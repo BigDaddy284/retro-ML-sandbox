@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-003 (Ready)
-- **Last approved checkpoint:** `main` after T-002
+- **Current task:** T-004 (Ready)
+- **Last approved checkpoint:** `main` after T-003
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -16,7 +16,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-000 | Project documentation baseline | 0 | Done | n/a (docs only) | 29249db (#1) |
 | T-001 | Python project scaffold, tooling and CI | 1 | Done | 13/13 | see PR #2 |
 | T-002 | Core domain types and errors | 1 | Done | 73/73 | see PR #3 |
-| T-003 | Emulator adapter interface and capabilities model | 1 | Ready | – | – |
+| T-003 | Emulator adapter interface and capabilities model | 1 | Done | 72/72 | see PR #4 |
 | T-004 | Synthetic game (deterministic toy racer) | 1 | Ready | – | – |
 | T-005 | Fake emulator adapter over the synthetic game | 1 | Ready | – | – |
 | T-006 | Adapter registry and connection service | 1 | Ready | – | – |
@@ -95,8 +95,19 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Completion report:** Error classes use an `Error` suffix (`EmulatorDisconnectedError`, `UnsupportedCapabilityError`) per lint rule N818; ARCHITECTURE.md updated to match.
 
 ### T-003 – Emulator adapter interface and capabilities model
-- **Objective:** The `EmulatorAdapter` protocol from ARCHITECTURE.md §3 plus a base class that enforces capability checks.
-- **Test plan:** a minimal test adapter satisfies the protocol; calling an unsupported operation raises `UnsupportedCapability` with a clear message; operations while disconnected raise `EmulatorDisconnected`; capability flags round-trip to JSON.
+- **Status:** Done
+- **Phase:** 1
+- **Objective:** The `EmulatorAdapter` base class from ARCHITECTURE.md §3 that enforces connection, capability and argument checks identically for every backend.
+- **Scope:** `retro_ai_lab.emulator.base`. **Out of scope:** any concrete adapter.
+- **Acceptance criteria:**
+  1. A subclass implementing only the abstract hooks works and reports no capabilities.
+  2. Every operation while disconnected raises `EmulatorDisconnectedError` without touching the backend.
+  3. Every optional operation raises `UnsupportedCapabilityError` naming the capability when its flag is off, without touching the backend.
+  4. Invalid arguments raise `ConfigurationError` before the backend is called.
+  5. `connect`/`disconnect` are idempotent; a failed connect leaves the adapter disconnected.
+- **Test plan:** abstract class cannot be instantiated; lifecycle and idempotency; timeout validation; failed connect; `mark_disconnected`; parametrised "requires connection" over all 11 operations; parametrised "requires capability" over all 8 gated operations; default hooks raise even when an adapter lies about capabilities; `read_memory` boundaries, unknown region, type errors, short backend reads; `set_input` dedupe and unknown button; `advance_frames` and `set_speed` validation; save-state slot validation; return types are tuples.
+- **Results:** 72 / 72 passed / 0 failed / 0 excluded (158 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Chose an ABC with `final` public methods and `_do_*` hooks over a bare `Protocol`, so the checks cannot be forgotten by a backend. ARCHITECTURE.md §3 rewritten to match.
 
 ### T-004 – Synthetic game (deterministic toy racer)
 - **Objective:** A tiny, pure-Python game with a screen buffer and a byte-addressable RAM holding position, speed, lap, checkpoint, lives and score at fixed but *undocumented-to-callers* addresses, so later discovery tasks have something real to find.
@@ -130,5 +141,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-000 completed on branch `init/project-docs`; PR opened for review.
 - T-001 completed and merged (PR #2). User asked for auto-merge once tests pass; continuing autonomously.
 - T-002 completed (PR #3).
-- Next: T-003.
+- T-003 completed (PR #4).
+- Next: T-004.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

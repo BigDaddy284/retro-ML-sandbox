@@ -51,30 +51,42 @@ tests/
   unit/ integration/ emulator/ real_emulator/ ui/ learning/
 ```
 
-## 3. Emulator adapter contract (draft)
+## 3. Emulator adapter contract
 
-Every adapter implements one interface and reports what it can do, so callers never assume a feature exists (DESIGN.md §7).
+Every adapter subclasses `retro_ai_lab.emulator.EmulatorAdapter` (T-003). The public methods are `final` and perform the checks every backend must share; subclasses implement `_do_*` hooks only.
 
 ```python
-class EmulatorAdapter(Protocol):
-    def connect(self, timeout_s: float) -> None: ...
-    def disconnect(self) -> None: ...
-    @property
-    def is_connected(self) -> bool: ...
-    def capabilities(self) -> Capabilities: ...          # flags: memory, screen, input, frame_advance, speed, save_states
-    def game_info(self) -> GameInfo: ...                  # system, title/hash if exposed
-    def buttons(self) -> Sequence[Button]: ...
-    def memory_regions(self) -> Sequence[MemoryRegion]: ...
-    def read_memory(self, region: str, offset: int, length: int) -> bytes: ...
-    def capture_frame(self) -> Frame: ...
-    def set_input(self, pressed: frozenset[Button]) -> None: ...
-    def advance_frames(self, n: int = 1) -> None: ...
-    def set_speed(self, multiplier: float) -> None: ...
-    def save_state(self, slot: str) -> None: ...
-    def load_state(self, slot: str) -> None: ...
+class EmulatorAdapter(ABC):
+    name: ClassVar[str]           # registry id, e.g. "bizhawk"
+    display_name: ClassVar[str]   # child-facing name
+
+    # lifecycle (idempotent)
+    def connect(self, timeout_s: float = 5.0) -> None
+    def disconnect(self) -> None
+    is_connected: bool
+    def mark_disconnected(self) -> None   # backend reports a dropped link
+
+    # description (require connection)
+    def capabilities(self) -> Capabilities
+    def game_info(self) -> GameInfo
+    def buttons(self) -> Sequence[Button]
+    def memory_regions(self) -> Sequence[MemoryRegion]        # memory_read
+
+    # operations (require connection + capability; arguments validated)
+    def read_memory(self, region: str, offset: int, length: int) -> bytes   # memory_read
+    def capture_frame(self) -> Frame                                        # screen_capture
+    def set_input(self, pressed: Iterable[Button]) -> None                  # input
+    def advance_frames(self, n: int = 1) -> None                            # frame_advance
+    def set_speed(self, multiplier: float) -> None                          # speed_control
+    def save_state(self, slot: str) -> None / load_state(...)               # save_states
 ```
 
-Calling an unsupported operation raises `UnsupportedCapabilityError`. Disconnects raise `EmulatorDisconnectedError`, which the service layer handles.
+Rules enforced by the base class:
+- Any operation while disconnected raises `EmulatorDisconnectedError`.
+- Any operation whose capability flag is off raises `UnsupportedCapabilityError(capability)` before the backend is touched.
+- Bad arguments (unknown region or button, out-of-range read, non-positive speed or frame count, unsafe slot name) raise `ConfigurationError`.
+- A backend that returns the wrong number of bytes from a read is reported as an error rather than passed through.
+- Hooks for optional capabilities have defaults that raise `UnsupportedCapabilityError`, so an adapter only implements what it supports.
 
 ## 4. Decision log
 
