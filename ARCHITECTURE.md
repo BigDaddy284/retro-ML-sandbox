@@ -74,7 +74,7 @@ class EmulatorAdapter(Protocol):
     def load_state(self, slot: str) -> None: ...
 ```
 
-Calling an unsupported operation raises `UnsupportedCapability`. Disconnects raise `EmulatorDisconnected`, which the service layer handles.
+Calling an unsupported operation raises `UnsupportedCapabilityError`. Disconnects raise `EmulatorDisconnectedError`, which the service layer handles.
 
 ## 4. Decision log
 

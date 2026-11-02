@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-002 (Ready)
-- **Last approved checkpoint:** `main` after T-001
+- **Current task:** T-003 (Ready)
+- **Last approved checkpoint:** `main` after T-002
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -15,7 +15,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 |---|---|---|---|---|---|
 | T-000 | Project documentation baseline | 0 | Done | n/a (docs only) | 29249db (#1) |
 | T-001 | Python project scaffold, tooling and CI | 1 | Done | 13/13 | see PR #2 |
-| T-002 | Core domain types and errors | 1 | Ready | – | – |
+| T-002 | Core domain types and errors | 1 | Done | 73/73 | see PR #3 |
 | T-003 | Emulator adapter interface and capabilities model | 1 | Ready | – | – |
 | T-004 | Synthetic game (deterministic toy racer) | 1 | Ready | – | – |
 | T-005 | Fake emulator adapter over the synthetic game | 1 | Ready | – | – |
@@ -81,8 +81,18 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Completion report:** `pyproject.toml` with `src/` layout and dev extras; `retro_ai_lab.cli` with `main(argv) -> int`; `conftest.py` auto-skips `real_emulator` tests unless configured; GitHub Actions matrix. Ruff format excludes Markdown so docs code blocks stay as written. No runtime dependencies yet; PySide6 is added in T-007.
 
 ### T-002 – Core domain types and errors
+- **Status:** Done
+- **Phase:** 1
 - **Objective:** Shared immutable types (`Button`, `Frame`, `MemoryRegion`, `GameInfo`, `Capabilities`) and the error hierarchy (`RetroAILabError`, `EmulatorError`, `EmulatorDisconnected`, `UnsupportedCapability`, `ProtocolError`).
-- **Test plan:** construction and validation (negative sizes, empty names, frame buffer length vs width×height×channels), immutability, equality/hash, error hierarchy `isinstance` relationships, serialisation round trip.
+- **Scope:** `retro_ai_lab.core.types` and `retro_ai_lab.core.errors`. **Out of scope:** any behaviour that uses them.
+- **Acceptance criteria:**
+  1. Each type rejects invalid values with `ConfigurationError` and a readable message.
+  2. Types are frozen, hashable and compare by value.
+  3. `to_dict`/`from_dict` round-trip through JSON; unknown or missing keys are rejected.
+  4. Errors form the documented hierarchy; `UnsupportedCapabilityError` carries the capability name.
+- **Test plan:** construction and validation (negative sizes, empty names, bad identifiers, bools-as-ints, frame buffer length vs width×height×channels, bad channel counts), immutability, equality/hash, pixel access incl. out-of-range, `MemoryRegion.contains` boundaries, error hierarchy `isinstance` relationships, JSON round trips (property-based for `Capabilities` and `Frame`), bad serialised input.
+- **Results:** 73 / 73 passed / 0 failed / 0 excluded (86 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Error classes use an `Error` suffix (`EmulatorDisconnectedError`, `UnsupportedCapabilityError`) per lint rule N818; ARCHITECTURE.md updated to match.
 
 ### T-003 – Emulator adapter interface and capabilities model
 - **Objective:** The `EmulatorAdapter` protocol from ARCHITECTURE.md §3 plus a base class that enforces capability checks.
@@ -119,5 +129,6 @@ Details will be written into this file when each becomes the next task, followin
 - Repository was empty. Committed `CLAUDE.md` and `DESIGN.md` to `main` as the initial commit.
 - T-000 completed on branch `init/project-docs`; PR opened for review.
 - T-001 completed and merged (PR #2). User asked for auto-merge once tests pass; continuing autonomously.
-- Next: T-002.
+- T-002 completed (PR #3).
+- Next: T-003.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
