@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-004: Toy Racer, a deterministic synthetic racing game with RAM, screen rendering and save/restore, used to test every layer without an emulator.
 - T-003: `EmulatorAdapter` base class enforcing connection, capability and argument checks for every backend.
 - T-002: Core domain types (`Button`, `Capabilities`, `MemoryRegion`, `GameInfo`, `Frame`) with validation and JSON round-trip, and the error hierarchy.
 - T-001: Python project scaffold (`src/retro_ai_lab`), CLI with `--version`, pytest/ruff/mypy configuration, GitHub Actions CI on Windows and Linux.
