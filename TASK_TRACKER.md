@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-004 (Ready)
-- **Last approved checkpoint:** `main` after T-003
+- **Current task:** T-005 (Ready)
+- **Last approved checkpoint:** `main` after T-004
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -17,7 +17,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-001 | Python project scaffold, tooling and CI | 1 | Done | 13/13 | see PR #2 |
 | T-002 | Core domain types and errors | 1 | Done | 73/73 | see PR #3 |
 | T-003 | Emulator adapter interface and capabilities model | 1 | Done | 72/72 | see PR #4 |
-| T-004 | Synthetic game (deterministic toy racer) | 1 | Ready | – | – |
+| T-004 | Synthetic game (deterministic toy racer) | 1 | Done | 39/39 | see PR #5 |
 | T-005 | Fake emulator adapter over the synthetic game | 1 | Ready | – | – |
 | T-006 | Adapter registry and connection service | 1 | Ready | – | – |
 | T-007 | App shell: main window launches with empty panels | 1 | Ready | – | – |
@@ -110,8 +110,21 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Completion report:** Chose an ABC with `final` public methods and `_do_*` hooks over a bare `Protocol`, so the checks cannot be forgotten by a backend. ARCHITECTURE.md §3 rewritten to match.
 
 ### T-004 – Synthetic game (deterministic toy racer)
+- **Status:** Done
+- **Phase:** 1
 - **Objective:** A tiny, pure-Python game with a screen buffer and a byte-addressable RAM holding position, speed, lap, checkpoint, lives and score at fixed but *undocumented-to-callers* addresses, so later discovery tasks have something real to find.
-- **Test plan:** determinism (same seed + inputs ⇒ identical RAM and frames); each button has its intended effect; lap and checkpoint progression; crash/life loss; game over and reset; RAM values stay in range; frame rendering size and content sanity; performance (≥ 2,000 steps/s headless).
+- **Scope:** `retro_ai_lab.emulator.fake.toy_racer`. **Out of scope:** the adapter wrapping it (T-005).
+- **Acceptance criteria:**
+  1. Same seed and inputs produce identical RAM and frames every time.
+  2. Up/Down/B/Left/Right have their documented effects; A has none; Start restarts only after game over.
+  3. A lap counts only after all three checkpoints; obstacles cost a life and stop the car; three hits end the game.
+  4. RAM values stay in range; the header is constant; noise and timer bytes change each frame.
+  5. `snapshot`/`restore` are exact; bad snapshots are rejected.
+  6. Rendering is 64×48 greyscale and reflects lane, lives, obstacles and game over.
+  7. ≥ 2,000 steps/s headless.
+- **Test plan:** initial state; seed validation; button set; obstacle seeding and placement; property-based determinism; unknown button; acceleration/deceleration/brake/cancel; lane bounds; A no-op; input mirror byte; checkpoints→lap; lap requires checkpoints (via doctored snapshot); scoring; score and lap saturation; collision; game over freezes gameplay but not the frame counter; Start semantics; property-based RAM range invariants; noise/timer; 16-bit frame wrap; snapshot/restore exactness and divergence-free continuation; bad snapshots; reset; render size, player, lane movement, game-over bar, approaching obstacles; performance.
+- **Results:** 39 / 39 passed / 0 failed / 0 excluded (197 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** RAM layout is 32 bytes with state at fixed addresses, 4 noise bytes, a free-running timer and a constant header, so later discovery tasks must separate signal from noise. Movement is simulated one unit per sub-step so obstacles and checkpoints cannot be skipped at speed.
 
 ### T-005 – Fake emulator adapter over the synthetic game
 - **Objective:** `FakeEmulatorAdapter` implementing the full adapter contract, including save/load state and speed, with configurable capability flags and fault injection (timeouts, disconnects).
@@ -142,5 +155,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-001 completed and merged (PR #2). User asked for auto-merge once tests pass; continuing autonomously.
 - T-002 completed (PR #3).
 - T-003 completed (PR #4).
-- Next: T-004.
+- T-004 completed (PR #5).
+- Next: T-005.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
