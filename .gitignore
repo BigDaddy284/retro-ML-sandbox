@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+# Never commit games or emulator data
+*.gb
+*.gbc
+*.gba
+*.nes
+*.sfc
+*.smc
+*.n64
+*.z64
+*.v64
+*.State
+roms/
+# Local user data
+/data/
+*.sqlite3
