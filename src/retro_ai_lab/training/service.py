@@ -67,7 +67,7 @@ from retro_ai_lab.training.insights import (
     suggest_experiments,
 )
 from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
-from retro_ai_lab.understanding.wakeup import find_wake_button
+from retro_ai_lab.understanding.wakeup import find_wake_button, inputs_matter
 
 CHECKPOINT_SLOT = "training"
 # Two goes this long with the same states although the AI pressed different buttons
@@ -177,6 +177,7 @@ class TrainingService:
         self._spot_pinned = False
         self._wake_button: str | None = None
         self._needs_wake = False
+        self._probe_listening = False  # ask the game directly at the next go start (T-848)
         self._last_go: tuple[tuple[str, ...], bool] | None = None
         self._short_resets: list[tuple[str, ...]] = []
         bus.subscribe(EmulatorConnected, self._on_connected)
@@ -515,6 +516,7 @@ class TrainingService:
         self._prepare_checkpoint()
         if not self._enabled:  # the link dropped while the checkpoint was being taken
             raise ConfigurationError("The game went away just as training was starting.")
+        self._probe_listening = True  # the first go asks whether the game listens (T-848)
         self._status = Status.RUNNING
         self._discovery.set_experiments_allowed(False)  # not over the game's link (T-839)
         self._apply_speed()
@@ -758,6 +760,7 @@ class TrainingService:
         )
         self._wake_button = knowledge.wake_button
         self._needs_wake = False
+        self._probe_listening = False
         self._last_go = None
         self._short_resets = []
 
@@ -873,6 +876,9 @@ class TrainingService:
             # game is about to go back to the checkpoint anyway, and no go is mid-step.
             if self._mode.ai_plays and self._harness is not None:
                 self._discovery.run_due_experiment()
+                if self._probe_listening and not self._needs_wake:
+                    self._needs_wake = not self._listens()
+                self._probe_listening = False
             if self._needs_wake and self._mode.ai_plays:
                 self._wake_up()
             self._runner.begin(restore=self._mode.ai_plays)
@@ -881,6 +887,32 @@ class TrainingService:
         finally:
             self._busy = False
         return self._runner
+
+    def _listens(self) -> bool:
+        """From the spot goes start from: do the AI's buttons change anything? (T-848)
+
+        Asked at the first go after Start and after a go that ended stuck or by a
+        reset, instead of waiting for goes to prove the game is ignoring the AI
+        (a title demo keeps the screen moving for minutes). True when the probe
+        can't be run, so nothing changes for an emulator without save states.
+        """
+        harness = self._harness
+        if harness is None or not harness.has_checkpoint or not harness.available():
+            return True
+        harness.restore()
+        try:
+            return inputs_matter(self._connection, self._playing_buttons())
+        except ConfigurationError as exc:
+            log.info("Could not check whether the game listens: %s", exc)
+            return True
+
+    def _playing_buttons(self) -> tuple[str, ...]:
+        """The buttons the AI plays with (its action space), else all of them."""
+        names = tuple(b.name for b in self._connection.call(lambda a: a.buttons()))
+        space = self._agent.space if self._agent is not None else None
+        if space is None:
+            return names
+        return tuple(dict.fromkeys(n for i in range(len(space)) for n in space.buttons_for(i)))
 
     def _wake_up(self) -> None:
         """The game stopped listening: find the button that gets it going (T-844).
@@ -896,12 +928,7 @@ class TrainingService:
             log.info("The game is not listening to the AI, and this emulator can't try buttons.")
             return
         names = tuple(b.name for b in self._connection.call(lambda a: a.buttons()))
-        space = self._agent.space if self._agent is not None else None
-        playing = (
-            tuple(dict.fromkeys(n for i in range(len(space)) for n in space.buttons_for(i)))
-            if space is not None
-            else names
-        )
+        playing = self._playing_buttons()
         log.info("The game is not listening to the AI; trying each button to get it going.")
         found = find_wake_button(self._connection, names, playing, first=self._wake_button)
         if found is None:
@@ -947,6 +974,8 @@ class TrainingService:
         self._history.append(record)
         self._note_listening(result)
         self._note_short_reset(result)
+        if result.ended_by in ("stuck", "reset"):
+            self._probe_listening = True  # ask the game directly next time (T-848)
         if self._agent is not None:
             self._policies.append((self._episodes, policy_of(self._agent)))
         self._bus.publish(EpisodeFinished(record))
