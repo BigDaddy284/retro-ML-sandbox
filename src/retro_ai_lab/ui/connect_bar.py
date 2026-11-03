@@ -65,6 +65,7 @@ class ConnectBar(QWidget):
         self._pool.setMaxThreadCount(1)
         self._busy = False
         self._last_error: str | None = None
+        self._last_request: tuple[str, dict[str, Any]] | None = None
 
         self._picker = QComboBox(self)
         self._picker.setObjectName("adapter_picker")
@@ -150,6 +151,8 @@ class ConnectBar(QWidget):
             return False
         self._busy = True
         self._last_error = None
+        self._last_request = (adapter, dict(options))
+        self._connect.setText("Connect")
         self._status.setText(STATUS_CONNECTING)
         self._update_buttons()
         task = _ConnectTask(self._context, adapter, options)
@@ -161,10 +164,24 @@ class ConnectBar(QWidget):
     def disconnect_now(self) -> None:
         self._context.connection.disconnect()
 
+    def reconnect(self) -> bool:
+        """Connect again with the same console and options as last time."""
+        if self._last_request is None:
+            return self.connect_now()
+        name, options = self._last_request
+        return self.connect_now(name, **options)
+
+    @property
+    def offering_reconnect(self) -> bool:
+        return self._connect.text() == "Reconnect"
+
     # ------------------------------------------------------------ internal
 
     def _on_connect_clicked(self) -> None:
-        self.connect_now()
+        if self.offering_reconnect:
+            self.reconnect()
+        else:
+            self.connect_now()
 
     def _on_task_done(self, error: object) -> None:
         self._busy = False
@@ -197,7 +214,10 @@ class ConnectBar(QWidget):
         if event.expected:
             self._status.setText(STATUS_IDLE)
         else:
-            self._status.setText(f"Lost the connection: {event.reason}")
+            self._status.setText(
+                f"Lost the connection: {event.reason} Press Reconnect to try again."
+            )
+            self._connect.setText("Reconnect")
 
     def _on_failed(self, event: ConnectionFailed) -> None:
         self._status.setText(f"Couldn't connect: {event.reason}")

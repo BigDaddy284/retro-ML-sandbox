@@ -181,7 +181,10 @@ def test_unexpected_loss_is_shown(qtbot: QtBot, bar: ConnectBar, context: AppCon
     context.connection.connect("fake", drop_after_ops=0)
     with pytest.raises(Exception, match="stopped responding"):
         context.connection.call(lambda a: a.capture_frame())
-    assert bar.status_text == "Lost the connection: The emulator stopped responding."
+    assert bar.status_text == (
+        "Lost the connection: The emulator stopped responding. Press Reconnect to try again."
+    )
+    assert bar.offering_reconnect
     assert bar.capability_text == ""
     assert bar.connect_button.isEnabled()
 

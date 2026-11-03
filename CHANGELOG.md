@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-011: Disconnection handling: link watchdog, resilient disconnect, one-click Reconnect, status-bar messages.
 - T-010: Manual play: on-screen controller pad built from the emulator's buttons, keyboard mapping, and a Play/Pause clock that advances frames.
 - T-009: Connect/disconnect toolbar with background connect, plain-English capability line, and `EventBridge` delivering service events on the GUI thread.
 - T-008: Game panel shows live emulator frames (`FrameView`, `FramePump`, `AppContext`).
