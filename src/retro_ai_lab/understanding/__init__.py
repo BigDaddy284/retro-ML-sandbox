@@ -6,11 +6,13 @@ from retro_ai_lab.understanding.knowledge import (
     Encoding,
     Evidence,
     Knowledge,
+    Relationship,
     Variable,
     VariableKind,
     confidence_from_evidence,
 )
 from retro_ai_lab.understanding.linking import InputLinks, apply_input_links, find_input_links
+from retro_ai_lab.understanding.relationships import RelationshipFinder, describe_key, event_key
 from retro_ai_lab.understanding.variables import Candidate, find_candidates, propose_candidates
 
 __all__ = [
@@ -24,10 +26,14 @@ __all__ = [
     "GameEvent",
     "InputLinks",
     "Knowledge",
+    "Relationship",
+    "RelationshipFinder",
     "Variable",
     "VariableKind",
     "apply_input_links",
     "confidence_from_evidence",
+    "describe_key",
+    "event_key",
     "find_candidates",
     "find_input_links",
     "propose_candidates",
