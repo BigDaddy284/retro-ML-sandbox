@@ -335,3 +335,53 @@ def test_the_game_runs_at_console_speed_with_pictures_at_half_that(
     qtbot.addWidget(panel)
     assert panel.clock.interval_ms == 1000 // 60 and panel.pump.interval_ms == 1000 // 30
     assert panel.clock.screenshot_every == 2
+
+
+# -------------------------------------------- T-828 failures show in the status line
+
+
+def test_a_failing_step_shows_in_the_status_line_until_a_frame_arrives(
+    qtbot: QtBot, panel: GamePanel, context: AppContext
+) -> None:
+    context.connection.connect("fake")
+    panel.clock.pause()
+    qtbot.waitUntil(lambda: not panel.clock.in_flight)
+    panel.pump.stop()
+    qtbot.waitUntil(lambda: not panel.pump.in_flight)
+    adapter = context.connection.adapter
+    assert isinstance(adapter, FakeEmulatorAdapter)
+    original = adapter._do_advance_frames
+    fail = {"on": True}
+
+    def flaky(n: int) -> None:
+        if fail["on"]:
+            raise EmulatorError("The emulator did not answer within 5 seconds.")
+        original(n)
+
+    adapter._do_advance_frames = flaky  # type: ignore[method-assign]
+    assert not panel.clock.tick()
+    assert panel.status_text == (
+        "Watching Toy Racer. The emulator did not finish a frame step: "
+        "The emulator did not answer within 5 seconds."
+    )
+    fail["on"] = False
+    assert panel.clock.pulse()
+    qtbot.waitUntil(lambda: panel.status_text.endswith("Frame 1."))
+
+
+def test_a_failing_capture_shows_in_the_status_line(
+    qtbot: QtBot, panel: GamePanel, context: AppContext
+) -> None:
+    panel.clock.pause()
+    context.connection.connect("fake")
+    qtbot.waitUntil(lambda: panel.view.frame is not None)
+    adapter = context.connection.adapter
+    assert isinstance(adapter, FakeEmulatorAdapter)
+    adapter._do_capture_frame = lambda: (_ for _ in ()).throw(EmulatorError("no picture"))  # type: ignore[method-assign]
+    qtbot.waitUntil(lambda: panel.pump.errors >= 1)
+    assert (
+        panel.status_text == "Watching Toy Racer. The emulator did not send a picture: no picture"
+    )
+    assert panel.pump.last_failure == "no picture"
+    qtbot.waitUntil(lambda: panel.pump.errors >= 3)  # said once, counted every time
+    assert panel.status_text.endswith("no picture")

@@ -412,3 +412,43 @@ def test_tick_feeds_the_snapshot_from_the_same_step(clock: PlayClock, context: A
     obs = context.observation
     assert obs.latest is not None and obs.latest.frame == 3 and reads["n"] == 1
     assert obs.latest.get("ram") == adapter.game.ram
+
+
+# ----------------------------------------------- T-828 a failing step is said once
+
+
+def test_a_failing_step_is_reported_once_until_the_message_changes(
+    qtbot: QtBot, clock: PlayClock, context: AppContext, caplog: pytest.LogCaptureFixture
+) -> None:
+    from retro_ai_lab.core import EmulatorError
+
+    context.connection.connect("fake")
+    clock.pause()
+    adapter = game(context)
+    messages = ["hiccup", "hiccup", "hiccup", "worse", None, "hiccup"]
+    original = adapter._do_advance_frames
+
+    def flaky(n: int) -> None:
+        message = messages.pop(0)
+        if message is not None:
+            raise EmulatorError(message)
+        original(n)
+
+    adapter._do_advance_frames = flaky  # type: ignore[method-assign]
+    said: list[str] = []
+    clock.step_failed.connect(said.append)
+    with caplog.at_level("WARNING", logger="retro_ai_lab.ui.play_clock"):
+        for _ in range(4):  # hiccup three times, then worse
+            assert clock.pulse()
+            qtbot.waitUntil(lambda: not clock.in_flight)
+        assert clock.errors == 4 and said == ["hiccup", "worse"]
+        assert clock.last_failure == "worse"
+        assert clock.tick()  # a good step clears the slate...
+        assert clock.last_failure is None
+        assert not clock.tick()  # ...so the same old message is news again
+    assert said == ["hiccup", "worse", "hiccup"]
+    assert [r.getMessage() for r in caplog.records] == [
+        "Frame step failed: hiccup",
+        "Frame step failed: worse",
+        "Frame step failed: hiccup",
+    ]
