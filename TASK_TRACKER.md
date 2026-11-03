@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-008 (Ready)
-- **Last approved checkpoint:** `main` after T-007
+- **Current task:** T-009 (Ready)
+- **Last approved checkpoint:** `main` after T-008
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -21,7 +21,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-005 | Fake emulator adapter over the synthetic game | 1 | Done | 52/52 | see PR #6 |
 | T-006 | Adapter registry and connection service | 1 | Done | 39/39 | see PR #7 |
 | T-007 | App shell: main window launches with empty panels | 1 | Done | 15/15 | see PR #8 |
-| T-008 | Game window panel shows live frames | 1 | Ready | – | – |
+| T-008 | Game window panel shows live frames | 1 | Done | 20/20 | see PR #9 |
 | T-009 | Connect / disconnect UI with capability display | 1 | Ready | – | – |
 | T-010 | Manual controller input from UI to adapter | 1 | Ready | – | – |
 | T-011 | Graceful handling of emulator disconnection | 1 | Ready | – | – |
@@ -171,7 +171,22 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 15 / 15 UI tests passed + 4 updated CLI tests (303 in the full suite) / 0 failed / 0 excluded. Lint, format and strict mypy clean (PySide6 stubs under `--strict`).
 - **Completion report:** Found and fixed a real bug while writing the smoke test: `main()` dropped `sys.argv` when called from `__main__`. Hidden `--exit-after-ms` flag exists only for smoke tests and tooling. Linux CI now installs `libegl1` etc. for Qt offscreen.
 
-### T-008 … T-012
+### T-008 – Game window panel shows live frames
+- **Status:** Done
+- **Phase:** 1
+- **Objective:** While an emulator that can capture its screen is connected, the Game panel shows its frames live, scaled like pixel art, and says in plain words what is going on otherwise.
+- **Scope:** `ui.context.AppContext`, `ui.frame_view.FrameView` + `frame_to_image`, `ui.game_panel.GamePanel` + `FramePump`; `MainWindow` takes a context and hosts the panel. **Out of scope:** connect/disconnect controls (T-009), input (T-010).
+- **Acceptance criteria:**
+  1. Grey, RGB and RGBA frames convert to correct `QImage`s.
+  2. The view keeps aspect ratio, uses integer scaling when it can, centres the image, and shows a placeholder when empty.
+  3. On `EmulatorConnected` with screen capture the pump starts and the first frame appears immediately; frames follow the game; on `EmulatorDisconnected` the pump stops and the view clears with a plain-English status (different for an unexpected loss).
+  4. An emulator without screen capture gets a friendly message, no pump.
+  5. Pump survives transient emulator errors and stops quietly on a dropped link; teardown stops the timer and unsubscribes from the bus.
+- **Test plan:** image conversion for each channel count, deep copy, type errors; view placeholder painting, centred integer scaling checked by pixel, downscaling keeps ratio, clear, type errors; panel initial state, connect → frame + pump, live updates via timer, disconnect, dropped link wording, no-screen emulator, pump without connection, pump error counting, bad fps, main window hosting, window teardown stops pump and unsubscribes.
+- **Results:** 20 / 20 passed / 0 failed / 0 excluded (323 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Frame capture runs on the UI thread for now (fast with the fake adapter); real adapters will move it to a worker in T-113. Teardown captures the pump and unsubscribe callbacks instead of `self` because the Python wrapper is already gone when `destroyed` fires.
+
+### T-009 … T-012
 Details will be written into this file when each becomes the next task, following the template.
 
 ### T-110 – Spike: confirm BizHawk Lua ↔ socket protocol
@@ -192,5 +207,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-005 completed (PR #6).
 - T-006 completed (PR #7).
 - T-007 completed (PR #8).
-- Next: T-008.
+- T-008 completed (PR #9).
+- Next: T-009.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

@@ -6,19 +6,24 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMainWindow, QSplitter, QStatusBar, QWidget
 
 from retro_ai_lab import __version__
+from retro_ai_lab.ui.context import AppContext
+from retro_ai_lab.ui.game_panel import GamePanel
 from retro_ai_lab.ui.panels import PANELS, Panel
 
 WINDOW_TITLE = "Retro AI Lab"
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, context: AppContext | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("main_window")
         self.setWindowTitle(WINDOW_TITLE)
         self.resize(1200, 800)
+        self._context = context if context is not None else AppContext()
 
         self._panels: dict[str, Panel] = {spec.key: Panel(spec) for spec in PANELS}
+        self._game_panel = GamePanel(self._context)
+        self._panels["game"].set_body(self._game_panel)
 
         # Layout: [ Game | Activity / Rewards ] over [ Progress | Learning ]
         top = QSplitter(Qt.Orientation.Horizontal)
@@ -52,6 +57,14 @@ class MainWindow(QMainWindow):
         status.addPermanentWidget(_VersionLabel(self))
 
     # ------------------------------------------------------------- API
+
+    @property
+    def context(self) -> AppContext:
+        return self._context
+
+    @property
+    def game_panel(self) -> GamePanel:
+        return self._game_panel
 
     def panel(self, key: str) -> Panel:
         return self._panels[key]
