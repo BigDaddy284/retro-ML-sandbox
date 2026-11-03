@@ -494,7 +494,6 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-012 completed (PR #13). Phase 1 is complete on the fake emulator; T-110+ (BizHawk) wait on ADR-005 sign-off.
 - T-201 completed (PR #14).
 - T-202 completed (PR #15).
-- T-401 completed (PR #27); Phase 4 broken into T-401 to T-408.
 - T-203 completed (PR #16). NumPy is now a runtime dependency (ADR-008).
 - T-204 completed (PR #17).
 - T-205 completed (PR #18). Phase 2 complete on the fake emulator.
@@ -506,5 +505,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-306 completed (PR #24).
 - T-307 completed (PR #25).
 - T-308 completed (PR #26). Phase 3 complete on the fake emulator.
-- Next: Phase 4 (E-4) task breakdown, then T-401.
+- Phase 4 broken into T-401..T-408. T-401 completed (PR #27).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
