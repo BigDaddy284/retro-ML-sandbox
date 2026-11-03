@@ -146,7 +146,7 @@ def test_keyboard_play_in_main_window_moves_the_car(qtbot: QtBot, context: AppCo
     qtbot.keyPress(w, Qt.Key.Key_Up)  # the window forwards keys to the pad
     qtbot.waitUntil(lambda: game(context).game.state.speed >= 2)
     qtbot.keyRelease(w, Qt.Key.Key_Up)
-    assert game(context).held == frozenset()
+    qtbot.waitUntil(lambda: game(context).held == frozenset())  # the release goes by a worker
     assert game(context).game.state.position > 0
 
     qtbot.mouseClick(w.game_panel.play_button, Qt.MouseButton.LeftButton)

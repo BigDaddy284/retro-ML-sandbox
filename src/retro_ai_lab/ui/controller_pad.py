@@ -8,11 +8,11 @@ recording, demonstrations) can observe the child's play.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QRunnable, Qt, QThreadPool, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QGridLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
-from retro_ai_lab.core import Button, EmulatorDisconnectedError, EmulatorError
+from retro_ai_lab.core import Button, EmulatorDisconnectedError
 from retro_ai_lab.services import EmulatorConnected, EmulatorDisconnected
 from retro_ai_lab.ui.context import AppContext
 
@@ -56,7 +56,39 @@ _LAYOUT: dict[str, tuple[int, int]] = {
 }
 
 
+class _SendSignals(QObject):
+    done = Signal(object)  # None, or the exception
+
+
+class _SendTask(QRunnable):
+    """One ``set_input`` call, off the GUI thread (T-821)."""
+
+    def __init__(self, context: AppContext, held: frozenset[Button]) -> None:
+        super().__init__()
+        self.signals = _SendSignals()
+        self._context = context
+        self._held = held
+
+    def run(self) -> None:
+        held = self._held
+        try:
+            self._context.connection.call(lambda a: a.set_input(held))
+        except Exception as exc:
+            self.signals.done.emit(exc)
+        else:
+            self.signals.done.emit(None)
+
+
 class ControllerPad(QWidget):
+    """On-screen buttons and keyboard mapping for the connected game.
+
+    The held set is the pad's own state and changes at once; the request to
+    the emulator goes out on a worker thread, because a real emulator takes a
+    frame or more to answer and the window must not wait for it. Changes made
+    while a request is in flight are merged: the final held set goes out once
+    the worker is free.
+    """
+
     input_changed = Signal(object)  # frozenset[Button]
 
     def __init__(
@@ -75,6 +107,11 @@ class ControllerPad(QWidget):
         self._enabled = False
         self._locked = False
         self._send_errors = 0
+        self._pool = QThreadPool(self)
+        self._pool.setMaxThreadCount(1)
+        self._sending = False
+        self._pending: frozenset[Button] | None = None
+        self._sends = 0
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self._grid_host = QWidget(self)
@@ -111,6 +148,16 @@ class ControllerPad(QWidget):
     @property
     def send_errors(self) -> int:
         return self._send_errors
+
+    @property
+    def sending(self) -> bool:
+        """Is a request on its way to the emulator right now?"""
+        return self._sending
+
+    @property
+    def sends(self) -> int:
+        """Requests handed to the worker since the pad was made."""
+        return self._sends
 
     @property
     def locked(self) -> bool:
@@ -232,13 +279,30 @@ class ControllerPad(QWidget):
         if not self._context.connection.is_connected:
             return
         self._context.observation.record_input((b.name for b in held), "human")
-        try:
-            self._context.connection.call(lambda a: a.set_input(held))
-        except EmulatorDisconnectedError:
-            pass  # the service announces the drop; the pad resets on that event
-        except EmulatorError:
+        self._queue(held)
+
+    def _queue(self, held: frozenset[Button]) -> None:
+        if self._sending:
+            self._pending = held  # the newest set wins; it goes out when the worker is free
+            return
+        self._sending = True
+        self._sends += 1
+        task = _SendTask(self._context, held)
+        task.signals.done.connect(self._on_sent)
+        self._pool.start(task)
+
+    def _on_sent(self, error: object) -> None:
+        """Back on the GUI thread once the emulator has answered."""
+        self._sending = False
+        if isinstance(error, EmulatorDisconnectedError):
+            self._pending = None  # the service announces the drop; the pad resets on that event
+            return
+        if isinstance(error, Exception):
             # Counted and carried on, so one glitch can't stick a key.
             self._send_errors += 1
+        pending, self._pending = self._pending, None
+        if pending is not None and self._context.connection.is_connected:
+            self._queue(pending)
 
 
 __all__ = ["DEFAULT_KEYMAP", "KEY_HINT", "NOT_CONNECTED", "NO_INPUT", "ControllerPad"]

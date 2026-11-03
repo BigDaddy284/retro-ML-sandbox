@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Button presses go to the emulator on a worker thread, so pressing a button no longer stalls the window (T-821).
 - Fixed: pressing Disconnect while the game was being stepped could be reported as a lost link (T-820).
 - The log records, every few seconds, how long the emulator took to answer each kind of request (T-819).
 - The play clock steps the game on a worker thread as well, and a link dropped by two workers at once is reported once (T-818).
