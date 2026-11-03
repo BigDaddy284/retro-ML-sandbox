@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-006 (Ready)
-- **Last approved checkpoint:** `main` after T-005
+- **Current task:** T-007 (Ready)
+- **Last approved checkpoint:** `main` after T-006
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -19,7 +19,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-003 | Emulator adapter interface and capabilities model | 1 | Done | 72/72 | see PR #4 |
 | T-004 | Synthetic game (deterministic toy racer) | 1 | Done | 39/39 | see PR #5 |
 | T-005 | Fake emulator adapter over the synthetic game | 1 | Done | 52/52 | see PR #6 |
-| T-006 | Adapter registry and connection service | 1 | Ready | – | – |
+| T-006 | Adapter registry and connection service | 1 | Done | 39/39 | see PR #7 |
 | T-007 | App shell: main window launches with empty panels | 1 | Ready | – | – |
 | T-008 | Game window panel shows live frames | 1 | Ready | – | – |
 | T-009 | Connect / disconnect UI with capability display | 1 | Ready | – | – |
@@ -143,8 +143,19 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Completion report:** `AdapterContract` lives in `src/retro_ai_lab/testing/` so BizHawk and VBA-M adapters reuse it unchanged; it skips a capability test only when the adapter genuinely lacks that capability, which is recorded in the pytest summary.
 
 ### T-006 – Adapter registry and connection service
+- **Status:** Done
+- **Phase:** 1
 - **Objective:** Discover available adapters, connect by name, expose session state and events to upper layers without Qt.
-- **Test plan:** registry lists fake adapter; unknown name error; connect/disconnect state machine including double-connect and disconnect-when-idle; events emitted in order.
+- **Scope:** `core.events.EventBus`, `emulator.registry.AdapterRegistry` + `default_registry()`, `services.connection.ConnectionService` with its events. **Out of scope:** threading, UI.
+- **Acceptance criteria:**
+  1. Registry lists, validates and instantiates adapters by name; unknown names and bad options are `ConfigurationError`.
+  2. Service state machine DISCONNECTED→CONNECTING→CONNECTED→DISCONNECTED, with failure returning to DISCONNECTED and a `ConnectionFailed` event.
+  3. Double connect is rejected; disconnect when idle is a silent no-op.
+  4. `call()` runs operations on the live adapter and reports a dropped link exactly once (state + `EmulatorDisconnected(expected=False)`).
+  5. Events are delivered in order; a failing handler cannot break publishing.
+- **Test plan:** event bus (order, subclass filtering, unsubscribe both ways, error isolation, default logging, self-unsubscribe during publish, counts, argument validation); registry (register/list/create with options, unknown, bad options, duplicates, invalid names, missing display name, non-adapter classes, default registry ships `fake`); service (initial state, happy path with exact event sequence, timeout passthrough, unknown adapter and bad options leave state untouched, failed connect, empty error message, double connect, disconnect, idle disconnect, reconnect, `call` happy path, `call` without connection, dropped link reported once, other errors pass through, custom registry).
+- **Results:** 39 / 39 passed / 0 failed / 0 excluded (288 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Connection is synchronous in this task; the UI task that needs it off the main thread (T-009) will wrap it in a worker. `EmulatorDisconnected` the event is distinct from `EmulatorDisconnectedError` the exception.
 
 ### T-007 – App shell
 - **Objective:** `python -m retro_ai_lab` opens a main window with the five panels from DESIGN.md §10 (Game, AI Activity, Rewards, Progress, Learning) as placeholders, each expandable.
@@ -169,5 +180,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-003 completed (PR #4).
 - T-004 completed (PR #5).
 - T-005 completed (PR #6).
-- Next: T-006.
+- T-006 completed (PR #7).
+- Next: T-007.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
