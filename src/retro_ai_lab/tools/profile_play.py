@@ -132,14 +132,14 @@ def profile(
         raise ConfigurationError(f"Unknown adapter '{adapter}'. Choose from {', '.join(ADAPTERS)}.")
     if not seconds > 0:
         raise ConfigurationError("seconds must be above zero.")
-    from PySide6.QtCore import Qt, QTimer
+    from PySide6.QtCore import QEventLoop, Qt, QTimer
 
     from retro_ai_lab.emulator.bizhawk.simulator import BizHawkSimulator
     from retro_ai_lab.ui.app import create_app
     from retro_ai_lab.ui.context import AppContext
     from retro_ai_lab.ui.main_window import MainWindow
 
-    app = create_app()
+    create_app()  # the process-wide QApplication, made if missing
     simulator = BizHawkSimulator() if adapter == "simulator" else None
     if simulator is not None:
         simulator.start()
@@ -169,9 +169,14 @@ def profile(
         heartbeat.setTimerType(Qt.TimerType.PreciseTimer)
         heartbeat.timeout.connect(stalls.beat)
         heartbeat.start(HEARTBEAT_MS)
-        QTimer.singleShot(int(seconds * 1000), app.quit)
+        # A local loop, not app.exec(): QCoreApplication.quit() leaves the
+        # thread's quitNow flag set, after which every later QEventLoop.exec()
+        # (pytest-qt's waits included) returns at once without processing
+        # anything (T-834).
+        loop = QEventLoop()
+        QTimer.singleShot(int(seconds * 1000), loop.quit)
         started = time.perf_counter()
-        app.exec()
+        loop.exec()
         elapsed = time.perf_counter() - started
         heartbeat.stop()
 
