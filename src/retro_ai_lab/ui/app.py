@@ -9,6 +9,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from retro_ai_lab import __version__
+from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.main_window import MainWindow
 
 APP_NAME = "Retro AI Lab"
@@ -30,6 +31,7 @@ def run_app(
     *,
     before_exec: Callable[[QApplication, MainWindow], None] | None = None,
     exit_after_ms: int | None = None,
+    context: AppContext | None = None,
 ) -> int:
     """Create the app and main window, show it, and run the event loop.
 
@@ -38,7 +40,7 @@ def run_app(
     delay, which is how the launch smoke test runs the real entry point.
     """
     app = create_app(argv)
-    window = MainWindow()
+    window = MainWindow(context)
     window.show()
     if before_exec is not None:
         QTimer.singleShot(0, lambda: before_exec(app, window))
