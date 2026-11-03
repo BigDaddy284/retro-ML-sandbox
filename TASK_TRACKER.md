@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-308 (Ready)
-- **Last approved checkpoint:** `main` after T-307
+- **Current task:** Phase 4 planning (next: E-4 tasks)
+- **Last approved checkpoint:** `main` after T-308
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -47,7 +47,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-305 | Relationship discovery between events and variables | 3 | Done | 7/7 | see PR #23 |
 | T-306 | Discovery runner: automatic observe-experiment-propose loop with progress events | 3 | Done | 10/10 | see PR #24 |
 | T-307 | "What the AI is doing" panel: discoveries with confidence badges, confirm / correct / reject | 3 | Done | 7/7 | see PR #25 |
-| T-308 | Knowledge persistence wiring: auto-save per game, export / import from the UI | 3 | – | – | – |
+| T-308 | Knowledge persistence wiring: auto-save per game, export / import from the UI | 3 | Done | 10/10 | see PR #26 |
 | E-4 | Reward System (controls, categories, personalities, goals, objectives) | 4 | Epic | – | – |
 | E-5 | Basic Learning (tabular Q-learning, save/load) | 5 | Epic | – | – |
 | E-6 | Training Interface (live/background, modes, graphs, history) | 6 | Epic | – | – |
@@ -426,8 +426,22 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 7 / 7 passed / 0 failed / 0 excluded (594 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Kept the vocabulary child-sized ("A guess", "Pretty sure") and kept the panel free of modal dialogs so it stays testable offscreen and unobtrusive while playing.
 
+### T-308 – Knowledge persistence wiring
+- **Status:** Done
+- **Phase:** 3
+- **Objective:** Make what the AI learns about a game survive restarts and be shareable (DESIGN.md §3.6 "discoveries should be reusable, editable and exportable").
+- **Scope:** `core.paths.default_data_dir()` (env override `RETRO_AI_LAB_DATA_DIR`, else the platform's per-user app data folder); `AppContext.data_dir` and `knowledge_store`; `DiscoveryService(store=…)` loads the game's knowledge on connect (damaged file → start over), saves whenever a belief is added or changed, on disconnect and on `save()`, and offers `export_to(path)` / `import_from(path)` (import must be for the same game); the panel saves after confirm/reject/rename ("Remembered for next time.") and has "Share what it learned…" / "Load shared knowledge…" buttons (file dialogs) backed by testable `export_to` / `import_from` with outcomes shown in a note line. **Out of scope:** merging two knowledge files (import replaces), cloud sharing (Phase 8).
+- **Acceptance criteria:**
+  1. Data dir resolves per platform and honours the override.
+  2. Knowledge is remembered between connections to the same game (confirmed verdicts included) and a different game starts empty; a damaged file does not crash the app.
+  3. Export writes a loadable file; import replaces the knowledge for the same game, is refused for another game, and discovery carries on afterwards.
+  4. Panel verdicts persist to the store; export/import outcomes and errors are shown in plain words; the file buttons are disabled when no game is connected.
+- **Test plan:** paths override/default/platform matrix; remembered between connections; damaged file; export/import incl. wrong game; panel save/export/import/errors/disabled.
+- **Results:** 10 / 10 passed / 0 failed / 0 excluded (604 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Phase 3 (Game Understanding) is complete on the fake emulator: the app watches a game, proposes what its bytes mean with evidence and honest confidence, experiments with the buttons, detects events and relationships, asks a person to confirm or correct, and remembers it all per game.
+
 ### Later Phase 3 tasks
-Details will be written into this file when each becomes the next task, following the template.
+None outstanding; refinements will be filed as they come up on real games.
 
 ### T-110 – Spike: confirm BizHawk Lua ↔ socket protocol
 - **Status:** Blocked on ADR-005 sign-off and on access to a Windows machine with BizHawk for verification.
@@ -464,5 +478,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-305 completed (PR #23).
 - T-306 completed (PR #24).
 - T-307 completed (PR #25).
-- Next: T-308.
+- T-308 completed (PR #26). Phase 3 complete on the fake emulator.
+- Next: Phase 4 (E-4) task breakdown, then T-401.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

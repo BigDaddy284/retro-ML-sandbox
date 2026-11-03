@@ -10,8 +10,11 @@ on demand when the emulator supports save states.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -22,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from retro_ai_lab.core import EmulatorError, UnsupportedCapabilityError
+from retro_ai_lab.core import ConfigurationError, EmulatorError, UnsupportedCapabilityError
 from retro_ai_lab.services import (
     DiscoveryProgress,
     DiscoveryUpdated,
@@ -97,6 +100,15 @@ class DiscoveryPanel(QWidget):
         self._rename.clicked.connect(self._on_rename_clicked)
         self._name.returnPressed.connect(self._on_rename_clicked)
         self._experiment.clicked.connect(self.run_experiment)
+        self._export = QPushButton("Share what it learned…", self)
+        self._export.setObjectName("export_button")
+        self._import = QPushButton("Load shared knowledge…", self)
+        self._import.setObjectName("import_button")
+        self._export.clicked.connect(self._on_export_clicked)
+        self._import.clicked.connect(self._on_import_clicked)
+        self._note = QLabel("", self)
+        self._note.setObjectName("discovery_note")
+        self._note.setWordWrap(True)
 
         self._events = QListWidget(self)
         self._events.setObjectName("discovery_events")
@@ -120,6 +132,11 @@ class DiscoveryPanel(QWidget):
         layout.addLayout(verdict)
         layout.addLayout(rename)
         layout.addWidget(self._experiment)
+        files = QHBoxLayout()
+        files.addWidget(self._export)
+        files.addWidget(self._import)
+        layout.addLayout(files)
+        layout.addWidget(self._note)
         layout.addWidget(QLabel("What just happened", self))
         layout.addWidget(self._events, 1)
         layout.addWidget(QLabel("What leads to what", self))
@@ -190,11 +207,16 @@ class DiscoveryPanel(QWidget):
                 return
         raise KeyError(var_id)
 
+    @property
+    def note_text(self) -> str:
+        return self._note.text()
+
     def confirm_selected(self) -> None:
         k, var_id = self._selection()
         if k is None or var_id is None:
             return
         k.confirm(var_id)
+        self._saved()
         self.refresh(keep=var_id)
 
     def reject_selected(self) -> None:
@@ -202,7 +224,27 @@ class DiscoveryPanel(QWidget):
         if k is None or var_id is None:
             return
         k.reject(var_id)
+        self._saved()
         self.refresh(keep=var_id)
+
+    def export_to(self, path: str | Path) -> None:
+        try:
+            written = self._context.discovery.export_to(path)
+        except ConfigurationError as exc:
+            self._note.setText(str(exc))
+            return
+        self._note.setText(f"Saved what the AI learned to {written.name}.")
+
+    def import_from(self, path: str | Path) -> None:
+        try:
+            imported = self._context.discovery.import_from(path)
+        except ConfigurationError as exc:
+            self._note.setText(str(exc))
+            return
+        self._note.setText(
+            f"Loaded {len(imported)} discoveries about {imported.title or 'this game'}."
+        )
+        self.refresh()
 
     def rename_selected(self, name: str) -> None:
         """Give the selected discovery a name; naming counts as confirming it."""
@@ -211,6 +253,7 @@ class DiscoveryPanel(QWidget):
             return
         k.correct(var_id, name=name.strip())
         self._name.clear()
+        self._saved()
         self.refresh(keep=var_id)
 
     def run_experiment(self) -> None:
@@ -280,6 +323,8 @@ class DiscoveryPanel(QWidget):
 
     def _set_enabled(self, enabled: bool) -> None:
         self._list.setEnabled(enabled)
+        self._export.setEnabled(enabled)
+        self._import.setEnabled(enabled)
         if not enabled:
             self._set_verdict_enabled(False)
             self._experiment.setEnabled(False)
@@ -303,6 +348,27 @@ class DiscoveryPanel(QWidget):
 
     def _on_rename_clicked(self) -> None:
         self.rename_selected(self._name.text())
+
+    def _saved(self) -> None:
+        path = self._context.discovery.save()
+        if path is not None:
+            self._note.setText("Remembered for next time.")
+
+    def _on_export_clicked(self) -> None:
+        k = self.knowledge
+        suggested = f"{k.title or k.game_id}-knowledge.json" if k else "knowledge.json"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Share what the AI learned", suggested, "Knowledge files (*.json)"
+        )
+        if path:
+            self.export_to(path)
+
+    def _on_import_clicked(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load shared knowledge", "", "Knowledge files (*.json)"
+        )
+        if path:
+            self.import_from(path)
 
     # -------------------------------------------------------------- events
 

@@ -9,7 +9,11 @@ a game is connected it:
   variable proposals (``find_candidates`` → ``propose_candidates``);
 * when the emulator supports save states, every ``experiment_every``
   frames runs the button-linking experiments and folds them in, from
-  whatever situation the game is in at that moment.
+  whatever situation the game is in at that moment;
+* with a :class:`KnowledgeStore`, loads what was learned about the game
+  last time and saves whenever a belief is added or changed, on
+  disconnect, and on request (``save``), plus ``export_to`` / ``import_from``
+  for sharing files.
 
 Everything it learns goes into :attr:`knowledge`, and every step is
 announced on the bus (:class:`DiscoveryProgress`, :class:`DiscoveryUpdated`)
@@ -19,8 +23,9 @@ so the UI can show what the AI is doing.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
-from retro_ai_lab.core import EmulatorError, UnsupportedCapabilityError
+from retro_ai_lab.core import ConfigurationError, EmulatorError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.services.connection import (
     ConnectionService,
@@ -29,6 +34,7 @@ from retro_ai_lab.services.connection import (
 )
 from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.observer import MemoryObserved, ObservationService
+from retro_ai_lab.storage.knowledge import KnowledgeStore, export, load
 from retro_ai_lab.understanding.events import EventDetector, EventLog, GameEvent
 from retro_ai_lab.understanding.knowledge import Knowledge, Relationship, Variable
 from retro_ai_lab.understanding.linking import apply_input_links, find_input_links
@@ -76,6 +82,7 @@ class DiscoveryService:
         review_every: int = DEFAULT_REVIEW_EVERY,
         experiment_every: int | None = DEFAULT_EXPERIMENT_EVERY,
         event_window: int = 5,
+        store: KnowledgeStore | None = None,
     ) -> None:
         if review_every < 1:
             raise ValueError("review_every must be positive")
@@ -87,6 +94,8 @@ class DiscoveryService:
         self._review_every = review_every
         self._experiment_every = experiment_every
         self._event_window = event_window
+        self._store = store
+        self._saves = 0
         self._knowledge: Knowledge | None = None
         self._detector: EventDetector | None = None
         self._finder: RelationshipFinder | None = None
@@ -130,6 +139,14 @@ class DiscoveryService:
     def experiments(self) -> int:
         return self._experiments
 
+    @property
+    def store(self) -> KnowledgeStore | None:
+        return self._store
+
+    @property
+    def saves(self) -> int:
+        return self._saves
+
     def can_experiment(self) -> bool:
         return self._harness is not None and self._harness.available()
 
@@ -149,6 +166,41 @@ class DiscoveryService:
         return ", ".join(parts) + "."
 
     # ------------------------------------------------------------ actions
+
+    def save(self) -> Path | None:
+        """Write the knowledge to the store (no store: nothing happens)."""
+        if self._store is None or self._knowledge is None:
+            return None
+        path = self._store.save(self._knowledge)
+        self._saves += 1
+        return path
+
+    def export_to(self, path: str | Path) -> Path:
+        """Write the current knowledge anywhere, for sharing."""
+        if self._knowledge is None:
+            raise ConfigurationError("Nothing to export yet; connect to a game first.")
+        return export(self._knowledge, path)
+
+    def import_from(self, path: str | Path) -> Knowledge:
+        """Replace the current game's knowledge with a shared file for the same game."""
+        current = self._knowledge
+        if current is None:
+            raise ConfigurationError("Connect to a game before importing knowledge for it.")
+        imported = load(path)
+        if imported.game_id != current.game_id:
+            raise ConfigurationError(
+                f"That file is about {imported.title or imported.game_id!r}, "
+                f"not {current.title or current.game_id!r}."
+            )
+        self._adopt(imported)
+        self.save()
+        self._announce(DiscoveryUpdated(tuple(imported), (), (), imported.relationships()))
+        return imported
+
+    def _adopt(self, knowledge: Knowledge) -> None:
+        self._knowledge = knowledge
+        self._detector = EventDetector(knowledge)
+        self._finder = RelationshipFinder(knowledge, window=self._event_window)
 
     def review(self) -> DiscoveryUpdated:
         """Turn the statistics gathered so far into proposals, right now."""
@@ -190,11 +242,15 @@ class DiscoveryService:
 
     def _on_connected(self, event: EmulatorConnected) -> None:
         info = event.game_info
-        self._knowledge = Knowledge(
-            game_id_for(info.system, info.title, info.rom_hash), title=info.title
-        )
-        self._detector = EventDetector(self._knowledge)
-        self._finder = RelationshipFinder(self._knowledge, window=self._event_window)
+        game_id = game_id_for(info.system, info.title, info.rom_hash)
+        if self._store is not None:
+            try:
+                knowledge = self._store.load_or_new(game_id, title=info.title)
+            except ConfigurationError:
+                knowledge = Knowledge(game_id, title=info.title)  # a damaged file: start over
+        else:
+            knowledge = Knowledge(game_id, title=info.title)
+        self._adopt(knowledge)
         self._events.clear()
         self._buttons = tuple(b.name for b in event.buttons)
         self._harness = ExperimentHarness(self._connection)
@@ -211,6 +267,8 @@ class DiscoveryService:
             )
 
     def _on_disconnected(self, event: EmulatorDisconnected) -> None:
+        if self._enabled:
+            self.save()
         self._enabled = False
         self._harness = None
         self._set_stage("idle", "Not watching a game.")
@@ -255,8 +313,11 @@ class DiscoveryService:
         self._bus.publish(DiscoveryProgress(stage, detail))
 
     def _announce(self, update: DiscoveryUpdated) -> None:
-        if not update.is_empty:
-            self._bus.publish(update)
+        if update.is_empty:
+            return
+        if update.added or update.changed:
+            self.save()
+        self._bus.publish(update)
 
 
 __all__ = [

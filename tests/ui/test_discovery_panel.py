@@ -159,3 +159,39 @@ def test_main_window_hosts_the_panel(qtbot: QtBot) -> None:
     assert isinstance(window.discovery_panel, DiscoveryPanel)
     assert window.discovery_panel.parent() is not None
     assert window.panel("activity").findChild(DiscoveryPanel) is window.discovery_panel
+
+
+# ------------------------------------------------------- persistence (T-308)
+
+
+def test_panel_saves_verdicts_and_shares_files(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    from pathlib import Path
+
+    base = Path(str(tmp_path))
+    monkeypatch.setenv("RETRO_AI_LAB_DATA_DIR", str(base / "data"))
+    ctx = AppContext()
+    assert ctx.data_dir == base / "data"
+    panel = DiscoveryPanel(ctx)
+    qtbot.addWidget(panel)
+    assert not panel.findChild(object, "export_button").isEnabled()  # type: ignore[union-attr]
+    ctx.connection.connect("fake", seed=2)
+    k = panel.knowledge
+    assert k is not None
+    v = k.propose("ram", LAYOUT.score, kind=VariableKind.SCORE)
+    panel.refresh()
+    panel.select(v.id)
+    panel.confirm_selected()
+    assert panel.note_text == "Remembered for next time."
+    assert ctx.knowledge_store.load("toyracer-2").get(v.id).confirmed
+    panel.export_to(base / "share.json")
+    assert "share.json" in panel.note_text
+    panel.import_from(base / "share.json")
+    assert panel.note_text.startswith("Loaded 1 discoveries")
+    panel.import_from(base / "missing.json")
+    assert "Can't read" in panel.note_text
+    panel.export_to(base / "nope" / "deep" / "x.json")
+    assert "Can't write" in panel.note_text
+    ctx.connection.disconnect()
+    assert not panel.findChild(object, "import_button").isEnabled()  # type: ignore[union-attr]

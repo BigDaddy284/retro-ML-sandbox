@@ -212,3 +212,88 @@ def test_bad_schedules() -> None:
     with pytest.raises(ValueError):
         DiscoveryService(c, o, bus, experiment_every=0)
     DiscoveryService(c, o, bus, experiment_every=None)  # experiments off is allowed
+
+
+# ------------------------------------------------------- persistence (T-308)
+
+
+def test_knowledge_is_remembered_between_connections(
+    connection: ConnectionService, observation: ObservationService, bus: EventBus, tmp_path: object
+) -> None:
+    from pathlib import Path
+
+    from retro_ai_lab.storage import KnowledgeStore
+    from retro_ai_lab.understanding import Confidence
+
+    store = KnowledgeStore(Path(str(tmp_path)) / "knowledge")
+    d = DiscoveryService(
+        connection, observation, bus, review_every=100, experiment_every=None, store=store
+    )
+    assert d.store is store and d.save() is None  # nothing to save yet
+    connection.connect("fake", seed=2)
+    play(connection, observation, 100)
+    k = d.knowledge
+    assert k is not None and len(k) > 0 and d.saves >= 1
+    first = next(iter(k))
+    k.confirm(first.id)
+    d.save()
+    connection.disconnect()
+    saved = store.load("toyracer-2")
+    assert saved.get(first.id).confidence is Confidence.CONFIRMED
+    connection.connect("fake", seed=2)
+    again = d.knowledge
+    assert again is not None and again is not k
+    assert again.get(first.id).confidence is Confidence.CONFIRMED
+    assert len(again) == len(k)
+    connection.disconnect()
+    connection.connect("fake", seed=9)  # a different game starts empty
+    assert d.knowledge is not None and len(d.knowledge) == 0
+
+
+def test_damaged_file_starts_over(
+    connection: ConnectionService, observation: ObservationService, bus: EventBus, tmp_path: object
+) -> None:
+    from pathlib import Path
+
+    from retro_ai_lab.storage import KnowledgeStore
+
+    store = KnowledgeStore(Path(str(tmp_path)) / "knowledge")
+    store.path_for("toyracer-2").write_text("{broken", "utf-8")
+    d = DiscoveryService(connection, observation, bus, store=store)
+    connection.connect("fake", seed=2)
+    assert d.knowledge is not None and len(d.knowledge) == 0
+
+
+def test_export_and_import(
+    connection: ConnectionService, observation: ObservationService, bus: EventBus, tmp_path: object
+) -> None:
+    from pathlib import Path
+
+    from retro_ai_lab.core import ConfigurationError
+    from retro_ai_lab.storage.knowledge import load
+    from retro_ai_lab.understanding import Knowledge, VariableKind
+
+    base = Path(str(tmp_path))
+    d = DiscoveryService(connection, observation, bus, review_every=100, experiment_every=None)
+    with pytest.raises(ConfigurationError):
+        d.export_to(base / "x.json")
+    with pytest.raises(ConfigurationError):
+        d.import_from(base / "x.json")
+    connection.connect("fake", seed=2)
+    play(connection, observation, 100)
+    out = d.export_to(base / "shared.json")
+    assert load(out).game_id == "toyracer-2"
+    shared = Knowledge("toyracer-2", title="Toy Racer")
+    shared.propose("ram", LAYOUT.score, kind=VariableKind.SCORE, name="Points")
+    shared.confirm("v1")
+    from retro_ai_lab.storage.knowledge import export
+
+    export(shared, base / "friend.json")
+    imported = d.import_from(base / "friend.json")
+    assert d.knowledge is imported and d.knowledge.get("v1").name == "Points"
+    play(connection, observation, 100)  # discovery carries on with the imported beliefs
+    assert len(d.knowledge) > 1
+    other = Knowledge("someone-else")
+    export(other, base / "other.json")
+    with pytest.raises(ConfigurationError, match="not"):
+        d.import_from(base / "other.json")
