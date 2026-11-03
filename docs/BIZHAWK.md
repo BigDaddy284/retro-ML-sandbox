@@ -98,3 +98,6 @@ disconnect and watch it run again.
   offered to the learning side, because the app reads a region whole every
   step. The handshake still lists them.
 * Analog sticks and axes are not buttons and are ignored.
+* "Practise fast" sets EmuHawk's speed to 6400% while the AI trains and
+  puts 100% back when training pauses or stops; the script also puts 100%
+  back when the app disconnects, so a crash does not leave the game racing.

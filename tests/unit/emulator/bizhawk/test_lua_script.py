@@ -492,6 +492,17 @@ def test_speed_and_save_states_through_the_real_script(
         assert host.paused and adapter.is_connected
         adapter.disconnect()
         assert host.error is None
+        # The app changed the speed, so the script puts 100% back when it leaves (T-836).
+        wait_until(lambda: host.speed == 100)
+
+
+def test_a_speed_the_app_never_touched_is_left_alone() -> None:
+    with LuaScriptHost() as host:
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
+        adapter.connect(timeout_s=5.0)
+        adapter.disconnect()
+        wait_until(lambda: not host.paused)
+        assert host.speed is None and "speedmode" not in host.calls
 
 
 json_values = st.recursive(

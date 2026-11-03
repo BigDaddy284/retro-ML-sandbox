@@ -331,6 +331,7 @@ local server = nil   -- the listening socket
 local app = nil      -- the connected app, or nil
 local pending = ""   -- a partial line received so far
 local free_run = false
+local speed_changed = false  -- the app set a speed; put 100% back when it leaves (T-836)
 local closing = false
 local pad = {}       -- button name -> true, from the handshake
 local domain_sizes = {}  -- memory domain name -> size, from the handshake
@@ -687,6 +688,7 @@ function handlers.speed(req)
     error("'percent' must be a number above zero.", 0)
   end
   client.speedmode(math.max(1, math.floor(percent + 0.5)))
+  speed_changed = true
   return {}
 end
 
@@ -734,6 +736,10 @@ local function drop_app()
   free_run = false
   closing = false
   release_all()
+  if speed_changed then
+    client.speedmode(100)
+    speed_changed = false
+  end
   unpause()
   show_messages(true)
 end
