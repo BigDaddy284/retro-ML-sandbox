@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-407 – Goals and objectives model
+- **Current task:** T-408 – Goal service
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -55,8 +55,9 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-404 | Reward service: per-game profile persistence, live reward tally from events | 4 | Done | 15/15 | see PR #30 |
 | T-405 | Reward exploitation detection with plain-words explanation | 4 | Done | 8/8 | see PR #31 |
 | T-406 | Rewards panel: categories that expand, +/- buttons, value, toggle, suggested, personality picker | 4 | Done | 7/7 | see PR #32 |
-| T-407 | Goals and objectives model: overall goal, objectives with detection, dependencies, completion | 4 | Planned | – | – |
-| T-408 | Goals panel: edit the objective structure, see completion and confidence | 4 | Planned | – | – |
+| T-407 | Goals and objectives model: overall goal, objectives with detection, dependencies, completion | 4 | Done | 9/9 | see PR #33 |
+| T-408 | Goal service: per-game goal persistence, completion tracking from events, suggested objectives | 4 | Planned | – | – |
+| T-409 | Goals panel: edit the objective structure, see completion and confidence | 4 | Planned | – | – |
 | E-5 | Basic Learning (tabular Q-learning, save/load) | 5 | Epic | – | – |
 | E-6 | Training Interface (live/background, modes, graphs, history) | 6 | Epic | – | – |
 | E-7 | Advanced Learning (DQN, hierarchical RL, demonstrations) | 7 | Epic | – | – |
@@ -536,8 +537,23 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 7 / 7 passed / 0 failed / 0 excluded (665 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** After a disconnect the tree rows are disabled, so re-selecting the kept row no longer fires Qt's current-item signal; the panel now sets the control buttons' state itself at the end of every refresh. Windows CI then caught a use-after-free: ticking a row rebuilt the tree while Qt was still inside that row's signal. A refresh that arrives during an item signal is now deferred by one event-loop tick.
 
+### T-407 – Goals and objectives model
+- **Status:** Done
+- **Phase:** 4
+- **Objective:** Model DESIGN.md §4: an overall goal a child picks or writes, broken into objectives that each have a child-friendly description, a detection method, a reward, an optional penalty, a completion status, a confidence level, an on/off setting and dependencies on other objectives; plus the AI's first attempt at breaking a goal down from what it knows.
+- **Scope:** `rewards.goals`: `Objective(id, description, trigger, reward, penalty, setback_trigger, completed, completed_frame, confidence, enabled, depends_on, notes)` with validation and JSON; `Goal(game_id, title)` with `add`/`get`/`remove`/`update`/`move`, `set_dependencies` (unknown ids and cycles rejected), `ready()` (enabled, not done, dependencies done), `next()`, `progress()`, `complete(id, frame)`, `reset_progress()`, `observe(event)` (completes ready objectives whose trigger fires, applies a penalty when a setback trigger fires before completion) returning `(reward, completed, penalised)`, `to_dict`/`from_dict` (schema 1); `GOAL_IDEAS` (the §4.1 examples); `suggest_goal(knowledge, title="")` builds objectives from believed progress variables ("Get further in Lap"), ordered by believed relationships (a cause comes before its effect) with confidence from the variable; `merge_suggestions(goal, knowledge)` adds missing suggested objectives without touching a person's edits. `storage.goals.GoalStore` on the shared JSON helpers. **Out of scope:** the service and panel (T-408, T-409).
+- **Acceptance criteria:**
+  1. Objective validation (blank description, bad reward, unknown confidence, self-dependency) and JSON round-trip.
+  2. Goal add/duplicate/get/remove/update/move; dependencies reject unknown ids and cycles; removing an objective drops dependencies on it.
+  3. `ready`/`next`/`progress` follow dependencies and the enabled flag; `observe` completes once, pays the reward, applies the penalty on a setback before completion only, ignores disabled or blocked objectives; `reset_progress` clears completion.
+  4. Suggestions: one objective per believed progress variable with its confidence, ordered by relationships; merging twice changes nothing and keeps edits; the toy racer goal completes "Get further in Checkpoint" during a drive.
+  5. Store round-trips, lists and deletes like the other stores.
+- **Test plan:** objective validation/JSON; goal container and dependencies; readiness and observe; suggestions and merge; toy racer; store.
+- **Results:** 9 / 9 passed / 0 failed / 0 excluded (674 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Dependencies may point at objectives later in the list, so loading adds every objective first and sets dependencies second. The penalty is defined as a setback that happens before the objective is done (DESIGN.md §4.2 "optional penalty"), which is the one reading that can't punish a finished step.
+
 ### Later Phase 4 tasks
-T-402 to T-408 as listed in the summary table; each gets its own section when started.
+T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
 ### Later Phase 3 tasks
 None outstanding; refinements will be filed as they come up on real games.
@@ -584,4 +600,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-404 completed (PR #30).
 - T-405 completed (PR #31).
 - T-406 completed (PR #32).
+- T-407 completed (PR #33).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

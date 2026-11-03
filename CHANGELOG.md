@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-407: Goals and objectives model: an overall goal broken into objectives with detection triggers, reward, optional setback penalty, completion, confidence, on/off and dependencies; suggested objectives from believed progress; a per-game goal store.
 - T-406: Rewards panel: behaviours under expandable categories with reward, suggested value and on/off tick, + / - / Use suggested buttons, personality picker, running total and the farming warning.
 - T-405: Reward exploitation detection: a plain-words warning (with a suggestion) when the AI keeps earning reward without any progress, announced once per window as `ExploitSuspected`.
 - T-404: Reward service: one saved reward profile per game, filled from the knowledge as discoveries arrive, every detected event scored into a running tally and announced as `RewardEarned`; child controls save and announce changes.
