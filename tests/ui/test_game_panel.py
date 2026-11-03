@@ -222,6 +222,18 @@ def test_a_frame_arriving_after_stop_is_dropped(qtbot: QtBot, context: AppContex
     assert len(seen) == 1
 
 
+def test_pump_changes_rate_while_running(qtbot: QtBot, context: AppContext) -> None:
+    pump = FramePump(context.connection, fps=50)
+    assert pump.interval_ms == 20
+    pump.start()
+    pump.set_fps(2)
+    assert pump.running and pump.interval_ms == 500
+    with pytest.raises(ValueError, match="fps must be positive"):
+        pump.set_fps(0)
+    assert pump.interval_ms == 500
+    pump.stop()
+
+
 def test_pump_rejects_bad_fps(context: AppContext) -> None:
     with pytest.raises(ValueError):
         FramePump(context.connection, fps=0)

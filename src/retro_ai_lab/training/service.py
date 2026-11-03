@@ -10,6 +10,7 @@ script can call :meth:`TrainingService.train` with no GUI at all.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections import deque
 from collections.abc import Sequence
@@ -68,6 +69,9 @@ from retro_ai_lab.training.insights import (
 from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
 
 CHECKPOINT_SLOT = "training"
+log = logging.getLogger(__name__)
+
+FAST_SPEED = 64.0  # EmuHawk's client.speedmode tops out at 6400% (T-836)
 PRACTISE_SLOT = "practise"  # the save-state slot of the spot the child pinned (T-508)
 DEFAULT_HISTORY = 200
 DEFAULT_PROMOTE_AT = 1000  # known situations before an "auto" brain moves to a network
@@ -154,6 +158,7 @@ class TrainingService:
         self._status = Status.IDLE
         self._mode = Mode.GUIDED
         self._speed = Speed.LIVE
+        self._fast_applied = False  # the emulator is running at FAST_SPEED for us (T-836)
         self._enabled = False
         self._episodes = 0
         self._total_steps = 0
@@ -383,6 +388,7 @@ class TrainingService:
         self._mode = mode
         if was_running:
             self._prepare_checkpoint()
+        self._apply_speed()
         self._announce("mode change")
 
     @property
@@ -450,7 +456,32 @@ class TrainingService:
     def set_speed(self, speed: Speed) -> None:
         if not isinstance(speed, Speed):
             raise ConfigurationError("speed must be a Speed.")
+        if speed is self._speed:
+            return
         self._speed = speed
+        self._apply_speed()
+        self._announce("speed")
+
+    def _apply_speed(self) -> None:
+        """Run the emulator flat out while the AI practises fast, at 1x otherwise (T-836).
+
+        Each training step is a round trip whose frames run at the emulator's own
+        throttle, so "Practise fast" was no faster than watching. An emulator
+        without speed control (mGBA) is left alone; a refused call is logged.
+        """
+        wanted = (
+            self._status is Status.RUNNING and self._mode.ai_plays and self._speed is Speed.FAST
+        )
+        if wanted == self._fast_applied or not self._connection.is_connected:
+            return
+        try:
+            if not self._connection.call(lambda a: a.capabilities().speed_control):
+                return
+            self._connection.call(lambda a: a.set_speed(FAST_SPEED if wanted else 1.0))
+        except (EmulatorError, UnsupportedCapabilityError) as exc:
+            log.warning("Could not change the emulator's speed: %s", exc)
+            return
+        self._fast_applied = wanted
 
     def start(self, mode: Mode | None = None) -> None:
         if not self._enabled:
@@ -467,18 +498,21 @@ class TrainingService:
         if not self._enabled:  # the link dropped while the checkpoint was being taken
             raise ConfigurationError("The game went away just as training was starting.")
         self._status = Status.RUNNING
+        self._apply_speed()
         self._announce("start")
 
     def pause(self) -> None:
         if self._status is not Status.RUNNING:
             raise ConfigurationError("Nothing is running to pause.")
         self._status = Status.PAUSED
+        self._apply_speed()
         self._announce("pause")
 
     def resume(self) -> None:
         if self._status is not Status.PAUSED:
             raise ConfigurationError("Training isn't paused.")
         self._status = Status.RUNNING
+        self._apply_speed()
         self._announce("resume")
 
     def stop(self) -> None:
@@ -486,6 +520,7 @@ class TrainingService:
             raise ConfigurationError("Nothing is running to stop.")
         self._close_episode("stopped")
         self._status = Status.IDLE
+        self._apply_speed()
         self._announce("stop")
 
     def save(self) -> Path | None:
@@ -710,6 +745,7 @@ class TrainingService:
             self.save()
         self._enabled = False
         self._harness = None
+        self._fast_applied = False  # the script puts the speed back itself
         self._spot_pinned = False  # save states don't outlive the link
         self._status = Status.IDLE
         if was_running:

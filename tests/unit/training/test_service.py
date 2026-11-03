@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
 
-from retro_ai_lab.core import ConfigurationError, EmulatorDisconnectedError
+from retro_ai_lab.core import (
+    Capabilities,
+    ConfigurationError,
+    EmulatorDisconnectedError,
+    EmulatorError,
+)
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
@@ -129,8 +134,6 @@ def test_idle_until_a_capable_game_is_connected(lab: Lab) -> None:
     assert not t.step() and t.episode is None and t.last is None
     with pytest.raises(ConfigurationError, match="Can't train yet"):
         t.start()
-    from retro_ai_lab.core import Capabilities
-
     lab.connection.connect(
         "fake", capabilities=Capabilities(screen_capture=True, frame_advance=True, input=True)
     )
@@ -264,6 +267,70 @@ def test_run_for_honours_its_budget(lab: Lab) -> None:
     assert t.run_for(0.0) == 1  # the deadline is checked after each step
     taken = t.run_for(0.05)
     assert taken >= 1
+    t.stop()
+
+
+def test_fast_practice_runs_the_emulator_flat_out(lab: Lab) -> None:
+    """T-836: "Practise fast" asks the emulator for its top speed, and only then."""
+    from retro_ai_lab.training.service import FAST_SPEED
+
+    lab.connect()
+    t = lab.training
+    a = lab.adapter()
+    assert a.speed == 1.0 and FAST_SPEED == 64.0
+    t.set_speed(Speed.FAST)
+    assert a.speed == 1.0  # not running yet
+    assert lab.changes[-1].reason == "speed"
+    t.set_speed(Speed.FAST)  # no change, no announcement
+    assert lab.changes[-1].reason == "speed" and sum(c.reason == "speed" for c in lab.changes) == 1
+    t.start()
+    assert a.speed == FAST_SPEED
+    t.pause()
+    assert a.speed == 1.0
+    t.resume()
+    assert a.speed == FAST_SPEED
+    t.set_speed(Speed.LIVE)
+    assert a.speed == 1.0
+    t.set_speed(Speed.FAST)
+    assert a.speed == FAST_SPEED
+    t.set_mode(Mode.MANUAL)  # the child plays: no speeding up
+    assert a.speed == 1.0
+    t.set_mode(Mode.INDEPENDENT)
+    assert a.speed == FAST_SPEED
+    t.stop()
+    assert a.speed == 1.0
+    # Manual mode never speeds the game up, whatever the speed setting says.
+    t.start(Mode.MANUAL)
+    assert a.speed == 1.0
+    t.stop()
+
+
+def test_a_refused_speed_call_does_not_stop_training(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lab.connect()
+    t = lab.training
+    a = lab.adapter()
+
+    def refuse(multiplier: float) -> None:
+        raise EmulatorError("no")
+
+    monkeypatch.setattr(a, "_do_set_speed", refuse)
+    t.set_speed(Speed.FAST)
+    t.start()
+    assert t.status is Status.RUNNING and a.speed == 1.0
+    assert t.step()
+    t.stop()
+
+
+def test_an_emulator_without_speed_control_is_left_alone(lab: Lab) -> None:
+    caps = replace(Capabilities.all(), speed_control=False)
+    lab.connection.connect("fake", seed=3, capabilities=caps)  # type: ignore[arg-type]
+    teach(lab)
+    t = lab.training
+    t.set_speed(Speed.FAST)
+    t.start()
+    assert t.status is Status.RUNNING and lab.adapter().speed == 1.0
     t.stop()
 
 

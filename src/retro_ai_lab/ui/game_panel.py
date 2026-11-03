@@ -22,7 +22,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 
 from retro_ai_lab.core import EmulatorDisconnectedError, Frame
 from retro_ai_lab.services import ConnectionService, EmulatorConnected, EmulatorDisconnected
-from retro_ai_lab.training import TrainingStateChanged
+from retro_ai_lab.training import Speed, Status, TrainingStateChanged
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.controller_pad import ControllerPad
 from retro_ai_lab.ui.frame_view import FrameView
@@ -30,6 +30,7 @@ from retro_ai_lab.ui.play_clock import PlayClock
 from retro_ai_lab.ui.worker import report
 
 DEFAULT_FPS = 30
+PRACTISE_FPS = 2  # pictures a second while the AI practises fast (T-836)
 CLOCK_FPS = 60  # the play clock's frame rate (console speed); pictures ride along at DEFAULT_FPS
 NOT_CONNECTED = "Not connected. Connect to a game to see it here."
 NO_SCREEN = "This emulator can't show its screen, but the AI can still play."
@@ -72,11 +73,9 @@ class FramePump(QObject):
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
-        if fps <= 0:
-            raise ValueError("fps must be positive")
         self._connection = connection
         self._timer = QTimer(self)
-        self._timer.setInterval(max(1, 1000 // fps))
+        self.set_fps(fps)
         self._timer.timeout.connect(self.tick)
         self._on_frame: list[object] = []
         self._latest: Frame | None = None
@@ -137,6 +136,12 @@ class FramePump(QObject):
         self._last_failure = message
         log.warning("Frame capture failed: %s", message)
         self._signals.failed.emit(message)
+
+    def set_fps(self, fps: int) -> None:
+        """Change the picture rate; a running pump keeps running at the new rate."""
+        if fps <= 0:
+            raise ValueError("fps must be positive")
+        self._timer.setInterval(max(1, 1000 // fps))
 
     def start(self) -> None:
         self._timer.start()
@@ -233,6 +238,7 @@ class GamePanel(QWidget):
         layout.addLayout(controls)
         layout.addWidget(self._status)
 
+        self._fps = fps
         self._pump = FramePump(context.connection, fps=fps, parent=self)
         self._pump.subscribe(context.observation.observe_frame)
         self._pump.subscribe(self._on_frame)
@@ -304,7 +310,11 @@ class GamePanel(QWidget):
 
     def _on_training_state(self, event: TrainingStateChanged) -> None:
         """The game's own controls yield to the AI while it plays, and come back after."""
-        ai = self._context.training.ai_in_control
+        training = self._context.training
+        ai = training.ai_in_control
+        # Fast practice needs the link for its steps: a few pictures a second (T-836).
+        fast = ai and training.status is Status.RUNNING and training.speed is Speed.FAST
+        self._pump.set_fps(PRACTISE_FPS if fast else self._fps)
         if ai and not self._ai_had_controls:
             self._resume_clock = self._clock.playing
             self._clock.pause()

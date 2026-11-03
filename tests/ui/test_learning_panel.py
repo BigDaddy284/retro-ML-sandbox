@@ -157,6 +157,32 @@ def test_game_controls_yield_to_the_ai_and_come_back(qtbot: QtBot, context: AppC
     w.close()
 
 
+def test_pictures_rest_while_the_ai_practises_fast(qtbot: QtBot, context: AppContext) -> None:
+    """T-836: at "Practise fast" the pump drops to a few pictures a second."""
+    from retro_ai_lab.ui.game_panel import DEFAULT_FPS, PRACTISE_FPS
+
+    w = MainWindow(context)
+    qtbot.addWidget(w)
+    w.show()
+    game, learning = w.game_panel, w.learning_panel
+    connect(context)
+    normal = game.pump.interval_ms
+    assert normal == 1000 // DEFAULT_FPS
+    learning.choose_speed(Speed.FAST)
+    assert game.pump.interval_ms == normal  # not running yet
+    learning.start()
+    assert game.pump.running and game.pump.interval_ms == 1000 // PRACTISE_FPS
+    learning.choose_speed(Speed.LIVE)
+    assert game.pump.interval_ms == normal
+    learning.choose_speed(Speed.FAST)
+    assert game.pump.interval_ms == 1000 // PRACTISE_FPS
+    learning.pause_or_resume()
+    assert game.pump.interval_ms == normal
+    learning.stop()
+    assert game.pump.interval_ms == normal
+    w.close()
+
+
 def test_manual_mode_leaves_the_controls_with_the_child(qtbot: QtBot, context: AppContext) -> None:
     w = MainWindow(context)
     qtbot.addWidget(w)
