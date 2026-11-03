@@ -73,16 +73,22 @@ def test_disconnect_stops_pump_and_clears(panel: GamePanel, context: AppContext)
     assert panel.status_text == NOT_CONNECTED
 
 
-def test_dropped_link_is_reported_in_plain_words(
-    qtbot: QtBot, panel: GamePanel, context: AppContext
-) -> None:
-    context.connection.connect("fake", drop_after_ops=1)  # the first tick uses the one op
+def test_dropped_link_is_reported_in_plain_words(qtbot: QtBot, context: AppContext) -> None:
+    # A slow pump, stopped after its first frame, so that only the tick below
+    # can spend the second operation (T-834: the 60 fps timer used to race it).
+    panel = GamePanel(context, fps=1)
+    qtbot.addWidget(panel)
+    panel.show()
     panel.clock.pause()
+    context.connection.connect("fake", drop_after_ops=1)  # the first tick uses the one op
     qtbot.waitUntil(lambda: panel.view.frame is not None)
+    panel.pump.stop()
+    qtbot.waitUntil(lambda: not panel.pump.in_flight)
+    assert context.connection.is_connected
     assert panel.pump.tick()  # this one drops the link, on the worker
     qtbot.waitUntil(lambda: not context.connection.is_connected)
-    qtbot.waitUntil(lambda: not panel.pump.running)
-    assert panel.view.frame is None
+    qtbot.waitUntil(lambda: panel.view.frame is None)
+    assert not panel.pump.running
     assert panel.status_text.startswith("Lost the game: The emulator stopped responding.")
     assert NOT_CONNECTED in panel.status_text
 
