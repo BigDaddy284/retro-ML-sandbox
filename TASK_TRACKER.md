@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-803 – Comparison of saved AIs
+- **Current task:** T-804 – "Compare AIs" panel
 - **Last approved checkpoint:** `main` after T-709 (PR #58)
 - **Open blockers:** none for development. ADR-005 (BizHawk bridge) is now Accepted with its real-emulator verification left to T-117 on the user's Windows PC. ADR-006 (first demo game) is still *Proposed*: the user picks the game. ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -87,7 +87,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | E-8 | Expansion (VBA-M, comparison, sharing, competitions) | 8 | Epic | – | – |
 | T-801 | Saved AIs: a named snapshot of rewards, goal and brain per game, on disk | 8 | Done | 5/5 | see PR #67 |
 | T-802 | Saved AI service: save the current AI under a name, load one back, delete; events | 8 | Done | 5/5 | see PR #68 |
-| T-803 | Comparison: rewards, objectives, time, attempts, successes and behaviour differences between saved AIs, in child words | 8 | – | – | – |
+| T-803 | Comparison: rewards, objectives, time, attempts, successes and behaviour differences between saved AIs, in child words | 8 | Done | 5/5 | see PR #69 |
 | T-804 | "Compare AIs" panel: save as, load, delete, comparison table, two curves on one graph | 8 | – | – | – |
 | T-805 | Sharing: export a saved AI as one file and import one safely (schema, size, same game) | 8 | – | – | – |
 | T-806 | Competitions: a challenge (game, start state, fixed settings, goes) and a scoreboard of saved AIs run under it | 8 | – | – | – |
@@ -1128,6 +1128,22 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #68. **PR:** #68.
 - **Completion report:** Wiring the service showed a layering slip in T-801: the store imported the `SavedAi` model from the `comparison` package, which imports the services, which import storage, a circle. The store now works on the saved AI's dictionary like the brain store does (it checks the `kind`, `name` and `game_id` header itself), and the service does the model conversion; T-801's tests were adjusted to match. Loading puts the brain back first, because a brain that does not fit the connected controls is the likeliest refusal, and a refusal then leaves rewards and goal untouched. Each service got a `replace` that goes through its own save-and-announce path, so panels refresh through the "loaded" events they already handle.
 
+### T-803 – Comparison of saved AIs
+- **Status:** Done
+- **Phase:** 8
+- **Objective:** DESIGN.md §11's comparison: set two or more saved AIs side by side on rewards earned, objectives completed, time taken, number of attempts, successful outcomes and the behaviours they learned, and say in a child's words which did what better, so the child can see why different reward settings produce different results. Pure functions over `SavedAi` records; the panel (T-804) only shows them.
+- **Scope:** `comparison/compare.py`: `Scorecard.from_saved(saved)` (name, personality, algorithm, goes = attempts, average and best reward a go, objectives completed, goes that reached a goal and the rate, average steps and frames a go, situations known) computed from the brain's goes through `LearningCurve` and the learner's `policy()`; `AiComparison(cards)` with `leader(measure)` for every measure (ties and empty lists give None), `measures()` listing what is compared with a child-friendly label and whether higher or lower is better; `behaviour_differences(a, b)` → `BehaviourDifference(state_key, a_move, b_move)` for situations both AIs know and would play differently (both learners rebuilt from their dictionaries; different controls are refused); `describe(comparison, knowledge=None, space=None)` producing sentences like "AI A scored more points a go (+12.3 against +4.0) and reached a goal more often (3 of 10 against 1 of 10). AI B finished its goes in fewer steps. In 5 situations they would press different buttons: where Lane=2, Speed=3 AI A presses up and AI B presses up + a." with sensible text for one AI, for AIs with no goes, and for AIs that play alike. **Out of scope:** the panel (T-804), running the AIs under the same conditions (T-806).
+- **Acceptance criteria:**
+  1. A scorecard from a saved AI with known goes reports exactly the numbers in those goes (attempts, average and best reward, objectives, successes, average steps and frames); a saved AI with no goes reports zeros and None where there is no best.
+  2. `leader` picks the higher scorer for reward-like measures and the lower for steps and frames, and returns None on a tie or with fewer than two cards.
+  3. `behaviour_differences` lists only situations known to both AIs with different best moves; AIs with different controls raise `ConfigurationError`.
+  4. `describe` names the leaders per measure, mentions the number of differing situations with one example, and copes with one AI, no goes, equal scores and no differences.
+- **Expected changes:** `comparison/compare.py`, `comparison/__init__.py`, tests.
+- **Test plan:** unit – scorecards from hand-built goes; leaders and ties; differences from two learners trained apart (and controls mismatch); describe wording; an end-to-end comparison of two AIs saved from the practice console. Regression – full suite.
+- **Results:** 5 tests pass; full suite 907 passed, 5 skipped on Python 3.13 and 3.11; ruff and mypy strict clean.
+- **Commit:** see PR #69. **PR:** #69.
+- **Completion report:** Scorecards come straight from the goes a brain carries, through the same `LearningCurve` the learning panel uses, so the comparison and the graph never disagree. "Time taken" is reported as steps and frames a go rather than seconds, because a saved AI may have trained at any speed; the panel can turn frames into seconds at the console's frame rate if that reads better. Leaders are decided per measure with ties and missing values giving no leader, and the sentences name the runner-up with its number ("+6.0 against AI B's +5.0") after the first draft left the losing AI unnamed. Behaviour differences rebuild both learners from their dictionaries and refuse different controls; a DQN's policy is whatever its `policy()` reports, so the comparison works for either algorithm.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -1199,5 +1215,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
 - Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56). T-708 completed (PR #57). T-709 completed (PR #58): Phase 7 complete.
-- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame. T-115 completed (PR #64): memory reads with a region size cap. T-116 completed (PR #65): step, speed and save states; every capability on; the episode runner drives the adapter. T-117 completed (PR #66): BizHawk in the app, socket probe for the watchdog, opt-in real-emulator test and docs/BIZHAWK.md; the real run waits for the user's Windows PC. Phase 8 broken down (T-801..T-808). T-801 completed (PR #67): saved AI record and store. T-802 completed (PR #68): saved AI service (save as, load, delete) wired into the app context.
+- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame. T-115 completed (PR #64): memory reads with a region size cap. T-116 completed (PR #65): step, speed and save states; every capability on; the episode runner drives the adapter. T-117 completed (PR #66): BizHawk in the app, socket probe for the watchdog, opt-in real-emulator test and docs/BIZHAWK.md; the real run waits for the user's Windows PC. Phase 8 broken down (T-801..T-808). T-801 completed (PR #67): saved AI record and store. T-802 completed (PR #68): saved AI service (save as, load, delete) wired into the app context. T-803 completed (PR #69): scorecards, leaders, behaviour differences and the comparison in words.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
