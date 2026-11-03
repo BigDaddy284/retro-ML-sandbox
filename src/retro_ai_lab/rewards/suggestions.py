@@ -169,6 +169,7 @@ def apply_suggestions(
         current = profile.find(bid)
         if current is None:
             profile.add(fresh)
+            profile.reset_to_suggested(bid)  # apply the profile's personality weights
             added.append(bid)
             continue
         changed = False
