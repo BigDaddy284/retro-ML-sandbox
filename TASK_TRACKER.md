@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-012 (Ready)
-- **Last approved checkpoint:** `main` after T-011
+- **Current task:** T-201 (Ready); Phase 1 complete except real-emulator tasks T-110+
+- **Last approved checkpoint:** `main` after T-012
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -25,7 +25,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-009 | Connect / disconnect UI with capability display | 1 | Done | 17/17 | see PR #10 |
 | T-010 | Manual controller input from UI to adapter | 1 | Done | 22/22 | see PR #11 |
 | T-011 | Graceful handling of emulator disconnection | 1 | Done | 16/16 | see PR #12 |
-| T-012 | Windows packaging smoke test (launchable build) | 1 | Ready | – | – |
+| T-012 | Windows packaging smoke test (launchable build) | 1 | Done | 5/5 + CI build | see PR #13 |
 | T-110 | Spike: confirm BizHawk Lua ↔ socket protocol | 1 | Blocked on ADR-005 | – | – |
 | T-111 | BizHawk adapter: connect and handshake | 1 | Ready after T-110 | – | – |
 | T-112 | BizHawk adapter: capabilities and game info | 1 | – | – | – |
@@ -231,8 +231,21 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 16 / 16 passed / 0 failed / 0 excluded (378 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Whichever component notices a drop first (pump, clock, pad or watchdog) the service reports it once with the same child-readable reason ("The emulator went away.") unless the adapter gave a more specific one.
 
-### T-012
-Details will be written into this file when it becomes the next task, following the template.
+### T-012 – Windows packaging smoke test
+- **Status:** Done
+- **Phase:** 1
+- **Objective:** A one-folder Windows build (`RetroAILab.exe`) that launches and exits cleanly, produced and smoke-tested by CI on every push to `main`, downloadable as a workflow artifact.
+- **Scope:** `packaging/retro_ai_lab.spec` (PyInstaller, windowed, unused Qt modules excluded), `packaging/smoke_test.py`, `.github/workflows/package.yml` (windows-latest build → smoke test → upload artifact). **Out of scope:** installer, code signing, icons.
+- **Acceptance criteria:**
+  1. The spec builds from the real entry point and the built app honours `--exit-after-ms` and `--version`.
+  2. The package workflow builds on Windows, runs the smoke test and uploads `RetroAILab-windows`.
+  3. The smoke script fails clearly on bad usage or a missing executable.
+- **Test plan:** spec parses and references the entry point; entry point exists; workflow content; smoke script usage and missing path; smoke script passes against the unpackaged entry point (slow). Manual/CI: PyInstaller build on Linux locally (same spec) passed the smoke test; Windows build verified by the Package workflow on the PR.
+- **Results:** 5 / 5 passed / 0 failed / 0 excluded (383 in the full suite). Local Linux PyInstaller build: window run exit 0, version run exit 0, 198 MB folder. Lint, format and strict mypy clean.
+- **Completion report:** The Windows exe is windowed (no console), so `--version` output is not visible on Windows; the smoke test checks only the exit code there. Build size will be revisited when PyTorch is added (Phase 5), probably by shipping a CPU-only wheel.
+
+### Phase 2 tasks
+Details will be written into this file when each becomes the next task, following the template.
 
 ### T-110 – Spike: confirm BizHawk Lua ↔ socket protocol
 - **Status:** Blocked on ADR-005 sign-off and on access to a Windows machine with BizHawk for verification.
@@ -256,5 +269,6 @@ Details will be written into this file when it becomes the next task, following 
 - T-009 completed (PR #10).
 - T-010 completed (PR #11).
 - T-011 completed (PR #12).
-- Next: T-012.
+- T-012 completed (PR #13). Phase 1 is complete on the fake emulator; T-110+ (BizHawk) wait on ADR-005 sign-off.
+- Next: T-201 (Phase 2).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
