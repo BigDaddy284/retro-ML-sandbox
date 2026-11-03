@@ -1,17 +1,21 @@
 """Command-line entry point.
 
-For now the CLI only reports its version. The desktop application is wired in
-by a later task (T-007), which will make a bare ``retro-ai-lab`` launch the UI.
+Running ``retro-ai-lab`` (or ``python -m retro_ai_lab``) with no arguments
+opens the desktop application. ``--version`` and ``--help`` are the only
+other options for now.
 """
 
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
+import sys
+from collections.abc import Callable, Sequence
 
 from retro_ai_lab import __version__
 
 PROG = "retro-ai-lab"
+
+Launcher = Callable[[Sequence[str]], int]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,15 +29,27 @@ def build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"{PROG} {__version__}",
     )
+    # Hidden: used by the launch smoke test and by tooling to open the app
+    # and close it again after a delay.
+    parser.add_argument("--exit-after-ms", type=int, default=None, help=argparse.SUPPRESS)
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def _default_launch(argv: Sequence[str]) -> int:
+    # Imported lazily so ``--version`` works without loading Qt.
+    from retro_ai_lab.ui.app import run_app
+
+    args = build_parser().parse_args(argv)
+    return run_app(argv, exit_after_ms=args.exit_after_ms)
+
+
+def main(argv: Sequence[str] | None = None, *, launch: Launcher = _default_launch) -> int:
     """Run the CLI. Returns the process exit code.
 
     ``argparse`` raises ``SystemExit`` for ``--version``, ``--help`` and bad
     arguments; we convert those into a return code so callers (and tests) get a
-    plain integer instead of an exception.
+    plain integer instead of an exception. ``launch`` is the function that
+    starts the desktop app; tests inject a stand-in.
     """
     parser = build_parser()
     try:
@@ -45,6 +61,4 @@ def main(argv: Sequence[str] | None = None) -> int:
         if isinstance(code, int):
             return code
         return 1
-    # No sub-command yet: behave like --help so the user sees what exists.
-    parser.print_help()
-    return 0
+    return launch(tuple(argv) if argv is not None else tuple(sys.argv[1:]))

@@ -16,6 +16,17 @@ An emulator-based machine learning sandbox that lets children train an AI to pla
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Module layout, interfaces and recorded architecture decisions |
 | [`CHANGELOG.md`](CHANGELOG.md) | Notable changes per task |
 
+## Running it
+
+```bash
+python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+retro-ai-lab            # opens the desktop app
+pytest                  # runs the test suite (headless Qt)
+```
+
+On Linux, Qt needs `libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0 libdbus-1-3 libfontconfig1`; see `.github/workflows/ci.yml`.
+
 ## Planned stack
 
 Python 3.11+, PySide6 (Qt) desktop UI, PyTorch and Gymnasium for learning, SQLite and JSON for storage. Target platform is Windows; the code is kept cross-platform so it can be developed and tested on Linux CI.
