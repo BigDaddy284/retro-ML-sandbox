@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMainWindow, QSplitter, QStatusBar, QWidget
+from PySide6.QtWidgets import QMainWindow, QSplitter, QStatusBar, QToolBar, QWidget
 
 from retro_ai_lab import __version__
+from retro_ai_lab.ui.connect_bar import ConnectBar
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.game_panel import GamePanel
 from retro_ai_lab.ui.panels import PANELS, Panel
@@ -24,6 +25,13 @@ class MainWindow(QMainWindow):
         self._panels: dict[str, Panel] = {spec.key: Panel(spec) for spec in PANELS}
         self._game_panel = GamePanel(self._context)
         self._panels["game"].set_body(self._game_panel)
+
+        toolbar = QToolBar("Connection", self)
+        toolbar.setObjectName("connection_toolbar")
+        toolbar.setMovable(False)
+        self._connect_bar = ConnectBar(self._context)
+        toolbar.addWidget(self._connect_bar)
+        self.addToolBar(toolbar)
 
         # Layout: [ Game | Activity / Rewards ] over [ Progress | Learning ]
         top = QSplitter(Qt.Orientation.Horizontal)
@@ -65,6 +73,10 @@ class MainWindow(QMainWindow):
     @property
     def game_panel(self) -> GamePanel:
         return self._game_panel
+
+    @property
+    def connect_bar(self) -> ConnectBar:
+        return self._connect_bar
 
     def panel(self, key: str) -> Panel:
         return self._panels[key]

@@ -109,8 +109,8 @@ class GamePanel(QWidget):
         self._pump = FramePump(context.connection, fps=fps, parent=self)
         self._pump.subscribe(self._on_frame)
         unsubscribe = (
-            context.bus.subscribe(EmulatorConnected, self._on_connected),
-            context.bus.subscribe(EmulatorDisconnected, self._on_disconnected),
+            context.bridge.subscribe(EmulatorConnected, self._on_connected),
+            context.bridge.subscribe(EmulatorDisconnected, self._on_disconnected),
         )
         # ``destroyed`` fires before children are deleted, so the pump is still
         # alive here. Capture what we need rather than ``self``, which is gone.
