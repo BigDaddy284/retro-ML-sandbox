@@ -10,13 +10,14 @@ episode can start from the same checkpoint (DESIGN.md §9).
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
 from retro_ai_lab.core import Button, ConfigurationError, EmulatorError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.learning.learner import Learner
+from retro_ai_lab.learning.replay import Transition
 from retro_ai_lab.learning.state import State, StateEncoder
 from retro_ai_lab.services.connection import ConnectionService
 from retro_ai_lab.services.discovery import DiscoveryUpdated
@@ -142,6 +143,7 @@ class EpisodeRunner:
         unstick_after: int | None = DEFAULT_UNSTICK_AFTER,
         unstick_buttons: tuple[str, ...] = DEFAULT_UNSTICK_BUTTONS,
         settle_frames: int = DEFAULT_SETTLE_FRAMES,
+        on_learned: Callable[[Transition], None] | None = None,
     ) -> None:
         if frames_per_step < 1:
             raise ConfigurationError("frames_per_step must be at least 1.")
@@ -161,6 +163,7 @@ class EpisodeRunner:
         self._unstick_after = unstick_after
         self._unstick_buttons = unstick_buttons
         self._settle_frames = settle_frames
+        self._on_learned = on_learned
         self._restored = False
         self._unsticks = 0
         self._same_state = 0
@@ -285,7 +288,7 @@ class EpisodeRunner:
             self._ended_by = "disconnected"
             self._signals.stop()
             return False
-        return self._settle(state, action, self._frames_per_step)
+        return self._settle(state, action, self._frames_per_step, "ai")
 
     def observe_step(self, buttons: Iterable[str], frames: int) -> bool:
         """Learn from a step someone else drove (the child, via the play clock).
@@ -303,9 +306,9 @@ class EpisodeRunner:
         action = self._agent.space.matches(buttons).index
         self._last_buttons = self._agent.space.buttons_for(action)
         self._last_action = action
-        return self._settle(self._state, action, frames)
+        return self._settle(self._state, action, frames, "child")
 
-    def _settle(self, state: State, action: int | None, frames: int) -> bool:
+    def _settle(self, state: State, action: int | None, frames: int, source: str) -> bool:
         """After the frames passed: collect the reward, read the next state, learn."""
         self._frames += frames
         reward, resets = self._signals.take()
@@ -319,6 +322,8 @@ class EpisodeRunner:
         done = resets > 0
         if action is not None:
             self._agent.learn(state, action, reward, next_state, done)
+            if self._on_learned is not None:
+                self._on_learned(Transition(state, action, reward, next_state, done, source))
         self._reward += reward
         self._steps += 1
         self._same_state = self._same_state + 1 if next_state == state else 0

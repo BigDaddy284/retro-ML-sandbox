@@ -18,6 +18,7 @@ from pathlib import Path
 from retro_ai_lab.core import ConfigurationError, EmulatorError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.learning.actions import ActionSpace
+from retro_ai_lab.learning.demonstrations import CHILD, Demonstrations
 from retro_ai_lab.learning.learner import (
     AUTO,
     Q_TABLE,
@@ -29,6 +30,7 @@ from retro_ai_lab.learning.learner import (
 )
 from retro_ai_lab.learning.promotion import convert, promote
 from retro_ai_lab.learning.qlearning import QLearningAgent, Settings
+from retro_ai_lab.learning.replay import Transition
 from retro_ai_lab.learning.state import StateEncoder
 from retro_ai_lab.rewards.exploitation import ExploitWarning
 from retro_ai_lab.rewards.goals import Goal
@@ -127,6 +129,7 @@ class TrainingService:
         self._algorithm = algorithm
         self._promote_at = promote_at
         self._last_change = ""
+        self._demonstrations = Demonstrations(seed=seed)
         self._store = store
         self._history: deque[EpisodeRecord] = deque(maxlen=history)
         self._policies: deque[tuple[int, dict[str, int]]] = deque(maxlen=DEFAULT_WINDOW + 1)
@@ -161,6 +164,11 @@ class TrainingService:
     def promote_at(self) -> int:
         """Known situations at which an ``auto`` brain moves from the table to a network."""
         return self._promote_at
+
+    @property
+    def demonstrations(self) -> Demonstrations:
+        """The child's moves kept for this game (empty between games)."""
+        return self._demonstrations
 
     @property
     def last_change(self) -> str:
@@ -250,7 +258,12 @@ class TrainingService:
         if not self._enabled or self._agent is None or self._game_id is None:
             return None
         return Brain(
-            self._game_id, self._agent, tuple(self._history), self._episodes, self._total_steps
+            self._game_id,
+            self._agent,
+            tuple(self._history),
+            self._episodes,
+            self._total_steps,
+            self._demonstrations,
         )
 
     def curve(self, window: int = DEFAULT_WINDOW) -> LearningCurve:
@@ -295,7 +308,11 @@ class TrainingService:
         runner = self._runner
         steps = runner.steps if runner is not None and runner.running else 0
         points = runner.reward if runner is not None and runner.running else 0.0
-        return f"Go {go}: {doing}, step {steps}, {points:+.0f} points so far."
+        text = f"Go {go}: {doing}, step {steps}, {points:+.0f} points so far."
+        if self._mode is Mode.MANUAL and self._demonstrations.shown:
+            n = self._demonstrations.shown
+            text += f" You have shown the AI {n} move{'s' if n != 1 else ''}."
+        return text
 
     # ------------------------------------------------------------ controls
 
@@ -331,6 +348,17 @@ class TrainingService:
         self.save()
         self._announce("algorithm change")
         return self._last_change
+
+    def rehearse(self, passes: int = 1) -> int:
+        """Let the AI learn from the child's moves again; returns the steps learned."""
+        if self._status is not Status.IDLE:
+            raise ConfigurationError("Stop training before the AI rehearses your moves.")
+        if self._agent is None or not self._enabled:
+            return 0
+        steps = self._demonstrations.rehearse(self._agent, passes=passes)
+        if steps:
+            self.save()
+        return steps
 
     def set_speed(self, speed: Speed) -> None:
         if not isinstance(speed, Speed):
@@ -389,6 +417,7 @@ class TrainingService:
         if self.brain() is None or self._agent is None or self._game_id is None:
             raise ConfigurationError("There is no brain to forget.")
         self._agent = self._new_agent(self._agent.space)
+        self._demonstrations.clear()
         self._history.clear()
         self._policies.clear()
         self._episodes = 0
@@ -480,6 +509,7 @@ class TrainingService:
         self._saves = 0
         space = ActionSpace.from_buttons(event.buttons)
         self._agent = self._new_agent(space)
+        self._demonstrations = Demonstrations(seed=self._seed)
         self._fresh_start = ""
         self._last_change = ""
         if self._store is not None and self._store.exists(self._game_id):
@@ -489,6 +519,8 @@ class TrainingService:
                 self._fresh_start = f"Couldn't use the saved brain, so starting afresh: {exc}"
             else:
                 self._agent = brain.agent
+                if brain.demonstrations is not None:
+                    self._demonstrations = brain.demonstrations
                 self._history.extend(brain.goes)
                 self._episodes = brain.episodes
                 self._total_steps = brain.total_steps
@@ -544,6 +576,10 @@ class TrainingService:
 
     # ------------------------------------------------------------ helpers
 
+    def _on_learned(self, transition: Transition) -> None:
+        if transition.source == CHILD:
+            self._demonstrations.add(transition)
+
     def _new_agent(self, space: ActionSpace) -> Learner:
         name = Q_TABLE if self._algorithm == AUTO else self._algorithm
         return make_learner(name, space, self._settings, seed=self._seed)
@@ -581,6 +617,7 @@ class TrainingService:
                 max_steps=self._max_steps,
                 harness=self._harness,
                 unstick_after=self._unstick_after,
+                on_learned=self._on_learned,
             )
         self._busy = True
         try:

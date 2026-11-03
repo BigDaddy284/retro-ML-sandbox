@@ -244,3 +244,31 @@ def test_how_the_ai_learns_picker(panel: LearningPanel, context: AppContext) -> 
     assert isinstance(t.agent, QLearningAgent) and "simple table" in panel.note_text
     panel.choose_algorithm(AUTO)
     assert panel.algorithm == AUTO and isinstance(t.agent, QLearningAgent)
+
+
+def test_learn_from_my_moves_again(qtbot: QtBot, context: AppContext) -> None:
+    w = MainWindow(context)
+    qtbot.addWidget(w)
+    w.show()
+    game, learning = w.game_panel, w.learning_panel
+    button = learning.findChild(object, "rehearse_button")
+    assert button is not None and not button.isEnabled()  # type: ignore[attr-defined]
+    connect(context)
+    t = context.training
+    assert not button.isEnabled()  # type: ignore[attr-defined]  # nothing shown yet
+    learning.choose_mode(Mode.MANUAL)
+    learning.start()
+    assert game.pad.press("up")
+    for _ in range(t.frames_per_step * 3):
+        game.clock.tick()
+    game.pad.release("up")
+    assert t.demonstrations.count == 3 and "shown the AI 3 moves" in learning.status_text
+    assert not button.isEnabled()  # type: ignore[attr-defined]  # not while training
+    learning.stop()
+    assert button.isEnabled()  # type: ignore[attr-defined]
+    agent = t.agent
+    assert agent is not None
+    before = agent.updates
+    learning.rehearse()
+    assert agent.updates == before + 3 and "learned from your 3 moves again" in learning.note_text
+    w.close()

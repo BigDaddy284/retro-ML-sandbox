@@ -12,6 +12,7 @@ from typing import Any
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning.actions import ActionSpace
+from retro_ai_lab.learning.demonstrations import Demonstrations
 from retro_ai_lab.learning.learner import Learner, learner_from_dict
 from retro_ai_lab.training.records import EpisodeRecord
 
@@ -25,6 +26,7 @@ class Brain:
     goes: tuple[EpisodeRecord, ...] = ()
     episodes: int = 0  # all goes ever, even those no longer in ``goes``
     total_steps: int = 0
+    demonstrations: Demonstrations | None = None  # the child's moves, if any were shown
 
     def __post_init__(self) -> None:
         if not self.game_id or not isinstance(self.game_id, str):
@@ -37,7 +39,7 @@ class Brain:
         return self.agent.algorithm
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "schema": SCHEMA_VERSION,
             "game_id": self.game_id,
             "agent": self.agent.to_dict(),
@@ -45,6 +47,9 @@ class Brain:
             "episodes": self.episodes,
             "total_steps": self.total_steps,
         }
+        if self.demonstrations is not None:
+            data["demonstrations"] = self.demonstrations.to_dict()
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], *, space: ActionSpace | None = None) -> Brain:
@@ -55,12 +60,14 @@ class Brain:
                 raise ConfigurationError(f"This brain is from a newer version (schema {schema}).")
             agent = learner_from_dict(data["agent"], space=space)
             goes = tuple(EpisodeRecord.from_dict(g) for g in data.get("goes", []))
+            demos = data.get("demonstrations")
             return cls(
                 str(data["game_id"]),
                 agent,
                 goes,
                 int(data.get("episodes", len(goes))),
                 int(data.get("total_steps", 0)),
+                Demonstrations.from_dict(demos) if demos is not None else None,
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"Bad brain data: {exc}") from exc

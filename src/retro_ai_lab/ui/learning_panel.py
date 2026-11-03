@@ -34,6 +34,7 @@ from retro_ai_lab.training import (
     Speed,
     Status,
     TrainingStateChanged,
+    TrainingStepped,
 )
 from retro_ai_lab.training.insights import describe_changes, describe_experiments
 from retro_ai_lab.ui.context import AppContext
@@ -104,6 +105,10 @@ class LearningPanel(QWidget):
         self._pause.clicked.connect(self.pause_or_resume)
         self._stop.clicked.connect(self.stop)
         self._forget.clicked.connect(self.forget)
+        self._rehearse = QPushButton("Learn from my moves again", self)
+        self._rehearse.setObjectName("rehearse_button")
+        self._rehearse.setToolTip("The AI goes over every move you showed it one more time.")
+        self._rehearse.clicked.connect(self.rehearse)
 
         self._status = QLabel(IDLE_TEXT, self)
         self._status.setObjectName("learning_status")
@@ -137,6 +142,7 @@ class LearningPanel(QWidget):
         buttons.addWidget(self._pause)
         buttons.addWidget(self._stop)
         buttons.addStretch(1)
+        buttons.addWidget(self._rehearse)
         buttons.addWidget(self._forget)
 
         layout = QVBoxLayout(self)
@@ -157,6 +163,7 @@ class LearningPanel(QWidget):
         unsubscribe = (
             bridge.subscribe(TrainingStateChanged, self._on_state_changed),
             bridge.subscribe(EpisodeFinished, self._on_episode_finished),
+            bridge.subscribe(TrainingStepped, self._on_stepped),
             bridge.subscribe(EmulatorConnected, self._on_connection_changed),
             bridge.subscribe(EmulatorDisconnected, self._on_connection_changed),
         )
@@ -256,6 +263,19 @@ class LearningPanel(QWidget):
             self._note.setText("The AI has forgotten this game and will start fresh.")
         self.refresh()
 
+    def rehearse(self) -> None:
+        steps = 0
+
+        def go() -> None:
+            nonlocal steps
+            steps = self._training.rehearse()
+
+        if self._call(go):
+            self._note.setText(
+                f"The AI learned from your {steps} move{'s' if steps != 1 else ''} again."
+            )
+        self.refresh()
+
     def tick(self) -> int:
         """One timer tick: a step (LIVE) or a slice of steps (FAST). Returns the steps."""
         if self._training.status is not Status.RUNNING or not self._training.mode.ai_plays:
@@ -283,6 +303,7 @@ class LearningPanel(QWidget):
         self._pause.setText("Resume" if t.status is Status.PAUSED else "Pause")
         self._stop.setEnabled(enabled and not idle)
         self._forget.setEnabled(enabled and idle)
+        self._rehearse.setEnabled(enabled and idle and t.demonstrations.count > 0)
         self._show_status()
         self._show_goes()
         self._arm_ticker()
@@ -331,6 +352,9 @@ class LearningPanel(QWidget):
                 f"Learning with the {describe_algorithm(t.agent.algorithm)[0].lower()}. "
                 + t.agent.stats()
             )
+        shown = t.demonstrations.shown
+        if shown and t.mode is not Mode.MANUAL:
+            lines.append(f"You have shown the AI {shown} move{'s' if shown != 1 else ''}.")
         if t.fresh_start:
             lines.append(t.fresh_start)
         self._status.setText("\n".join(lines))
@@ -377,6 +401,10 @@ class LearningPanel(QWidget):
         elif event.reason == "promoted":
             self._note.setText(self._training.last_change)
         self.refresh()
+
+    def _on_stepped(self, event: TrainingStepped) -> None:
+        if not self._training.mode.ai_plays:  # the child's steps don't come through tick()
+            self._show_status()
 
     def _on_episode_finished(self, event: EpisodeFinished) -> None:
         self._show_goes()

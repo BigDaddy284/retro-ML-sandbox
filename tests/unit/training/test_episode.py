@@ -250,3 +250,25 @@ def test_short_training_run_learns_some_situations(lab: Lab) -> None:
     assert agent.epsilon < 0.5
     # Reaching a checkpoint completes the suggested objective, and the go says so.
     assert sum(x.objectives for x in results) >= 1 and any(x.succeeded for x in results)
+
+
+def test_runner_reports_every_learned_step_with_its_source(lab: Lab) -> None:
+    from retro_ai_lab.learning import Transition
+
+    lab.connection.connect("fake", seed=3)
+    teach(lab)
+    learned: list[Transition] = []
+    r = runner(lab, max_steps=5, on_learned=learned.append)
+    r.begin()
+    while r.step():
+        pass
+    r.finish()
+    assert len(learned) == 5 and all(t.source == "ai" for t in learned)
+    # Observed steps (the child's) are reported as the child's.
+    learned.clear()
+    first = r.begin(restore=False)
+    assert r.observe_step(["up"], 4)
+    assert len(learned) == 1 and learned[0].source == "child"
+    assert learned[0].action == r.last_action and learned[0].state == first
+    assert learned[0].next_state == r.state
+    r.finish()

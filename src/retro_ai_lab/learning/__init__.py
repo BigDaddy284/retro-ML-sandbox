@@ -1,6 +1,7 @@
 """Learning (Phase 5+): how the AI gets better at the game."""
 
 from retro_ai_lab.learning.actions import Action, ActionSpace
+from retro_ai_lab.learning.demonstrations import Demonstrations
 from retro_ai_lab.learning.dqn import DQN, DQNConfig, DQNLearner
 from retro_ai_lab.learning.features import FeatureMap
 from retro_ai_lab.learning.learner import (
@@ -31,6 +32,7 @@ __all__ = [
     "DQNConfig",
     "DQNLearner",
     "Decision",
+    "Demonstrations",
     "FeatureMap",
     "Learner",
     "Network",
