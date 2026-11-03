@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-009: Connect/disconnect toolbar with background connect, plain-English capability line, and `EventBridge` delivering service events on the GUI thread.
 - T-008: Game panel shows live emulator frames (`FrameView`, `FramePump`, `AppContext`).
 - T-007: PySide6 application shell: main window with the five collapsible panels, status bar, `retro-ai-lab` launches the UI, hidden `--exit-after-ms` for smoke tests.
 - T-006: `EventBus`, `AdapterRegistry` and `ConnectionService` (state machine with connected/disconnected/failed events, dropped-link detection).

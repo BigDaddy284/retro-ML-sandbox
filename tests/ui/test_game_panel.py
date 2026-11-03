@@ -138,8 +138,8 @@ def test_closing_window_stops_pump_and_unsubscribes(qtbot: QtBot, context: AppCo
     qtbot.addWidget(w)
     w.show()
     context.connection.connect("fake")
-    before = context.bus.handler_count()
+    before = context.bridge.handler_count()
     w.close()
     w.deleteLater()
-    qtbot.waitUntil(lambda: context.bus.handler_count() < before)
+    qtbot.waitUntil(lambda: context.bridge.handler_count() < before)
     context.connection.disconnect()  # no handler errors after teardown

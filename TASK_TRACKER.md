@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-009 (Ready)
-- **Last approved checkpoint:** `main` after T-008
+- **Current task:** T-010 (Ready)
+- **Last approved checkpoint:** `main` after T-009
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -22,7 +22,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-006 | Adapter registry and connection service | 1 | Done | 39/39 | see PR #7 |
 | T-007 | App shell: main window launches with empty panels | 1 | Done | 15/15 | see PR #8 |
 | T-008 | Game window panel shows live frames | 1 | Done | 20/20 | see PR #9 |
-| T-009 | Connect / disconnect UI with capability display | 1 | Ready | – | – |
+| T-009 | Connect / disconnect UI with capability display | 1 | Done | 17/17 | see PR #10 |
 | T-010 | Manual controller input from UI to adapter | 1 | Ready | – | – |
 | T-011 | Graceful handling of emulator disconnection | 1 | Ready | – | – |
 | T-012 | Windows packaging smoke test (launchable build) | 1 | Ready | – | – |
@@ -186,7 +186,22 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 20 / 20 passed / 0 failed / 0 excluded (323 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Frame capture runs on the UI thread for now (fast with the fake adapter); real adapters will move it to a worker in T-113. Teardown captures the pump and unsubscribe callbacks instead of `self` because the Python wrapper is already gone when `destroyed` fires.
 
-### T-009 … T-012
+### T-009 – Connect / disconnect UI with capability display
+- **Status:** Done
+- **Phase:** 1
+- **Objective:** A child can pick a console, press Connect, see in plain words what that emulator can do, and press Disconnect; connecting never freezes the window.
+- **Scope:** `ui.bridge.EventBridge` (bus events delivered on the GUI thread), `ui.connect_bar.ConnectBar` (picker, buttons, status, capability line, background connect via `QThreadPool`), `AppContext.bridge`, toolbar in `MainWindow`; `GamePanel` now subscribes via the bridge. **Out of scope:** per-adapter connection options UI (needed when BizHawk arrives).
+- **Acceptance criteria:**
+  1. Events published from worker threads reach UI handlers on the GUI thread; same-thread events are immediate.
+  2. Connect runs in the background; the event loop keeps turning during a slow connect; a second connect while busy is refused.
+  3. Buttons and picker enable/disable correctly in every state; status wording for idle, connecting, connected, failed, expected and unexpected disconnect.
+  4. Capability line lists what the emulator can and can't do in child-friendly words.
+  5. Connect bar in the main window drives the game panel end to end.
+- **Test plan:** bridge (same thread immediate, worker thread queued to GUI thread, unsubscribe/counts, detach + local publish); capability wording (all, none, mixed, labels plain); initial state; click connect/disconnect; failure wording and retry; responsiveness during a 0.4 s connect (timer ticks counted); refuse when already connected; no adapters; unexpected loss; main window integration.
+- **Results:** 17 / 17 passed / 0 failed / 0 excluded (340 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** `ConnectionService` is not thread-safe by design; the only cross-thread call is `connect()` inside the worker, during which the service is in CONNECTING and refuses other work. Disconnect stays on the GUI thread (fast for every adapter we plan).
+
+### T-010 … T-012
 Details will be written into this file when each becomes the next task, following the template.
 
 ### T-110 – Spike: confirm BizHawk Lua ↔ socket protocol
@@ -208,5 +223,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-006 completed (PR #7).
 - T-007 completed (PR #8).
 - T-008 completed (PR #9).
-- Next: T-009.
+- T-009 completed (PR #10).
+- Next: T-010.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
