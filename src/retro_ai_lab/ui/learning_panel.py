@@ -54,6 +54,7 @@ FAST_TICK_MS = 1
 ENDED_BY = {
     "reset": "the game started over",
     "max_steps": "time was up",
+    "stuck": "the screen stopped changing",
     "disconnected": "the game went away",
     "stopped": "you pressed Stop",
     "mode change": "you changed the mode",

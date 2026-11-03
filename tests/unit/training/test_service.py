@@ -878,3 +878,90 @@ def test_the_goal_step_picks_the_skill(lab: Lab, tmp_path: Path) -> None:
     plain.train(1)  # no goal service here: the general skill plays
     assert plain.agent.skill == DEFAULT_SKILL and plain.agent.episodes == 2
     assert plain.active_skill() is None
+
+
+# ------------------------------------------------------------ T-844
+
+
+def _drive_to_game_over(lab: Lab) -> None:
+    game = lab.adapter().game
+    while not game.state.game_over:
+        game.step(["up"])
+    lab.observation.observe()
+
+
+def test_the_ai_works_out_which_button_starts_the_game(
+    lab: Lab, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-844: on a screen that ignores the pad the AI tries every button and keeps the one."""
+    k = lab.connect()
+    assert k.wake_button is None
+    _drive_to_game_over(lab)
+    t = lab.training
+    caplog.set_level(logging.INFO)
+    t.start(Mode.INDEPENDENT)  # the checkpoint is the game-over screen
+    assert t.wake_button is None
+    while t.episodes < 1:
+        assert t.step()
+    assert t.last is not None and t.last.result.ended_by == "stuck"
+    saved: list[int] = []
+    monkeypatch.setattr(lab.discovery, "save", lambda: saved.append(1))
+    assert t.step()  # the next go starts by working out how to wake the game
+    assert t.wake_button == "start" and k.wake_button == "start"
+    assert saved == [1]  # remembered with the game's knowledge
+    assert "trying each button to get it going" in caplog.text
+    assert "Pressing Start gets the game going." in caplog.text
+    assert "Start gets the game going." in lab.discovery.summary()
+    episode = t.episode
+    assert episode is not None and episode.unstick_buttons == ("start",)
+    assert not lab.adapter().game.state.game_over  # go 2 is being played in the game
+    while t.episodes < 2:
+        assert t.step()
+    assert t.last is not None and t.last.result.ended_by != "stuck"
+    # Goes after that start from the new checkpoint, inside the game.
+    assert t.step() and not lab.adapter().game.state.game_over
+    t.stop()
+
+
+def test_identical_goes_trigger_the_search(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """T-844: two goes with the same states although the buttons differed = a demo."""
+    from retro_ai_lab.training.episode import EpisodeRunner
+
+    bus = EventBus(on_error=lambda exc, event, handler: (_ for _ in ()).throw(exc))
+    connection = ConnectionService(default_registry(), bus)
+    observation = ObservationService(connection, bus)
+    discovery = DiscoveryService(connection, observation, bus, experiment_every=None)
+    training = TrainingService(  # unstick_after=None: the screen never counts as stuck
+        connection,
+        observation,
+        discovery,
+        bus,
+        frames_per_step=4,
+        max_steps=12,
+        seed=1,
+        unstick_after=None,
+    )
+    lab = Lab(bus, connection, observation, discovery, None, None, training, [], [])  # type: ignore[arg-type]
+    lab.connect()
+    _drive_to_game_over(lab)
+    monkeypatch.setattr(EpisodeRunner, "fingerprint", property(lambda self: ("same",) * 8))
+    monkeypatch.setattr(EpisodeRunner, "actions_varied", property(lambda self: True))
+    t = lab.training
+    t.start(Mode.INDEPENDENT)
+    while t.episodes < 2:
+        assert t.step()
+    assert t.wake_button is None and lab.adapter().game.state.game_over
+    assert t.step()
+    assert t.wake_button == "start" and not lab.adapter().game.state.game_over
+    t.stop()
+
+
+def test_goes_look_identical() -> None:
+    from retro_ai_lab.training.service import IDENTICAL_GO_STEPS, goes_look_identical
+
+    same = tuple(f"s{i}" for i in range(IDENTICAL_GO_STEPS))
+    assert goes_look_identical((same, True), (same, True))
+    assert not goes_look_identical((same, False), (same, True))  # the AI never varied
+    assert not goes_look_identical((same, True), (same, False))
+    assert not goes_look_identical((same[:-1], True), (same[:-1], True))  # too short
+    assert not goes_look_identical((same, True), ((*same[:-1], "other"), True))

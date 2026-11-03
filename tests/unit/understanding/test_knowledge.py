@@ -301,3 +301,16 @@ def test_confidence_follows_new_evidence(knowledge: Knowledge) -> None:
     assert again.confidence is Confidence.MEDIUM
     assert "confidence" not in again.to_dict()
     assert Variable.from_dict(again.to_dict()).confidence is Confidence.MEDIUM
+
+
+def test_wake_button_round_trips(knowledge: Knowledge) -> None:
+    assert knowledge.wake_button is None
+    assert Knowledge.from_dict(knowledge.to_dict()).wake_button is None
+    knowledge.wake_button = "start"
+    data = knowledge.to_dict()
+    assert data["wake_button"] == "start"
+    assert Knowledge.from_dict(data).wake_button == "start"
+    with pytest.raises(ConfigurationError):
+        Knowledge.from_dict({**data, "wake_button": 3})
+    with pytest.raises(ConfigurationError):
+        Knowledge.from_dict({**data, "wake_button": ""})

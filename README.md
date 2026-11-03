@@ -97,6 +97,16 @@ prints how many frames the clock managed against how many it wanted, what each
 bridge command cost, what the app's own bookkeeping took per step and per
 picture, and the longest stall of the window's thread.
 
+## Letting the AI start the game
+
+Press Start in the Learning panel wherever the game is, even on its title
+screen. If the game ignores the AI (a demo is playing, or the game is over),
+the AI tries every button on the controller, one at a time, until it finds the
+one that gets the game going, remembers it for that game, and presses it
+whenever the game stops listening again. The Discovery panel's summary says
+what it found ("Start gets the game going."). To practise one part of a game,
+play to it yourself and press "Pin this spot" first.
+
 ## Arranging the panels
 
 Every panel can be dragged by its title bar to another edge of the window,

@@ -112,7 +112,7 @@ def test_start_tick_pause_resume_stop_and_the_goes_list(
     rows = panel.go_rows()
     assert len(rows) == 2 and rows[0][0] == "2" and rows[1][0] == "1"  # newest first
     assert rows[0][1] == "On its own" and rows[0][4] == ENDED_BY["stopped"]
-    assert rows[1][4] in (ENDED_BY["max_steps"], ENDED_BY["reset"])
+    assert rows[1][4] in (ENDED_BY["max_steps"], ENDED_BY["reset"], ENDED_BY["stuck"])
     assert panel.status_text.startswith("Resting after 2 goes.")
     assert go_cells(t.history[0])[2] == str(t.history[0].result.steps)
 

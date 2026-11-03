@@ -15,6 +15,7 @@ from retro_ai_lab.understanding.linking import InputLinks, apply_input_links, fi
 from retro_ai_lab.understanding.longlook import LongLook
 from retro_ai_lab.understanding.relationships import RelationshipFinder, describe_key, event_key
 from retro_ai_lab.understanding.variables import Candidate, find_candidates, propose_candidates
+from retro_ai_lab.understanding.wakeup import find_wake_button, inputs_matter
 
 __all__ = [
     "Candidate",
@@ -38,5 +39,7 @@ __all__ = [
     "event_key",
     "find_candidates",
     "find_input_links",
+    "find_wake_button",
+    "inputs_matter",
     "propose_candidates",
 ]

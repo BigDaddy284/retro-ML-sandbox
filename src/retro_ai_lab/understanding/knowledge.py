@@ -332,6 +332,9 @@ class Knowledge:
         self._variables: dict[str, Variable] = {}
         self._relationships: dict[str, Relationship] = {}
         self._version = 0
+        # The button the AI found gets this game going when it stops listening
+        # (a title screen, game over); worked out by experiment, never assumed (T-844).
+        self.wake_button: str | None = None
 
     # ------------------------------------------------------------ access
 
@@ -537,6 +540,7 @@ class Knowledge:
             "title": self.title,
             "variables": [v.to_dict() for v in self._variables.values()],
             "relationships": [r.to_dict() for r in self._relationships.values()],
+            "wake_button": self.wake_button,
         }
 
     @classmethod
@@ -552,6 +556,10 @@ class Knowledge:
                 k.add(Variable.from_dict(item))
             for item in data.get("relationships", []):
                 k.set_relationship(Relationship.from_dict(item))
+            wake = data.get("wake_button")
+            if wake is not None and (not isinstance(wake, str) or not wake):
+                raise ConfigurationError("wake_button must be a button name or null.")
+            k.wake_button = wake
         except (KeyError, TypeError, AttributeError) as exc:
             raise ConfigurationError(f"Bad knowledge data: {exc}") from exc
         return k
