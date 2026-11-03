@@ -15,6 +15,7 @@ import json
 import socket
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from retro_ai_lab.core import ConfigurationError
@@ -62,6 +63,8 @@ class BizHawkSimulator:
         if screenshot not in (None, "png", "garbage"):
             raise ConfigurationError("screenshot must be 'png', 'garbage' or None.")
         self._screenshot = screenshot
+        self.image_files: list[str] = []  # paths the app asked screenshots into (T-825)
+        self.write_image_files = True
         self._short_reads = short_reads
         self._server: socket.socket | None = None
         self._thread: threading.Thread | None = None
@@ -371,6 +374,14 @@ class BizHawkSimulator:
             return {"image": None}
         if self._screenshot == "garbage":
             return {"image": "not base64 at all!"}
+        path = request.get("image_file")
+        if path is not None:
+            if not isinstance(path, str) or not path.endswith(".png"):
+                raise ConfigurationError("'image_file' must be a path ending in .png.")
+            if self.write_image_files:
+                Path(path).write_bytes(encode_png(self._game.render()))
+            self.image_files.append(path)
+            return {"image_file": path}
         return {"image": b64(encode_png(self._game.render()))}
 
     def _mode(self, request: dict[str, Any]) -> dict[str, Any]:

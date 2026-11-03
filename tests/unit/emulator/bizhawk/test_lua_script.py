@@ -239,12 +239,44 @@ def test_screenshot_through_the_real_script(
         assert (frame.width, frame.height, frame.channels) == (expected.width, expected.height, 3)
         assert frame.pixels == bytes(v for v in expected.pixels for _ in range(3))
         assert frame.number == host.game.state.frame
-        # the script joins with "/", which Windows accepts; compare as paths
-        assert [Path(p.decode()) for p in host.screenshots] == [tmp_path / "retro_ai_lab_frame.png"]
-        assert list(tmp_path.iterdir()) == []  # the script tidies up after itself
+        # On this PC the adapter names the file (T-825) and reads it itself.
+        assert adapter.image_transfer == "file"
+        assert [Path(p.decode()) for p in host.screenshots] == [Path(adapter.image_path)]
+        assert not Path(adapter.image_path).exists()  # the adapter tidies up after itself
         host.write_screenshots = False
         with pytest.raises(EmulatorError, match="did not write a screenshot"):
             adapter.capture_frame()
+        assert adapter.is_connected
+        adapter.disconnect()
+        assert host.error is None
+
+
+def test_screenshot_over_the_socket_through_the_real_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The base64 route stays for an emulator on another PC."""
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setenv("TMP", str(tmp_path))
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    with LuaScriptHost() as host:
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0, image_transfer="socket")
+        adapter.connect(timeout_s=5.0)
+        frame = adapter.capture_frame()
+        assert frame.number == host.game.state.frame
+        # the script joins with "/", which Windows accepts; compare as paths
+        assert [Path(p.decode()) for p in host.screenshots] == [tmp_path / "retro_ai_lab_frame.png"]
+        assert list(tmp_path.iterdir()) == []  # the script tidies up after itself
+        answer = adapter._call("step", frames=1, screenshot=True)
+        assert base64.b64decode(answer["image"])[:8] == b"\x89PNG\r\n\x1a\n"
+        assert "image_file" not in answer
+        # A named file comes back as its path, with no base64 copy.
+        target = tmp_path / "named.png"
+        answer = adapter._call("step", frames=1, screenshot=True, image_file=str(target))
+        assert answer["image_file"] == str(target) and "image" not in answer
+        assert target.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+        for bad in ("notes.txt", "", 7):
+            with pytest.raises(EmulatorError, match="image_file"):
+                adapter._call("screenshot", image_file=bad)
         assert adapter.is_connected
         adapter.disconnect()
         assert host.error is None

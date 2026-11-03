@@ -470,6 +470,38 @@ local function take_screenshot()
   return base64.encode(data)
 end
 
+-- The app on the same PC can name a file instead (T-825): the screenshot is
+-- written there and only the path goes back, sparing the base64 round trip.
+local function image_file(req)
+  local path = req.image_file
+  if path == nil then return nil end
+  if type(path) ~= "string" or path == "" or path:find("[\r\n]") or path:sub(-4) ~= ".png" then
+    error("'image_file' must be a path ending in .png.", 0)
+  end
+  return path
+end
+
+local function screenshot_into(path)
+  os.remove(path)
+  emu:screenshot(path)
+  local file = io.open(path, "rb")
+  if file == nil then
+    error("mGBA did not write a screenshot.", 0)
+  end
+  file:close()
+  return path
+end
+
+local function screenshot_body(req, body)
+  local path = image_file(req)
+  if path then
+    body.image_file = screenshot_into(path)
+  else
+    body.image = take_screenshot()
+  end
+  return body
+end
+
 local function slot_name(slot)
   if type(slot) ~= "string" or slot == "" or slot:find("[^%w_]") then
     error("'slot' must be a name of letters, digits and underscores.", 0)
@@ -544,7 +576,7 @@ function handlers.mode(req)
 end
 
 function handlers.screenshot(req)
-  return { image = take_screenshot() }
+  return screenshot_body(req, {})
 end
 
 function handlers.read(req)
@@ -569,6 +601,7 @@ function handlers.step(req)
   if req.screenshot ~= nil and type(req.screenshot) ~= "boolean" then
     error("'screenshot' must be true or false.", 0)
   end
+  image_file(req)  -- refuse a bad path now, not after the frames have passed
   waiting = { id = req.id, req = req, remaining = frames }
   return nil  -- answered later
 end
@@ -640,7 +673,7 @@ local function finish_step()
       out.reads = serve_reads(step.req.reads)
     end
     if step.req.screenshot then
-      out.image = take_screenshot()
+      screenshot_body(step.req, out)
     end
     return out
   end)

@@ -563,8 +563,40 @@ local function take_screenshot()
   return base64.encode(data)
 end
 
+-- The app on the same PC can name a file instead (T-825): the screenshot is
+-- written there and only the path goes back, sparing the base64 round trip.
+local function image_file(req)
+  local path = req.image_file
+  if path == nil then return nil end
+  if type(path) ~= "string" or path == "" or path:find("[\r\n]") or path:sub(-4) ~= ".png" then
+    error("'image_file' must be a path ending in .png.", 0)
+  end
+  return path
+end
+
+local function screenshot_into(path)
+  os.remove(path)
+  client.screenshot(path)
+  local file = io.open(path, "rb")
+  if file == nil then
+    error("EmuHawk did not write a screenshot.", 0)
+  end
+  file:close()
+  return path
+end
+
+local function screenshot_body(req, body)
+  local path = image_file(req)
+  if path then
+    body.image_file = screenshot_into(path)
+  else
+    body.image = take_screenshot()
+  end
+  return body
+end
+
 function handlers.screenshot(req)
-  return { image = take_screenshot() }
+  return screenshot_body(req, {})
 end
 
 function handlers.read(req)
@@ -597,7 +629,7 @@ function handlers.step(req)
     body.reads = serve_reads(req.reads)
   end
   if req.screenshot then
-    body.image = take_screenshot()
+    screenshot_body(req, body)
   end
   return body
 end
