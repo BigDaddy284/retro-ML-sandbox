@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError
+from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError, Frame
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.observation.diff import ChangeTracker, SnapshotDiff
 from retro_ai_lab.observation.memory import MemoryCapture, MemorySnapshot, SnapshotRing
+from retro_ai_lab.observation.screen import FrameDiff, ScreenTracker
 from retro_ai_lab.services.connection import (
     ConnectionService,
     EmulatorConnected,
@@ -25,6 +26,12 @@ from retro_ai_lab.services.connection import (
 class MemoryObserved:
     snapshot: MemorySnapshot
     diff: SnapshotDiff | None  # None for the first snapshot after connect
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenObserved:
+    frame: Frame
+    diff: FrameDiff | None  # None for the first frame after connect
 
 
 class ObservationService:
@@ -39,6 +46,8 @@ class ObservationService:
         self._bus = bus
         self._ring = SnapshotRing(ring_capacity)
         self._tracker = ChangeTracker()
+        self._screen = ScreenTracker()
+        self._frames_seen = 0
         self._capture: MemoryCapture | None = None
         self._enabled = False
         self._frame = 0
@@ -60,6 +69,15 @@ class ObservationService:
     @property
     def tracker(self) -> ChangeTracker:
         return self._tracker
+
+    @property
+    def screen(self) -> ScreenTracker:
+        return self._screen
+
+    @property
+    def frames_seen(self) -> int:
+        """Screen frames fed through :meth:`observe_frame` since connect."""
+        return self._frames_seen
 
     @property
     def frame(self) -> int:
@@ -102,11 +120,23 @@ class ObservationService:
         self._bus.publish(event)
         return event
 
+    def observe_frame(self, frame: Frame) -> ScreenObserved | None:
+        """Feed a captured screen frame (the game panel's pump calls this)."""
+        if not self._connection.is_connected:
+            return None
+        self._frames_seen += 1
+        diff = self._screen.observe(frame)
+        event = ScreenObserved(frame, diff)
+        self._bus.publish(event)
+        return event
+
     # ------------------------------------------------------------- events
 
     def _on_connected(self, event: EmulatorConnected) -> None:
         self._ring.clear()
         self._tracker.reset()
+        self._screen.reset()
+        self._frames_seen = 0
         self._frame = 0
         self._errors = 0
         self._enabled = event.capabilities.memory_read
@@ -117,4 +147,4 @@ class ObservationService:
         self._capture = None
 
 
-__all__ = ["MemoryObserved", "ObservationService"]
+__all__ = ["MemoryObserved", "ObservationService", "ScreenObserved"]

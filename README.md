@@ -33,7 +33,7 @@ Every push to `main` runs the **Package** workflow, which builds `RetroAILab.exe
 
 ## Planned stack
 
-Python 3.11+, PySide6 (Qt) desktop UI, PyTorch and Gymnasium for learning, SQLite and JSON for storage. Target platform is Windows; the code is kept cross-platform so it can be developed and tested on Linux CI.
+Python 3.11+, PySide6 (Qt) desktop UI, NumPy for screen and memory analysis, PyTorch and Gymnasium for learning, SQLite and JSON for storage. Target platform is Windows; the code is kept cross-platform so it can be developed and tested on Linux CI.
 
 ## Legal
 

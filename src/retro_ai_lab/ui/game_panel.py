@@ -122,6 +122,7 @@ class GamePanel(QWidget):
         layout.addWidget(self._status)
 
         self._pump = FramePump(context.connection, fps=fps, parent=self)
+        self._pump.subscribe(context.observation.observe_frame)
         self._pump.subscribe(self._on_frame)
         unsubscribe = (
             context.bridge.subscribe(EmulatorConnected, self._on_connected),

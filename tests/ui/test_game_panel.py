@@ -146,3 +146,18 @@ def test_closing_window_stops_pump_and_unsubscribes(qtbot: QtBot, context: AppCo
     w.deleteLater()
     qtbot.waitUntil(lambda: context.bridge.handler_count() < before)
     context.connection.disconnect()  # no handler errors after teardown
+
+
+def test_pump_feeds_the_observation_service(qtbot: QtBot, context: AppContext) -> None:
+    """T-203: every captured frame reaches the screen tracker."""
+    panel = GamePanel(context, fps=100)
+    qtbot.addWidget(panel)
+    context.connection.connect("fake")  # the panel shows a first frame on connect
+    panel.clock.pause()
+    seen = context.observation.frames_seen
+    assert seen >= 1
+    panel.clock.tick(2)
+    panel.pump.tick()
+    assert context.observation.frames_seen == seen + 1
+    assert context.observation.screen.transitions == seen
+    assert context.observation.screen.observed == seen + 1

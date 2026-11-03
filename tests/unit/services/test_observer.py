@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from retro_ai_lab.core import Capabilities, EmulatorError
+from retro_ai_lab.core import Capabilities, EmulatorError, Frame
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import BUTTONS, LAYOUT
@@ -142,3 +142,33 @@ def test_ring_capacity_is_honoured(
 def test_advance_rejects_negative(observer: ObservationService) -> None:
     with pytest.raises(ValueError):
         observer.advance(-1)
+
+
+# ------------------------------------------------------------- screen (T-203)
+
+
+def test_observe_frame_tracks_screen_and_publishes(
+    observer: ObservationService, connection: ConnectionService, bus: EventBus
+) -> None:
+    from retro_ai_lab.services.observer import ScreenObserved
+
+    seen: list[ScreenObserved] = []
+    bus.subscribe(ScreenObserved, seen.append)
+    frame = fake_frame()
+    assert observer.observe_frame(frame) is None  # not connected: ignored
+    connection.connect("fake", seed=2)
+    first = observer.observe_frame(connection.call(lambda a: a.capture_frame()))
+    assert first is not None and first.diff is None
+    connection.call(lambda a: a.set_input([UP]))
+    connection.call(lambda a: a.advance_frames(5))
+    second = observer.observe_frame(connection.call(lambda a: a.capture_frame()))
+    assert second is not None and second.diff is not None
+    assert observer.frames_seen == 2 and observer.screen.transitions == 1
+    assert seen == [first, second]
+    connection.disconnect()
+    connection.connect("fake")
+    assert observer.frames_seen == 0 and observer.screen.observed == 0
+
+
+def fake_frame() -> Frame:
+    return Frame(4, 4, 1, bytes(16))
