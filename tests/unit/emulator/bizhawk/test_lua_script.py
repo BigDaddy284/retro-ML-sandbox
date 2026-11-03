@@ -147,7 +147,8 @@ def test_screenshot_through_the_real_script(
         assert (frame.width, frame.height, frame.channels) == (expected.width, expected.height, 3)
         assert frame.pixels == bytes(v for v in expected.pixels for _ in range(3))
         assert frame.number == host.game.state.frame
-        assert host.screenshots == [str(tmp_path / "retro_ai_lab_frame.png").encode()]
+        # the script joins with "/", which Windows accepts; compare as paths
+        assert [Path(p.decode()) for p in host.screenshots] == [tmp_path / "retro_ai_lab_frame.png"]
         assert list(tmp_path.iterdir()) == []  # the script tidies up after itself
         host.write_screenshots = False
         with pytest.raises(EmulatorError, match="did not write a screenshot"):
