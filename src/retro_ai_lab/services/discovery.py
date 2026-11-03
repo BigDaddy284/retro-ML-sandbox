@@ -38,6 +38,7 @@ from retro_ai_lab.storage.knowledge import KnowledgeStore, export, load
 from retro_ai_lab.understanding.events import EventDetector, EventLog, GameEvent
 from retro_ai_lab.understanding.knowledge import Knowledge, Relationship, Variable
 from retro_ai_lab.understanding.linking import apply_input_links, find_input_links
+from retro_ai_lab.understanding.longlook import LongLook
 from retro_ai_lab.understanding.relationships import RelationshipFinder
 from retro_ai_lab.understanding.variables import find_candidates, propose_candidates
 
@@ -98,6 +99,7 @@ class DiscoveryService:
         self._saves = 0
         self._knowledge: Knowledge | None = None
         self._detector: EventDetector | None = None
+        self._look: LongLook | None = None
         self._finder: RelationshipFinder | None = None
         self._events = EventLog()
         self._harness: ExperimentHarness | None = None
@@ -201,6 +203,7 @@ class DiscoveryService:
         self._knowledge = knowledge
         self._detector = EventDetector(knowledge)
         self._finder = RelationshipFinder(knowledge, window=self._event_window)
+        self._look = LongLook(knowledge)
 
     def review(self) -> DiscoveryUpdated:
         """Turn the statistics gathered so far into proposals, right now."""
@@ -209,9 +212,10 @@ class DiscoveryService:
             "thinking", "Looking for values that behave like scores, lives or counters."
         )
         added = propose_candidates(k, find_candidates(self._observation.tracker))
+        changed = self._look.review() if self._look is not None else ()
         self._reviews += 1
         self._since_review = 0
-        update = DiscoveryUpdated(added, (), (), ())
+        update = DiscoveryUpdated(added, changed, (), ())
         self._announce(update)
         self._set_stage("watching", self.summary())
         return update
@@ -278,6 +282,8 @@ class DiscoveryService:
             return
         assert self._detector is not None and self._finder is not None
         events = self._detector.observe(event.snapshot)
+        if self._look is not None:
+            self._look.observe(event.snapshot)
         relationships: tuple[Relationship, ...] = ()
         if events:
             self._events.extend(events)

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.understanding.knowledge import Evidence, Knowledge, Variable, VariableKind
+from retro_ai_lab.understanding.longlook import LONG_LOOK_KINDS
 
 if TYPE_CHECKING:
     # Imported lazily at run time: services already import this package, and
@@ -176,7 +177,10 @@ def apply_input_links(knowledge: Knowledge, links: InputLinks) -> tuple[Variable
                 var.kind in (VariableKind.UNKNOWN, VariableKind.PROGRESS)
                 and set(buttons) & DIRECTIONS
                 and not mirror
+                and not any(e.kind in LONG_LOOK_KINDS for e in var.evidence)
             ):
+                # A slow number that moves with the stick is probably a position, unless
+                # the longer look (T-709) has already shown it counts progress.
                 changes["kind"] = VariableKind.POSITION
         if changes:
             touched[var_id] = knowledge.update(var_id, **changes)

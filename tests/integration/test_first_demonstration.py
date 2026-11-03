@@ -184,16 +184,27 @@ def test_first_working_demonstration(tmp_path: Path) -> None:
     ctx.rewards.set_enabled(score_gain.id, False)
     ctx.rewards.set_value(setback.id, -50)
     ctx.goals.update_objective(objective.id, enabled=False)
+    # By now the AI also understands checkpoints and laps (T-709) and has suggested
+    # rewards and goal steps for them; the child switches every carrot off too.
+    for behaviour in profile:
+        if behaviour.enabled and behaviour.value > 0:
+            ctx.rewards.set_enabled(behaviour.id, False)
+    for o in goal:
+        if o.enabled and o.id != objective.id:
+            ctx.goals.update_objective(o.id, enabled=False)
     assert not profile.get(score_gain.id).enabled and profile.get(setback.id).value == -50
+    assert all(b.value <= 0 for b in profile if b.enabled)
     adapter.game.restore(starting_line)
     careful = train(ctx, GOES).recent()
 
     # 10. Changing the rewards changed how it plays: the point-lover drives fast,
-    #     scores more and runs out of lives sooner; the careful one crawls and lasts.
+    #     scores more per step and runs out of lives sooner; the careful one crawls
+    #     and lasts (long enough that its total can creep past the lover's, which is
+    #     why the score is compared per step).
     lover_reward, lover_steps, lover_score, lover_speed = score_lover
     careful_reward, careful_steps, careful_score, careful_speed = careful
     assert lover_speed >= 2 * careful_speed, (score_lover, careful)
-    assert lover_score > careful_score, (score_lover, careful)
+    assert lover_score / lover_steps > careful_score / careful_steps, (score_lover, careful)
     assert lover_steps < careful_steps, (score_lover, careful)
     assert lover_reward > 0 > careful_reward, (score_lover, careful)
 
