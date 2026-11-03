@@ -1,8 +1,9 @@
 """Collapsible panels that make up the main window.
 
-Each :class:`Panel` has a header with a child-friendly title and an
-expand/collapse button, and a content area. The five panels of DESIGN.md §10
-are defined in :data:`PANELS`; their content is filled in by later tasks.
+Each :class:`Panel` has a header with a child-friendly title, an
+expand/collapse button and a "What's this?" button, and a content area. The
+five panels of DESIGN.md §10 are defined in :data:`PANELS`; their content is
+filled in by later tasks.
 """
 
 from __future__ import annotations
@@ -28,6 +29,8 @@ class PanelSpec:
     blurb: str  # one plain-English line shown while the panel is empty
 
 
+WHATS_THIS = "What's this?"
+
 PANELS: tuple[PanelSpec, ...] = (
     PanelSpec("game", "Game", "This is where you will see the game as the AI plays it."),
     PanelSpec(
@@ -45,6 +48,7 @@ class Panel(QFrame):
     """A titled, collapsible box."""
 
     toggled = Signal(bool)  # emitted with the new expanded state
+    help_requested = Signal(str)  # emitted with the panel key when "What's this?" is pressed
 
     def __init__(self, spec: PanelSpec, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -64,10 +68,18 @@ class Panel(QFrame):
         self._button.setAutoRaise(True)
         self._button.clicked.connect(self._on_clicked)
 
+        self._help = QToolButton(self)
+        self._help.setObjectName(f"panel_{spec.key}_help")
+        self._help.setText(WHATS_THIS)
+        self._help.setToolTip(f"Explain the {spec.title} panel in plain words")
+        self._help.setAutoRaise(True)
+        self._help.clicked.connect(lambda _=False: self.help_requested.emit(self._spec.key))
+
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(self._button)
         header.addStretch(1)
+        header.addWidget(self._help)
 
         self._content = QWidget(self)
         self._content.setObjectName(f"panel_{spec.key}_content")
@@ -138,8 +150,12 @@ class Panel(QFrame):
     def toggle_button(self) -> QToolButton:
         return self._button
 
+    @property
+    def help_button(self) -> QToolButton:
+        return self._help
+
     def _on_clicked(self, checked: bool) -> None:
         self.set_expanded(checked)
 
 
-__all__ = ["PANELS", "Panel", "PanelSpec"]
+__all__ = ["PANELS", "WHATS_THIS", "Panel", "PanelSpec"]
