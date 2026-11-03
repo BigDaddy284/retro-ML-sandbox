@@ -287,7 +287,8 @@ def test_merge_handles_many_objectives_quickly() -> None:
     goal = Goal("big")
     started = time.perf_counter()
     added = merge_suggestions(goal, k)
-    assert len(added) == 400 and merge_suggestions(goal, k) == ()
+    # The AI acts on its best 16 progress values (T-850); all of them get an objective.
+    assert len(added) == 16 and merge_suggestions(goal, k) == ()
     outcome = goal.observe(GameEvent(EventKind.PROGRESS, 1, "v1", "up", 0, 1))
     assert [o.id for o in outcome.completed] == ["goal:progress:v1"]
     # The second objective depends on the first, now done: it completes on the same pass.

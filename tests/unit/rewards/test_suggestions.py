@@ -206,3 +206,14 @@ def test_toy_racer_profile_rewards_checkpoints_and_punishes_crashes() -> None:
     assert earned[EventKind.PROGRESS] > 0
     assert earned[EventKind.SETBACK] < 0
     assert earned[EventKind.RESET] < 0
+
+
+def test_suggestions_cover_the_best_few_of_a_kind() -> None:
+    """T-850: 100 believed scores suggest 16 behaviours, not 100."""
+    k = Knowledge("g")
+    for i in range(100):
+        k.propose(RAM, i, kind=VariableKind.SCORE, evidence=[Evidence("t", "", 1.0)])
+    best = k.propose(RAM, 100, kind=VariableKind.SCORE, evidence=SURE)
+    suggested = by_key(suggest_behaviours(k))
+    assert len([key for key in suggested if key.startswith("score_gain:")]) == 16
+    assert f"score_gain:{best.id}" in suggested

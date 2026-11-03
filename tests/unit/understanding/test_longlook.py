@@ -195,4 +195,5 @@ def test_many_fast_values_are_all_unpaired_after_settling() -> None:
     for i in range(SETTLED + 2):
         row = bytes([(i + j) % 8 for j in range(200)]) + bytes([(i + j) % 3 for j in range(200)])
         look.observe(MemorySnapshot(i, {RAM: row}))
-    assert len(look.watching) == 400 and look.tracking == ()
+    # The AI acts on 16 of each kind (T-850): all of them unpaired once settled.
+    assert len(look.watching) == 32 and look.tracking == ()

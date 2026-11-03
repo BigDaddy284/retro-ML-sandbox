@@ -122,9 +122,7 @@ class GoalService:
         knowledge = self._discovery.knowledge
         options: list[TriggerOption] = []
         if knowledge is not None:
-            for var in knowledge:
-                if var.rejected or var.confidence < Confidence.LOW:
-                    continue
+            for var in knowledge.believed(Confidence.LOW):
                 for (event_kind, var_kind), (_category, _value, template) in RULES.items():
                     if var_kind is var.kind:
                         options.append(

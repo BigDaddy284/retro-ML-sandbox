@@ -59,8 +59,8 @@ def _causes(knowledge: Knowledge) -> tuple[set[str], set[str]]:
     game_over: set[str] = set()
     progress_keys = {
         _key(EventKind.PROGRESS, v.id)
-        for v in knowledge
-        if v.kind is VariableKind.PROGRESS and not v.rejected
+        for v in knowledge.believed()
+        if v.kind is VariableKind.PROGRESS
     }
     for rel in knowledge.confident_relationships(Confidence.LOW):
         if rel.effect in progress_keys:
@@ -76,9 +76,7 @@ def suggest_behaviours(
     """Behaviours the knowledge supports, each with a suggested value."""
     leads_to_progress, game_over_flags = _causes(knowledge)
     out: list[Behaviour] = []
-    for var in knowledge:
-        if var.rejected or var.confidence < at_least:
-            continue
+    for var in knowledge.believed(at_least):
         for (event_kind, var_kind), rule in RULES.items():
             if var_kind is not var.kind:
                 continue
