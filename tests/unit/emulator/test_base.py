@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Sequence
 from typing import Any
 
@@ -363,3 +365,70 @@ def test_buttons_and_regions_are_returned_as_tuples(adapter: RecordingAdapter) -
     assert isinstance(adapter.buttons(), tuple)
     assert isinstance(adapter.memory_regions(), tuple)
     assert adapter.buttons() == (A, B)
+
+
+# ------------------------------------------------------------- T-817 threads
+
+
+class _OverlapAdapter(RecordingAdapter):
+    """Counts how many backend calls run at once; the base must keep it at one."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.active = 0
+        self.max_active = 0
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def _do_capture_frame(self) -> Frame:
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        self.entered.set()
+        self.release.wait(5)
+        self.active -= 1
+        return super()._do_capture_frame()
+
+    def _do_advance_frames(self, n: int) -> None:
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        self.active -= 1
+        super()._do_advance_frames(n)
+
+
+def test_operations_from_two_threads_never_overlap() -> None:
+    adapter = _OverlapAdapter()
+    adapter.connect()
+    adapter.release.set()
+    stop = time.monotonic() + 0.3
+
+    def hammer(op: object) -> None:
+        while time.monotonic() < stop:
+            op()  # type: ignore[operator]
+
+    threads = [
+        threading.Thread(target=hammer, args=(adapter.capture_frame,)),
+        threading.Thread(target=hammer, args=(lambda: adapter.advance_frames(1),)),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    names = {name for name, _ in adapter.calls}
+    assert adapter.max_active == 1
+    assert {"frame", "advance"} <= names
+
+
+def test_check_link_answers_at_once_while_another_thread_holds_the_adapter() -> None:
+    adapter = _OverlapAdapter()
+    adapter.connect()
+    worker = threading.Thread(target=adapter.capture_frame)
+    worker.start()
+    assert adapter.entered.wait(5)
+    started = time.perf_counter()
+    assert adapter.check_link() is True
+    assert time.perf_counter() - started < 0.5  # did not wait for the capture
+    adapter.release.set()
+    worker.join(5)
+    assert adapter.check_link() is True
+    adapter.mark_disconnected()
+    assert adapter.check_link() is False

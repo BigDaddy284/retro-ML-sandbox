@@ -1,8 +1,12 @@
-"""T-008: the Game panel shows live frames while connected."""
+"""T-008: the Game panel shows live frames while connected (T-817: off the GUI thread)."""
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
+from PySide6.QtCore import QTimer
 from pytestqt.qtbot import QtBot
 
 from retro_ai_lab.core import Capabilities, EmulatorError
@@ -32,10 +36,13 @@ def test_starts_disconnected(panel: GamePanel) -> None:
     assert not panel.pump.running
 
 
-def test_connect_shows_first_frame_and_starts_pump(panel: GamePanel, context: AppContext) -> None:
+def test_connect_shows_first_frame_and_starts_pump(
+    qtbot: QtBot, panel: GamePanel, context: AppContext
+) -> None:
     context.connection.connect("fake", seed=2)
     assert panel.pump.running
     assert panel.pump.interval_ms == 1000 // 60
+    qtbot.waitUntil(lambda: panel.view.frame is not None)
     assert panel.view.frame is not None
     assert panel.view.frame.number == 0
     assert panel.status_text == "Watching Toy Racer. Frame 0."
@@ -65,12 +72,15 @@ def test_disconnect_stops_pump_and_clears(panel: GamePanel, context: AppContext)
     assert panel.status_text == NOT_CONNECTED
 
 
-def test_dropped_link_is_reported_in_plain_words(panel: GamePanel, context: AppContext) -> None:
+def test_dropped_link_is_reported_in_plain_words(
+    qtbot: QtBot, panel: GamePanel, context: AppContext
+) -> None:
     context.connection.connect("fake", drop_after_ops=1)  # the first tick uses the one op
-    assert panel.view.frame is not None
-    panel.pump.tick()  # this one drops the link
-    assert not panel.pump.running
-    assert not context.connection.is_connected
+    panel.clock.pause()
+    qtbot.waitUntil(lambda: panel.view.frame is not None)
+    assert panel.pump.tick()  # this one drops the link, on the worker
+    qtbot.waitUntil(lambda: not context.connection.is_connected)
+    qtbot.waitUntil(lambda: not panel.pump.running)
     assert panel.view.frame is None
     assert panel.status_text.startswith("Lost the game: The emulator stopped responding.")
     assert NOT_CONNECTED in panel.status_text
@@ -90,12 +100,14 @@ def test_emulator_without_screen_capture(panel: GamePanel, context: AppContext) 
 def test_pump_tick_without_connection_is_a_quiet_noop(context: AppContext) -> None:
     pump = FramePump(context.connection)
     pump.start()
-    assert pump.tick() is None
+    assert pump.tick() is False
     assert not pump.running
     assert pump.latest is None
 
 
-def test_pump_counts_other_emulator_errors_and_keeps_running(context: AppContext) -> None:
+def test_pump_counts_other_emulator_errors_and_keeps_running(
+    qtbot: QtBot, context: AppContext
+) -> None:
     pump = FramePump(context.connection, fps=10)
     context.connection.connect("fake")
     adapter = context.connection.adapter
@@ -112,11 +124,95 @@ def test_pump_counts_other_emulator_errors_and_keeps_running(context: AppContext
 
     adapter._do_capture_frame = flaky  # type: ignore[method-assign]
     pump.start()
-    assert pump.tick() is None
-    assert pump.errors == 1
-    assert pump.running
-    assert pump.tick() is not None
-    assert pump.errors == 1
+    pump.stop()  # drive it by hand
+    assert pump.tick()
+    qtbot.waitUntil(lambda: pump.errors == 1)
+    assert pump.latest is None
+    assert pump.tick()
+    qtbot.waitUntil(lambda: pump.latest is not None)
+    assert pump.errors == 1 and pump.captured == 1
+
+
+class _SlowCapture:
+    """Makes the fake adapter's capture wait for a gate, and records its thread."""
+
+    def __init__(self, adapter: FakeEmulatorAdapter) -> None:
+        self.gate = threading.Event()
+        self.threads: list[int] = []
+        original = adapter._do_capture_frame
+
+        def slow() -> object:
+            self.threads.append(threading.get_ident())
+            self.gate.wait(5)
+            return original()
+
+        adapter._do_capture_frame = slow  # type: ignore[method-assign]
+
+
+def _slow_pump(context: AppContext, fps: int = 100) -> tuple[FramePump, _SlowCapture]:
+    pump = FramePump(context.connection, fps=fps)
+    context.connection.connect("fake")
+    adapter = context.connection.adapter
+    assert isinstance(adapter, FakeEmulatorAdapter)
+    return pump, _SlowCapture(adapter)
+
+
+def test_capture_runs_off_the_gui_thread_and_subscribers_on_it(
+    qtbot: QtBot, context: AppContext
+) -> None:
+    pump, slow = _slow_pump(context)
+    slow.gate.set()
+    seen: list[int] = []
+    pump.subscribe(lambda frame: seen.append(threading.get_ident()))
+    assert pump.tick()
+    assert pump.in_flight
+    qtbot.waitUntil(lambda: pump.latest is not None)
+    assert not pump.in_flight
+    assert slow.threads and slow.threads[0] != threading.get_ident()
+    assert seen == [threading.get_ident()]
+
+
+def test_tick_skips_while_a_capture_is_in_flight(qtbot: QtBot, context: AppContext) -> None:
+    pump, slow = _slow_pump(context)
+    assert pump.tick()
+    assert pump.tick() is False
+    assert pump.tick() is False
+    assert pump.skipped == 2 and pump.in_flight
+    slow.gate.set()
+    qtbot.waitUntil(lambda: pump.captured == 1)
+    assert len(slow.threads) == 1  # one capture, not three
+    assert pump.tick()  # free again
+    qtbot.waitUntil(lambda: pump.captured == 2)
+
+
+def test_gui_events_keep_flowing_while_a_capture_is_slow(qtbot: QtBot, context: AppContext) -> None:
+    """The user's complaint: the window must not wait for the emulator."""
+    pump, slow = _slow_pump(context)
+    pump.start()
+    qtbot.waitUntil(lambda: pump.in_flight)
+    fired: list[float] = []
+    started = time.perf_counter()
+    QTimer.singleShot(0, lambda: fired.append(time.perf_counter() - started))
+    qtbot.waitUntil(lambda: bool(fired))
+    assert fired[0] < 0.1  # the capture is still blocked behind the gate
+    assert pump.in_flight
+    slow.gate.set()
+    qtbot.waitUntil(lambda: pump.captured >= 1)
+    pump.stop()
+
+
+def test_a_frame_arriving_after_stop_is_dropped(qtbot: QtBot, context: AppContext) -> None:
+    pump, slow = _slow_pump(context)
+    seen: list[object] = []
+    pump.subscribe(seen.append)
+    assert pump.tick()
+    pump.stop()
+    slow.gate.set()
+    qtbot.waitUntil(lambda: not pump.in_flight)
+    assert pump.latest is None and seen == [] and pump.captured == 0
+    assert pump.tick()  # and it still works afterwards
+    qtbot.waitUntil(lambda: pump.captured == 1)
+    assert len(seen) == 1
 
 
 def test_pump_rejects_bad_fps(context: AppContext) -> None:
@@ -131,7 +227,7 @@ def test_main_window_hosts_the_game_panel(qtbot: QtBot, context: AppContext) -> 
     assert w.context is context
     assert w.game_panel.parent() is w.panel("game").content
     context.connection.connect("fake")
-    assert w.game_panel.view.frame is not None
+    qtbot.waitUntil(lambda: w.game_panel.view.frame is not None)
     assert w.game_panel.pump.running
     w.close()
 
@@ -154,10 +250,12 @@ def test_pump_feeds_the_observation_service(qtbot: QtBot, context: AppContext) -
     qtbot.addWidget(panel)
     context.connection.connect("fake")  # the panel shows a first frame on connect
     panel.clock.pause()
+    qtbot.waitUntil(lambda: context.observation.frames_seen >= 1)
+    panel.pump.stop()  # from here on, frames only when asked
+    qtbot.waitUntil(lambda: not panel.pump.in_flight)
     seen = context.observation.frames_seen
-    assert seen >= 1
     panel.clock.tick(2)
-    panel.pump.tick()
-    assert context.observation.frames_seen == seen + 1
+    assert panel.pump.tick()
+    qtbot.waitUntil(lambda: context.observation.frames_seen == seen + 1)
     assert context.observation.screen.transitions == seen
     assert context.observation.screen.observed == seen + 1

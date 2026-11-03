@@ -150,7 +150,7 @@ class BizHawkAdapter(EmulatorAdapter):
 
     # -------------------------------------------------------------- hooks
 
-    def check_link(self) -> bool:
+    def _do_check_link(self) -> bool:
         link = self._link
         if not self._connected or link is None:
             return False

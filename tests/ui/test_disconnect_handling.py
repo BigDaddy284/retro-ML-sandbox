@@ -74,9 +74,11 @@ def test_silent_drop_is_noticed_and_every_part_of_the_window_recovers(
     fake(context).drop_link()  # the emulator dies while nothing is being sent
     qtbot.waitUntil(lambda: context.connection.state is ConnectionState.DISCONNECTED)
 
+    # The drop may be found on the frame pump's worker thread (T-817), in
+    # which case the window hears of it a moment later, through the bridge.
     bar = window.connect_bar
+    qtbot.waitUntil(lambda: bar.offering_reconnect)
     assert bar.status_text == f"Lost the connection: {LINK_LOST} Press Reconnect to try again."
-    assert bar.offering_reconnect
     assert bar.connect_button.isEnabled()
     assert not bar.disconnect_button.isEnabled()
     assert bar.capability_text == ""
@@ -99,7 +101,7 @@ def test_reconnect_button_uses_the_same_console_and_options(
     qtbot.waitUntil(lambda: context.connection.is_connected and not bar.busy)
     fake(context).drop_link()
     qtbot.waitUntil(lambda: context.connection.state is ConnectionState.DISCONNECTED)
-    assert bar.connect_button.text() == "Reconnect"
+    qtbot.waitUntil(lambda: bar.connect_button.text() == "Reconnect")
 
     qtbot.mouseClick(bar.connect_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: context.connection.is_connected and not bar.busy)
@@ -160,7 +162,7 @@ def test_drop_during_manual_play_is_handled_once(
 ) -> None:
     context.connection.connect("fake", drop_after_ops=3)
     qtbot.waitUntil(lambda: context.connection.state is ConnectionState.DISCONNECTED)
-    assert window.connect_bar.offering_reconnect
+    qtbot.waitUntil(lambda: window.connect_bar.offering_reconnect)
     # Nothing keeps hammering a dead connection.
     pump_errors = window.game_panel.pump.errors
     clock_errors = window.game_panel.clock.errors

@@ -1,15 +1,19 @@
 """The Game panel: live emulator screen plus a one-line status.
 
-:class:`FramePump` polls the connection service for frames on a timer while
-an emulator that can capture its screen is connected. It is driven by
-service events, so the panel never has to know how a connection was made.
+:class:`FramePump` asks the connection service for frames on a timer while
+an emulator that can capture its screen is connected. Each capture runs on a
+worker thread, because a real emulator answers over a socket in tens of
+milliseconds and the GUI thread must never wait for it (T-817); the frame
+comes back to the GUI thread by signal. The pump is driven by service
+events, so the panel never has to know how a connection was made.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError, Frame
@@ -23,6 +27,30 @@ from retro_ai_lab.ui.play_clock import PlayClock
 DEFAULT_FPS = 30
 NOT_CONNECTED = "Not connected. Connect to a game to see it here."
 NO_SCREEN = "This emulator can't show its screen, but the AI can still play."
+
+log = logging.getLogger(__name__)
+
+
+class _CaptureSignals(QObject):
+    done = Signal(int, object)  # the capture's generation, then the Frame or the exception
+
+
+class _CaptureTask(QRunnable):
+    """One ``capture_frame`` call, run off the GUI thread."""
+
+    def __init__(self, connection: ConnectionService, generation: int) -> None:
+        super().__init__()
+        self.signals = _CaptureSignals()
+        self._connection = connection
+        self._generation = generation
+
+    def run(self) -> None:
+        try:
+            frame = self._connection.call(lambda a: a.capture_frame())
+        except Exception as exc:
+            self.signals.done.emit(self._generation, exc)
+        else:
+            self.signals.done.emit(self._generation, frame)
 
 
 class FramePump(QObject):
@@ -44,6 +72,12 @@ class FramePump(QObject):
         self._on_frame: list[object] = []
         self._latest: Frame | None = None
         self._errors = 0
+        self._pool = QThreadPool(self)
+        self._pool.setMaxThreadCount(1)
+        self._in_flight = False
+        self._generation = 0  # bumped by stop(): results from before it are dropped
+        self._skipped = 0
+        self._captured = 0
 
     @property
     def running(self) -> bool:
@@ -61,37 +95,79 @@ class FramePump(QObject):
     def errors(self) -> int:
         return self._errors
 
+    @property
+    def in_flight(self) -> bool:
+        """Is a capture running on the worker right now?"""
+        return self._in_flight
+
+    @property
+    def skipped(self) -> int:
+        """Ticks that found the previous capture still running."""
+        return self._skipped
+
+    @property
+    def captured(self) -> int:
+        """Frames delivered since the pump was made."""
+        return self._captured
+
     def start(self) -> None:
         self._timer.start()
 
     def stop(self) -> None:
         self._timer.stop()
         self._latest = None
+        self._generation += 1
 
     def subscribe(self, callback: object) -> None:
         self._on_frame.append(callback)
 
-    def tick(self) -> Frame | None:
-        """Capture one frame now. Returns it, or None if nothing was captured.
+    def tick(self) -> bool:
+        """Ask for a frame now, on the worker. Returns True if a capture started.
+
+        Nothing starts, and the pump stops, when no emulator is connected.
+        Nothing starts either while the previous capture is still running:
+        that tick is skipped, so the real frame rate settles to whatever the
+        link can deliver instead of piling up requests.
+        """
+        if not self._connection.is_connected:
+            self.stop()
+            return False
+        if self._in_flight:
+            self._skipped += 1
+            return False
+        self._in_flight = True
+        task = _CaptureTask(self._connection, self._generation)
+        task.signals.done.connect(self._on_done)
+        self._pool.start(task)
+        return True
+
+    def _on_done(self, generation: int, result: object) -> None:
+        """Back on the GUI thread with the frame, or with what went wrong.
 
         A dropped link is reported by the connection service itself (it
         publishes ``EmulatorDisconnected``), so here we only stop quietly.
         """
-        if not self._connection.is_connected:
+        self._in_flight = False
+        if generation != self._generation:
+            return  # stopped (or disconnected) while this capture was running
+        if isinstance(result, EmulatorDisconnectedError):
             self.stop()
-            return None
-        try:
-            frame = self._connection.call(lambda a: a.capture_frame())
-        except EmulatorDisconnectedError:
-            self.stop()
-            return None
-        except EmulatorError:
+            return
+        if isinstance(result, EmulatorError):
             self._errors += 1
-            return None
-        self._latest = frame
+            return
+        if isinstance(result, Exception):
+            self._errors += 1
+            log.warning("Frame capture failed: %s", result)
+            return
+        if not isinstance(result, Frame):
+            self._errors += 1
+            log.warning("Frame capture returned %r.", type(result).__name__)
+            return
+        self._latest = result
+        self._captured += 1
         for cb in self._on_frame:
-            cb(frame)  # type: ignore[operator]
-        return frame
+            cb(result)  # type: ignore[operator]
 
 
 class GamePanel(QWidget):
