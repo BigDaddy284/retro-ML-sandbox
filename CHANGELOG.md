@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Fixed: when a call to BizHawk timed out, its answer arrived during the next call, which then saw the wrong request number and dropped the link; a late answer is now skipped and only the slow call is lost (T-854).
 - Fixed: a step of many frames at normal speed (the five-second wait in the button search) made the BizHawk link give up after five seconds and drop, so the app disconnected shortly after Start; a step now waits long enough for its frames, and the `call_timeout_s` option really governs calls (it was the connect timeout before). The probe and the button search run the emulator at 64x when it allows and put the speed back afterwards (T-853).
 - Changed: when the game ignores the AI and no button gets it going, the AI lets the game run for five seconds and looks again, three times in all, and then stops training and says so in the Learning panel instead of playing goes on a title demo and earning points from values that move on their own (T-852).
 - Changed: when the AI searches for the button that gets the game going, a button whose press changed something lasting while the game still ignores the pad is pressed again, up to three times (on Super Mario Bros. the first Start during the demo only brings the title screen back; the next one starts the game), and the search waits five seconds after each press so a splash screen cannot hide the answer (T-851).

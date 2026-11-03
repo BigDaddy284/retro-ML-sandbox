@@ -66,6 +66,20 @@ def decode_response(line: bytes, expected_id: int) -> dict[str, Any]:
     raise ProtocolError("The emulator's answer had no 'ok' field.")
 
 
+def _late_answer(line: bytes, expected_id: int) -> int | None:
+    """The id of a well-formed answer to an earlier request than ``expected_id``, else None."""
+    try:
+        data = json.loads(line.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    answered = data.get("id")
+    if isinstance(answered, bool) or not isinstance(answered, int) or answered >= expected_id:
+        return None
+    return answered
+
+
 class LineChannel:
     """Newline-framed messages over a connected socket, with a read buffer."""
 
@@ -227,14 +241,32 @@ class Link:
         request_id = self._next_id
         self._next_id += 1
         started = self._clock()
+        wait = self._timeout_s if timeout_s is None else timeout_s
         try:
             self._channel.send_line(encode_request(request_id, cmd, **fields))
-            line = self._channel.receive_line(self._timeout_s if timeout_s is None else timeout_s)
-            try:
-                return decode_response(line, request_id)
-            except ProtocolError:
-                self._channel.close()
-                raise
+            while True:
+                remaining = wait - (self._clock() - started)
+                if remaining <= 0:
+                    raise EmulatorError(f"The emulator did not answer within {wait:g} seconds.")
+                try:
+                    line = self._channel.receive_line(remaining)
+                except (EmulatorDisconnectedError, ProtocolError):
+                    raise
+                except EmulatorError as exc:  # the remaining wait ran out: report the whole wait
+                    raise EmulatorError(
+                        f"The emulator did not answer within {wait:g} seconds."
+                    ) from exc
+                late = _late_answer(line, request_id)
+                if late is not None:
+                    # The answer to a call that already gave up (T-854): one slow
+                    # answer costs that call, not the link.
+                    log.info("Skipped the emulator's late answer to request %d.", late)
+                    continue
+                try:
+                    return decode_response(line, request_id)
+                except ProtocolError:
+                    self._channel.close()
+                    raise
         finally:
             self._record(cmd, self._clock() - started)
 

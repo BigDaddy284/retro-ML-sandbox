@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import socket
 import threading
 
@@ -100,6 +101,30 @@ def test_link_numbers_requests_and_closes_on_protocol_errors() -> None:
     assert not link.is_open
     with pytest.raises(EmulatorDisconnectedError):
         link.call("ping")
+    theirs.close()
+
+
+def test_a_late_answer_is_skipped(caplog: pytest.LogCaptureFixture) -> None:
+    """T-854: the answer to a call that timed out does not break the next call."""
+    ours, theirs = socket.socketpair()
+    link = Link(LineChannel(ours), timeout_s=0.2)
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.emulator.bizhawk.protocol")
+    with pytest.raises(EmulatorError, match="did not answer"):
+        link.call("step", frames=300)  # nothing comes back in time
+    assert link.is_open
+    theirs.sendall(b'{"id":1,"ok":true}\n{"id":2,"ok":true,"x":1}\n')  # both arrive now
+    assert link.call("ping")["x"] == 1 and link.is_open
+    assert "Skipped the emulator's late answer to request 1." in caplog.text
+    # A stream of late answers does not wait forever: the deadline covers the skipping.
+    theirs.sendall(b'{"id":1,"ok":true}\n' * 3)
+    with pytest.raises(EmulatorError, match="did not answer"):
+        link.call("ping")
+    assert link.is_open
+    # An answer to a request not made yet is still a protocol error that closes the link.
+    theirs.sendall(b'{"id":50,"ok":true}\n')
+    with pytest.raises(ProtocolError):
+        link.call("ping")
+    assert not link.is_open
     theirs.close()
 
 
