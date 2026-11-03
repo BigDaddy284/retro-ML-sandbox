@@ -159,3 +159,27 @@ def test_main_window_has_the_panel_and_its_tip(qtbot: QtBot, context: AppContext
     assert w.compare_panel.parent() is w.panel("compare").content
     w.explain("compare")
     assert w.tip_dialog.current_key == "panel.compare"
+
+
+def test_share_and_load_a_shared_ai(
+    qtbot: QtBot, panel: ComparePanel, context: AppContext, tmp_path: Path
+) -> None:
+    assert not widget(panel, "import_ai_button").isEnabled()  # type: ignore[attr-defined]
+    assert not panel.export_selected_to(tmp_path / "x.json")
+    assert panel.note_text == "Pick a saved AI to share."
+    assert not panel.import_from(tmp_path / "x.json") and "Connect to a game" in panel.note_text
+    connect(context)
+    assert widget(panel, "import_ai_button").isEnabled()  # type: ignore[attr-defined]
+    assert not widget(panel, "share_ai_button").isEnabled()  # type: ignore[attr-defined]
+    context.training.train(1)
+    assert panel.save_now("AI A")
+    assert widget(panel, "share_ai_button").isEnabled()  # type: ignore[attr-defined]
+    shared = tmp_path / "ai-a.json"
+    assert panel.export_selected_to(shared) and panel.note_text == "Shared AI A as ai-a.json."
+    assert panel.import_from(shared) and panel.note_text == "Loaded the shared AI as AI A (2)."
+    assert panel.saved_names() == ("AI A", "AI A (2)") and panel.selected_name == "AI A (2)"
+    assert "AI A (2)" in panel.comparison_text or "about as well" in panel.comparison_text
+    assert not panel.import_from(tmp_path / "missing.json")
+    assert panel.note_text.startswith("Can't read the shared AI")
+    assert not panel.export_selected_to(tmp_path / "nope" / "deep" / "x.json")
+    assert panel.note_text.startswith("Can't write the shared AI")

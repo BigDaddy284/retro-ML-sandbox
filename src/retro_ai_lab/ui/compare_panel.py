@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -87,6 +90,12 @@ class ComparePanel(QWidget):
         self._delete = QPushButton("Delete", self)
         self._delete.setObjectName("delete_ai_button")
         self._delete.clicked.connect(self.delete_selected)
+        self._share = QPushButton("Share…", self)
+        self._share.setObjectName("share_ai_button")
+        self._share.clicked.connect(self._on_share_clicked)
+        self._import = QPushButton("Load a shared AI…", self)
+        self._import.setObjectName("import_ai_button")
+        self._import.clicked.connect(self._on_import_clicked)
 
         self._text = QLabel(IDLE_TEXT, self)
         self._text.setObjectName("comparison_text")
@@ -102,7 +111,9 @@ class ComparePanel(QWidget):
         buttons = QHBoxLayout()
         buttons.addWidget(self._load)
         buttons.addWidget(self._delete)
+        buttons.addWidget(self._share)
         buttons.addStretch(1)
+        buttons.addWidget(self._import)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(save_row)
@@ -203,6 +214,31 @@ class ComparePanel(QWidget):
         self._note.setText(f"Deleted {name}." if removed else f"{name} was already gone.")
         return removed
 
+    def export_selected_to(self, path: str | Path) -> bool:
+        """Write the selected saved AI to ``path`` for a friend."""
+        name = self.selected_name
+        if name is None:
+            self._note.setText("Pick a saved AI to share.")
+            return False
+        try:
+            written = self._context.saved_ais.export_to(name, path)
+        except (ConfigurationError, UnsupportedCapabilityError) as exc:
+            self._note.setText(str(exc))
+            return False
+        self._note.setText(f"Shared {name} as {written.name}.")
+        return True
+
+    def import_from(self, path: str | Path) -> bool:
+        """Keep a friend's shared AI for this game."""
+        try:
+            saved = self._context.saved_ais.import_from(path)
+        except (ConfigurationError, UnsupportedCapabilityError) as exc:
+            self._note.setText(str(exc))
+            return False
+        self._note.setText(f"Loaded the shared AI as {saved.name}.")
+        self.select(saved.name)
+        return True
+
     def refresh(self) -> None:
         service = self._context.saved_ais
         keep = self.selected_name
@@ -265,9 +301,29 @@ class ComparePanel(QWidget):
         self._save.setEnabled(enabled)
         self._load.setEnabled(enabled and chosen)
         self._delete.setEnabled(enabled and chosen)
+        self._share.setEnabled(enabled and chosen)
+        self._import.setEnabled(enabled)
 
     def _on_save_clicked(self) -> None:
         self.save_now()
+
+    def _on_share_clicked(self) -> None:
+        name = self.selected_name
+        if name is None:
+            self._note.setText("Pick a saved AI to share.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Share this AI", f"{name}-ai.json", "Shared AI files (*.json)"
+        )
+        if path:
+            self.export_selected_to(path)
+
+    def _on_import_clicked(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load a shared AI", "", "Shared AI files (*.json)"
+        )
+        if path:
+            self.import_from(path)
 
     def _on_changed(self, event: SavedAiChanged) -> None:
         self.refresh()
