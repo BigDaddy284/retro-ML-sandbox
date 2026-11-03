@@ -279,8 +279,9 @@ class LearningPanel(QWidget):
             return
         lines = [t.summary()]
         episode = t.episode
-        if episode is not None and t.mode.ai_plays and episode.last_buttons:
-            lines.append("Pressing: " + " + ".join(sorted(episode.last_buttons)) + ".")
+        if episode is not None and t.mode.ai_plays and episode.steps > 0:
+            pressed = " + ".join(sorted(episode.last_buttons)) or "nothing"
+            lines.append(f"Pressing: {pressed}.")
         if t.agent is not None:
             lines.append(t.agent.stats())
         if t.fresh_start:
