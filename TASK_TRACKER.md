@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-604 – AI activity
+- **Current task:** T-605 – Behaviour changes and suggested experiments
 - **Last approved checkpoint:** `main` after T-409 (PRs #36–#42 merging in order as CI passes)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -70,7 +70,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-601 | Learning curve: per-go points, rolling average, best go, trend and success rate in plain words | 6 | Done | 7/7 | see PR #43 |
 | T-602 | Learning graph widget: points per go and the rolling average, drawn in the Learning panel | 6 | Done | 4/4 | see PR #44 |
 | T-603 | Progress panel: training attempts, success rate and trend beside the goal | 6 | Done | 2/2 | see PR #45 |
-| T-604 | AI activity: current and previous actions, exploring vs best-known, current objective | 6 | Planned | – | – |
+| T-604 | AI activity: current and previous actions, exploring vs best-known, current objective | 6 | Done | 6/6 | see PR #46 |
 | T-605 | Behaviour changes and suggested experiments: what the AI now does differently, what to try next | 6 | Planned | – | – |
 | T-606 | First working demonstration on the Fake Emulator: DESIGN.md §17 steps 1–10 as one scripted test, including rewards changing behaviour | 6 | Planned | – | – |
 | T-607 | Educational tips: "What's this?" explanations in simple and advanced words for every panel | 6 | Planned | – | – |
@@ -745,6 +745,20 @@ Live and background training and the guided and manual modes were delivered in P
 - **Results:** 2 / 2 passed / 0 failed / 0 excluded (748 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** A small task by design: the numbers come from T-601's curve, so the panel only formats them. Per-step success rates are noted as a later refinement.
 
+### T-604 – AI activity
+- **Status:** Done
+- **Phase:** 6
+- **Objective:** Show what the AI is doing right now (DESIGN.md §10 "AI Activity": current action, previous actions, current objective, AI decisions) at the top of the "What the AI is doing" panel, in a child's words.
+- **Scope:** `learning.qlearning`: `Decision(action, explored, value)` recorded by `choose()` as `last_decision` (cleared by `reset()` / `end_episode()` is left alone so the last move stays visible). `ui.activity_strip`: `ActivityStrip(context)` with three lines, `now_text` ("Resting." / "Now: pressing up + a, trying something new." / "Now: pressing up, its best known move (worth +3.2)." / "Watching you press up." in manual mode), `before_text` ("Before: up, up + a, nothing, …", the last 8 moves, newest first; collected from `InputRecorded` events of the player in charge) and `goal_text` ("Working on: Get further in Checkpoint." / "No goal step to work on."); refreshed on `InputRecorded`, `TrainingStateChanged`, `EpisodeFinished`, `GoalChanged`, `ObjectiveCompleted` and connect / disconnect. `DiscoveryPanel.activity` hosts it above the stage line. **Out of scope:** why a move is best (Q-values per button; a later "look inside" view), screen overlays.
+- **Acceptance criteria:**
+  1. `choose()` records whether the move was exploration or the best known one and its value; a fresh agent with `epsilon=1` always explores, with `epsilon=0` never does.
+  2. Idle text while nothing runs; during an AI go the now-line names the pressed buttons and whether it was exploring or its best move; previous moves list the last 8, newest first; in manual mode the strip reports the child's presses.
+  3. The goal line follows the goal service's next step and clears when the goal is complete or absent.
+  4. Disconnect resets the strip; the panel hosts it and it unsubscribes when destroyed.
+- **Test plan:** agent decisions; strip texts through an AI go, manual play and disconnect; goal line; teardown.
+- **Results:** 6 / 6 passed / 0 failed / 0 excluded (754 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Listening to `InputRecorded` turned out wrong: a repeated "do nothing" records no input, so the strip missed moves. The service now publishes `TrainingStepped(frame, buttons, decision)` for every step (both modes), and the strip redraws at most once per event-loop turn so fast training doesn't flood the labels. The runner exposes `last_action` (None for an unstick press) so the strip can say "to get the game going again".
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -803,5 +817,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-505 completed (PR #40).
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
-- Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45).
+- Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

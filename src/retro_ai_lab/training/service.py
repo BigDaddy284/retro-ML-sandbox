@@ -18,7 +18,7 @@ from pathlib import Path
 from retro_ai_lab.core import ConfigurationError, EmulatorError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.learning.actions import ActionSpace
-from retro_ai_lab.learning.qlearning import QLearningAgent, Settings
+from retro_ai_lab.learning.qlearning import Decision, QLearningAgent, Settings
 from retro_ai_lab.learning.state import StateEncoder
 from retro_ai_lab.services.connection import (
     ConnectionService,
@@ -54,6 +54,15 @@ class TrainingStateChanged:
 @dataclass(frozen=True, slots=True)
 class EpisodeFinished:
     record: EpisodeRecord
+
+
+@dataclass(frozen=True, slots=True)
+class TrainingStepped:
+    """One step happened: what was pressed and, for the AI's own moves, why."""
+
+    frame: int
+    buttons: frozenset[str]
+    decision: Decision | None  # None when the child played or Start was pressed to unstick
 
 
 class TrainingService:
@@ -312,7 +321,14 @@ class TrainingService:
             return False
         before = runner.steps
         went_on = runner.step()
-        self._total_steps += runner.steps - before
+        if runner.steps > before:
+            self._total_steps += 1
+            decision = self._agent.last_decision if self._agent is not None else None
+            if runner.last_action is None:
+                decision = None
+            self._bus.publish(
+                TrainingStepped(self._observation.frame, runner.last_buttons, decision)
+            )
         # Link loss closes the go from the disconnect handler, so check it's still open.
         if not went_on and runner.state is not None:
             self._record(runner.finish())
@@ -430,6 +446,7 @@ class TrainingService:
         frames, self._manual_frames = self._manual_frames, 0
         went_on = runner.observe_step(held, frames)
         self._total_steps += 1
+        self._bus.publish(TrainingStepped(frame, runner.last_buttons, None))
         if not went_on and runner.state is not None:
             self._record(runner.finish())
 
@@ -497,4 +514,5 @@ __all__ = [
     "EpisodeFinished",
     "TrainingService",
     "TrainingStateChanged",
+    "TrainingStepped",
 ]

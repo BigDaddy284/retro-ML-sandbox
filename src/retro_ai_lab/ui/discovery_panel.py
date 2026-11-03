@@ -32,6 +32,7 @@ from retro_ai_lab.services import (
     EmulatorConnected,
     EmulatorDisconnected,
 )
+from retro_ai_lab.ui.activity_strip import ActivityStrip
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.understanding import Confidence, Knowledge, Variable, describe_key
 
@@ -122,8 +123,11 @@ class DiscoveryPanel(QWidget):
         rename.addWidget(self._name, 1)
         rename.addWidget(self._rename)
 
+        self._activity = ActivityStrip(context, self)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._activity)
         layout.addWidget(self._stage)
         layout.addWidget(self._summary)
         layout.addWidget(QLabel("What the AI thinks it has found", self))
@@ -163,6 +167,10 @@ class DiscoveryPanel(QWidget):
     @property
     def selected_id(self) -> str | None:
         return self._selected
+
+    @property
+    def activity(self) -> ActivityStrip:
+        return self._activity
 
     @property
     def stage_text(self) -> str:
