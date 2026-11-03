@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 
 import pytest
@@ -27,7 +28,7 @@ from retro_ai_lab.emulator.bizhawk.simulator import ROM_NAME, SYSTEM
 from retro_ai_lab.emulator.fake.toy_racer import BUTTONS
 from retro_ai_lab.emulator.registry import AdapterRegistry
 from retro_ai_lab.observation.memory import MemoryCapture
-from retro_ai_lab.services.connection import ConnectionService
+from retro_ai_lab.services.connection import ConnectionService, EmulatorDisconnected
 
 
 def wait_until(check: object, *, timeout_s: float = 5.0) -> None:
@@ -386,3 +387,34 @@ def test_episode_runner_drives_the_simulator() -> None:
         assert [r["cmd"] for r in sim.requests].count("step") == 20
         assert observation.inputs.by_source("ai")
         connection.disconnect()
+
+
+def test_silent_drop_is_noticed_by_the_watchdog_check() -> None:
+    with BizHawkSimulator() as sim:
+        adapter = BizHawkAdapter(port=sim.port, call_timeout_s=2.0)
+        assert not adapter.check_link()
+        adapter.connect(timeout_s=2.0)
+        service = _connection_for(adapter)
+        losses: list[EmulatorDisconnected] = []
+        service._bus.subscribe(EmulatorDisconnected, losses.append)
+        sent = len(sim.requests)
+        for _ in range(3):
+            assert service.check()  # healthy and idle: nothing goes over the wire
+        time.sleep(0.05)
+        assert len(sim.requests) == sent
+        sim.drop_client()
+        wait_until(lambda: not service.check())
+        assert not adapter.is_connected and adapter.hello == {}
+        assert len(losses) == 1 and not losses[0].expected
+        assert not service.check()  # reported once, stays quiet
+        assert len(losses) == 1
+
+
+def test_missing_emulator_advice_names_the_script() -> None:
+    with BizHawkSimulator() as sim:
+        port = sim.port
+    adapter = BizHawkAdapter(port=port, call_timeout_s=1.0)
+    with pytest.raises(EmulatorError, match=re.escape(str(SCRIPT_PATH))) as info:
+        adapter.connect(timeout_s=1.0)
+    assert "Couldn't find BizHawk" in str(info.value)
+    assert not adapter.is_connected

@@ -204,3 +204,29 @@ def test_main_window_connect_bar_drives_game_panel(qtbot: QtBot, context: AppCon
     assert w.game_panel.view.frame is None
     assert not w.game_panel.pump.running
     w.close()
+
+
+def test_bizhawk_is_offered_and_a_missing_emulahawk_is_explained(qtbot: QtBot) -> None:
+    import re
+    import socket
+
+    from retro_ai_lab.emulator.bizhawk import SCRIPT_PATH
+    from retro_ai_lab.emulator.registry import default_registry
+
+    ctx = AppContext(registry=default_registry())
+    b = ConnectBar(ctx)
+    qtbot.addWidget(b)
+    assert [b._picker.itemText(i) for i in range(b._picker.count())] == [
+        "Practice console (Toy Racer)",
+        "BizHawk (EmuHawk)",
+    ]
+    b.select_adapter("bizhawk")
+    with socket.socket() as probe:  # a port nobody is listening on
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    assert b.connect_now(port=port, timeout_s=1.0)
+    qtbot.waitUntil(lambda: not b.busy, timeout=5000)
+    assert b.status_text.startswith("Couldn't connect: Couldn't find BizHawk on port")
+    assert re.search(re.escape(str(SCRIPT_PATH)), b.status_text)
+    assert b.last_error is not None
+    assert ctx.connection.state is ConnectionState.DISCONNECTED

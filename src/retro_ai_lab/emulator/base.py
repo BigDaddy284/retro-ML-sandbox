@@ -80,6 +80,15 @@ class EmulatorAdapter(ABC):
         """Record that the link dropped without our asking (backend use)."""
         self._connected = False
 
+    def check_link(self) -> bool:
+        """Is the link still up? Called by a watchdog while nothing is being sent.
+
+        The default trusts ``is_connected``. A backend whose transport can be
+        probed without a request (a socket, say) overrides this, marks itself
+        disconnected when the other end has gone, and returns False.
+        """
+        return self._connected
+
     # ---------------------------------------------------------- description
 
     @final

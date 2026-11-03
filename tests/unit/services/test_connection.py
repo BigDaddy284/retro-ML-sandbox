@@ -58,7 +58,10 @@ def test_initial_state(service: ConnectionService) -> None:
     assert not service.is_connected
     assert service.adapter is None
     assert service.session is None
-    assert service.available_adapters() == (("fake", "Practice console (Toy Racer)"),)
+    assert service.available_adapters() == (
+        ("fake", "Practice console (Toy Racer)"),
+        ("bizhawk", "BizHawk (EmuHawk)"),
+    )
 
 
 # ------------------------------------------------------------- connect
