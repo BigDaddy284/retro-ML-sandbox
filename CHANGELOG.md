@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-402: Suggested behaviours and reward values derived from the game knowledge (kind, confidence and what leads to progress), applied to a profile without overriding a person's choices.
 - T-401: Reward model: behaviours filed under the eight categories with a trigger, +/- controls, current and suggested values, enable toggle and JSON round-trip; packages now import cleanly in any order.
 - T-308: Knowledge is saved per game in the user's app data folder, restored on reconnect, and can be shared and loaded from the panel.
 - T-307: "What the AI is doing" panel: discoveries with plain-words confidence badges and evidence, yes/no/rename answers, on-demand button experiments, recent events and relationships.

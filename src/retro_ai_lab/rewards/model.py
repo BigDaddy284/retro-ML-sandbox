@@ -274,6 +274,14 @@ class RewardProfile:
     def set_enabled(self, behaviour_id: str, enabled: bool) -> Behaviour:
         return self._update(behaviour_id, enabled=bool(enabled))
 
+    def update(self, behaviour_id: str, **changes: Any) -> Behaviour:
+        """Change descriptive fields (name, category, notes) without touching the controls."""
+        allowed = {"name", "category", "notes"}
+        unknown = set(changes) - allowed
+        if unknown:
+            raise ConfigurationError(f"Can't update {sorted(unknown)}; use the controls.")
+        return self._update(behaviour_id, **changes)
+
     def suggest(self, behaviour_id: str, suggested: float) -> Behaviour:
         """Record a new suggested value; follow it unless a person has set the value."""
         number = clamp(_check_number(suggested, "Suggested value"))
