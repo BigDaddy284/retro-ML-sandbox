@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import threading
+import time
 from typing import Any
 
 import pytest
@@ -18,6 +19,7 @@ from retro_ai_lab.services import (
     ConnectionState,
     EmulatorDisconnected,
 )
+from retro_ai_lab.services import connection as connection_module
 
 
 @pytest.fixture
@@ -161,3 +163,59 @@ def test_two_workers_dropping_at_once_report_the_loss_once(
     assert [e for e in events if isinstance(e, EmulatorDisconnected)] == [
         EmulatorDisconnected("fake", False, "The emulator went away.")
     ]
+
+
+def test_a_worker_cannot_turn_a_clean_disconnect_into_a_lost_link(
+    service: ConnectionService, events: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-820: Disconnect was pressed while a worker was mid-call.
+
+    The worker's next call fails because the adapter is closing; it must find
+    the disconnect already recorded rather than announce a lost link itself.
+    """
+    service.connect("fake")
+    adapter = fake(service)
+    capture_entered = threading.Event()
+    capture_gate = threading.Event()
+    closing = threading.Event()
+    original_capture = adapter._do_capture_frame
+
+    def slow_capture() -> Any:
+        capture_entered.set()
+        capture_gate.wait(5)
+        return original_capture()
+
+    def broken_disconnect() -> None:
+        closing.set()
+        raise EmulatorError("socket already closed")
+
+    adapter._do_capture_frame = slow_capture  # type: ignore[method-assign]
+    adapter._do_disconnect = broken_disconnect  # type: ignore[method-assign]
+    # The service is slow between the backend's failure and its own bookkeeping.
+    monkeypatch.setattr(connection_module.log, "warning", lambda *a, **k: time.sleep(0.1))
+
+    worker_errors: list[Exception] = []
+
+    def worker() -> None:
+        service.call(lambda a: a.capture_frame())  # holds the adapter until the gate opens
+        assert closing.wait(5)
+        try:
+            service.call(lambda a: a.capture_frame())  # waits for the adapter, then fails
+        except EmulatorDisconnectedError as exc:
+            worker_errors.append(exc)
+
+    reasons: list[str] = []
+    worker_thread = threading.Thread(target=worker)
+    worker_thread.start()
+    assert capture_entered.wait(5)
+    disconnector = threading.Thread(target=lambda: reasons.append(service.disconnect()))
+    disconnector.start()  # blocks on the adapter until the worker's capture ends
+    time.sleep(0.05)
+    capture_gate.set()
+    worker_thread.join(5)
+    disconnector.join(5)
+
+    assert len(worker_errors) == 1
+    assert reasons == ["Disconnected, although the emulator complained: socket already closed"]
+    assert events == [EmulatorDisconnected("fake", True, reasons[0])]
+    assert service.state is ConnectionState.DISCONNECTED
