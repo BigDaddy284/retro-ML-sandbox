@@ -14,6 +14,7 @@ import contextlib
 import json
 import socket
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,7 @@ class BizHawkSimulator:
         no_game: bool = False,
         screenshot: str | None = "png",
         short_reads: bool = False,
+        frame_delay_s: float = 0.0,
     ) -> None:
         if drop_after is not None and drop_after < 0:
             raise ConfigurationError("drop_after must be >= 0 or None.")
@@ -66,6 +68,9 @@ class BizHawkSimulator:
         self.image_files: list[str] = []  # paths the app asked screenshots into (T-825)
         self.write_image_files = True
         self._short_reads = short_reads
+        if frame_delay_s < 0:
+            raise ConfigurationError("frame_delay_s must be >= 0.")
+        self._frame_delay_s = frame_delay_s  # how long a frame takes (T-853)
         self._server: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -324,6 +329,8 @@ class BizHawkSimulator:
         with self._lock:
             pressed = tuple(b.name for b in BUTTONS if self._held.get(b.label, False))
         for _ in range(frames):
+            if self._frame_delay_s:
+                time.sleep(self._frame_delay_s)
             self._game.step(pressed)
         body: dict[str, Any] = {}
         if "reads" in request:

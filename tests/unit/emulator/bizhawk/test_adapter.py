@@ -423,6 +423,26 @@ def test_missing_emulator_advice_names_the_script() -> None:
 # ------------------------------------------------------------ T-822 bundles
 
 
+def test_a_long_step_waits_for_its_frames() -> None:
+    """T-853: a step of many frames at normal speed is waited for, other calls are not."""
+    with BizHawkSimulator(frame_delay_s=0.03) as sim:
+        adapter = BizHawkAdapter(port=sim.port, call_timeout_s=0.1)
+        adapter.connect(timeout_s=2.0)
+        started = time.monotonic()
+        adapter.advance_frames(6)  # about 0.18 s: beyond the call timeout, within 0.1 + 6/30
+        assert time.monotonic() - started >= 0.15 and adapter.is_connected
+        assert "timeout_s" not in sim.requests[-1]  # the allowance never travels
+        adapter.disconnect()
+    with BizHawkSimulator(frame_delay_s=0.1) as sim:
+        adapter = BizHawkAdapter(port=sim.port, call_timeout_s=0.1)
+        adapter.connect(timeout_s=2.0)
+        with pytest.raises(EmulatorError, match="did not answer"):  # 0.6 s: too slow
+            adapter.advance_frames(6)
+        assert adapter._link is not None and adapter._link.timeout_s == 0.1  # other calls
+    with pytest.raises(ConfigurationError):
+        BizHawkSimulator(frame_delay_s=-1)
+
+
 def test_bundled_step_is_one_request_against_the_simulator() -> None:
     from retro_ai_lab.core import StepResult
 

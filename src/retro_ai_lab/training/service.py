@@ -13,7 +13,8 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -883,16 +884,45 @@ class TrainingService:
             if self._mode.ai_plays and self._harness is not None:
                 self._discovery.run_due_experiment()
                 if self._probe_listening and not self._needs_wake:
-                    self._needs_wake = not self._listens()
+                    with self._flat_out():
+                        self._needs_wake = not self._listens()
                 self._probe_listening = False
-            if self._needs_wake and self._mode.ai_plays and not self._wake_up_or_wait():
-                return None  # training stopped: no go on a game that ignores the AI
+            if self._needs_wake and self._mode.ai_plays:
+                with self._flat_out():
+                    woken = self._wake_up_or_wait()
+                if not woken:
+                    return None  # training stopped: no go on a game that ignores the AI
             self._runner.begin(restore=self._mode.ai_plays)
         except EmulatorError:
             return None
         finally:
             self._busy = False
         return self._runner
+
+    @contextmanager
+    def _flat_out(self) -> Iterator[None]:
+        """Run the emulator at FAST_SPEED for a probe or search, then put it back (T-853).
+
+        Nobody needs to watch the search at normal speed, and at normal speed its
+        five-second steps are slow. Left alone when the emulator has no speed
+        control, when it is already fast, or when the call is refused.
+        """
+        changed = False
+        if not self._fast_applied and self._connection.is_connected:
+            try:
+                if self._connection.call(lambda a: a.capabilities().speed_control):
+                    self._connection.call(lambda a: a.set_speed(FAST_SPEED))
+                    changed = True
+            except (EmulatorError, UnsupportedCapabilityError) as exc:
+                log.warning("Could not speed the emulator up for the search: %s", exc)
+        try:
+            yield
+        finally:
+            if changed and self._connection.is_connected and not self._fast_applied:
+                try:
+                    self._connection.call(lambda a: a.set_speed(1.0))
+                except (EmulatorError, UnsupportedCapabilityError) as exc:
+                    log.warning("Could not put the emulator's speed back: %s", exc)
 
     def _listens(self) -> bool:
         """From the spot goes start from: do the AI's buttons change anything? (T-848)

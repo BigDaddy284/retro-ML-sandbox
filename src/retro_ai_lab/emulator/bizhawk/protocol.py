@@ -266,10 +266,15 @@ def open_link(
     port: int,
     *,
     timeout_s: float,
+    call_timeout_s: float | None = None,
     emulator: str = "BizHawk",
     hint: str = BIZHAWK_HINT,
 ) -> Link:
-    """Connect to the bridge; failures become child-readable errors."""
+    """Connect to the bridge; failures become child-readable errors.
+
+    ``timeout_s`` is for connecting; calls wait ``call_timeout_s`` (the same
+    when not given).
+    """
     # A refused connection surfaces as ConnectionRefusedError on Linux but as a
     # timeout on Windows (which keeps retrying until the deadline), so every
     # failure to connect gets the same advice.
@@ -278,7 +283,9 @@ def open_link(
     except OSError as exc:
         raise EmulatorError(f"Couldn't find {emulator} on port {port}. {hint}") from exc
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    return Link(LineChannel(sock), timeout_s=timeout_s)
+    return Link(
+        LineChannel(sock), timeout_s=timeout_s if call_timeout_s is None else call_timeout_s
+    )
 
 
 __all__ = [

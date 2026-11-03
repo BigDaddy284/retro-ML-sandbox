@@ -1089,6 +1089,57 @@ def test_a_second_search_after_a_wait_can_still_find_the_button(
     t.stop()
 
 
+def test_the_search_runs_flat_out_and_puts_the_speed_back(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-853: the probe and the search run at FAST_SPEED, then the speed goes back."""
+    import retro_ai_lab.training.service as module
+
+    speeds: list[float] = []
+    real_probe, real_search = module.inputs_matter, module.find_wake_button
+
+    def probe(*args: object, **kwargs: object) -> bool:
+        speeds.append(lab.adapter().speed)
+        return real_probe(*args, **kwargs)  # type: ignore[arg-type]
+
+    def search(*args: object, **kwargs: object) -> str | None:
+        speeds.append(lab.adapter().speed)
+        return real_search(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(module, "inputs_matter", probe)
+    monkeypatch.setattr(module, "find_wake_button", search)
+    lab.connect()
+    _drive_to_game_over(lab)
+    t = lab.training
+    t.start(Mode.INDEPENDENT)
+    assert t.step() and t.wake_button == "start"
+    assert speeds and set(speeds) == {module.FAST_SPEED}  # the probe, the search
+    assert lab.adapter().speed == 1.0  # LIVE again for the go
+    t.stop()
+    # At "Practise fast" the emulator is already fast and stays so.
+    t.set_speed(Speed.FAST)
+    speeds.clear()
+    _drive_to_game_over(lab)
+    t.start(Mode.INDEPENDENT)
+    assert t.step() and set(speeds) == {module.FAST_SPEED}
+    assert lab.adapter().speed == module.FAST_SPEED
+    t.stop()
+    assert lab.adapter().speed == 1.0
+    # No speed control: left alone, no error.
+    lab.connection.disconnect()
+    lab.connect(
+        capabilities=Capabilities(
+            memory_read=True, frame_advance=True, input=True, save_states=True
+        )
+    )
+    _drive_to_game_over(lab)
+    t2 = lab.training
+    speeds.clear()
+    t2.start(Mode.INDEPENDENT)
+    assert t2.step() and speeds and set(speeds) == {1.0}
+    t2.stop()
+
+
 def test_a_listening_game_is_probed_only_after_a_go_that_went_wrong(
     lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:

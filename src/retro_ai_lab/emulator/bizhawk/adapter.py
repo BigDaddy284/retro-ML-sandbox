@@ -49,6 +49,7 @@ IMAGE_TRANSFERS = ("auto", "file", "socket")
 LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 DEFAULT_CALL_TIMEOUT_S = 5.0
+SLOWEST_FPS = 30  # a step's frames are allowed to run this slowly before the link gives up
 SCRIPT_PATH = Path(__file__).with_name("retro_ai_lab.lua")  # the bridge the app ships
 DEFAULT_MAX_REGION_BYTES = 256 * 1024
 """Memory domains larger than this are not offered as regions.
@@ -257,6 +258,7 @@ class BizHawkAdapter(EmulatorAdapter):
                 self._host,
                 self._port,
                 timeout_s=timeout_s,
+                call_timeout_s=self._call_timeout_s,
                 emulator=cls.emulator_name,
                 hint=cls.open_hint,
             )
@@ -336,8 +338,13 @@ class BizHawkAdapter(EmulatorAdapter):
         reads: Sequence[tuple[str, int, int]],
         screenshot: bool,
     ) -> StepResult:
-        """One ``step`` request carries buttons, frames, reads and the screenshot."""
+        """One ``step`` request carries buttons, frames, reads and the screenshot.
+
+        At normal speed the frames take as long as they take (300 frames are five
+        seconds), so the answer is waited for accordingly (T-853).
+        """
         fields: dict[str, Any] = {"frames": frames}
+        fields["timeout_s"] = self._call_timeout_s + frames / SLOWEST_FPS
         if pressed is not None:
             fields["buttons"] = self._button_fields(pressed)
         if reads:
@@ -362,7 +369,7 @@ class BizHawkAdapter(EmulatorAdapter):
         return {}
 
     def _do_advance_frames(self, n: int) -> None:
-        self._call("step", frames=n)
+        self._call("step", frames=n, timeout_s=self._call_timeout_s + n / SLOWEST_FPS)
 
     def _do_set_speed(self, multiplier: float) -> None:
         self._call("speed", percent=max(1, round(multiplier * 100)))
@@ -494,6 +501,7 @@ __all__ = [
     "IMAGE_TRANSFERS",
     "LOCAL_HOSTS",
     "NOT_LIVE_MEMORY_WORDS",
+    "SLOWEST_FPS",
     "UNREADABLE_REGION",
     "BizHawkAdapter",
     "is_live_memory",
