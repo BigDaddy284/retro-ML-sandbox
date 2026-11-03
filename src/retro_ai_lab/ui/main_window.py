@@ -9,6 +9,7 @@ from retro_ai_lab import __version__
 from retro_ai_lab.services import ConnectionFailed, EmulatorConnected, EmulatorDisconnected
 from retro_ai_lab.ui.connect_bar import ConnectBar
 from retro_ai_lab.ui.context import AppContext
+from retro_ai_lab.ui.discovery_panel import DiscoveryPanel
 from retro_ai_lab.ui.game_panel import GamePanel
 from retro_ai_lab.ui.link_watchdog import LinkWatchdog
 from retro_ai_lab.ui.panels import PANELS, Panel
@@ -27,6 +28,8 @@ class MainWindow(QMainWindow):
         self._panels: dict[str, Panel] = {spec.key: Panel(spec) for spec in PANELS}
         self._game_panel = GamePanel(self._context)
         self._panels["game"].set_body(self._game_panel)
+        self._discovery_panel = DiscoveryPanel(self._context)
+        self._panels["activity"].set_body(self._discovery_panel)
         # Keys pressed anywhere in the window reach the controller pad.
         self.installEventFilter(self._game_panel.pad)
 
@@ -83,6 +86,10 @@ class MainWindow(QMainWindow):
     @property
     def context(self) -> AppContext:
         return self._context
+
+    @property
+    def discovery_panel(self) -> DiscoveryPanel:
+        return self._discovery_panel
 
     @property
     def game_panel(self) -> GamePanel:
