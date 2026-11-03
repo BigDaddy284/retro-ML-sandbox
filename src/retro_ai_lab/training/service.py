@@ -80,6 +80,12 @@ RESET_SUSPECT_STEPS = 3
 RESET_SUSPECT_GOES = 3
 log = logging.getLogger(__name__)
 
+DEAF_TRIES = 3  # searches for a wake button before training stops (T-852)
+DEAF_WAIT = 300  # frames the game runs between those searches (an intro may be playing)
+NOT_LISTENING = (
+    "The game is ignoring the AI and no button gets it going. Get the game going "
+    "yourself, or pin a spot inside it, then press Start again."
+)
 FAST_SPEED = 64.0  # EmuHawk's client.speedmode tops out at 6400% (T-836)
 PRACTISE_SLOT = "practise"  # the save-state slot of the spot the child pinned (T-508)
 DEFAULT_HISTORY = 200
@@ -879,8 +885,8 @@ class TrainingService:
                 if self._probe_listening and not self._needs_wake:
                     self._needs_wake = not self._listens()
                 self._probe_listening = False
-            if self._needs_wake and self._mode.ai_plays:
-                self._wake_up()
+            if self._needs_wake and self._mode.ai_plays and not self._wake_up_or_wait():
+                return None  # training stopped: no go on a game that ignores the AI
             self._runner.begin(restore=self._mode.ai_plays)
         except EmulatorError:
             return None
@@ -914,25 +920,49 @@ class TrainingService:
             return names
         return tuple(dict.fromkeys(n for i in range(len(space)) for n in space.buttons_for(i)))
 
-    def _wake_up(self) -> None:
+    def _wake_up_or_wait(self) -> bool:
+        """Get a deaf game going, or stop training rather than play a demo (T-852).
+
+        A failed search is followed by a few seconds of letting the game run (an
+        intro may still be playing) and another look; after ``DEAF_TRIES`` searches
+        training ends with ``NOT_LISTENING``. Returns False when it ended.
+        """
+        for attempt in range(1, DEAF_TRIES + 1):
+            if self._wake_up() or self._harness is None:
+                return True
+            if attempt == DEAF_TRIES:
+                break
+            self._connection.call(lambda a: a.step(DEAF_WAIT))
+            self._harness.checkpoint()
+            if self._listens():
+                return True
+        log.warning(NOT_LISTENING)
+        self._status = Status.IDLE
+        self._discovery.set_experiments_allowed(True)
+        self._apply_speed()
+        self._announce("not listening")
+        return False
+
+    def _wake_up(self) -> bool:
         """The game stopped listening: find the button that gets it going (T-844).
 
         Runs from where the game is now (the screen that ignores the AI). When a
         button works the game is left running after it and that spot becomes the
-        checkpoint, so the goes after this one start inside the game.
+        checkpoint, so the goes after this one start inside the game. Returns
+        False only when the search ran and found nothing.
         """
         self._needs_wake = False
         self._last_go = None
         harness = self._harness
         if harness is None or not harness.available():
             log.info("The game is not listening to the AI, and this emulator can't try buttons.")
-            return
+            return True
         names = tuple(b.name for b in self._connection.call(lambda a: a.buttons()))
         playing = self._playing_buttons()
         log.info("The game is not listening to the AI; trying each button to get it going.")
         found = find_wake_button(self._connection, names, playing, first=self._wake_button)
         if found is None:
-            return
+            return False
         self._wake_button = found
         knowledge = self._discovery.knowledge
         if knowledge is not None and knowledge.wake_button != found:
@@ -941,6 +971,7 @@ class TrainingService:
         if self._runner is not None:
             self._runner.set_unstick_buttons((found,))
         harness.checkpoint()
+        return True
 
     def _prepare_checkpoint(self) -> None:
         """Every go in an AI mode restarts from where the child left the game."""
