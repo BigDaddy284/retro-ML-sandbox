@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-402 – Reward suggestions from the game knowledge
+- **Current task:** T-403 – AI personalities
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -50,7 +50,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-308 | Knowledge persistence wiring: auto-save per game, export / import from the UI | 3 | Done | 10/10 | see PR #26 |
 | E-4 | Reward System (controls, categories, personalities, goals, objectives) | 4 | Epic | – | – |
 | T-401 | Reward model: behaviours with category, trigger, +/- controls, suggested value, enable toggle, JSON round-trip | 4 | Done | 18/18 | see PR #27 |
-| T-402 | Reward suggestions: derive behaviours and suggested values from the game knowledge | 4 | Planned | – | – |
+| T-402 | Reward suggestions: derive behaviours and suggested values from the game knowledge | 4 | Done | 7/7 | see PR #28 |
 | T-403 | AI personalities: Explorer, Collector, Completionist, Speedrunner, Battler, Survivor, Balanced presets | 4 | Planned | – | – |
 | T-404 | Reward service: per-game profile persistence, live reward tally from events | 4 | Planned | – | – |
 | T-405 | Reward exploitation detection with plain-words explanation | 4 | Planned | – | – |
@@ -463,6 +463,20 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 18 / 18 passed / 0 failed / 0 excluded (622 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Importing `retro_ai_lab.understanding` first went round in a circle (understanding → linking → services → discovery → understanding.linking); the linking module now imports the experiment harness lazily, and an import-order test guards every package. `reset_to_suggested` clears the person's mark so suggestions follow again.
 
+### T-402 – Reward suggestions from the game knowledge
+- **Status:** Done
+- **Phase:** 4
+- **Objective:** Fill the reward profile automatically from what the AI believes about the game (DESIGN.md §5.4): every believed variable that can raise an event becomes a behaviour with a sensible suggested value, bigger for things that lead to progress, smaller while the belief is shaky, and always editable.
+- **Scope:** `rewards.suggestions`: `suggest_behaviours(knowledge, at_least=LOW)` maps (event kind, variable kind) pairs to a category, name and base value (progress +10, score jump +5, losing a life -10, gaining one +5, health drop -3 / recovery +2, flag on +2 / off 0, starting over -5); scales by belief confidence (Low 0.5, Medium 0.75, High and Confirmed 1.0); a cause of a believed relationship whose effect is progress gets 1.5x ("leads to progress"); a flag that leads to a reset reads as game over (Survival, -15). `apply_suggestions(profile, knowledge)` adds new behaviours, re-suggests changed values (a person's own value is kept), refreshes names and notes, and removes automatic behaviours whose variable is gone or rejected unless a person set them. **Out of scope:** personalities (T-403), persistence and wiring (T-404), UI (T-406).
+- **Acceptance criteria:**
+  1. Each tracked variable kind yields the expected behaviours, category and base value; unknown, rejected and too-uncertain variables yield nothing; "Starting over" is always offered.
+  2. Confidence scales the value; a progress-causing relationship boosts it with a note; a flag that leads to a reset is suggested as a game-over penalty.
+  3. Applying twice changes nothing; a renamed variable renames its behaviours; a raised confidence re-suggests the value but not a person's value; a rejected variable removes its automatic behaviours unless a person set them; a child's own behaviours are untouched.
+  4. On the toy racer knowledge, the profile has checkpoint/lap progress, score jump, lives lost/gained, game over and starting over, and a live drive earns positive reward for checkpoints and negative for crashes.
+- **Test plan:** per-kind mapping; filters; confidence scaling; relationship boost and game-over flag; apply idempotence, rename, re-suggest, custom kept, removal, foreign behaviours; toy racer end to end.
+- **Results:** 7 / 7 passed / 0 failed / 0 excluded (629 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Added `RewardProfile.update` for descriptive fields (name, category, notes) so suggestions can refresh wording without going through the child's controls. Game over is spotted from data (a flag followed by a reset) rather than from the variable's name.
+
 ### Later Phase 4 tasks
 T-402 to T-408 as listed in the summary table; each gets its own section when started.
 
@@ -506,4 +520,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-307 completed (PR #25).
 - T-308 completed (PR #26). Phase 3 complete on the fake emulator.
 - Phase 4 broken into T-401..T-408. T-401 completed (PR #27).
+- T-402 completed (PR #28).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

@@ -173,6 +173,10 @@ def test_set_value_and_enabled() -> None:
     assert not p.set_enabled("b1", False).enabled
     assert p.set_enabled("b1", True).enabled
     assert p.enabled_count() == 1
+    assert p.update("b1", name="Coins", notes="shiny").name == "Coins"
+    assert p.get("b1").notes == "shiny" and p.get("b1").value == MAX_VALUE
+    with pytest.raises(ConfigurationError):
+        p.update("b1", value=3.0)
 
 
 def test_suggest_moves_the_value_only_until_a_person_sets_it() -> None:
