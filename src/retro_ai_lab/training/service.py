@@ -74,6 +74,10 @@ CHECKPOINT_SLOT = "training"
 # mean the game is not listening (a title-screen demo); then it goes looking for the
 # button that gets the game going (T-844).
 IDENTICAL_GO_STEPS = 8
+# Goes ended by a reset this early, this many times in a row, blaming the same values,
+# mean those values cycle back to their start on their own (T-845).
+RESET_SUSPECT_STEPS = 3
+RESET_SUSPECT_GOES = 3
 log = logging.getLogger(__name__)
 
 FAST_SPEED = 64.0  # EmuHawk's client.speedmode tops out at 6400% (T-836)
@@ -174,6 +178,7 @@ class TrainingService:
         self._wake_button: str | None = None
         self._needs_wake = False
         self._last_go: tuple[tuple[str, ...], bool] | None = None
+        self._short_resets: list[tuple[str, ...]] = []
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
         bus.subscribe(MemoryObserved, self._on_memory)
@@ -754,6 +759,7 @@ class TrainingService:
         self._wake_button = knowledge.wake_button
         self._needs_wake = False
         self._last_go = None
+        self._short_resets = []
 
     def _on_disconnected(self, event: EmulatorDisconnected) -> None:
         was_running = self._status is not Status.IDLE
@@ -940,6 +946,7 @@ class TrainingService:
         )
         self._history.append(record)
         self._note_listening(result)
+        self._note_short_reset(result)
         if self._agent is not None:
             self._policies.append((self._episodes, policy_of(self._agent)))
         self._bus.publish(EpisodeFinished(record))
@@ -961,6 +968,24 @@ class TrainingService:
         ):
             self._needs_wake = True
         self._last_go = this
+
+    def _note_short_reset(self, result: EpisodeResult) -> None:
+        """Three goes in a row ended at once by the same values: they cycle (T-845)."""
+        runner = self._runner
+        ids = runner.last_reset_ids if runner is not None else ()
+        if result.ended_by != "reset" or result.steps > RESET_SUSPECT_STEPS or not ids:
+            self._short_resets = []
+            return
+        if self._short_resets and self._short_resets[-1] != ids:
+            self._short_resets = []
+        self._short_resets.append(ids)
+        if len(self._short_resets) < RESET_SUSPECT_GOES:
+            return
+        self._short_resets = []
+        try:
+            self._discovery.doubt_reset(ids)
+        except (ConfigurationError, UnsupportedCapabilityError) as exc:
+            log.warning("Couldn't note the cycling values: %s", exc)
 
     def _announce(self, reason: str) -> None:
         self._bus.publish(TrainingStateChanged(self._status, self._mode, reason))
@@ -1002,6 +1027,8 @@ def _goes(n: int) -> str:
 __all__ = [
     "CHECKPOINT_SLOT",
     "IDENTICAL_GO_STEPS",
+    "RESET_SUSPECT_GOES",
+    "RESET_SUSPECT_STEPS",
     "EpisodeFinished",
     "TrainingService",
     "TrainingStateChanged",

@@ -46,6 +46,7 @@ class EpisodeSignals:
         self._completed = 0
         self._listening = False
         self._last_reset = ""  # what the detector blamed, for the log (T-840)
+        self._last_reset_ids: tuple[str, ...] = ()
         bus.subscribe(RewardEarned, self._on_reward)
         bus.subscribe(ObjectiveCompleted, self._on_completed)
         bus.subscribe(ObjectiveSetback, self._on_setback)
@@ -65,11 +66,17 @@ class EpisodeSignals:
         """The detail and frame of the last reset counted since :meth:`start`."""
         return self._last_reset
 
+    @property
+    def last_reset_ids(self) -> tuple[str, ...]:
+        """The values the last reset blamed (T-845)."""
+        return self._last_reset_ids
+
     def start(self) -> None:
         self._reward = 0.0
         self._resets = 0
         self._completed = 0
         self._last_reset = ""
+        self._last_reset_ids = ()
         self._listening = True
 
     def stop(self) -> None:
@@ -102,6 +109,7 @@ class EpisodeSignals:
             if event.kind is EventKind.RESET:
                 self._resets += 1
                 self._last_reset = f"{event.detail} (frame {event.frame})"
+                self._last_reset_ids = event.variables
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +281,11 @@ class EpisodeRunner:
     def last_reset(self) -> str:
         """What the detector blamed for the reset that ended the go, if one did (T-840)."""
         return self._signals.last_reset
+
+    @property
+    def last_reset_ids(self) -> tuple[str, ...]:
+        """The values the reset that ended this go blamed (T-845)."""
+        return self._signals.last_reset_ids
 
     @property
     def unsticks(self) -> int:

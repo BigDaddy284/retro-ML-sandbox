@@ -54,6 +54,7 @@ class GameEvent:
     detail: str
     before: int | None = None
     after: int | None = None
+    variables: tuple[str, ...] = ()  # a reset: the values that went back to their start
 
     @property
     def delta(self) -> int | None:
@@ -61,6 +62,10 @@ class GameEvent:
             return None
         return self.after - self.before
 
+
+# Evidence kind on a value the AI found returning to its first value every few
+# frames (T-845): its return is not the game starting over.
+CYCLES = "cycles"
 
 TRACKED_KINDS = frozenset(
     {
@@ -71,6 +76,10 @@ TRACKED_KINDS = frozenset(
         VariableKind.FLAG,
     }
 )
+
+
+def _cycles(var: Variable) -> bool:
+    return any(e.kind == CYCLES for e in var.evidence)
 
 
 @dataclass(slots=True)
@@ -150,7 +159,7 @@ class EventDetector:
                 continue
             if value != watch.last:
                 events.extend(self._judge(watch, value, snapshot.frame))
-                if value == watch.first and value != watch.last:
+                if value == watch.first and value != watch.last and not _cycles(var):
                     returned_home.append(watch)
                     if value < watch.last:
                         dropped = True
@@ -164,6 +173,7 @@ class EventDetector:
                     snapshot.frame,
                     None,
                     f"{names} all went back to their starting values.",
+                    variables=tuple(w.variable.id for w in returned_home),
                 )
             )
         return tuple(events)
@@ -271,4 +281,12 @@ class EventLog:
         self._total = 0
 
 
-__all__ = ["RESET_NEEDS", "RESET_SURE", "EventDetector", "EventKind", "EventLog", "GameEvent"]
+__all__ = [
+    "CYCLES",
+    "RESET_NEEDS",
+    "RESET_SURE",
+    "EventDetector",
+    "EventKind",
+    "EventLog",
+    "GameEvent",
+]

@@ -360,3 +360,13 @@ def test_a_go_stuck_part_way_is_not_stuck_from_the_start(lab: Lab) -> None:
     result = r.run_episode()  # drives until the lives run out, then sits on game over
     assert result.ended_by == "stuck" and not r.stuck_from_start
     assert result.steps > 20
+
+
+def test_signals_keep_the_ids_a_reset_blamed(lab: Lab) -> None:
+    signals = EpisodeSignals(lab.bus)
+    signals.start()
+    reset = GameEvent(EventKind.RESET, 7, None, WENT_HOME, variables=("v3", "v4"))
+    lab.bus.publish(DiscoveryUpdated((), (), (reset,), ()))
+    assert signals.last_reset_ids == ("v3", "v4")
+    signals.start()
+    assert signals.last_reset_ids == ()

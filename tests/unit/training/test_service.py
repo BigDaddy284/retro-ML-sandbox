@@ -38,7 +38,7 @@ from retro_ai_lab.training import (
     TrainingStateChanged,
 )
 from retro_ai_lab.understanding import Encoding, Evidence, Knowledge, VariableKind
-from retro_ai_lab.understanding.events import EventKind, GameEvent
+from retro_ai_lab.understanding.events import CYCLES, EventKind, GameEvent
 
 WENT_HOME = "Lives, Lap all went back to their starting values."
 
@@ -965,3 +965,51 @@ def test_goes_look_identical() -> None:
     assert not goes_look_identical((same, True), (same, False))
     assert not goes_look_identical((same[:-1], True), (same[:-1], True))  # too short
     assert not goes_look_identical((same, True), ((*same[:-1], "other"), True))
+
+
+# ------------------------------------------------------------ T-845
+
+
+def _end_go_by_reset(lab: Lab, ids: tuple[str, ...]) -> None:
+    t = lab.training
+    before = t.episodes
+    assert t.step()  # a go is running after this
+    reset = GameEvent(EventKind.RESET, 5, None, "went home", variables=ids)
+    lab.bus.publish(DiscoveryUpdated((), (), (reset,), ()))
+    t.step()
+    assert t.episodes == before + 1
+
+
+def test_three_short_resets_from_the_same_values_teach_the_ai_they_cycle(
+    lab: Lab, caplog: pytest.LogCaptureFixture
+) -> None:
+    k = lab.connect()
+    t = lab.training
+    caplog.set_level(logging.INFO)
+    t.start(Mode.INDEPENDENT)
+    ids = ("v3", "v4")
+    for _ in range(2):
+        _end_go_by_reset(lab, ids)
+    assert not any(e.kind == CYCLES for e in k.get("v3").evidence)
+    _end_go_by_reset(lab, ids)
+    assert all(any(e.kind == CYCLES for e in k.get(v).evidence) for v in ids)
+    assert "cycle back to their start; no longer reading that as a restart" in caplog.text
+    # The next go is not cut short by those values: the detector ignores their return.
+    assert t.step() and t.episode is not None and t.episode.steps == 1
+    t.stop()
+
+
+def test_short_resets_that_differ_are_left_alone(lab: Lab) -> None:
+    k = lab.connect()
+    t = lab.training
+    t.start(Mode.INDEPENDENT)
+    _end_go_by_reset(lab, ("v3", "v4"))
+    _end_go_by_reset(lab, ("v3", "v4"))
+    _end_go_by_reset(lab, ("v3",))  # a different group: the count starts again
+    _end_go_by_reset(lab, ("v3",))
+    assert not any(e.kind == CYCLES for v in ("v3", "v4") for e in k.get(v).evidence)
+    # A long go in between also starts the count again.
+    for _ in range(2):
+        _end_go_by_reset(lab, ("v3",))
+    assert any(e.kind == CYCLES for e in k.get("v3").evidence)
+    t.stop()
