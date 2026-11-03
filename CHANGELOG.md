@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-306: Discovery service: automatic event/relationship tracking, scheduled reviews and button experiments while a game is connected, with progress and update events.
 - T-305: Relationship discovery: cause/effect links between events with rates and confidence, stored in the knowledge (schema 2) and found live by `RelationshipFinder`.
 - T-304: Event detection from believed variables: progress, score gains, setbacks, recoveries, flags and resets, with an event log.
 - T-303: Input linking: experiments that find which bytes each button moves (excluding unstable bytes) and fold the result into the knowledge as evidence, relabels and proposals.

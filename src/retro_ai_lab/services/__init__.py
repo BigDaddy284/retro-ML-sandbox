@@ -10,6 +10,7 @@ from retro_ai_lab.services.connection import (
     EmulatorDisconnected,
     Session,
 )
+from retro_ai_lab.services.discovery import DiscoveryProgress, DiscoveryService, DiscoveryUpdated
 from retro_ai_lab.services.experiments import Comparison, ExperimentHarness, Trial, constant_plan
 from retro_ai_lab.services.observer import (
     InputRecorded,
@@ -25,6 +26,9 @@ __all__ = [
     "ConnectionService",
     "ConnectionState",
     "ConnectionStateChanged",
+    "DiscoveryProgress",
+    "DiscoveryService",
+    "DiscoveryUpdated",
     "EmulatorConnected",
     "EmulatorDisconnected",
     "ExperimentHarness",

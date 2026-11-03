@@ -167,3 +167,9 @@ def test_clock_feeds_the_observation_service(clock: PlayClock, context: AppConte
     assert obs.latest.get("ram") == game(context).game.ram
     clock.tick(1)
     assert len(obs.ring) == 2 and obs.tracker.transitions == 1
+
+
+def test_context_owns_a_discovery_service(context: AppContext) -> None:
+    """T-306: the app context wires discovery to the observation service."""
+    context.connection.connect("fake")
+    assert context.discovery.enabled and context.discovery.knowledge is not None
