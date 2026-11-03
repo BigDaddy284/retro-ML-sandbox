@@ -7,7 +7,7 @@ How Retro AI Lab is tested, and the quality gates every task must pass.
 | Purpose | Tool |
 |---|---|
 | Test runner | `pytest` |
-| Qt UI tests | `pytest-qt`, run with `QT_QPA_PLATFORM=offscreen` |
+| Qt UI tests | `pytest-qt`, run with `QT_QPA_PLATFORM=offscreen` (set automatically by `tests/ui/conftest.py`) |
 | Property / fuzz tests | `hypothesis` (parsers, protocol framing, reward maths) |
 | Coverage | `pytest-cov` (reported per task; no global percentage gate replaces real criteria coverage) |
 | Lint / format | `ruff` |

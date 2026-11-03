@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-007 (Ready)
-- **Last approved checkpoint:** `main` after T-006
+- **Current task:** T-008 (Ready)
+- **Last approved checkpoint:** `main` after T-007
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -20,7 +20,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-004 | Synthetic game (deterministic toy racer) | 1 | Done | 39/39 | see PR #5 |
 | T-005 | Fake emulator adapter over the synthetic game | 1 | Done | 52/52 | see PR #6 |
 | T-006 | Adapter registry and connection service | 1 | Done | 39/39 | see PR #7 |
-| T-007 | App shell: main window launches with empty panels | 1 | Ready | – | – |
+| T-007 | App shell: main window launches with empty panels | 1 | Done | 15/15 | see PR #8 |
 | T-008 | Game window panel shows live frames | 1 | Ready | – | – |
 | T-009 | Connect / disconnect UI with capability display | 1 | Ready | – | – |
 | T-010 | Manual controller input from UI to adapter | 1 | Ready | – | – |
@@ -158,8 +158,18 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Completion report:** Connection is synchronous in this task; the UI task that needs it off the main thread (T-009) will wrap it in a worker. `EmulatorDisconnected` the event is distinct from `EmulatorDisconnectedError` the exception.
 
 ### T-007 – App shell
+- **Status:** Done
+- **Phase:** 1
 - **Objective:** `python -m retro_ai_lab` opens a main window with the five panels from DESIGN.md §10 (Game, AI Activity, Rewards, Progress, Learning) as placeholders, each expandable.
-- **Test plan (pytest-qt):** window opens and closes cleanly; all five panels present with child-friendly titles; expand/collapse works; app exits 0.
+- **Scope:** `ui.app`, `ui.main_window`, `ui.panels`; CLI launches the UI when run with no arguments; PySide6 and pytest-qt dependencies; Linux CI installs Qt system libraries. **Out of scope:** any real panel content.
+- **Acceptance criteria:**
+  1. The real entry point launches headless in a fresh process and exits 0.
+  2. Window title "Retro AI Lab"; five panels in the documented order with child-friendly titles and a plain-English placeholder each.
+  3. Each panel collapses and expands by click and by API, emitting `toggled`; collapsing one leaves the others.
+  4. `--version`/`--help` never load Qt; no arguments launches the app.
+- **Test plan (pytest-qt, offscreen):** open/close; panel keys, titles, placeholders, visibility; spec uniqueness and no jargon; collapse/expand by click with arrow state and signal; toggle API idempotency; independence of panels; `set_body` replaces placeholder; status bar message and version label; `create_app` singleton + metadata; `run_app` with hook; `exit_after_ms`; real subprocess launch smoke test. CLI tests updated: no-args launches via injected launcher, `--version`/`--help` never launch, hidden `--exit-after-ms` validated, process argv used when `argv` is None.
+- **Results:** 15 / 15 UI tests passed + 4 updated CLI tests (303 in the full suite) / 0 failed / 0 excluded. Lint, format and strict mypy clean (PySide6 stubs under `--strict`).
+- **Completion report:** Found and fixed a real bug while writing the smoke test: `main()` dropped `sys.argv` when called from `__main__`. Hidden `--exit-after-ms` flag exists only for smoke tests and tooling. Linux CI now installs `libegl1` etc. for Qt offscreen.
 
 ### T-008 … T-012
 Details will be written into this file when each becomes the next task, following the template.
@@ -181,5 +191,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-004 completed (PR #5).
 - T-005 completed (PR #6).
 - T-006 completed (PR #7).
-- Next: T-007.
+- T-007 completed (PR #8).
+- Next: T-008.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

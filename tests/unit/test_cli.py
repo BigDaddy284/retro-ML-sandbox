@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Sequence
 
 import pytest
 
@@ -22,9 +23,37 @@ def test_help_flag_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
     assert "Retro AI Lab" in capsys.readouterr().out
 
 
-def test_no_arguments_prints_help_and_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main([]) == 0
-    assert "usage:" in capsys.readouterr().out
+def test_no_arguments_launches_the_app_and_returns_its_exit_code() -> None:
+    launched: list[Sequence[str]] = []
+
+    def fake_launch(argv: Sequence[str]) -> int:
+        launched.append(tuple(argv))
+        return 7
+
+    assert main([], launch=fake_launch) == 7
+    assert main(["--exit-after-ms", "5"], launch=fake_launch) == 7
+    assert launched == [(), ("--exit-after-ms", "5")]
+
+
+def test_no_argv_uses_process_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["retro-ai-lab", "--exit-after-ms", "1"])
+    launched: list[Sequence[str]] = []
+    assert main(launch=lambda argv: launched.append(argv) or 3) == 3
+    assert launched == [("--exit-after-ms", "1")]
+
+
+def test_exit_after_ms_requires_an_integer(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["--exit-after-ms", "soon"]) == 2
+    assert "invalid int value" in capsys.readouterr().err
+
+
+def test_version_and_help_do_not_launch_the_app() -> None:
+    def never(argv: Sequence[str]) -> int:
+        raise AssertionError("must not launch")
+
+    assert main(["--version"], launch=never) == 0
+    assert main(["--help"], launch=never) == 0
+    assert main(["--bogus"], launch=never) == 2
 
 
 @pytest.mark.parametrize("argv", [["--bogus"], ["--version=1"], ["extra", "positional"]])
