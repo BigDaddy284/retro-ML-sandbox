@@ -120,3 +120,27 @@ def test_a_thousand_snapshots_store_quickly(archive: SnapshotArchive) -> None:
     elapsed = time.perf_counter() - start
     assert archive.count(sid) == 1000
     assert elapsed < 10, f"{elapsed:.1f}s for 1000 snapshots"
+
+
+# ------------------------------------------------------------- inputs (T-204)
+
+
+def test_inputs_are_stored_per_session_in_order(archive: SnapshotArchive) -> None:
+    from retro_ai_lab.observation.inputs import InputEvent
+
+    s1 = archive.new_session("one", "toy")
+    s2 = archive.new_session("two", "toy")
+    assert archive.inputs(s1) == []
+    e1 = InputEvent(0, frozenset({"up"}))
+    e2 = InputEvent(7, frozenset({"up", "a"}), "ai")
+    assert archive.append_input(s1, e1) == 0
+    assert archive.append_input(s1, e2) == 1
+    assert archive.append_input(s2, InputEvent(3, frozenset())) == 0
+    assert archive.inputs(s1) == [e1, e2]
+    assert archive.inputs(s2) == [InputEvent(3, frozenset())]
+    archive.delete_session(s1)
+    assert archive.inputs(s1) == []
+    with pytest.raises(ConfigurationError):
+        archive.append_input(999, e1)
+    with pytest.raises(ConfigurationError):
+        archive.append_input(s2, "up")  # type: ignore[arg-type]

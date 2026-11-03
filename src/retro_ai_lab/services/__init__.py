@@ -10,7 +10,12 @@ from retro_ai_lab.services.connection import (
     EmulatorDisconnected,
     Session,
 )
-from retro_ai_lab.services.observer import MemoryObserved, ObservationService, ScreenObserved
+from retro_ai_lab.services.observer import (
+    InputRecorded,
+    MemoryObserved,
+    ObservationService,
+    ScreenObserved,
+)
 
 __all__ = [
     "LINK_LOST",
@@ -20,6 +25,7 @@ __all__ = [
     "ConnectionStateChanged",
     "EmulatorConnected",
     "EmulatorDisconnected",
+    "InputRecorded",
     "MemoryObserved",
     "ObservationService",
     "ScreenObserved",

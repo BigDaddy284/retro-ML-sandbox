@@ -208,6 +208,7 @@ class ControllerPad(QWidget):
         self.input_changed.emit(held)
         if not self._context.connection.is_connected:
             return
+        self._context.observation.record_input((b.name for b in held), "human")
         try:
             self._context.connection.call(lambda a: a.set_input(held))
         except EmulatorDisconnectedError:

@@ -7,6 +7,7 @@ from retro_ai_lab.observation.diff import (
     SnapshotDiff,
     diff_snapshots,
 )
+from retro_ai_lab.observation.inputs import HeldSpan, InputEvent, InputLog
 from retro_ai_lab.observation.memory import MemoryCapture, MemorySnapshot, SnapshotRing
 from retro_ai_lab.observation.screen import FrameDiff, ScreenTracker, diff_frames
 
@@ -15,6 +16,9 @@ __all__ = [
     "ByteStats",
     "ChangeTracker",
     "FrameDiff",
+    "HeldSpan",
+    "InputEvent",
+    "InputLog",
     "MemoryCapture",
     "MemorySnapshot",
     "ScreenTracker",

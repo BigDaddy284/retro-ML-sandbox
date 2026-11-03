@@ -8,11 +8,13 @@ without touching the emulator themselves.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError, Frame
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.observation.diff import ChangeTracker, SnapshotDiff
+from retro_ai_lab.observation.inputs import InputEvent, InputLog
 from retro_ai_lab.observation.memory import MemoryCapture, MemorySnapshot, SnapshotRing
 from retro_ai_lab.observation.screen import FrameDiff, ScreenTracker
 from retro_ai_lab.services.connection import (
@@ -34,6 +36,11 @@ class ScreenObserved:
     diff: FrameDiff | None  # None for the first frame after connect
 
 
+@dataclass(frozen=True, slots=True)
+class InputRecorded:
+    event: InputEvent
+
+
 class ObservationService:
     def __init__(
         self,
@@ -47,6 +54,7 @@ class ObservationService:
         self._ring = SnapshotRing(ring_capacity)
         self._tracker = ChangeTracker()
         self._screen = ScreenTracker()
+        self._inputs = InputLog()
         self._frames_seen = 0
         self._capture: MemoryCapture | None = None
         self._enabled = False
@@ -73,6 +81,10 @@ class ObservationService:
     @property
     def screen(self) -> ScreenTracker:
         return self._screen
+
+    @property
+    def inputs(self) -> InputLog:
+        return self._inputs
 
     @property
     def frames_seen(self) -> int:
@@ -130,12 +142,24 @@ class ObservationService:
         self._bus.publish(event)
         return event
 
+    def record_input(self, buttons: Iterable[str], source: str = "human") -> InputRecorded | None:
+        """Record the held button set as of the current frame."""
+        if not self._connection.is_connected:
+            return None
+        event = self._inputs.record(self._frame, buttons, source)
+        if event is None:
+            return None
+        recorded = InputRecorded(event)
+        self._bus.publish(recorded)
+        return recorded
+
     # ------------------------------------------------------------- events
 
     def _on_connected(self, event: EmulatorConnected) -> None:
         self._ring.clear()
         self._tracker.reset()
         self._screen.reset()
+        self._inputs.clear()
         self._frames_seen = 0
         self._frame = 0
         self._errors = 0
@@ -147,4 +171,4 @@ class ObservationService:
         self._capture = None
 
 
-__all__ = ["MemoryObserved", "ObservationService", "ScreenObserved"]
+__all__ = ["InputRecorded", "MemoryObserved", "ObservationService", "ScreenObserved"]
