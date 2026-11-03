@@ -191,8 +191,8 @@ def test_bundled_step_reads_and_screenshots(
         frame = adapter.capture_frame()
         expected = host.game.render()
         assert (frame.width, frame.height, frame.channels) == (expected.width, expected.height, 3)
-        assert [Path(p.decode()) for p in host.screenshots] == [tmp_path / "retro_ai_lab_frame.png"]
-        assert list(tmp_path.iterdir()) == []
+        assert [Path(p.decode()) for p in host.screenshots] == [Path(adapter.image_path)]  # T-825
+        assert not Path(adapter.image_path).exists() and list(tmp_path.iterdir()) == []
         answer = adapter._call(
             "step",
             frames=2,
@@ -202,6 +202,14 @@ def test_bundled_step_reads_and_screenshots(
         )
         assert base64.b64decode(answer["image"])[:8] == b"\x89PNG\r\n\x1a\n"
         assert len(base64.b64decode(answer["reads"][0])) == 8
+        target = tmp_path / "named.png"
+        answer = adapter._call("step", frames=1, screenshot=True, image_file=str(target))
+        assert answer["image_file"] == str(target) and "image" not in answer
+        assert target.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+        with pytest.raises(EmulatorError, match="image_file"):
+            adapter._call("step", frames=1, screenshot=True, image_file="notes.txt")
+        with pytest.raises(EmulatorError, match="image_file"):
+            adapter._call("screenshot", image_file=7)
         host.write_screenshots = False
         with pytest.raises(EmulatorError, match="did not write a screenshot"):
             adapter.capture_frame()

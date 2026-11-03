@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- On the same PC, screenshots are handed over as a file the app names and reads itself, instead of a base64 copy made in Lua and sent through the socket; `image_transfer="socket"` keeps the old route for an emulator on another PC (T-825).
 - A training step is one request to the emulator as well: buttons, frames and the memory snapshot travel together (T-824).
 - While the game runs, each frame is one request to the emulator: the play clock's step carries the held buttons, the memory snapshot and (at the picture rate) the screenshot, and the frame pump rests until the game is paused (T-823).
 - Adapters can step, read several memory regions and take a screenshot in one request (`step`, `read_many`), and memory snapshots use one request (T-822).

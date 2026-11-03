@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
+import os
+import tempfile
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -40,6 +43,9 @@ from retro_ai_lab.emulator.bizhawk.protocol import (
     open_link,
 )
 
+IMAGE_TRANSFERS = ("auto", "file", "socket")
+LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
 DEFAULT_CALL_TIMEOUT_S = 5.0
 SCRIPT_PATH = Path(__file__).with_name("retro_ai_lab.lua")  # the bridge the app ships
 DEFAULT_MAX_REGION_BYTES = 256 * 1024
@@ -64,10 +70,16 @@ class BizHawkAdapter(EmulatorAdapter):
         *,
         call_timeout_s: float = DEFAULT_CALL_TIMEOUT_S,
         max_region_bytes: int = DEFAULT_MAX_REGION_BYTES,
+        image_transfer: str = "auto",
     ) -> None:
         super().__init__()
         if not isinstance(host, str) or not host.strip():
             raise ConfigurationError("The BizHawk host must be a non-empty string.")
+        if image_transfer not in IMAGE_TRANSFERS:
+            raise ConfigurationError(
+                f"image_transfer must be one of {', '.join(IMAGE_TRANSFERS)}, "
+                f"not {image_transfer!r}."
+            )
         if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
             raise ConfigurationError("The BizHawk port must be a whole number from 1 to 65535.")
         if (
@@ -84,6 +96,15 @@ class BizHawkAdapter(EmulatorAdapter):
         self._port = port
         self._call_timeout_s = float(call_timeout_s)
         self._max_region_bytes = max_region_bytes
+        # Screenshots as a file when the emulator is on this PC (T-825): the
+        # script writes the PNG where we say and only the path crosses the
+        # socket, instead of a base64 copy made byte by byte in Lua.
+        if image_transfer == "auto":
+            image_transfer = "file" if host.strip().lower() in LOCAL_HOSTS else "socket"
+        self._image_transfer = image_transfer
+        self._image_path = os.path.join(
+            tempfile.gettempdir(), f"retro_ai_lab_{os.getpid()}_{id(self):x}.png"
+        )
         self._link: Link | None = None
         self._hello: dict[str, Any] = {}
         self._description: Description | None = None
@@ -96,6 +117,16 @@ class BizHawkAdapter(EmulatorAdapter):
     @property
     def host(self) -> str:
         return self._host
+
+    @property
+    def image_transfer(self) -> str:
+        """How screenshots travel: ``file`` (same PC) or ``socket`` (base64)."""
+        return self._image_transfer
+
+    @property
+    def image_path(self) -> str:
+        """Where the script writes screenshots when they travel as a file."""
+        return self._image_path
 
     @property
     def port(self) -> int:
@@ -243,6 +274,7 @@ class BizHawkAdapter(EmulatorAdapter):
             fields["reads"] = self._read_requests(reads)
         if screenshot:
             fields["screenshot"] = True
+            fields.update(self._image_fields())
         answer = self._call("step", **fields)
         if pressed is not None:
             self._held = pressed
@@ -251,8 +283,13 @@ class BizHawkAdapter(EmulatorAdapter):
         return StepResult(frames, data, frame)
 
     def _do_capture_frame(self) -> Frame:
-        answer = self._call("screenshot")
+        answer = self._call("screenshot", **self._image_fields())
         return self._frame_from(answer)
+
+    def _image_fields(self) -> dict[str, Any]:
+        if self._image_transfer == "file":
+            return {"image_file": self._image_path}
+        return {}
 
     def _do_advance_frames(self, n: int) -> None:
         self._call("step", frames=n)
@@ -300,13 +337,36 @@ class BizHawkAdapter(EmulatorAdapter):
 
     def _frame_from(self, answer: dict[str, Any]) -> Frame:
         image = answer.get("image")
-        if image is None:
-            raise EmulatorError("The emulator did not take a screenshot.")
-        if not isinstance(image, str):
-            raise ProtocolError("The emulator's screenshot was not base64 text.")
-        data = _b64decode(image, "screenshot")
+        path = answer.get("image_file")
+        if path is not None and image is None:
+            data = self._read_image_file(path)
+        else:
+            if image is None:
+                raise EmulatorError("The emulator did not take a screenshot.")
+            if not isinstance(image, str):
+                raise ProtocolError("The emulator's screenshot was not base64 text.")
+            data = _b64decode(image, "screenshot")
         number = answer.get("frame")
         return decode_image(data, number=number if isinstance(number, int) else 0)
+
+    def _read_image_file(self, path: object) -> bytes:
+        if not isinstance(path, str) or path != self._image_path:
+            raise ProtocolError("The emulator named a screenshot file the app did not ask for.")
+        try:
+            with open(path, "rb") as file:
+                data = file.read()
+        except OSError as exc:
+            raise EmulatorError(
+                f"The emulator says it wrote a screenshot to {path}, but this app cannot "
+                f"read it ({exc.strerror or exc}). If the emulator runs on another PC, "
+                "connect with image_transfer='socket'."
+            ) from exc
+        finally:
+            with contextlib.suppress(OSError):
+                os.remove(path)
+        if not data:
+            raise EmulatorError("The emulator wrote an empty screenshot.")
+        return data
 
     def _call(self, cmd: str, **fields: Any) -> dict[str, Any]:
         link = self._link
@@ -337,4 +397,10 @@ def _b64decode(text: str, what: str) -> bytes:
         raise ProtocolError(f"The emulator's {what} was not valid base64.") from exc
 
 
-__all__ = ["DEFAULT_CALL_TIMEOUT_S", "DEFAULT_MAX_REGION_BYTES", "BizHawkAdapter"]
+__all__ = [
+    "DEFAULT_CALL_TIMEOUT_S",
+    "DEFAULT_MAX_REGION_BYTES",
+    "IMAGE_TRANSFERS",
+    "LOCAL_HOSTS",
+    "BizHawkAdapter",
+]

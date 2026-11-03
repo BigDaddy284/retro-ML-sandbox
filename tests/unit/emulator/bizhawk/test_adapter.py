@@ -460,3 +460,51 @@ def test_bundled_step_refuses_a_lying_answer() -> None:
             adapter.step(1, reads=[("ram", 0, 8)])
         assert adapter.is_connected
         adapter.disconnect()
+
+
+# ------------------------------------------------ T-825 screenshots as a file
+
+
+def test_screenshots_travel_as_a_file_on_this_pc() -> None:
+    import os
+
+    with BizHawkSimulator() as sim:
+        adapter = BizHawkAdapter(port=sim.port)
+        assert adapter.image_transfer == "file" and adapter.image_path.endswith(".png")
+        adapter.connect(timeout_s=1.0)
+        frame = adapter.capture_frame()
+        assert frame.number == sim.game.state.frame
+        assert sim.requests[-1]["image_file"] == adapter.image_path
+        assert sim.image_files == [adapter.image_path]
+        assert not os.path.exists(adapter.image_path)  # read and removed
+        result = adapter.step(1, screenshot=True)
+        assert result.frame is not None and sim.requests[-1]["image_file"] == adapter.image_path
+        assert "image" not in sim.requests[-1]
+        sim.write_image_files = False  # the emulator claims a file that is not there
+        with pytest.raises(EmulatorError, match="image_transfer='socket'"):
+            adapter.capture_frame()
+        assert adapter.is_connected
+        adapter.disconnect()
+
+
+def test_screenshots_travel_as_base64_for_another_pc() -> None:
+    with BizHawkSimulator() as sim:
+        adapter = BizHawkAdapter(port=sim.port, image_transfer="socket")
+        adapter.connect(timeout_s=1.0)
+        adapter.capture_frame()
+        assert "image_file" not in sim.requests[-1] and sim.image_files == []
+        adapter.disconnect()
+    assert BizHawkAdapter(host="192.168.1.20").image_transfer == "socket"
+    assert BizHawkAdapter(host="LOCALHOST").image_transfer == "file"
+    assert BizHawkAdapter(host="192.168.1.20", image_transfer="file").image_transfer == "file"
+    with pytest.raises(ConfigurationError, match="image_transfer"):
+        BizHawkAdapter(image_transfer="mmf")
+
+
+def test_a_screenshot_file_the_app_did_not_ask_for_is_refused() -> None:
+    with BizHawkSimulator() as sim:
+        adapter = BizHawkAdapter(port=sim.port, image_transfer="socket")
+        adapter.connect(timeout_s=1.0)
+        with pytest.raises(ProtocolError, match="did not ask for"):
+            adapter._frame_from({"image_file": "/somewhere/else.png"})
+        adapter.disconnect()
