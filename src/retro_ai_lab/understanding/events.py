@@ -23,6 +23,16 @@ from retro_ai_lab.understanding.knowledge import Confidence, Knowledge, Variable
 
 RESET_NEEDS = 2  # values back at their starting values together, for a reset
 RESET_SURE = Confidence.MEDIUM  # and at least one of them this sure (T-838)
+RESET_SHARE = 0.5  # and at least this share of every value that has moved (T-846)
+"""A restart is most of the game going home, not a few bytes (T-846).
+
+With 1,600 believed values on the user's Super Mario Bros., some handful of
+them was back at its first value on nearly every step while hundreds of
+others were not, and every go ended within eight frames as a "reset" blaming
+a different handful each time. The game starting over puts most of what has
+moved back where it began, so the values going home together must be at
+least half of all the values that have moved since the detector saw them.
+"""
 """Shaky values going home together are not a restart (T-838).
 
 On the user's Super Mario Bros. the 6502's stack page and other scratch
@@ -88,6 +98,7 @@ class _Watch:
     first: int
     last: int
     typical_gain: float = 0.0  # running average of upward steps (scores)
+    moved: bool = False  # has ever left its first value (T-846)
 
 
 class EventDetector:
@@ -107,6 +118,7 @@ class EventDetector:
         self._gain_factor = gain_factor
         self._watches: dict[str, _Watch] = {}
         self._observed = 0
+        self._moved = 0  # watches that have moved at least once (T-846)
         # The watch list, kept until the knowledge or the snapshot's regions change
         # (T-841): rebuilding it from 1,600 variables on every snapshot cost more than
         # the step itself, and a variable whose region the snapshot does not carry is
@@ -122,9 +134,15 @@ class EventDetector:
     def watching(self) -> tuple[str, ...]:
         return tuple(self._watches)
 
+    @property
+    def moved(self) -> int:
+        """How many watched values have ever left their first value."""
+        return self._moved
+
     def reset(self) -> None:
         self._watches.clear()
         self._observed = 0
+        self._moved = 0
 
     def _tracked(self, regions: tuple[str, ...]) -> list[Variable]:
         key = (self._knowledge.version, regions)
@@ -155,9 +173,14 @@ class EventDetector:
             watch = self._watches.get(var.id)
             if watch is None or watch.variable != var:
                 # New (or changed) variable: start watching, no event yet.
+                if watch is not None and watch.moved:
+                    self._moved -= 1
                 self._watches[var.id] = _Watch(var, value, value)
                 continue
             if value != watch.last:
+                if not watch.moved:
+                    watch.moved = True
+                    self._moved += 1
                 events.extend(self._judge(watch, value, snapshot.frame))
                 if value == watch.first and value != watch.last and not _cycles(var):
                     returned_home.append(watch)
@@ -165,7 +188,8 @@ class EventDetector:
                         dropped = True
             watch.last = value
         sure = any(w.variable.confidence >= RESET_SURE for w in returned_home)
-        if len(returned_home) >= RESET_NEEDS and dropped and sure:
+        most = len(returned_home) >= RESET_SHARE * self._moved
+        if len(returned_home) >= RESET_NEEDS and most and dropped and sure:
             names = ", ".join(w.variable.display_name for w in returned_home)
             events.append(
                 GameEvent(
@@ -284,6 +308,7 @@ class EventLog:
 __all__ = [
     "CYCLES",
     "RESET_NEEDS",
+    "RESET_SHARE",
     "RESET_SURE",
     "EventDetector",
     "EventKind",
