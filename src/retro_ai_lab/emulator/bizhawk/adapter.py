@@ -57,15 +57,43 @@ The memory observer reads every region whole, every frame; a multi-megabyte
 bus would swamp both the line protocol and the discovery engine.
 """
 
-NOT_LIVE_MEMORY_WORDS = frozenset({"rom", "vrom", "bus", "bios", "registers"})
+NOT_LIVE_MEMORY_WORDS = frozenset(
+    {
+        "rom",
+        "vrom",
+        "bus",
+        "bios",
+        "registers",
+        # Picture and sound memory (T-835): see the note below.
+        "oam",
+        "vram",
+        "ciram",
+        "nametables",
+        "palram",
+        "palette",
+        "palettes",
+        "cgram",
+        "cram",
+        "vsram",
+        "apuram",
+    }
+)
 """Words in a domain's name that mark it as not worth snapshotting (T-827).
 
-Only live, writable memory tells the AI anything: ROM and BIOS never change,
-and a bus (EmuHawk's ``System Bus``, ``PPU Bus``) mirrors RAM and ROM plus
-hardware registers, some of which change the game's state when read. On a
-NES those domains are 100 KB a frame against 2 KB of RAM. A "registers"
+Only the game's own working memory tells the AI anything: ROM and BIOS never
+change, and a bus (EmuHawk's ``System Bus``, ``PPU Bus``) mirrors RAM and ROM
+plus hardware registers, some of which change the game's state when read. On
+a NES those domains are 100 KB a frame against 2 KB of RAM. A "registers"
 domain (NesHawk's ``CPU registers``) is a view of the CPU, not memory, and
 reading it whole threw on the user's EmuHawk (T-833).
+
+Picture memory (sprite attributes in ``OAM``, tile maps in ``CIRAM
+(nametables)`` or ``VRAM``, palettes in ``PALRAM``/``CGRAM``/``CRAM``) and
+sound memory (``APURAM``) are rewritten every frame from the state in RAM,
+and the picture is already what the screen capture shows. On the user's
+Super Mario Bros. they made 1646 watched values out of a 2 KB game: sprite
+bytes bounce between a few values and land back on their first, which reads
+as lives lost and as a reset, so every go ended after a step or two (T-835).
 """
 
 UNREADABLE_REGION = re.compile(r"could not read \d+ bytes at \d+ of '(?P<domain>[^']+)'")

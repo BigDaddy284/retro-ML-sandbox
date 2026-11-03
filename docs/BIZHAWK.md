@@ -87,9 +87,13 @@ disconnect and watch it run again.
 
 * One app connection at a time; a second connection is refused until the
   first disconnects.
-* Only live memory is watched: ROM, BIOS and bus domains (`System Bus`,
-  `PPU Bus`) are left out, because they never change or mirror what RAM
-  already says, and reading a bus can poke hardware registers.
+* Only the game's working memory is watched: ROM, BIOS and bus domains
+  (`System Bus`, `PPU Bus`) are left out, because they never change or mirror
+  what RAM already says, and reading a bus can poke hardware registers.
+  Picture and sound memory (`OAM`, `CIRAM (nametables)`, `VRAM`, `PALRAM`,
+  `CGRAM`, `APURAM`) is left out too: the game draws it from RAM every frame,
+  the screen capture already shows it, and its bouncing sprite bytes read as
+  lives lost and as resets.
 * Memory regions above 256 KiB (a whole system bus, for example) are not
   offered to the learning side, because the app reads a region whole every
   step. The handshake still lists them.
