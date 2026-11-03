@@ -16,7 +16,38 @@ An emulator-based machine learning sandbox that lets children train an AI to pla
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Module layout, interfaces and recorded architecture decisions |
 | [`CHANGELOG.md`](CHANGELOG.md) | Notable changes per task |
 
-## Running it
+## Setting up on Windows (no exe yet)
+
+The app is not published as an installer or exe yet, so it runs from this
+checkout with Python. Once:
+
+1. Install Python 3.11 or newer from <https://www.python.org/downloads/> and
+   tick **Add python.exe to PATH** in the installer.
+2. Get this repository onto the PC (GitHub's **Code > Download ZIP**, unzipped,
+   or `git clone`).
+3. Open a Command Prompt in that folder (type `cmd` in the folder's address bar
+   in Explorer) and run these three lines one at a time, pressing Enter after
+   each and waiting for the prompt to come back. The second takes a minute or
+   two and prints a lot.
+
+   ```
+   python -m venv .venv
+   .venv\Scripts\activate
+   pip install -e .
+   ```
+
+Every time after that, in a Command Prompt in the same folder:
+
+```
+.venv\Scripts\activate
+retro-ai-lab
+```
+
+The desktop window opens with the console box at the top. To play on a real
+emulator, follow [docs/BIZHAWK.md](docs/BIZHAWK.md) or
+[docs/MGBA.md](docs/MGBA.md).
+
+## Running it (developers)
 
 ```bash
 python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activate

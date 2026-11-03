@@ -9,19 +9,27 @@ the machine (the script only accepts connections from 127.0.0.1).
 ## What you need
 
 * Windows with **BizHawk 2.9 or newer** (tested design target: 2.10). Download
-  from <https://tasvideos.org/BizHawk> and run its prerequisites installer once.
+  the zip from <https://tasvideos.org/BizHawk> and unzip it anywhere (for
+  example `C:\BizHawk`); run its prerequisites installer once (that only adds
+  Windows runtimes, it does not install BizHawk itself).
 * A game ROM you own, for a console BizHawk supports (NES, SNES, Game Boy, Mega
   Drive and many more).
-* Retro AI Lab (the built `RetroAILab.exe` or `pip install -e .` in a checkout).
+* Retro AI Lab running on the same PC. There is no exe yet: follow **Setting
+  up on Windows** in the [README](../README.md) once, then start it with
+  `.venv\Scripts\activate` and `retro-ai-lab` from the checkout folder.
 
 ## Starting a session
 
-1. Open EmuHawk and load the ROM (File > Open ROM).
-2. Open the Lua console: **Tools > Lua Console**, then **Script > Open Script**
-   and pick `retro_ai_lab.lua`. In a checkout it is at
-   `src/retro_ai_lab/emulator/bizhawk/retro_ai_lab.lua`; the built app keeps it
-   under `retro_ai_lab/emulator/bizhawk/` next to the executable. The console
-   prints `Retro AI Lab is waiting for the app on port 43110.`
+No Lua knowledge is needed: the script is written, you only open it.
+
+1. Run `EmuHawk.exe` from the BizHawk folder and load the ROM: **File > Open
+   ROM**. The game starts playing.
+2. In EmuHawk's menu bar click **Tools > Lua Console**. A small new window
+   opens. In *that* window's menu click **Script > Open Script**, browse to the
+   checkout and pick `src\retro_ai_lab\emulator\bizhawk\retro_ai_lab.lua`.
+   The script appears in the list with a green tick and the console prints
+   `Retro AI Lab is waiting for the app on port 43110.` Leave the window open.
+   (A red X means the script hit an error; the text in the console says what.)
 3. In Retro AI Lab pick **BizHawk (EmuHawk)** in the console box and press
    **Connect**. The game pauses (the script holds it so the AI can step one
    frame at a time) and the status line shows the game's name.

@@ -13,16 +13,18 @@ from 127.0.0.1).
 * **mGBA 0.10 or newer** (the first version with scripting). Download from
   <https://mgba.io/downloads.html>.
 * A Game Boy or Game Boy Advance ROM you own.
-* Retro AI Lab (the built `RetroAILab.exe` or `pip install -e .` in a checkout).
+* Retro AI Lab running on the same PC. There is no exe yet: follow **Setting
+  up on Windows** in the [README](../README.md) once, then start it with
+  `.venv\Scripts\activate` and `retro-ai-lab` from the checkout folder.
 
 ## Starting a session
 
 1. Open mGBA and load the ROM (File > Load ROM).
-2. Open the scripting window: **Tools > Scripting...**, then **File > Load
-   script** and pick `retro_ai_lab.lua`. In a checkout it is at
-   `src/retro_ai_lab/emulator/mgba/retro_ai_lab.lua`; the built app keeps it
-   under `retro_ai_lab/emulator/mgba/` next to the executable. The scripting
-   console prints `Retro AI Lab is waiting for the app on port 43110.`
+2. Open the scripting window: **Tools > Scripting...**, then in that window
+   **File > Load script**, browse to the checkout and pick
+   `src\retro_ai_lab\emulator\mgba\retro_ai_lab.lua`. No Lua knowledge is
+   needed. The scripting console prints
+   `Retro AI Lab is waiting for the app on port 43110.` Leave the window open.
 3. In Retro AI Lab pick **mGBA** in the console box and press **Connect**. The
    status line shows the game's name.
 4. Disconnect in the app, or close the scripting window, to hand the game back.
