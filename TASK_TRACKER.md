@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-705 – DQN learner (Phase 7)
+- **Current task:** T-706 – Automatic algorithm choice and the "How the AI learns" control (Phase 7)
 - **Last approved checkpoint:** `main` after T-507 (PRs #43–#49 merging in order as CI passes; T-701 stacked on them)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only the BizHawk work (T-110 onward). ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -79,7 +79,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-702 | Experience replay: a bounded memory of past steps the AI can learn from again | 7 | Done | 5/5 | see PR #51 |
 | T-703 | Feature vectors: a situation as numbers a neural network can read | 7 | Done | 6/6 | see PR #52 |
 | T-704 | Small neural network in NumPy (layers, Adam, gradient check; no new dependency) | 7 | Done | 6/6 | see PR #53 |
-| T-705 | DQN learner: network, target network and replay; learns a synthetic task; saves and reloads | 7 | Ready | – | – |
+| T-705 | DQN learner: network, target network and replay; learns a synthetic task; saves and reloads | 7 | Done | 6/6 | see PR #54 |
 | T-706 | Automatic algorithm choice (table while the game is small, network when it grows) and a "How the AI learns" control | 7 | Ready | – | – |
 | T-707 | Learning from demonstrations: the child's play is kept as experience the AI learns from | 7 | Ready | – | – |
 | T-708 | Hierarchical learning: a skill per goal step; the active step picks the skill | 7 | Ready | – | – |
@@ -883,6 +883,24 @@ DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical l
 - **Commit:** see PR. **PR:** #53.
 - **Completion report:** `Network` as planned: He-initialised dense layers, ReLU hidden units, linear outputs, a masked mean Huber loss, hand-written backpropagation checked against central finite differences on every parameter (relative error below 1e-6), Adam with bias correction, `copy()` / `load_from()` for a target network, and a JSON round trip that includes the optimiser moments and step count so training continues exactly after a reload. Parameters are float64 (tiny networks; exactness over speed). Nothing uses it yet; T-705 does.
 
+### T-705 – DQN learner
+- **Status:** Done
+- **Phase:** 7
+- **Objective:** The intermediate learner of DESIGN.md §6.1: a Deep Q-Network that learns from feature vectors with experience replay and a target network, behind the same `Learner` contract as the Q-table, so the training service, the saved brain, the panels and the insights work unchanged.
+- **Scope:** `learning.dqn`: `DQN = "dqn"`; `DQNConfig(hidden=(64, 64), batch_size=32, warmup=32, target_sync=250, learning_rate=1e-3, replay_capacity=10_000, width=32)` (validated); `DQNLearner(space, settings=None, *, seed=None, config=None)` registered as `"dqn"` – epsilon-greedy over the online network's Q-values (`Settings` gives gamma and the exploration schedule; `alpha` is unused), `learn` stores the transition in a `ReplayBuffer` and, once `warmup` transitions are held, trains the network on a random batch towards `r + γ · max Q_target(s')` (0 beyond `done`) with the chosen action masked, syncing the target network every `target_sync` training steps; `known` / `policy()` over the distinct situations in memory (bounded by the replay capacity); `stats()` in plain words; `reset()`; `to_dict` / `from_dict` saving the feature map, both networks, the replay memory, the known situations, the random states and the counts so learning continues exactly after a reload. `algorithms()` becomes `("dqn", "q_table")`. **Out of scope:** choosing the algorithm automatically and the UI control (T-706), demonstrations (T-707), Double DQN / prioritised replay.
+- **Acceptance criteria:**
+  1. `DQNLearner` satisfies `Learner`, builds through `make_learner("dqn", ...)`, reports `algorithm == "dqn"`, and refuses a bad action index, a non-finite reward and a bad config.
+  2. It learns: on the two-state chain and on a six-step corridor (reward only at the end) the greedy policy goes right from every situation within a bounded number of steps, with the value nearer the reward higher.
+  3. Replay and target mechanics: nothing is trained before `warmup` transitions; every `learn` after that trains once on `batch_size` transitions; the target network equals the online one right after each sync and only then.
+  4. Exploration decays per episode to the floor; `reset()` empties memory and knowledge and restores exploration; `known` and `policy()` cover exactly the situations seen; `stats()` names them.
+  5. A learner round-trips through JSON (`learner_from_dict` dispatches to it): the same Q-values, the same next choices and the same next training step as without the reload; wrong controls, wrong algorithm, a newer schema and damaged data are refused.
+  6. The training service runs goes with `algorithm="dqn"` on the Fake Emulator, saves the brain and restores it on reconnect; insights work on the DQN's policy.
+- **Expected changes:** `learning/dqn.py` (new), `learning/__init__.py`, `tests/unit/learning/test_dqn.py` (new), `tests/unit/learning/test_learner.py` (algorithm list).
+- **Test plan:** unit – conformance and validation; learning on the chain and the corridor (seeded); warmup / batch / target-sync bookkeeping; decay, reset, known, policy, stats; JSON round trip and refusals; training service end to end with `algorithm="dqn"`. Regression – full suite.
+- **Results:** 6 / 6 passed / 0 failed / 0 excluded (795 in the full suite, on Python 3.13 and 3.11). Lint, format and strict mypy clean.
+- **Commit:** see PR. **PR:** #54.
+- **Completion report:** `DQNLearner` as planned, registered as `"dqn"`. It reuses `Settings` for gamma and the exploration schedule (`alpha` is unused; the network has its own learning rate in `DQNConfig`), the feature map, the network and the replay buffer from T-702..T-704. The learning test shows it solving the two-state chain in 400 steps and a six-square corridor with a reward only at the end in 1500 steps with a 16-unit hidden layer. The saved brain holds both networks, the replay memory, the known situations and the random states, so the next choice and the next training step after a reload are bit-for-bit the same; a brain saved without the memory or the random states still loads. The service test runs three goes with `algorithm="dqn"` on the Fake Emulator and restores the brain on reconnect. Known limitation: the replay memory makes the saved brain larger (about 200 bytes per transition, 10 000 at most).
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -942,5 +960,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
-- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53).
+- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

@@ -51,7 +51,7 @@ def test_q_learning_agent_is_a_learner_and_reports_its_policy() -> None:
 
 
 def test_registry_builds_by_name_and_rejects_unknown_names() -> None:
-    assert algorithms() == ("q_table",)
+    assert algorithms() == ("dqn", "q_table")
     learner = make_learner("q_table", SPACE, Settings(epsilon=0.3), seed=9)
     assert isinstance(learner, QLearningAgent)
     assert learner.epsilon == 0.3 and learner.space == SPACE
