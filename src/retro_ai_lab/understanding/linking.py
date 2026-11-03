@@ -16,10 +16,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from retro_ai_lab.core import ConfigurationError
-from retro_ai_lab.services.experiments import ExperimentHarness, Trial, constant_plan
 from retro_ai_lab.understanding.knowledge import Evidence, Knowledge, Variable, VariableKind
+
+if TYPE_CHECKING:
+    # Imported lazily at run time: services already import this package, and
+    # loading it first (as the rewards package does) must not go round in a circle.
+    from retro_ai_lab.services.experiments import ExperimentHarness, Trial
 
 Location = tuple[str, int]
 
@@ -73,6 +78,8 @@ def find_input_links(
         raise ConfigurationError("frames and repeats must be positive.")
     if not harness.has_checkpoint:
         raise ConfigurationError("No checkpoint yet; call harness.checkpoint() first.")
+    from retro_ai_lab.services.experiments import constant_plan
+
     idle = [harness.run(constant_plan((), frames), label=f"idle-{i}") for i in range(repeats)]
     unstable: set[Location] = set()
     for other in idle[1:]:

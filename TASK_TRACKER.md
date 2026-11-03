@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** Phase 4 planning (next: E-4 tasks)
-- **Last approved checkpoint:** `main` after T-308
+- **Current task:** T-402 – Reward suggestions from the game knowledge
+- **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -49,6 +49,14 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-307 | "What the AI is doing" panel: discoveries with confidence badges, confirm / correct / reject | 3 | Done | 7/7 | see PR #25 |
 | T-308 | Knowledge persistence wiring: auto-save per game, export / import from the UI | 3 | Done | 10/10 | see PR #26 |
 | E-4 | Reward System (controls, categories, personalities, goals, objectives) | 4 | Epic | – | – |
+| T-401 | Reward model: behaviours with category, trigger, +/- controls, suggested value, enable toggle, JSON round-trip | 4 | Done | 18/18 | see PR #27 |
+| T-402 | Reward suggestions: derive behaviours and suggested values from the game knowledge | 4 | Planned | – | – |
+| T-403 | AI personalities: Explorer, Collector, Completionist, Speedrunner, Battler, Survivor, Balanced presets | 4 | Planned | – | – |
+| T-404 | Reward service: per-game profile persistence, live reward tally from events | 4 | Planned | – | – |
+| T-405 | Reward exploitation detection with plain-words explanation | 4 | Planned | – | – |
+| T-406 | Rewards panel: categories that expand, +/- buttons, value, toggle, suggested, personality picker | 4 | Planned | – | – |
+| T-407 | Goals and objectives model: overall goal, objectives with detection, dependencies, completion | 4 | Planned | – | – |
+| T-408 | Goals panel: edit the objective structure, see completion and confidence | 4 | Planned | – | – |
 | E-5 | Basic Learning (tabular Q-learning, save/load) | 5 | Epic | – | – |
 | E-6 | Training Interface (live/background, modes, graphs, history) | 6 | Epic | – | – |
 | E-7 | Advanced Learning (DQN, hierarchical RL, demonstrations) | 7 | Epic | – | – |
@@ -440,6 +448,24 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 10 / 10 passed / 0 failed / 0 excluded (604 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Phase 3 (Game Understanding) is complete on the fake emulator: the app watches a game, proposes what its bytes mean with evidence and honest confidence, experiments with the buttons, detects events and relationships, asks a person to confirm or correct, and remembers it all per game.
 
+### T-401 – Reward model
+- **Status:** Done
+- **Phase:** 4
+- **Objective:** Give children the simple controls DESIGN.md §5.1 asks for: every behaviour the AI can be rewarded for has a +, a -, a current value, an enable/disable toggle and a suggested value, organised into the eight categories of §5.2, with no mathematics on show.
+- **Scope:** `rewards.model`: `Category` enum (Exploration … Completion, with labels), `Trigger` (event kind + optional variable, matches a `GameEvent`), `Behaviour` (id, name, category, trigger, suggested, value, enabled, custom flag, notes; validated and clamped to ±100), `RewardProfile(game_id)` with add/get/remove/by_category, `increase`/`decrease` by one step, `set_value`, `set_enabled`, `reset_to_suggested`, `suggest` (moves the value too unless a person has set it), `reward_for(event)` / `reward_for_events`, JSON `to_dict`/`from_dict` (schema 1). **Out of scope:** deriving behaviours from knowledge (T-402), personalities (T-403), persistence and live tally (T-404), UI (T-406).
+- **Acceptance criteria:**
+  1. Categories and behaviours validate (empty id/name, non-finite or out-of-range values, bad category rejected) and round-trip through JSON; newer schema refused.
+  2. `+` and `-` move the value by one step, clamp at ±100, and mark the behaviour as set by a person; `reset_to_suggested` clears that mark.
+  3. A suggestion updates the suggested value and moves the current value only while a person has not set it.
+  4. Disabled behaviours contribute nothing; `reward_for` sums every enabled matching behaviour; a trigger with no variable matches any variable of that kind; events that match nothing give 0.
+  5. `by_category` lists every category (empty ones too) in the §5.2 order.
+- **Test plan:** category labels/order; trigger matching incl. wildcard; behaviour validation and clamping; profile add/duplicate/get/remove; +/-/clamp/custom; set_value/enable; suggest with and without custom; reward_for with enabled/disabled/multiple; JSON round-trip, bad data, newer schema; hypothesis property: +/- never leave the range.
+- **Results:** 18 / 18 passed / 0 failed / 0 excluded (622 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Importing `retro_ai_lab.understanding` first went round in a circle (understanding → linking → services → discovery → understanding.linking); the linking module now imports the experiment harness lazily, and an import-order test guards every package. `reset_to_suggested` clears the person's mark so suggestions follow again.
+
+### Later Phase 4 tasks
+T-402 to T-408 as listed in the summary table; each gets its own section when started.
+
 ### Later Phase 3 tasks
 None outstanding; refinements will be filed as they come up on real games.
 
@@ -479,5 +505,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-306 completed (PR #24).
 - T-307 completed (PR #25).
 - T-308 completed (PR #26). Phase 3 complete on the fake emulator.
-- Next: Phase 4 (E-4) task breakdown, then T-401.
+- Phase 4 broken into T-401..T-408. T-401 completed (PR #27).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
