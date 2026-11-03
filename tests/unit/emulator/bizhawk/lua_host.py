@@ -125,6 +125,7 @@ class LuaScriptHost:
         self.paused = False
         self.speed: float | None = None
         self.pressed: tuple[str, ...] = ()
+        self.last_pad: tuple[dict[bytes, bool], int | None] | None = None
         self.frames = 0
         self.log: list[bytes] = []
         self.calls: list[str] = []
@@ -359,11 +360,11 @@ class LuaScriptHost:
     def _joypad_set(self, buttons: Any, controller: int | None) -> None:
         self._record("joypad_set")
         labels = {b.label.encode(): b.name for b in BUTTONS}
-        pressed = []
-        for name, value in buttons.items():
-            if value and name in labels:
-                pressed.append(labels[name])
-        self.pressed = tuple(pressed)
+        table = {bytes(name): bool(value) for name, value in buttons.items()}
+        self.last_pad = (table, controller)
+        self.pressed = tuple(
+            labels[name] for name, value in table.items() if value and name in labels
+        )
 
     def _save(self, path: bytes) -> None:
         self._record("save")

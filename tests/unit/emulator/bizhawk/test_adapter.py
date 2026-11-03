@@ -48,8 +48,15 @@ def test_handshake_disconnect_and_idempotence() -> None:
         assert info.system == SYSTEM and info.title == ROM_NAME
         assert info.rom_hash == "toyracer-0"
         # capabilities follow the simulator's commands: only screenshots so far
-        assert adapter.capabilities() == Capabilities(screen_capture=True)
-        assert adapter.description.commands == {"hello", "ping", "mode", "bye", "screenshot"}
+        assert adapter.capabilities() == Capabilities(screen_capture=True, input=True)
+        assert adapter.description.commands == {
+            "hello",
+            "ping",
+            "mode",
+            "bye",
+            "screenshot",
+            "input",
+        }
         assert adapter.buttons() == tuple(Button(b.name, b.label) for b in BUTTONS)
         assert adapter.description.button_names["start"] == "Start"
         assert adapter.description.regions == (MemoryRegion("ram", 32, description="RAM"),)
@@ -122,6 +129,30 @@ def test_dropped_link_is_noticed_on_the_next_call() -> None:
         with pytest.raises(EmulatorDisconnectedError):
             adapter.ping()
         assert not adapter.is_connected
+
+
+def test_set_input_through_the_simulator() -> None:
+    with BizHawkSimulator() as sim:
+        adapter = BizHawkAdapter(port=sim.port)
+        adapter.connect(timeout_s=1.0)
+        assert adapter.capabilities().input
+        assert adapter.held == frozenset()
+        up, a = Button("up", "Up"), Button("a", "A")
+        adapter.set_input({up, a})
+        assert adapter.held == {up, a}
+        expected = dict.fromkeys(sim.held, False)
+        expected.update({"Up": True, "A": True})
+        assert sim.held == expected
+        assert sim.requests[-1]["buttons"] == expected  # the whole pad, every time
+        with pytest.raises(ConfigurationError, match="Unknown buttons"):
+            adapter.set_input({Button("turbo", "Turbo")})
+        assert sim.requests[-1]["cmd"] == "input" and adapter.held == {up, a}
+        adapter.set_input(())
+        assert adapter.held == frozenset() and not any(sim.held.values())
+        adapter.set_input({up})
+        adapter.disconnect()
+        assert adapter.held == frozenset()
+        wait_until(lambda: not any(sim.held.values()))
 
 
 def test_capture_frame_through_the_simulator() -> None:
