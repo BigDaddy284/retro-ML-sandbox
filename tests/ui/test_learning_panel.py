@@ -8,6 +8,7 @@ import pytest
 from pytestqt.qtbot import QtBot
 
 from retro_ai_lab.core import Capabilities
+from retro_ai_lab.emulator.fake.adapter import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
 from retro_ai_lab.services import DiscoveryUpdated
 from retro_ai_lab.training import Mode, Speed, Status
@@ -185,7 +186,7 @@ def test_manual_mode_leaves_the_controls_with_the_child(qtbot: QtBot, context: A
 
 
 def test_forget_and_link_loss(panel: LearningPanel, context: AppContext) -> None:
-    connect(context, drop_after_ops=400)
+    connect(context)
     t = context.training
     panel.start()
     panel.forget()
@@ -195,6 +196,12 @@ def test_forget_and_link_loss(panel: LearningPanel, context: AppContext) -> None
     assert "forgotten" in panel.note_text
     assert t.agent is not None and t.agent.updates == 0 and panel.go_rows() == ()
     panel.start()
+    for _ in range(3):
+        assert panel.tick() == 1
+    assert t.episode is not None  # a go is running when the link goes
+    adapter = context.connection.adapter
+    assert isinstance(adapter, FakeEmulatorAdapter)
+    adapter.drop_link()
     while context.connection.is_connected:
         panel.tick()
     assert t.status is Status.IDLE and not panel.ticking
@@ -272,3 +279,40 @@ def test_learn_from_my_moves_again(qtbot: QtBot, context: AppContext) -> None:
     learning.rehearse()
     assert agent.updates == before + 3 and "learned from your 3 moves again" in learning.note_text
     w.close()
+
+
+def test_practise_from_here_pins_and_forgets_the_spot(
+    panel: LearningPanel, context: AppContext
+) -> None:
+    from retro_ai_lab.ui.learning_panel import (
+        PIN_TEXT,
+        PINNED_NOTE,
+        SPOT_LINE,
+        UNPIN_TEXT,
+        UNPINNED_NOTE,
+    )
+
+    button = panel.findChild(object, "spot_button")
+    assert button is not None and button.text() == PIN_TEXT and not button.isEnabled()
+    connect(context)
+    t = context.training
+    assert button.isEnabled()
+    panel.toggle_spot()
+    assert t.spot_pinned and button.text() == UNPIN_TEXT
+    assert panel.note_text == PINNED_NOTE and SPOT_LINE in panel.status_text
+    panel.start()
+    assert not button.isEnabled()
+    panel.tick()
+    panel.stop()
+    assert button.isEnabled() and button.text() == UNPIN_TEXT
+    panel.toggle_spot()
+    assert not t.spot_pinned and button.text() == PIN_TEXT
+    assert panel.note_text == UNPINNED_NOTE and SPOT_LINE not in panel.status_text
+    context.connection.disconnect()
+    connect(
+        context,
+        capabilities=Capabilities(
+            memory_read=True, screen_capture=True, frame_advance=True, input=True
+        ),
+    )
+    assert not button.isEnabled()

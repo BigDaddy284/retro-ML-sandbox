@@ -41,6 +41,11 @@ from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.learning_graph import LearningGraph
 
 IDLE_TEXT = "Connect to a game, then press Start to let the AI learn it."
+PIN_TEXT = "Practise from here"
+UNPIN_TEXT = "Forget this spot"
+PINNED_NOTE = "From now on every go starts here. Press again to forget this spot."
+UNPINNED_NOTE = "Spot forgotten: goes start wherever the game is."
+SPOT_LINE = "Every go starts from the spot you picked."
 COLUMNS = ("Go", "How", "Steps", "Points", "Ended by")
 MAX_ROWS = 30
 FRAME_MS = 1000 / 60
@@ -109,6 +114,10 @@ class LearningPanel(QWidget):
         self._rehearse.setObjectName("rehearse_button")
         self._rehearse.setToolTip("The AI goes over every move you showed it one more time.")
         self._rehearse.clicked.connect(self.rehearse)
+        self._spot = QPushButton(PIN_TEXT, self)
+        self._spot.setObjectName("spot_button")
+        self._spot.setToolTip("Practise this part of the game: every go starts from here.")
+        self._spot.clicked.connect(self.toggle_spot)
 
         self._status = QLabel(IDLE_TEXT, self)
         self._status.setObjectName("learning_status")
@@ -141,6 +150,7 @@ class LearningPanel(QWidget):
         buttons.addWidget(self._start)
         buttons.addWidget(self._pause)
         buttons.addWidget(self._stop)
+        buttons.addWidget(self._spot)
         buttons.addStretch(1)
         buttons.addWidget(self._rehearse)
         buttons.addWidget(self._forget)
@@ -258,6 +268,16 @@ class LearningPanel(QWidget):
         self._call(self._training.stop)
         self.refresh()
 
+    def toggle_spot(self) -> None:
+        """Pin the game's position as the spot to practise, or forget the pinned one."""
+        t = self._training
+        if t.spot_pinned:
+            if self._call(t.unpin_spot):
+                self._note.setText(UNPINNED_NOTE)
+        elif self._call(t.pin_spot):
+            self._note.setText(PINNED_NOTE)
+        self.refresh()
+
     def forget(self) -> None:
         if self._call(self._training.forget):
             self._note.setText("The AI has forgotten this game and will start fresh.")
@@ -304,6 +324,9 @@ class LearningPanel(QWidget):
         self._stop.setEnabled(enabled and not idle)
         self._forget.setEnabled(enabled and idle)
         self._rehearse.setEnabled(enabled and idle and t.demonstrations.count > 0)
+        self._spot.setText(UNPIN_TEXT if t.spot_pinned else PIN_TEXT)
+        harness = t.harness
+        self._spot.setEnabled(enabled and idle and harness is not None and harness.available())
         self._show_status()
         self._show_goes()
         self._arm_ticker()
@@ -357,6 +380,8 @@ class LearningPanel(QWidget):
             lines.append(f"You have shown the AI {shown} move{'s' if shown != 1 else ''}.")
         if t.fresh_start:
             lines.append(t.fresh_start)
+        if t.spot_pinned:
+            lines.append(SPOT_LINE)
         self._status.setText("\n".join(lines))
 
     def _show_insights(self) -> None:
@@ -416,4 +441,16 @@ class LearningPanel(QWidget):
         self.refresh()
 
 
-__all__ = ["COLUMNS", "ENDED_BY", "IDLE_TEXT", "MAX_ROWS", "LearningPanel", "go_cells"]
+__all__ = [
+    "COLUMNS",
+    "ENDED_BY",
+    "IDLE_TEXT",
+    "MAX_ROWS",
+    "PINNED_NOTE",
+    "PIN_TEXT",
+    "SPOT_LINE",
+    "UNPINNED_NOTE",
+    "UNPIN_TEXT",
+    "LearningPanel",
+    "go_cells",
+]
