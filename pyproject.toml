@@ -36,6 +36,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "retro_ai_lab.emulator.bizhawk" = ["*.lua"]
+"retro_ai_lab.emulator.mgba" = ["*.lua"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
