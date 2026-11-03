@@ -21,8 +21,9 @@ from retro_ai_lab.services import (
     ObservationService,
     RewardService,
 )
-from retro_ai_lab.storage import GoalStore, RewardStore
+from retro_ai_lab.storage import BrainStore, GoalStore, RewardStore
 from retro_ai_lab.training import (
+    Brain,
     EpisodeFinished,
     Mode,
     Speed,
@@ -85,6 +86,7 @@ def lab(tmp_path: Path) -> Lab:
         max_steps=50,
         settings=Settings(epsilon=0.5),
         seed=1,
+        store=BrainStore(tmp_path / "b"),
     )
     finished: list[EpisodeFinished] = []
     changes: list[TrainingStateChanged] = []
@@ -371,10 +373,10 @@ def test_link_loss_closes_the_go_and_reconnect_starts_afresh(lab: Lab) -> None:
     assert not t.step()
     with pytest.raises(ConfigurationError):
         t.start()
-    assert t.agent is agent  # kept until the next game, for saving (T-506)
+    assert t.agent is agent  # kept until the next game
     lab.connect()
-    assert t.enabled and t.agent is not agent and t.history == () and t.episodes == 0
-    assert t.summary() == "Ready to train."
+    assert t.enabled and t.agent is not agent and t.episodes == 1  # loaded from disk (T-506)
+    assert t.summary() == "Resting after 1 go."
     # A disconnect while idle is quiet.
     lab.connection.disconnect()
     assert [c.reason for c in lab.changes] == ["start", "disconnected"]
@@ -385,6 +387,102 @@ def test_app_context_wires_the_training_service(tmp_path: Path) -> None:
 
     context = AppContext(data_dir=tmp_path)
     assert isinstance(context.training, TrainingService)
+    assert context.training.store is context.brain_store
+    assert context.brain_store.folder == tmp_path / "brains"
     context.connection.connect("fake")
     assert context.training.enabled
     context.connection.disconnect()
+
+
+# ------------------------------------------------------------ persistence (T-506)
+
+
+def test_brain_is_saved_as_it_goes_and_restored_on_reconnect(lab: Lab) -> None:
+    lab.connect()
+    t = lab.training
+    store = t.store
+    assert store is not None and t.game_id is not None and t.saves == 0
+    assert not store.exists(t.game_id) and t.fresh_start == ""
+    assert t.brain() is not None and t.brain().episodes == 0  # type: ignore[union-attr]
+    t.train(2)
+    assert t.saves == 2 and store.exists(t.game_id)
+    t.start()
+    t.step()
+    assert t.save() == store.path_for(t.game_id) and t.saves == 3
+    t.stop()  # closes a go, which saves
+    assert t.saves == 4
+    agent = t.agent
+    assert agent is not None
+    before = agent.to_dict()
+    lab.connection.disconnect()
+    assert t.saves == 5 and t.save() is None  # nothing to save once disconnected
+    lab.connect()
+    again = t.agent
+    assert again is not None and again is not agent and again.to_dict() == before
+    assert t.episodes == 3 and [r.number for r in t.history] == [1, 2, 3]
+    assert t.total_steps == t.history[0].result.steps + t.history[1].result.steps + 1
+    assert t.summary() == "Resting after 3 goes."
+    # Later goes carry on the numbering.
+    t.train(1)
+    assert t.last is not None and t.last.number == 4 and t.episodes == 4
+
+
+def test_saved_brain_for_different_controls_or_damaged_file_starts_afresh(lab: Lab) -> None:
+    lab.connect()
+    t = lab.training
+    store = t.store
+    game_id = t.game_id
+    assert store is not None and game_id is not None
+    t.train(1)
+    lab.connection.disconnect()
+    data = store.load(game_id)
+    data["agent"]["space"]["actions"] = data["agent"]["space"]["actions"][:2]
+    data["agent"]["table"] = {"actions": 2, "rows": {}}
+    store.save(data)
+    lab.connect()
+    assert t.enabled and t.episodes == 0 and t.history == ()
+    assert "different controls" in t.fresh_start
+    lab.connection.disconnect()  # saves the fresh brain over the odd one
+    assert Brain.from_dict(store.load(game_id)).episodes == 0
+    store.path_for(game_id).write_text("{", "utf-8")
+    lab.connect()
+    assert t.enabled and "starting afresh" in t.fresh_start
+    t.train(1)
+    assert t.fresh_start != "" and t.episodes == 1
+    lab.connection.disconnect()
+    lab.connect()
+    assert t.fresh_start == "" and t.episodes == 1
+
+
+def test_forget_starts_from_scratch_and_deletes_the_file(lab: Lab) -> None:
+    lab.connect()
+    t = lab.training
+    store = t.store
+    game_id = t.game_id
+    assert store is not None and game_id is not None
+    t.train(1)
+    t.start()
+    with pytest.raises(ConfigurationError, match="Stop training"):
+        t.forget()
+    t.stop()
+    assert store.exists(game_id)
+    old = t.agent
+    t.forget()
+    assert not store.exists(game_id) and t.agent is not old and t.agent is not None
+    assert t.agent.updates == 0 and t.episodes == 0 and t.history == ()
+    assert lab.changes[-1].reason == "forget" and t.summary() == "Ready to train."
+    t.train(1)
+    assert t.episodes == 1 and store.exists(game_id)
+    lab.connection.disconnect()
+    with pytest.raises(ConfigurationError, match="no brain"):
+        t.forget()
+
+
+def test_service_without_a_store_never_saves(tmp_path: Path, lab: Lab) -> None:
+    t = TrainingService(lab.connection, lab.observation, lab.discovery, lab.bus, max_steps=5)
+    lab.connect()
+    assert t.store is None and t.game_id is not None
+    t.train(1)
+    assert t.saves == 0 and t.save() is None
+    lab.connection.disconnect()
+    assert t.saves == 0
