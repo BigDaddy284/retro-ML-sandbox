@@ -5,9 +5,9 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** none – Phase 7 complete; next: Phase 4/3 leftovers (T-410, T-110) or Phase 8 polish once ADR-005/006 are decided
-- **Last approved checkpoint:** `main` after T-507 (PRs #43–#49 merging in order as CI passes; T-701 stacked on them)
-- **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only the BizHawk work (T-110 onward). ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
+- **Current task:** none – T-110 done; next: T-111 (BizHawk adapter: connect and handshake)
+- **Last approved checkpoint:** `main` after T-709 (PR #58)
+- **Open blockers:** none for development. ADR-005 (BizHawk bridge) is now Accepted with its real-emulator verification left to T-117 on the user's Windows PC. ADR-006 (first demo game) is still *Proposed*: the user picks the game. ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
 ## Summary
 
@@ -26,8 +26,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-010 | Manual controller input from UI to adapter | 1 | Done | 22/22 | see PR #11 |
 | T-011 | Graceful handling of emulator disconnection | 1 | Done | 16/16 | see PR #12 |
 | T-012 | Windows packaging smoke test (launchable build) | 1 | Done | 5/5 + CI build | see PR #13 |
-| T-110 | Spike: confirm BizHawk Lua ↔ socket protocol | 1 | Blocked on ADR-005 | – | – |
-| T-111 | BizHawk adapter: connect and handshake | 1 | Ready after T-110 | – | – |
+| T-110 | Spike: confirm BizHawk Lua ↔ socket protocol | 1 | Done | n/a (docs only) | see PR #59 |
+| T-111 | BizHawk adapter: connect and handshake | 1 | Ready | – | – |
 | T-112 | BizHawk adapter: capabilities and game info | 1 | – | – | – |
 | T-113 | BizHawk adapter: frame capture | 1 | – | – | – |
 | T-114 | BizHawk adapter: controller input | 1 | – | – | – |
@@ -977,8 +977,19 @@ T-402 to T-409 as listed in the summary table; each gets its own section when st
 None outstanding; refinements will be filed as they come up on real games.
 
 ### T-110 – Spike: confirm BizHawk Lua ↔ socket protocol
-- **Status:** Blocked on ADR-005 sign-off and on access to a Windows machine with BizHawk for verification.
-- **Objective:** Prove the communication route (BizHawk Lua `comm` socket API vs. alternatives), message framing, and achievable throughput, and record the result in ARCHITECTURE.md.
+- **Status:** Done
+- **Phase:** 1 (BizHawk)
+- **Objective:** Fix the communication route between EmuHawk and the app, the message framing and the command set, record it in `ARCHITECTURE.md` §5, and say exactly what still needs a real emulator.
+- **Scope:** Documentation only. Checked the BizHawk Lua reference for the `comm`, `memory`, `joypad`, `emu`, `savestate`, `client` and `gameinfo` functions, and Archipelago's `connector_bizhawk_generic.lua` as a worked example of a Lua-side TCP server with newline-delimited JSON on current EmuHawk. Chose LuaSocket (script is the server, app connects) over the built-in `comm.socketServer*` client (needs `--socket_ip/--socket_port` at launch; framing changed in 2.6.2). Defined the commands (`hello`, `read`, `input`, `step`, `screenshot`, `speed`, `save`, `load`, `mode`, `ping`, `bye`), the bundled `step` so a training step is one round trip, and two run modes (hold: emulator paused, frames advance on request; free-run fallback). Decided the test strategy: the Lua script runs in CI under `lupa` (Lua 5.4 in-process) against stubbed EmuHawk globals, plus a Python `BizHawkSimulator` over a real socket. **Out of scope:** any code (T-111 onward); measuring throughput on a real machine (T-117).
+- **Acceptance criteria:**
+  1. `ARCHITECTURE.md` §5 documents route, framing, commands with the Lua API behind each, timing, run modes, throughput expectations and the testing approach.
+  2. ADR-005 is Accepted with the limitation named (real-emulator behaviour verified in T-117).
+  3. Every assumption that only a real EmuHawk can confirm is listed in the "verify" column so T-117 has a checklist.
+- **Expected changes:** `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** n/a (documentation). The protocol itself is tested from T-111 on.
+- **Results:** n/a. Full suite unchanged (819 passing).
+- **Commit:** see PR. **PR:** #59.
+- **Completion report:** The honest limitation: no EmuHawk runs in this environment, so the spike confirms the route from documentation and a widely used working script, not by measurement. Everything that depends on the real emulator (the domain list format, button names per core, whether `emu.frameadvance()` moves a paused emulator, the screenshot file format and cost, `client.speedmode` range) is listed in §5.2 for T-117. The hold-mode question is the one that matters for the adapter's semantics; the free-run fallback keeps the adapter usable either way. `lupa` is added as a dev dependency in T-111 so the Lua script is exercised in CI.
 
 ---
 
@@ -1030,4 +1041,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
 - Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56). T-708 completed (PR #57). T-709 completed (PR #58): Phase 7 complete.
+- T-110 completed (BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
