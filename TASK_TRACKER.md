@@ -1523,7 +1523,7 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Acceptance criteria:** `report` emits normally; with the owner deleted (shiboken `delete`) it returns False and logs; each of the three tasks finishes without raising when its signals object was deleted before `run()`.
 - **Expected changes:** `ui/worker.py` (new), `ui/play_clock.py`, `ui/game_panel.py`, `ui/controller_pad.py`, `tests/ui/test_worker.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
 - **Test plan:** as the criteria (5 tests); regression – full suite on 3.13, UI suite on 3.11.
-- **Results:** 5 new tests; full suite 1045 passed, 10 skipped on 3.13; UI suite 179 passed on 3.11; ruff and mypy (strict, `src`) clean.
+- **Results:** 5 new tests; full suite 1063 passed, 10 skipped on 3.13; UI suite 179 passed on 3.11; ruff and mypy (strict, `src`) clean.
 - **Commit:** see PR. **PR:** see summary table.
 - **Completion report:** a late report with nobody to receive it is dropped quietly instead of ending up in the log as a crash.
 
