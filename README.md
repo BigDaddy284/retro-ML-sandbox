@@ -16,10 +16,22 @@ An emulator-based machine learning sandbox that lets children train an AI to pla
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Module layout, interfaces and recorded architecture decisions |
 | [`CHANGELOG.md`](CHANGELOG.md) | Notable changes per task |
 
-## Setting up on Windows (no exe yet)
+## Setting up on Windows
 
-The app is not published as an installer or exe yet, so it runs from this
-checkout with Python. Once:
+### Option A: the built app (no Python needed)
+
+Every change to `main` builds a Windows app on GitHub. Signed in to GitHub,
+open the repository's **Actions** tab, click the newest green **Package** run,
+and download **RetroAILab-windows** under *Artifacts* at the bottom of the page.
+Unzip it anywhere and run `RetroAILab.exe` (SmartScreen may ask once because
+the app is unsigned: *More info > Run anyway*). The emulator bridge scripts are
+inside that folder at `_internal\retro_ai_lab\emulator\bizhawk\retro_ai_lab.lua`
+and `_internal\retro_ai_lab\emulator\mgba\retro_ai_lab.lua`. GitHub keeps each
+build for 14 days, so fetch a fresh one when it is gone.
+
+### Option B: from source with Python
+
+If the PC cannot reach PyPI (pip times out), use option A instead. Once:
 
 1. Install Python 3.11 or newer from <https://www.python.org/downloads/> and
    tick **Add python.exe to PATH** in the installer.

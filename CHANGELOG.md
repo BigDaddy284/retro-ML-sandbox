@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-814: README explains downloading the built Windows app from GitHub Actions; the emulator guides give the bridge script's path inside the built app.
 - T-813: README "Setting up on Windows" for non-developers; docs/BIZHAWK.md and docs/MGBA.md point at it and spell out the Lua Console / scripting window clicks.
 - T-812: documentation refresh (README status, ARCHITECTURE layers and package layout, ADR-010 accepted, TESTING_STRATEGY test layers) to match the code.
 - T-508: **Practise from here** in the Learning panel: pin the game's position and every go and every Start restarts there until the spot is forgotten (DESIGN.md §9 checkpoint training); races put the game back at the spot too.

@@ -26,7 +26,9 @@ No Lua knowledge is needed: the script is written, you only open it.
    ROM**. The game starts playing.
 2. In EmuHawk's menu bar click **Tools > Lua Console**. A small new window
    opens. In *that* window's menu click **Script > Open Script**, browse to the
-   checkout and pick `src\retro_ai_lab\emulator\bizhawk\retro_ai_lab.lua`.
+   checkout and pick `src\retro_ai_lab\emulator\bizhawk\retro_ai_lab.lua`
+   (in the built app it is `_internal\retro_ai_lab\emulator\bizhawk\retro_ai_lab.lua`
+   next to `RetroAILab.exe`).
    The script appears in the list with a green tick and the console prints
    `Retro AI Lab is waiting for the app on port 43110.` Leave the window open.
    (A red X means the script hit an error; the text in the console says what.)
