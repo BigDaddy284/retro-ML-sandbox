@@ -297,3 +297,23 @@ def test_export_and_import(
     export(other, base / "other.json")
     with pytest.raises(ConfigurationError, match="not"):
         d.import_from(base / "other.json")
+
+
+def test_the_long_look_explains_checkpoints_and_laps(
+    discovery: DiscoveryService,
+    connection: ConnectionService,
+    observation: ObservationService,
+    updates: list[DiscoveryUpdated],
+) -> None:
+    from retro_ai_lab.understanding.longlook import COUNTS_ROUNDS, SAME_PLACES
+
+    connection.connect("fake", seed=2)
+    play(connection, observation, 3000)
+    k = discovery.knowledge
+    assert k is not None
+    checkpoint, lap = k.at("ram", LAYOUT.checkpoint), k.at("ram", LAYOUT.lap)
+    assert checkpoint is not None and lap is not None
+    assert checkpoint.kind is VariableKind.PROGRESS and lap.kind is VariableKind.PROGRESS
+    assert any(e.kind == SAME_PLACES for e in checkpoint.evidence)
+    assert any(e.kind == COUNTS_ROUNDS for e in lap.evidence)
+    assert any(checkpoint in u.changed or lap in u.changed for u in updates)

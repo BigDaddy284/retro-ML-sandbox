@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-709 – Better progress detection (Phase 7)
+- **Current task:** none – Phase 7 complete; next: Phase 4/3 leftovers (T-410, T-110) or Phase 8 polish once ADR-005/006 are decided
 - **Last approved checkpoint:** `main` after T-507 (PRs #43–#49 merging in order as CI passes; T-701 stacked on them)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only the BizHawk work (T-110 onward). ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -83,7 +83,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-706 | Automatic algorithm choice (table while the game is small, network when it grows) and a "How the AI learns" control | 7 | Done | 7/7 | see PR #55 |
 | T-707 | Learning from demonstrations: the child's play is kept as experience the AI learns from | 7 | Done | 6/6 | see PR #56 |
 | T-708 | Hierarchical learning: a skill per goal step; the active step picks the skill | 7 | Done | 6/6 | see PR #57 |
-| T-709 | Better progress detection on a longer look (checkpoint vs position, lap vs flag) | 7 | Ready | – | – |
+| T-709 | Better progress detection on a longer look (checkpoint vs position, lap vs flag) | 7 | Done | 5/5 | see PR #58 |
 | E-8 | Expansion (VBA-M, comparison, sharing, competitions) | 8 | Epic | – | – |
 
 The **first working demonstration** (DESIGN.md §17) is reached at the end of E-5 plus the minimum of E-6, first on the Fake Emulator and then on a real game via BizHawk.
@@ -953,6 +953,23 @@ DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical l
 - **Commit:** see PR. **PR:** #57.
 - **Completion report:** As planned. Skills are saved as an ordered list (the brain store sorts JSON keys, and the order numbers the skills in `policy()`, which the behaviour-change insights compare across goes). `stats()` adds up over every skill. The service test showed the goal service suggesting a new step once the two hand-made ones were done, so the AI keeps working on whatever the goal says is next; without a goal service the general skill plays. Known limitation: a skill starts from nothing when its step is first reached; sharing what the general skill knows with a new skill is a possible follow-up.
 
+### T-709 – Better progress detection on a longer look
+- **Status:** Done
+- **Phase:** 7
+- **Objective:** DESIGN.md §16 "more sophisticated game understanding": the first-guess classifier sees a lap counter as a flag while it has only shown 0 and 1, and cannot tell a checkpoint counter from any other slow number. A longer look at how progress-like values move together fixes both: a "flag" that reaches a third value is progress; a value that steps up at the same few places of a position is a checkpoint; a value that steps up each time another starts over counts its rounds (laps).
+- **Scope:** `understanding.longlook`: `LongLook(knowledge, *, at_least=Confidence.LOW)` watches believed flags, progress values and positions ("steppers") against believed positions and progress values ("drivers") snapshot by snapshot (`observe`), and on `review()` applies to the knowledge: `third-value` (a flag with three or more values, mostly up → `PROGRESS`), `same-places` (a few-valued stepper that steps up when a wide-ranging position is at the same few places → evidence; a "position" believed so becomes `PROGRESS`, the checkpoint case), `counts-rounds` (steps up each time a driver starts over → evidence; a flag becomes `PROGRESS`). Each evidence kind is added once per stepper / driver. `DiscoveryService` feeds every snapshot to the long look and runs its review with each scheduled review, announcing changed variables in `DiscoveryUpdated.changed`; `summary()` unchanged. Input linking (T-303) no longer turns a progress value into a position once the long look has evidence that it counts (the checkpoint moves with the stick too, because the car does). **Out of scope:** new variable kinds, relationships between events (T-305 has those), anything about scores or lives.
+- **Acceptance criteria:**
+  1. A two-valued "flag" that later shows a third value, mostly climbing, is re-kinded to `PROGRESS` with `third-value` evidence; one that keeps switching between two values is left alone.
+  2. A progress value that steps up only when a position sits at the same few places gains `same-places` evidence naming the position, once, and a few-valued "position" doing so becomes `PROGRESS`; a value that steps up at scattered places, and the wide-ranging position itself, do not.
+  3. A value that steps up each time another value starts over gains `counts-rounds` evidence, once, and becomes `PROGRESS` if it was a flag; values that step up at other times do not.
+  4. Rejected or low-confidence variables are ignored; variables not covered by a snapshot are skipped; `review()` on nothing changes nothing.
+  5. On the Toy Racer, after a few laps the long look gives the checkpoint `same-places` evidence against the position and the lap `counts-rounds` evidence against the checkpoint, through the discovery service, announced as changed variables; the first-demo and other tests still pass.
+- **Expected changes:** `understanding/longlook.py` (new), `understanding/__init__.py`, `understanding/linking.py`, `services/discovery.py`, `tests/unit/understanding/test_longlook.py` (new), `tests/unit/services/test_discovery.py`.
+- **Test plan:** unit – flag to progress and the counter-case; same places and scattered places; counting rounds and not; skipping rules and an empty review; the Toy Racer through the discovery service. Regression – full suite.
+- **Results:** 5 / 5 passed / 0 failed / 0 excluded (4 long-look tests, 1 discovery test; 819 in the full suite, on Python 3.13 and 3.11). Lint, format and strict mypy clean.
+- **Commit:** see PR. **PR:** #58.
+- **Completion report:** The Toy Racer taught the rules their guards. (1) Input linking (T-303) had been turning the checkpoint into a "position" because the car moves while Up is held; it now leaves a value alone once the long look has evidence it counts. (2) Nearby driver values are one place (`PLACE_SLACK`), the places must cover under a quarter of the position's range, and each place must step the value to the same number nearly every time: a speed ramping up after a respawn at a checkpoint, or a lane changed by a periodic steering pattern, step at the same places but to different numbers, and are not checkpoints. (3) A value that has only ever shown two faces is left a flag whatever else it does: the game-over flag also switches on where the track starts over. With those, the Toy Racer's checkpoint and lap come out as progress with `same-places` and `counts-rounds` evidence through the discovery service. The first-demonstration test now switches off every suggested carrot for its "careful" AI (the AI understands checkpoints and laps now, so it suggests rewards and steps for them) and compares scores per step, since the point-lover now drives fast enough to crash well before the careful one stops.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -1012,5 +1029,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
-- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56). T-708 completed (PR #57).
+- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56). T-708 completed (PR #57). T-709 completed (PR #58): Phase 7 complete.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

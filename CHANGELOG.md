@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-709: A longer look at progress-like values: a flag that reaches a third value counts, a value that steps up at the same few places of a position is a checkpoint, and one that steps up each time another starts over counts its rounds (laps); input linking no longer mistakes such values for positions.
 - T-708: Hierarchical learning (`skills`): a separate skill for each step of the goal, chosen by the step the AI is working on; any brain can be turned into skills and back from the "How the AI learns" picker.
 - T-707: The moves the child shows the AI in manual mode are kept as demonstrations, saved with the brain, counted in the Learning panel, and can be learned from again with "Learn from my moves again".
 - T-706: The AI picks how it learns by default (the simple table first, a neural network once the game has grown, keeping what it learned) and the Learning panel's "How the AI learns" picker lets the child choose; feature vectors gained a fine-scale slot per variable.
