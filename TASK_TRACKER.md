@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-503 – Tabular Q-learning agent
+- **Current task:** T-504 – Episode runner
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -61,7 +61,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | E-5 | Basic Learning (tabular Q-learning, save/load) | 5 | Epic | – | – |
 | T-501 | State encoder: believed variables binned into a small discrete state | 5 | Done | 6/6 | see PR #36 |
 | T-502 | Action space from the emulator's buttons (singles and sensible combos) | 5 | Done | 5/5 | see PR #37 |
-| T-503 | Tabular Q-learning agent: choose, learn, explore less over time, JSON round-trip | 5 | Planned | – | – |
+| T-503 | Tabular Q-learning agent: choose, learn, explore less over time, JSON round-trip | 5 | Done | 5/5 | see PR #38 |
 | T-504 | Episode runner: act, advance, collect rewards from the services, learn, stop on reset; checkpoint restarts | 5 | Planned | – | – |
 | T-505 | Training service: independent / guided / manual modes, start / pause / stop, episode history, live or fast | 5 | Planned | – | – |
 | T-506 | Learning persistence: the AI's brain saved per game and restored on connect | 5 | Planned | – | – |
@@ -616,6 +616,21 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 5 / 5 passed / 0 failed / 0 excluded (697 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Combos are direction + one other button only (15 actions on the toy racer); a tabular learner can't afford more, and it covers steer-and-accelerate and run-and-jump.
 
+### T-503 – Tabular Q-learning agent
+- **Status:** Done
+- **Phase:** 5
+- **Objective:** The beginner learner of DESIGN.md §6.1: reward-based, simple state/action learning, tabular Q-learning, with its progress saveable (Phase 5 "save and reload learning progress").
+- **Scope:** `learning.qlearning`: `QTable` (state key → one value per action, `best(state)`, `value(state, action)`, `known_states`), `QLearningAgent(space, alpha=0.1, gamma=0.95, epsilon=1.0, epsilon_min=0.05, epsilon_decay=0.995, seed=None)` with `choose(state) -> int` (epsilon-greedy, ties broken at random), `greedy(state)`, `learn(state, action, reward, next_state, done)` (standard Q update, no bootstrap when done), `end_episode()` (decays epsilon), `updates`, `episodes`, `stats()` (states known, updates, exploring share in plain words), `to_dict` / `from_dict` (schema 1, keeps the action space, settings, epsilon and table), `reset()`; settings validated. **Out of scope:** running it against a game (T-504), saving to disk (T-506).
+- **Acceptance criteria:**
+  1. Settings outside their ranges rejected; unknown states start at zero; `best` on an unknown state is action 0 unless a random tie-break is requested.
+  2. The Q update matches the textbook formula (including the `done` case); learning is deterministic for a given seed.
+  3. Epsilon decays per episode down to its floor; with epsilon 0 the agent is greedy; with epsilon 1 every action gets picked over many draws.
+  4. On a tiny two-state chain where only one action leads to reward, the agent learns to prefer it from any state within a few hundred updates.
+  5. JSON round-trip reproduces choices and values exactly; a mismatched action space is refused; newer schema refused.
+- **Test plan:** validation; update formula; exploration; two-state chain convergence; round-trip and refusals; stats text.
+- **Results:** 5 / 5 passed / 0 failed / 0 excluded (702 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** The random generator's state is saved with the brain so a reloaded agent makes exactly the choices it would have made; `stats()` speaks in "situations" and "goes" rather than states and episodes.
+
 ### Later Phase 5 tasks
 T-502 to T-507 as listed in the summary table; each gets its own section when started.
 
@@ -672,4 +687,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-409 completed (PR #35). Phase 4 complete on the fake emulator.
 - Phase 5 broken into T-501..T-507. T-501 completed (PR #36).
 - T-502 completed (PR #37).
+- T-503 completed (PR #38).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
