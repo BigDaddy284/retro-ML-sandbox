@@ -1,5 +1,6 @@
 """Game Understanding Engine: what the app has learned about a game."""
 
+from retro_ai_lab.understanding.events import EventDetector, EventKind, EventLog, GameEvent
 from retro_ai_lab.understanding.knowledge import (
     Confidence,
     Encoding,
@@ -16,7 +17,11 @@ __all__ = [
     "Candidate",
     "Confidence",
     "Encoding",
+    "EventDetector",
+    "EventKind",
+    "EventLog",
     "Evidence",
+    "GameEvent",
     "InputLinks",
     "Knowledge",
     "Variable",

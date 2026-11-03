@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-304: Event detection from believed variables: progress, score gains, setbacks, recoveries, flags and resets, with an event log.
 - T-303: Input linking: experiments that find which bytes each button moves (excluding unstable bytes) and fold the result into the knowledge as evidence, relabels and proposals.
 - T-302: Variable candidate finder: proposes counters, scores, lives, flags, progress, position and speed bytes (with 16-bit pairing) from change statistics, with evidence.
 - T-301: Knowledge model (variables with evidence and derived confidence, user confirm/correct/reject) and a per-game JSON knowledge store with export/import.
