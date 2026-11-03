@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-703: Feature vectors: a `FeatureMap` turns a situation into a fixed-length vector (present flag and scaled bucket per believed variable) for the coming network learners, and saves its slot order.
 - T-702: Experience replay: a bounded, seeded memory of past steps (`Transition`, `ReplayBuffer`) that saves and reloads with the brain.
 - T-701: Every learning algorithm sits behind one `Learner` contract with a registry by name; saved brains record their algorithm (older brains load as `q_table`); the training service takes `algorithm=`.
 - T-607: "What's this?" on every panel opens a shared tips window explaining the panel and the ideas behind it (AI, machine learning, reinforcement learning, rewards, neural networks, training, decisions, exploring, reward exploitation, learning in steps) in simple or grown-up words.

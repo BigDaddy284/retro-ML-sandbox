@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-703 – Feature vectors (Phase 7)
+- **Current task:** T-704 – NumPy neural network (Phase 7)
 - **Last approved checkpoint:** `main` after T-507 (PRs #43–#49 merging in order as CI passes; T-701 stacked on them)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only the BizHawk work (T-110 onward). ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -77,7 +77,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | E-7 | Advanced Learning (DQN, hierarchical RL, demonstrations) | 7 | Epic | – | – |
 | T-701 | Learner interface: any learning algorithm behind one contract; brains record which algorithm they hold | 7 | Done | 5/5 | see PR #50 |
 | T-702 | Experience replay: a bounded memory of past steps the AI can learn from again | 7 | Done | 5/5 | see PR #51 |
-| T-703 | Feature vectors: a situation as numbers a neural network can read | 7 | In progress | – | – |
+| T-703 | Feature vectors: a situation as numbers a neural network can read | 7 | Done | 6/6 | see PR #52 |
 | T-704 | Small neural network in NumPy (layers, Adam, gradient check; no new dependency) | 7 | Ready | – | – |
 | T-705 | DQN learner: network, target network and replay; learns a synthetic task; saves and reloads | 7 | Ready | – | – |
 | T-706 | Automatic algorithm choice (table while the game is small, network when it grows) and a "How the AI learns" control | 7 | Ready | – | – |
@@ -848,6 +848,23 @@ DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical l
 - **Commit:** see PR. **PR:** #51.
 - **Completion report:** `Transition` and `ReplayBuffer` as planned; transitions carry a `source` ("ai" or "child") so T-707 can keep the child's play apart from the AI's. The buffer is a `deque(maxlen)` with its own seeded `Random`, so sampling after a reload continues the same sequence. Nothing uses it yet; T-705 wires it into the DQN.
 
+### T-703 – Feature vectors
+- **Status:** Done
+- **Phase:** 7
+- **Objective:** Turn a situation (a `State`) into a fixed-length vector of numbers a neural network can read, so a network learner (T-705) sees the same situations as the Q-table and a saved network keeps seeing them the same way next session.
+- **Scope:** `learning.features`: `FeatureMap(width=DEFAULT_WIDTH, bins=DEFAULT_BINS)` that gives each believed variable two slots in first-seen order – "present" (0 / 1) and its bucket scaled to [-1, 1] (`bucket / (bins + 16)`, clipped) – so a variable that is missing from a state reads as absent rather than as "bucket 0"; `vector(state) -> float32 (size,)` with `size = 2 * width`; `batch(states) -> (n, size)`; `ids`, `slot_of(id)`, `dropped` (variables seen beyond `width`, which are ignored and counted); JSON round trip (`to_dict` / `from_dict`) that keeps the slot order. **Out of scope:** the network (T-704), raw pixels or memory as features, learned embeddings.
+- **Acceptance criteria:**
+  1. Variables get slots in the order they are first seen and keep them; the map grows as new variables appear without moving existing slots; `size` is fixed from the start.
+  2. A present variable reads as `(1, bucket / (bins + 16))`, an absent one as `(0, 0)`, and negative buckets as negative numbers; every value lies in [-1, 1] for any bucket the encoder can produce (property test).
+  3. `batch` returns an `(n, size)` float32 array whose rows equal the single vectors; an empty state is all zeros; two states that differ (within the width) give different vectors.
+  4. `width` below one or `bins` outside 2..64 raise `ConfigurationError`; variables past the width are ignored and counted in `dropped`, and the map still works.
+  5. A map round-trips through JSON (slot order, width, bins, dropped) so a reloaded map gives identical vectors; bad data is refused with `ConfigurationError`.
+- **Expected changes:** `learning/features.py` (new), `learning/__init__.py`, `tests/unit/learning/test_features.py` (new).
+- **Test plan:** unit – slot assignment and growth; vector values (present / absent / negative) and a hypothesis property over buckets and bins for the [-1, 1] bound; batch shape, dtype, zeros and distinctness; validation and overflow; JSON round trip and bad data. Regression – full suite.
+- **Results:** 6 / 6 passed / 0 failed / 0 excluded (783 in the full suite, on Python 3.13 and 3.11). Lint, format and strict mypy clean.
+- **Commit:** see PR. **PR:** #52.
+- **Completion report:** `FeatureMap` as planned: two slots per variable (present, scaled bucket), slots handed out in first-seen order and kept, `size = 2 * width` fixed from construction so a network's input layer never has to change. The scale is `bins + 16`, the largest bucket a 16-bit value reaches, and values are clipped to [-1, 1] regardless. Variables beyond the width are ignored and counted in `dropped` (a documented limit; the default width of 32 is far above what the engine believes in practice). The map saves with the slot order so a reloaded network reads identical vectors. Nothing uses it yet; T-705 does.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -907,5 +924,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
-- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51).
+- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
