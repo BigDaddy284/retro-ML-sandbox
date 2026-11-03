@@ -71,6 +71,7 @@ class BizHawkSimulator:
         self._free_run = False
         self._client: socket.socket | None = None
         self._closing = False
+        self._held: dict[str, bool] = dict.fromkeys(PAD, False)
 
     # ---------------------------------------------------------- lifecycle
 
@@ -150,6 +151,12 @@ class BizHawkSimulator:
         with self._lock:
             return self._free_run
 
+    @property
+    def held(self) -> dict[str, bool]:
+        """Every pad button and whether the app holds it down."""
+        with self._lock:
+            return dict(self._held)
+
     # ------------------------------------------------------------ serving
 
     def _serve(self) -> None:
@@ -171,6 +178,7 @@ class BizHawkSimulator:
                     if self._client is client:
                         self._client = None
                     self._paused = False
+                    self._held = dict.fromkeys(PAD, False)
                 client.close()
 
     def _session(self, client: socket.socket) -> None:
@@ -237,6 +245,7 @@ class BizHawkSimulator:
             "bye": self._bye,
             "mode": self._mode,
             "screenshot": self._screenshot_cmd,
+            "input": self._input,
         }
 
     def _hello(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -256,7 +265,22 @@ class BizHawkSimulator:
     def _bye(self, request: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             self._paused = False
+            self._held = dict.fromkeys(PAD, False)
         self._closing = True
+        return {}
+
+    def _input(self, request: dict[str, Any]) -> dict[str, Any]:
+        buttons = request.get("buttons")
+        if not isinstance(buttons, dict):
+            raise ConfigurationError("'buttons' must be a table of button names to true or false.")
+        for name, value in buttons.items():
+            if name not in PAD:
+                raise ConfigurationError(f"This pad has no button '{name}'.")
+            if not isinstance(value, bool):
+                raise ConfigurationError(f"Button '{name}' must be true or false.")
+        with self._lock:
+            self._held = dict.fromkeys(PAD, False)
+            self._held.update(buttons)
         return {}
 
     def _screenshot_cmd(self, request: dict[str, Any]) -> dict[str, Any]:

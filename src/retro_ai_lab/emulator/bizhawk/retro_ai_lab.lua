@@ -323,6 +323,9 @@ local app = nil      -- the connected app, or nil
 local pending = ""   -- a partial line received so far
 local free_run = false
 local closing = false
+local pad = {}       -- button name -> true, from the handshake
+local prefixed = false  -- true when the core names buttons "P1 A" rather than "A"
+local held = {}      -- the full pad table joypad.set gets before every frame
 
 local function unpause()
   if client and client.unpause then
@@ -361,29 +364,59 @@ local function domains()
 end
 
 -- Only pad entries that are pressed-or-not count as buttons; analog axes
--- (numbers) are left out.
+-- (numbers) are left out. Remembers the pad for input.
 local function button_names()
   local names = {}
-  local ok, pad = pcall(joypad.get, 1)
-  if ok and type(pad) == "table" then
-    for name, value in pairs(pad) do
+  prefixed = false
+  local ok, table_ = pcall(joypad.get, 1)
+  if ok and type(table_) == "table" then
+    for name, value in pairs(table_) do
       if type(value) == "boolean" then
         names[#names + 1] = name
       end
     end
   end
   if #names == 0 then
-    ok, pad = pcall(joypad.get)
-    if ok and type(pad) == "table" then
-      for name, value in pairs(pad) do
+    ok, table_ = pcall(joypad.get)
+    if ok and type(table_) == "table" then
+      for name, value in pairs(table_) do
         if type(value) == "boolean" and name:sub(1, 3) == "P1 " then
           names[#names + 1] = name:sub(4)
+          prefixed = true
         end
       end
     end
   end
   table.sort(names)
+  pad = {}
+  held = {}
+  for _, name in ipairs(names) do
+    pad[name] = true
+    held[name] = false
+  end
   return json.array(names)
+end
+
+-- Hold the current button table for the next frame.
+local function apply_held()
+  if next(pad) == nil then
+    return
+  end
+  if prefixed then
+    local full = {}
+    for name, value in pairs(held) do
+      full["P1 " .. name] = value
+    end
+    joypad.set(full)
+  else
+    joypad.set(held, 1)
+  end
+end
+
+local function release_all()
+  for name in pairs(held) do
+    held[name] = false
+  end
 end
 
 local handlers = {}
@@ -414,6 +447,26 @@ function handlers.hello(req)
 end
 
 function handlers.ping(req)
+  return {}
+end
+
+function handlers.input(req)
+  local buttons = req.buttons
+  if type(buttons) ~= "table" then
+    error("'buttons' must be a table of button names to true or false.", 0)
+  end
+  for name, value in pairs(buttons) do
+    if type(name) ~= "string" or not pad[name] then
+      error("This pad has no button '" .. tostring(name) .. "'.", 0)
+    end
+    if type(value) ~= "boolean" then
+      error("Button '" .. name .. "' must be true or false.", 0)
+    end
+  end
+  release_all()
+  for name, value in pairs(buttons) do
+    held[name] = value
+  end
   return {}
 end
 
@@ -485,6 +538,7 @@ local function drop_app()
   pending = ""
   free_run = false
   closing = false
+  release_all()
   unpause()
 end
 
@@ -567,6 +621,9 @@ local function main()
     if app and not free_run then
       emu.yield()
     else
+      if app then
+        apply_held()
+      end
       emu.frameadvance()
     end
   end

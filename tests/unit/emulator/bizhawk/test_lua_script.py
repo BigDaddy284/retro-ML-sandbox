@@ -12,10 +12,11 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError
+from retro_ai_lab.core import Button, EmulatorDisconnectedError, EmulatorError
 from retro_ai_lab.emulator.bizhawk import PROTOCOL_VERSION, BizHawkAdapter
 from tests.unit.emulator.bizhawk.lua_host import (
     BIZHAWK_VERSION,
+    PAD_BUTTONS,
     ROM_HASH,
     ROM_NAME,
     SYSTEM,
@@ -50,7 +51,7 @@ def test_handshake_hold_mode_and_reconnect() -> None:
             {"name": "System Bus", "size": 65536},
         ]
         assert hello["buttons"] == sorted(["Up", "Down", "Left", "Right", "A", "B", "Start"])
-        assert hello["commands"] == ["bye", "hello", "mode", "ping", "screenshot"]
+        assert hello["commands"] == ["bye", "hello", "input", "mode", "ping", "screenshot"]
         assert isinstance(hello["frame"], int)
         assert [b.name for b in adapter.buttons()] == [
             "a",
@@ -81,6 +82,48 @@ def test_handshake_hold_mode_and_reconnect() -> None:
         adapter.connect(timeout_s=5.0)
         assert adapter.is_connected and host.paused
         adapter.disconnect()
+        assert host.error is None
+
+
+def test_input_is_held_and_applied_every_frame() -> None:
+    with LuaScriptHost() as host:
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
+        adapter.connect(timeout_s=5.0)
+        assert adapter.capabilities().input
+        adapter.set_input({Button("up", "Up")})
+        assert host.game.state.speed == 0  # hold mode: nothing moves yet
+        adapter._call("mode", free_run=True)
+        wait_until(lambda: host.game.state.speed >= 3)
+        assert host.last_pad is not None
+        table, controller = host.last_pad
+        assert controller == 1
+        assert table == {**dict.fromkeys(PAD_BUTTONS, False), b"Up": True}
+        adapter.set_input(())
+        wait_until(lambda: host.last_pad is not None and not any(host.last_pad[0].values()))
+        speed = host.game.state.speed
+        frames = host.frames
+        wait_until(lambda: host.frames > frames + 10)
+        assert host.game.state.speed <= speed  # no more acceleration
+        # the script refuses bad input and stays up
+        for bad, message in [
+            ("yes", "must be a table"),
+            ({"Turbo": True}, "has no button 'Turbo'"),
+            ({"Up": 1}, "must be true or false"),
+        ]:
+            with pytest.raises(EmulatorError, match=message):
+                adapter._call("input", buttons=bad)
+        adapter.ping()
+        adapter.set_input({Button("up", "Up")})
+        adapter.disconnect()
+        # once the app is gone the script stops driving the pad at all, so the
+        # player's own controller is free again (joypad.set only lasts a frame)
+        frames = host.frames
+        wait_until(lambda: host.frames > frames + 3)
+        sets = host.calls.count("joypad_set")
+        frames = host.frames
+        wait_until(lambda: host.frames > frames + 5)
+        assert host.calls.count("joypad_set") == sets
+        assert host.pressed == ()
         assert host.error is None
 
 

@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** none – T-113 done; next: T-114 (BizHawk adapter: controller input)
+- **Current task:** none – T-114 done; next: T-115 (BizHawk adapter: memory reads)
 - **Last approved checkpoint:** `main` after T-709 (PR #58)
 - **Open blockers:** none for development. ADR-005 (BizHawk bridge) is now Accepted with its real-emulator verification left to T-117 on the user's Windows PC. ADR-006 (first demo game) is still *Proposed*: the user picks the game. ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -30,8 +30,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-111 | BizHawk adapter: connect and handshake | 1 | Done | 25/25 | see PR #60 |
 | T-112 | BizHawk adapter: capabilities and game info | 1 | Done | 26/26 | see PR #61 |
 | T-113 | BizHawk adapter: frame capture | 1 | Done | 5/5 | see PR #62 |
-| T-114 | BizHawk adapter: controller input | 1 | Ready | – | – |
-| T-115 | BizHawk adapter: memory reads | 1 | – | – | – |
+| T-114 | BizHawk adapter: controller input | 1 | Done | 2/2 | see PR #63 |
+| T-115 | BizHawk adapter: memory reads | 1 | Ready | – | – |
 | T-116 | BizHawk adapter: frame advance, speed, save states | 1 | – | – | – |
 | T-117 | BizHawk adapter: disconnect handling and real-emulator verification | 1 | – | – | – |
 | T-201 | Memory snapshot capture and storage | 2 | Done | 46/46 | see PR #14 |
@@ -1021,6 +1021,22 @@ DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical l
 - **Commit:** see PR. **PR:** #62.
 - **Completion report:** The screenshot goes through a file because that is the only way EmuHawk's Lua gives pixels to a script without the `comm` socket server: `client.screenshot(path)` into the temp folder, read back, base64'd, removed. Under `lupa` the stubbed `client.screenshot` writes a real PNG of the Toy Racer, so the script's file handling is exercised for real, including the case where nothing was written. Decoding uses QtGui's `QImage` (under a millisecond for a console-sized PNG) rather than a hand-written PNG unfilter that would cost a tenth of a second per frame in Python; `QImageWriter` encodes for the simulator and tests because `QImage.save`'s stubs and runtime disagree about the format argument across PySide6 releases. Frames come out as packed RGB; alpha is dropped. The cost of a screenshot on a real machine (PNG encode plus file plus base64 in Lua) is a T-117 measurement; `comm.mmfScreenshot` remains the fallback in ARCHITECTURE.md §5.4.
 
+### T-114 – BizHawk adapter: controller input
+- **Status:** Done
+- **Phase:** 1 (BizHawk)
+- **Objective:** `set_input(pressed)` on the BizHawk adapter holds those buttons down in EmuHawk until changed, the way the fake adapter does.
+- **Scope:** Script: `input` command with `buttons: {EmuHawk name: bool}`; the script remembers the full table and applies it with `joypad.set` before every frame it advances (free-run loop now; `step` in T-116). The pad names come from the handshake, so the script sets every button explicitly (unlisted buttons are released) and the player's own pad does not fight the AI; when the core only exposes prefixed names (`P1 A`) the script sets them that way. A `buttons` that is not a table of booleans, or names a button the pad does not have, is refused. Adapter: `_do_set_input` maps the app's identifiers back to EmuHawk names, sends every button as pressed or not, and keeps `held`; `input` capability follows the command. Simulator: `input` stores the held set (applied by `step` in T-116). Test host: `joypad.set` records the last table and feeds the pressed buttons into the Toy Racer on the next frame. **Out of scope:** frame stepping (T-116), reading the player's own presses (manual mode uses the app's pad, DESIGN.md §9).
+- **Acceptance criteria:**
+  1. Against the simulator, `capabilities().input` is true, `set_input({up, a})` is received as every button with `Up` and `A` true and the rest false, `held` reflects it, and an unknown button is refused by the base class before anything is sent.
+  2. Through the real script under `lupa` in free-run mode, holding `Up` makes the Toy Racer speed up within a few frames and releasing (empty set) stops the acceleration; the script sets the whole pad each frame.
+  3. The script refuses a non-table `buttons`, a non-boolean value, and an unknown name, each with a message, and stays connected.
+  4. Disconnecting clears the adapter's held set, and the script stops driving the pad (so the player's own controller is free again).
+- **Expected changes:** `adapter.py`, `simulator.py`, `retro_ai_lab.lua`, `tests/unit/emulator/bizhawk/{test_adapter,test_lua_script,lua_host}.py`.
+- **Test plan:** unit – adapter against the simulator; script under lupa (acceleration, release, refusals, whole-pad set). Regression – full suite.
+- **Results:** 2 / 2 passed / 0 failed / 0 excluded (adapter-vs-simulator with refusals and release; script-under-lupa with acceleration, release, three refusals and the pad left alone after disconnect; 877 in the full suite, on Python 3.13 and 3.11). Lint, format and strict mypy clean.
+- **Commit:** see PR. **PR:** #63.
+- **Completion report:** The script sets the *whole* pad every frame (each button true or false) rather than only the pressed ones: `joypad.set` with a partial table would leave the other buttons to the player's controller, and a stray press from a child mid-training would change what the AI learned. The pad names come from the handshake, so both the prefixed (`P1 A`) and per-controller (`A`) naming styles are handled in one place. Once the app disconnects the script stops calling `joypad.set` altogether, which hands the controller straight back to the player (a set only lasts one frame in EmuHawk). The test that proves acceleration runs the real script in free-run mode against the Toy Racer: Up held through the script makes the car speed up, releasing stops it.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -1092,5 +1108,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
 - Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56). T-708 completed (PR #57). T-709 completed (PR #58): Phase 7 complete.
-- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames.
+- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

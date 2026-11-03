@@ -68,6 +68,7 @@ class BizHawkAdapter(EmulatorAdapter):
         self._hello: dict[str, Any] = {}
         self._description: Description | None = None
         self._free_run = False
+        self._held: frozenset[Button] = frozenset()
 
     # ------------------------------------------------------------ queries
 
@@ -90,6 +91,11 @@ class BizHawkAdapter(EmulatorAdapter):
         self._require_connected()
         assert self._description is not None
         return self._description
+
+    @property
+    def held(self) -> frozenset[Button]:
+        """The buttons currently held down in the emulator."""
+        return self._held
 
     @property
     def free_run(self) -> bool:
@@ -126,6 +132,7 @@ class BizHawkAdapter(EmulatorAdapter):
         link, self._link = self._link, None
         self._hello = {}
         self._description = None
+        self._held = frozenset()
         if link is None:
             return
         try:
@@ -151,6 +158,12 @@ class BizHawkAdapter(EmulatorAdapter):
     def _do_capture_frame(self) -> Frame:
         answer = self._call("screenshot")
         return self._frame_from(answer)
+
+    def _do_set_input(self, pressed: frozenset[Button]) -> None:
+        names = self.description.button_names
+        down = {b.name for b in pressed}
+        self._call("input", buttons={label: ident in down for ident, label in names.items()})
+        self._held = pressed
 
     # ------------------------------------------------------------ helpers
 
@@ -182,6 +195,7 @@ class BizHawkAdapter(EmulatorAdapter):
         link, self._link = self._link, None
         self._hello = {}
         self._description = None
+        self._held = frozenset()
         if link is not None:
             link.close()
         self.mark_disconnected()
