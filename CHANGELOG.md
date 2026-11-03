@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Changed: when the AI searches for the button that gets the game going, a button whose press changed something lasting while the game still ignores the pad is pressed again, up to three times (on Super Mario Bros. the first Start during the demo only brings the title screen back; the next one starts the game), and the search waits five seconds after each press so a splash screen cannot hide the answer (T-851).
 - Changed: the AI acts on its best 16 guesses of each kind (the values it watches for events, pairs up, rewards, sets goals on and learns the state from) instead of every guess in the knowledge; with 1,600 guesses on Super Mario Bros. that was most of the cost of every step and left the AI never seeing the same situation twice. The Discovery panel still shows every guess, and a confirmed one always counts (T-850).
 - Changed: the long look (which notices counters that step at the same few places) no longer keeps pairing a value that steps nearly every frame, shows more than 16 faces, or stepped at too many places; with 1,600 believed values over a moving title demo that pairing was the largest cost of every training step (T-849).
 - Changed: when training starts (and after a go that ended stuck or on a restart) the AI first checks whether its buttons change anything in the game; if not, it searches for the button that gets the game going right away instead of waiting for goes to prove the game is ignoring it (T-848).
