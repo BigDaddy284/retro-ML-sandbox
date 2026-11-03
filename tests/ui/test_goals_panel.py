@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
@@ -150,7 +151,9 @@ def test_after_tick_reset_and_title(panel: GoalsPanel, context: AppContext) -> N
     assert panel.row_text(lap)[3:] == ("Off", "off")
     item = panel._items[lap]
     item.setCheckState(4, Qt.CheckState.Checked)
-    assert panel.row_text(lap)[4] == "on" and panel.note_text == "Switched on."
+    assert panel.note_text == "Switched on."  # the service heard it at once
+    QApplication.processEvents()  # the tree is rebuilt a tick later, never inside the signal
+    assert panel.row_text(lap)[4] == "on" and panel._items[lap] is not item
     panel.toggle_done_selected()
     panel.reset_progress()
     assert panel.row_text(lap)[3] == "Ready" and "Starting again" in panel.note_text

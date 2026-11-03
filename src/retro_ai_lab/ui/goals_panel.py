@@ -11,7 +11,7 @@ is saved and announced.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QModelIndex, Qt, Signal
+from PySide6.QtCore import QModelIndex, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -75,6 +75,8 @@ class GoalsPanel(QWidget):
         self._selected: str | None = None
         self._items: dict[str, QTreeWidgetItem] = {}
         self._options: dict[str, str] = {}
+        self._in_item_signal = False
+        self._refresh_pending = False
 
         self._title = QLineEdit(self)
         self._title.setObjectName("goal_title")
@@ -390,12 +392,24 @@ class GoalsPanel(QWidget):
         if oid is None:
             return
         on = item.checkState(4) == Qt.CheckState.Checked
-        self._try(
-            lambda: self._context.goals.update_objective(str(oid), enabled=on),
-            "Switched on." if on else "Switched off.",
-        )
+        # Qt is still inside this item's signal: rebuilding the tree now would delete
+        # the item under its feet (a crash on Windows), so any refresh waits a tick.
+        self._in_item_signal = True
+        try:
+            self._try(
+                lambda: self._context.goals.update_objective(str(oid), enabled=on),
+                "Switched on." if on else "Switched off.",
+            )
+        finally:
+            self._in_item_signal = False
+        if self._refresh_pending:
+            self._refresh_pending = False
+            QTimer.singleShot(0, self.refresh)
 
     def _on_goal_changed(self, event: GoalChanged) -> None:
+        if self._in_item_signal:
+            self._refresh_pending = True
+            return
         self.refresh()
 
     def _on_completed(self, event: ObjectiveCompleted) -> None:

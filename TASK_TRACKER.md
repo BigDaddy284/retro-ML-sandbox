@@ -580,7 +580,7 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
   5. The main window hosts the panel in the Progress slot.
 - **Test plan:** idle; rows/status/badges; add both kinds; remove/move; done toggle; after + cycle; tick; reset; title; completion note; disconnect; main window.
 - **Results:** 6 / 6 passed / 0 failed / 0 excluded (686 in the full suite). Lint, format and strict mypy clean.
-- **Completion report:** `Goal` defines `__len__`, so an empty goal is falsy; the panel tested `goal is not None` after a test showed the idle text on a fresh goal. Phase 4 (Reward System) is complete on the fake emulator: behaviours with simple controls, categories, personalities, suggestions, farming warnings, and an editable goal with steps.
+- **Completion report:** `Goal` defines `__len__`, so an empty goal is falsy; the panel tested `goal is not None` after a test showed the idle text on a fresh goal. A refresh that arrives while Qt is inside a row's tick signal is deferred by one tick (the same Windows use-after-free T-406 hit). Phase 4 (Reward System) is complete on the fake emulator: behaviours with simple controls, categories, personalities, suggestions, farming warnings, and an editable goal with steps.
 
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
