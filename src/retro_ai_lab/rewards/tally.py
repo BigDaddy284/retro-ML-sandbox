@@ -15,6 +15,14 @@ class RewardEntry:
     frame: int
     amount: float
     behaviour_ids: tuple[str, ...]
+    shares: tuple[float, ...] = ()  # how much each behaviour gave, same order as the ids
+
+    def share_of(self, behaviour_id: str) -> float:
+        total = 0.0
+        for bid, part in zip(self.behaviour_ids, self.shares, strict=True):
+            if bid == behaviour_id:
+                total += part
+        return total
 
 
 @dataclass(slots=True)
@@ -59,17 +67,19 @@ class RewardTally:
     ) -> RewardEntry:
         """Record one reward. ``shares`` (same order as ids) says how much each behaviour gave."""
         ids = tuple(behaviour_ids)
-        parts = tuple(shares)
+        parts = tuple(float(s) for s in shares)
         if parts and len(parts) != len(ids):
             raise ConfigurationError("shares must match behaviour_ids.")
-        entry = RewardEntry(int(frame), float(amount), ids)
+        if not parts and ids:
+            parts = tuple(float(amount) / len(ids) for _ in ids)
+        entry = RewardEntry(int(frame), float(amount), ids, parts)
         self._recent.append(entry)
         self._total += entry.amount
         self._count += 1
-        for i, bid in enumerate(ids):
+        for bid, part in zip(ids, parts, strict=True):
             slot = self._by_behaviour.setdefault(bid, BehaviourTotal())
             slot.count += 1
-            slot.amount += parts[i] if parts else entry.amount / len(ids)
+            slot.amount += part
         return entry
 
     def by_behaviour(self) -> dict[str, BehaviourTotal]:

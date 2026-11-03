@@ -18,7 +18,12 @@ from retro_ai_lab.services.observer import (
     ObservationService,
     ScreenObserved,
 )
-from retro_ai_lab.services.rewards import RewardEarned, RewardProfileChanged, RewardService
+from retro_ai_lab.services.rewards import (
+    ExploitSuspected,
+    RewardEarned,
+    RewardProfileChanged,
+    RewardService,
+)
 
 __all__ = [
     "LINK_LOST",
@@ -33,6 +38,7 @@ __all__ = [
     "EmulatorConnected",
     "EmulatorDisconnected",
     "ExperimentHarness",
+    "ExploitSuspected",
     "InputRecorded",
     "MemoryObserved",
     "ObservationService",

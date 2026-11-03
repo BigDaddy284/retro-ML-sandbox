@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-405 – Reward exploitation detection
+- **Current task:** T-406 – Rewards panel
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -53,7 +53,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-402 | Reward suggestions: derive behaviours and suggested values from the game knowledge | 4 | Done | 7/7 | see PR #28 |
 | T-403 | AI personalities: Explorer, Collector, Completionist, Speedrunner, Battler, Survivor, Balanced presets | 4 | Done | 6/6 | see PR #29 |
 | T-404 | Reward service: per-game profile persistence, live reward tally from events | 4 | Done | 15/15 | see PR #30 |
-| T-405 | Reward exploitation detection with plain-words explanation | 4 | Planned | – | – |
+| T-405 | Reward exploitation detection with plain-words explanation | 4 | Done | 8/8 | see PR #31 |
 | T-406 | Rewards panel: categories that expand, +/- buttons, value, toggle, suggested, personality picker | 4 | Planned | – | – |
 | T-407 | Goals and objectives model: overall goal, objectives with detection, dependencies, completion | 4 | Planned | – | – |
 | T-408 | Goals panel: edit the objective structure, see completion and confidence | 4 | Planned | – | – |
@@ -506,6 +506,20 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 15 / 15 passed / 0 failed / 0 excluded (650 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** The knowledge store's file helpers were lifted into `storage.jsonfiles` so both stores share one atomic-write and safe-name path. Rewards are scored from `DiscoveryUpdated` events rather than a second detector, so the learner and the panel see exactly the events the engine saw.
 
+### T-405 – Reward exploitation detection
+- **Status:** Done
+- **Phase:** 4
+- **Objective:** Notice when the AI seems to be farming its rewards instead of getting anywhere (DESIGN.md §5.5), flag it, and explain in plain words why that might be happening and what the child can do.
+- **Scope:** `rewards.exploitation`: `ExploitWarning(kind, behaviour_ids, share, window, explanation, suggestion)`; `ExploitDetector(profile, tally, window=3600, min_reward=20, dominant=0.7)` whose `check(now)` looks at the rewards of the last `window` frames and returns a warning when positive reward reached `min_reward` with nothing earned from a Progression or Completion behaviour: `farming` when one behaviour gave at least `dominant` of it, `no_progress` otherwise. No verdict while the profile has no Progression or Completion behaviour switched on (progress can't be judged yet). `RewardEntry` keeps per-behaviour shares. `RewardService` runs the check as events are scored, publishes `ExploitSuspected(warning)` at most once per window per cause, and keeps `warnings` / `current_warning` (cleared when the window passes without a repeat or on connect). **Out of scope:** showing warnings (T-406), automatic reward changes (never; the child decides).
+- **Acceptance criteria:**
+  1. One dominant positive behaviour with no progress in the window gives a `farming` warning naming it, with its share, an explanation and a suggestion; several behaviours give `no_progress`.
+  2. Progress earned in the window, too little reward, entries outside the window, or no progress behaviour switched on give no warning; the dominant behaviour being progression itself gives no warning.
+  3. Bad settings rejected.
+  4. The service announces a warning once per window per cause, clears it when play moves on, and resets on connect.
+- **Test plan:** detector scenarios (farming, no-progress, progress clears, too little, old entries, no progress behaviour, progression dominant); settings; service announce / no repeat / clear / reset.
+- **Results:** 8 / 8 passed / 0 failed / 0 excluded (658 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** `RewardEntry` now keeps each behaviour's share so the detector can tell progress reward apart inside a shared entry. The check runs on the frame of the newest scored event, so it costs nothing while no events arrive.
+
 ### Later Phase 4 tasks
 T-402 to T-408 as listed in the summary table; each gets its own section when started.
 
@@ -552,4 +566,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-402 completed (PR #28).
 - T-403 completed (PR #29).
 - T-404 completed (PR #30).
+- T-405 completed (PR #31).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

@@ -15,6 +15,7 @@ from pathlib import Path
 
 from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
+from retro_ai_lab.rewards.exploitation import ExploitDetector, ExploitWarning
 from retro_ai_lab.rewards.model import Behaviour, RewardProfile
 from retro_ai_lab.rewards.personalities import Personality, apply_personality
 from retro_ai_lab.rewards.suggestions import SuggestionReport, apply_suggestions
@@ -47,6 +48,14 @@ class RewardProfileChanged:
     reason: str  # "suggestions", "control", "personality", "loaded"
 
 
+@dataclass(frozen=True, slots=True)
+class ExploitSuspected:
+    """The AI looks like it is farming rewards instead of progressing."""
+
+    frame: int
+    warning: ExploitWarning
+
+
 class RewardService:
     def __init__(
         self,
@@ -56,6 +65,8 @@ class RewardService:
         *,
         store: RewardStore | None = None,
         tally_capacity: int = 1000,
+        exploit_window: int = 3600,
+        exploit_min_reward: float = 20.0,
     ) -> None:
         self._connection = connection
         self._discovery = discovery
@@ -65,6 +76,11 @@ class RewardService:
         self._tally = RewardTally(tally_capacity)
         self._enabled = False
         self._saves = 0
+        self._exploit_window = exploit_window
+        self._exploit_min_reward = exploit_min_reward
+        self._detector: ExploitDetector | None = None
+        self._warnings: list[ExploitSuspected] = []
+        self._current: ExploitSuspected | None = None
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
         bus.subscribe(DiscoveryUpdated, self._on_discovery)
@@ -91,6 +107,16 @@ class RewardService:
     @property
     def saves(self) -> int:
         return self._saves
+
+    @property
+    def warnings(self) -> tuple[ExploitSuspected, ...]:
+        """Every exploitation warning raised since connect."""
+        return tuple(self._warnings)
+
+    @property
+    def current_warning(self) -> ExploitSuspected | None:
+        """The warning still in force, if play has not moved on since."""
+        return self._current
 
     def summary(self) -> str:
         if self._profile is None or not self._enabled:
@@ -161,6 +187,14 @@ class RewardService:
                 self._profile = RewardProfile(game_id)  # a damaged file: start over
         else:
             self._profile = RewardProfile(game_id)
+        self._detector = ExploitDetector(
+            self._profile,
+            self._tally,
+            window=self._exploit_window,
+            min_reward=self._exploit_min_reward,
+        )
+        self._warnings.clear()
+        self._current = None
         self._bus.publish(RewardProfileChanged((), self._profile.ids(), (), "loaded"))
         self.refresh_suggestions()
 
@@ -176,6 +210,8 @@ class RewardService:
             self.refresh_suggestions()
         for game_event in update.events:
             self._score(game_event)
+        if update.events:
+            self._watch_for_exploits(max(e.frame for e in update.events))
 
     # ------------------------------------------------------------ helpers
 
@@ -189,6 +225,26 @@ class RewardService:
         self._tally.record(game_event.frame, amount, ids, shares=[b.value for b in matched])
         if amount != 0.0:
             self._bus.publish(RewardEarned(game_event.frame, amount, ids, game_event))
+
+    def _watch_for_exploits(self, now: int) -> None:
+        if self._detector is None:
+            return
+        warning = self._detector.check(now)
+        if warning is None:
+            if self._current is not None and now - self._current.frame >= self._exploit_window:
+                self._current = None  # play moved on: the warning no longer applies
+            return
+        current = self._current
+        if (
+            current is not None
+            and current.warning.key == warning.key
+            and now - current.frame < self._exploit_window
+        ):
+            return  # already said so for this window
+        suspected = ExploitSuspected(now, warning)
+        self._current = suspected
+        self._warnings.append(suspected)
+        self._bus.publish(suspected)
 
     def _require(self) -> RewardProfile:
         if self._profile is None or not self._enabled:
@@ -206,4 +262,4 @@ class RewardService:
         self._bus.publish(change)
 
 
-__all__ = ["RewardEarned", "RewardProfileChanged", "RewardService"]
+__all__ = ["ExploitSuspected", "RewardEarned", "RewardProfileChanged", "RewardService"]
