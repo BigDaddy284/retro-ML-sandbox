@@ -44,7 +44,7 @@ src/retro_ai_lab/
                    BizHawkSimulator, retro_ai_lab.lua (EmuHawk)
     mgba/          MgbaAdapter (the BizHawk adapter under mGBA's name), retro_ai_lab.lua (mGBA)
   observation/     frames, memory snapshots, diffs, input log
-  understanding/   knowledge, variables, events, relations, confidence
+  understanding/   knowledge, variables, events, relations, confidence (a reset needs two values back at their start together, one of them at least MEDIUM: T-838)
   rewards/         reward profile, personalities, suggestions, exploitation, goals
   learning/        action space, state encoder, Q-table, DQN (NumPy), skills, greedy player
   training/        episode runner, training service, brain, curve, insights, research (step log)
@@ -102,6 +102,8 @@ Rules enforced by the base class:
 - Hooks for optional capabilities have defaults that raise `UnsupportedCapabilityError`, so an adapter only implements what it supports.
 - `step` and `read_many` (T-822) bundle what the UI needs each frame; their default hooks compose the primitives, and `BizHawkAdapter` sends one `step` / one `read` request instead. Each part of a `step` is checked only when used, so a step without a screenshot works on an emulator that cannot capture its screen.
 - One conversation at a time (T-817): every public operation holds the adapter's re-entrant lock, because the Game panel captures frames on a worker thread while the GUI thread (play clock, training, watchdog) may be talking to the same socket. `check_link()` never waits for that lock: if another thread holds it, the link is evidently in use and the answer is True.
+
+**No experiments over a busy link (T-839).** `DiscoveryService` runs its scheduled button experiment from inside the snapshot handler, so on the real emulator it froze the window and the game for seconds mid-go; `TrainingService` sets `experiments_allowed` off at start and on at stop, in every mode, and in an AI mode runs a due one between goes (`run_due_experiment`, before the next go restores the checkpoint); the panel's on-demand experiment is unaffected.
 
 **Panels are docks (T-837).** `MainWindow` has no central widget: each `Panel` sits in a `QDockWidget` named `dock_<key>`, movable, floatable, closable, with nested and tabbed docks allowed, so the six can be rearranged, tabbed, floated, hidden and brought back from the toolbar's "Panels" menu (`toggleViewAction` per dock, then "Reset layout"). The default arrangement is DESIGN §10's all-visible layout (Game left, activity over rewards right, the other three along the bottom). `saveState`/`restoreState` keep the arrangement in `layout.bin` under the data folder, written on close; a missing or unusable file means the default, and tests build windows without one.
 

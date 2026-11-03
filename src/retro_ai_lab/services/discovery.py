@@ -110,6 +110,7 @@ class DiscoveryService:
         self._reviews = 0
         self._stage = "idle"
         self._enabled = False
+        self._experiments_allowed = True  # the training service holds them back (T-839)
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
         bus.subscribe(MemoryObserved, self._on_memory)
@@ -151,6 +152,37 @@ class DiscoveryService:
 
     def can_experiment(self) -> bool:
         return self._harness is not None and self._harness.available()
+
+    @property
+    def experiments_allowed(self) -> bool:
+        """May the scheduled button experiments run now? (T-839)
+
+        An experiment takes a save state, runs a trial per button and loads the
+        state back: dozens of round trips that freeze the window and move the
+        game under whoever is playing, so training holds them back.
+        """
+        return self._experiments_allowed
+
+    def set_experiments_allowed(self, allowed: bool) -> None:
+        self._experiments_allowed = bool(allowed)
+
+    @property
+    def experiment_due(self) -> bool:
+        """Has the schedule come round while experiments were held back? (T-839)"""
+        return (
+            self._experiment_every is not None and self._since_experiment >= self._experiment_every
+        )
+
+    def run_due_experiment(self) -> bool:
+        """Run the scheduled experiment now if one is due and possible (T-839).
+
+        The training service calls this between goes, when the game is about to
+        be put back to the checkpoint anyway. Returns True if one ran.
+        """
+        if not self._enabled or not self.experiment_due or not self.can_experiment():
+            return False
+        self.experiment()
+        return True
 
     def summary(self) -> str:
         """One line for the status bar / panel header."""
@@ -258,6 +290,7 @@ class DiscoveryService:
         self._events.clear()
         self._buttons = tuple(b.name for b in event.buttons)
         self._harness = ExperimentHarness(self._connection)
+        self._experiments_allowed = True
         self._since_review = 0
         self._since_experiment = 0
         self._experiments = 0
@@ -297,6 +330,7 @@ class DiscoveryService:
         if (
             self._experiment_every is not None
             and self._since_experiment >= self._experiment_every
+            and self._experiments_allowed
             and self.can_experiment()
         ):
             try:

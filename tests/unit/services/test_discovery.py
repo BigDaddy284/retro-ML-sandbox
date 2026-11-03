@@ -161,6 +161,33 @@ def test_experiments_run_on_schedule_and_on_demand(
     assert discovery.stage == "watching"
 
 
+def test_scheduled_experiments_can_be_held_back(
+    discovery: DiscoveryService, connection: ConnectionService, observation: ObservationService
+) -> None:
+    """T-839: training holds the scheduled experiments back; on demand still works."""
+    connection.connect("fake", seed=5)
+    assert discovery.experiments_allowed
+    discovery.set_experiments_allowed(False)
+    play(connection, observation, 300)
+    assert discovery.experiments == 0
+    discovery.experiment()  # the panel's "Try the buttons" is not held back
+    assert discovery.experiments == 1
+    play(connection, observation, 250)
+    assert discovery.experiments == 1
+    assert discovery.experiment_due
+    assert discovery.run_due_experiment() and discovery.experiments == 2  # between goes
+    assert not discovery.experiment_due and not discovery.run_due_experiment()
+    play(connection, observation, 250)
+    assert discovery.experiments == 2  # still held back
+    discovery.set_experiments_allowed(True)
+    play(connection, observation, 1)
+    assert discovery.experiments == 3
+    discovery.set_experiments_allowed(False)
+    connection.disconnect()
+    connection.connect("fake", seed=5)
+    assert discovery.experiments_allowed  # a new link starts afresh
+
+
 def test_experiments_unavailable_without_save_states(
     discovery: DiscoveryService, connection: ConnectionService, observation: ObservationService
 ) -> None:

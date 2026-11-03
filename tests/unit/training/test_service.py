@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -37,6 +38,9 @@ from retro_ai_lab.training import (
     TrainingStateChanged,
 )
 from retro_ai_lab.understanding import Encoding, Evidence, Knowledge, VariableKind
+from retro_ai_lab.understanding.events import EventKind, GameEvent
+
+WENT_HOME = "Lives, Lap all went back to their starting values."
 
 RAM = "ram"
 SURE = [Evidence("test", "", 6.0)]
@@ -331,6 +335,78 @@ def test_an_emulator_without_speed_control_is_left_alone(lab: Lab) -> None:
     t.set_speed(Speed.FAST)
     t.start()
     assert t.status is Status.RUNNING and lab.adapter().speed == 1.0
+    t.stop()
+
+
+def test_training_holds_the_button_experiments_back(lab: Lab) -> None:
+    """T-839: no automatic experiments over the link while a go is running."""
+    lab.connect()
+    t = lab.training
+    assert lab.discovery.experiments_allowed
+    t.start()
+    assert not lab.discovery.experiments_allowed
+    t.pause()
+    assert not lab.discovery.experiments_allowed  # the game is still the AI's
+    t.resume()
+    t.stop()
+    assert lab.discovery.experiments_allowed
+    t.start(Mode.MANUAL)  # the child drives the same link
+    assert not lab.discovery.experiments_allowed
+    t.stop()
+    assert lab.discovery.experiments_allowed
+
+
+def test_due_experiments_run_between_goes_not_mid_go(tmp_path: Path) -> None:
+    """T-839: a due experiment runs as the next go begins, never inside a go."""
+    bus = EventBus(on_error=lambda exc, event, handler: (_ for _ in ()).throw(exc))
+    connection = ConnectionService(default_registry(), bus)
+    observation = ObservationService(connection, bus)
+    discovery = DiscoveryService(connection, observation, bus, experiment_every=30)
+    training = TrainingService(
+        connection, observation, discovery, bus, frames_per_step=4, max_steps=8, seed=1
+    )
+    lab = Lab(bus, connection, observation, discovery, None, None, training, [], [])  # type: ignore[arg-type]
+    lab.connect()
+    training.start()
+    seen = 0
+    ran_at: list[int] = []
+    for _ in range(200):
+        training.step()
+        if discovery.experiments > seen:
+            seen = discovery.experiments
+            episode = training.episode
+            assert episode is not None
+            ran_at.append(episode.steps)
+    training.stop()
+    assert seen >= 3, "experiments still happen while training"
+    assert ran_at and all(steps == 1 for steps in ran_at), ran_at  # the first step of a go
+    assert not discovery.experiment_due or not discovery.experiments_allowed
+
+
+def test_the_log_says_why_each_go_ended(lab: Lab, caplog: pytest.LogCaptureFixture) -> None:
+    """T-840: the user's log file shows how each go ended and what a reset blamed."""
+    lab.connect()
+    t = lab.training
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.training.service")
+    t.start()
+    assert t.step()
+    reset = GameEvent(EventKind.RESET, 99, None, WENT_HOME)
+    lab.bus.publish(DiscoveryUpdated((), (), (reset,), ()))
+    t.step()  # the go ends on the reset
+    assert t.episodes == 1
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(
+        m.startswith("Go 1 ended by reset after 2 steps (8 frames), ")
+        and m.endswith(f": {WENT_HOME} (frame 99)")
+        for m in messages
+    ), messages
+    while t.episodes < 2:
+        t.step()
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(
+        m.startswith("Go 2 ended by max_steps after 50 steps") and "(frame" not in m
+        for m in messages
+    ), messages
     t.stop()
 
 

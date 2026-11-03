@@ -34,6 +34,7 @@ from retro_ai_lab.understanding import (
 )
 
 RAM = "ram"
+WENT_HOME = "Lives, Lap all went back to their starting values."
 SURE = [Evidence("test", "", 6.0)]
 
 
@@ -119,6 +120,22 @@ def test_signals_collect_only_while_listening(lab: Lab) -> None:
     signals.stop()
     lab.bus.publish(DiscoveryUpdated((), (), (gain,), ()))
     assert signals.take() == (0.0, 0)
+
+
+def test_signals_remember_the_reset_that_ended_the_go(lab: Lab) -> None:
+    """T-840: the detail of the reset goes to the log."""
+    lab.connection.connect("fake", seed=3)
+    teach(lab)
+    r = runner(lab, frames_per_step=4, max_steps=30)
+    r.begin()
+    assert r.last_reset == ""
+    reset = GameEvent(EventKind.RESET, 42, None, WENT_HOME)
+    lab.bus.publish(DiscoveryUpdated((), (), (reset,), ()))
+    assert r.last_reset == f"{WENT_HOME} (frame 42)"
+    assert not r.step() and r.finish().ended_by == "reset"
+    r.begin()
+    assert r.last_reset == ""  # a new go starts clean
+    r.finish()
 
 
 def test_episode_runs_the_requested_steps(lab: Lab) -> None:

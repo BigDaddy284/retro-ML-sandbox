@@ -21,6 +21,16 @@ from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.observation.memory import MemorySnapshot
 from retro_ai_lab.understanding.knowledge import Confidence, Knowledge, Variable, VariableKind
 
+RESET_NEEDS = 2  # values back at their starting values together, for a reset
+RESET_SURE = Confidence.MEDIUM  # and at least one of them this sure (T-838)
+"""Shaky values going home together are not a restart (T-838).
+
+On the user's Super Mario Bros. the 6502's stack page and other scratch
+bytes in RAM bounce between a few values and land back on their first ones
+together with no restart, and at LOW confidence two of them were enough to
+end every go after a few steps. One of the values must be at least MEDIUM.
+"""
+
 
 class EventKind(Enum):
     PROGRESS = "progress"  # a progress value stepped up
@@ -130,7 +140,8 @@ class EventDetector:
                     if value < watch.last:
                         dropped = True
             watch.last = value
-        if len(returned_home) >= 2 and dropped:
+        sure = any(w.variable.confidence >= RESET_SURE for w in returned_home)
+        if len(returned_home) >= RESET_NEEDS and dropped and sure:
             names = ", ".join(w.variable.display_name for w in returned_home)
             events.append(
                 GameEvent(
@@ -245,4 +256,4 @@ class EventLog:
         self._total = 0
 
 
-__all__ = ["EventDetector", "EventKind", "EventLog", "GameEvent"]
+__all__ = ["RESET_NEEDS", "RESET_SURE", "EventDetector", "EventKind", "EventLog", "GameEvent"]

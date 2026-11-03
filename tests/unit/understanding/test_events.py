@@ -90,6 +90,33 @@ def test_reset_needs_two_values_returning_home_with_a_drop() -> None:
     assert kinds == {EventKind.RECOVERY}
 
 
+def test_reset_needs_one_value_the_ai_is_fairly_sure_of() -> None:
+    """T-838: LOW guesses going home together are noise (the real game's stack bytes)."""
+    from retro_ai_lab.understanding.events import RESET_NEEDS, RESET_SURE
+    from retro_ai_lab.understanding.knowledge import Confidence, Evidence
+
+    assert RESET_NEEDS == 2 and RESET_SURE is Confidence.MEDIUM
+    low = [Evidence("guess", "", 1.0)]
+    k = Knowledge("g")
+    for off, kind in enumerate((VariableKind.PROGRESS, VariableKind.LIVES, VariableKind.SCORE)):
+        k.propose(RAM, off, kind=kind, name=kind.label, evidence=low)
+    assert all(v.confidence is Confidence.LOW for v in k)
+    d = EventDetector(k)
+    d.observe(snap(0, 0, 3, 0))
+    d.observe(snap(1, 2, 1, 7))
+    assert all(e.kind is not EventKind.RESET for e in d.observe(snap(2, 0, 3, 0)))
+    # One of them fairly sure is enough.
+    k2 = Knowledge("g")
+    k2.propose(RAM, 0, kind=VariableKind.PROGRESS, name="P", evidence=low)
+    k2.propose(RAM, 1, kind=VariableKind.LIVES, name="L", evidence=[Evidence("seen", "", 3.0)])
+    lives = k2.at(RAM, 1)
+    assert lives is not None and lives.confidence is Confidence.MEDIUM
+    d2 = EventDetector(k2)
+    d2.observe(snap(0, 0, 3))
+    d2.observe(snap(1, 2, 1))
+    assert any(e.kind is EventKind.RESET for e in d2.observe(snap(2, 0, 3)))
+
+
 def test_score_gain_fires_on_unusual_jumps_only() -> None:
     k = Knowledge("g")
     k.propose(RAM, 0, encoding=Encoding.U16LE, kind=VariableKind.SCORE, name="Score", evidence=SURE)
