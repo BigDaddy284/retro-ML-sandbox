@@ -14,6 +14,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from retro_ai_lab.core import ConfigurationError, EmulatorError
 from retro_ai_lab.core.events import EventBus
@@ -414,6 +415,37 @@ class TrainingService:
         self._saves += 1
         return path
 
+    def replace_brain(self, data: dict[str, Any]) -> Brain:
+        """Swap in a brain for the connected game (loading a saved AI); idle only."""
+        if self._status is not Status.IDLE:
+            raise ConfigurationError("Stop training before loading another brain.")
+        if self.brain() is None or self._agent is None or self._game_id is None:
+            raise ConfigurationError("Connect to a game before loading a brain.")
+        brain = Brain.from_dict(data, space=self._agent.space)
+        if brain.game_id != self._game_id:
+            raise ConfigurationError(
+                f"That brain is for {brain.game_id!r}, not the connected game."
+            )
+        self._history.clear()
+        self._policies.clear()
+        self._runner = None
+        self._fresh_start = ""
+        self._adopt(brain)
+        self.save()
+        self._announce("loaded")
+        return brain
+
+    def _adopt(self, brain: Brain) -> None:
+        self._agent = brain.agent
+        self._demonstrations = (
+            brain.demonstrations
+            if brain.demonstrations is not None
+            else Demonstrations(seed=self._seed)
+        )
+        self._history.extend(brain.goes)
+        self._episodes = brain.episodes
+        self._total_steps = brain.total_steps
+
     def forget(self) -> None:
         """Start the AI from scratch for this game and delete what was saved."""
         if self._status is not Status.IDLE:
@@ -523,12 +555,7 @@ class TrainingService:
             except ConfigurationError as exc:
                 self._fresh_start = f"Couldn't use the saved brain, so starting afresh: {exc}"
             else:
-                self._agent = brain.agent
-                if brain.demonstrations is not None:
-                    self._demonstrations = brain.demonstrations
-                self._history.extend(brain.goes)
-                self._episodes = brain.episodes
-                self._total_steps = brain.total_steps
+                self._adopt(brain)
         self._encoder = StateEncoder(knowledge)
         self._harness = (
             ExperimentHarness(self._connection, slot=CHECKPOINT_SLOT)

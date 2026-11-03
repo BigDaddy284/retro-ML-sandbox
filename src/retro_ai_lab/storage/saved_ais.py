@@ -1,11 +1,15 @@
-"""Saved AIs on disk: a folder per game, a JSON file per saved AI."""
+"""Saved AIs on disk: a folder per game, a JSON file per saved AI.
+
+Like the brain store this works on the plain dictionary a ``SavedAi``
+produces, so the storage layer needs nothing from the layers above it.
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
-from retro_ai_lab.comparison.saved_ai import SavedAi
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.storage.jsonfiles import ensure_folder, read_json, safe_file_name, write_json
 
@@ -49,25 +53,26 @@ class SavedAiStore:
         data = _peek(self.path_for(game_id, name))
         return data is not None and data["name"] == name
 
-    def save(self, saved: SavedAi) -> Path:
-        path = self.path_for(saved.game_id, saved.name)
+    def save(self, data: dict[str, Any]) -> Path:
+        """Write a saved AI's dictionary (it names itself and its game)."""
+        if _header(data) is None:
+            raise ConfigurationError("Only a saved AI's own data can be stored here.")
+        name, game_id = str(data["name"]), str(data["game_id"])
+        path = self.path_for(game_id, name)
         current = _peek(path)
-        if current is not None and current["name"] != saved.name:
+        if current is not None and current["name"] != name:
             raise ConfigurationError(
-                f"The name {saved.name!r} is too close to the saved AI {current['name']!r}. "
+                f"The name {name!r} is too close to the saved AI {current['name']!r}. "
                 "Pick a name that differs in more than punctuation."
             )
         ensure_folder(path.parent, "saved AIs")
-        return write_json(path, saved.to_dict(), "saved AI")
+        return write_json(path, data, "saved AI")
 
-    def load(self, game_id: str, name: str) -> SavedAi:
+    def load(self, game_id: str, name: str) -> dict[str, Any]:
         path = self.path_for(game_id, name)
         if not self.exists(game_id, name):
             raise ConfigurationError(f"No saved AI called {name!r} for {game_id!r}.")
-        saved = SavedAi.from_dict(read_json(path, "saved AI"))
-        if saved.game_id != game_id:
-            raise ConfigurationError(f"{path} holds an AI for another game.")
-        return saved
+        return read_json(path, "saved AI")
 
     def delete(self, game_id: str, name: str) -> bool:
         if not self.exists(game_id, name):
@@ -76,12 +81,15 @@ class SavedAiStore:
         return True
 
 
-def _peek(path: Path) -> dict[str, object] | None:
-    """The file's header if it is one of ours, else None (foreign files are left alone)."""
+def _peek(path: Path) -> dict[str, Any] | None:
+    """The file's data if it is one of ours, else None (foreign files are left alone)."""
     try:
-        data = json.loads(path.read_text("utf-8"))
+        return _header(json.loads(path.read_text("utf-8")))
     except (OSError, ValueError):
         return None
+
+
+def _header(data: object) -> dict[str, Any] | None:
     if (
         isinstance(data, dict)
         and data.get("kind") == "saved_ai"

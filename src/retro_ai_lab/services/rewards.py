@@ -163,6 +163,24 @@ class RewardService:
             )
         return report
 
+    def replace(self, profile: RewardProfile) -> None:
+        """Swap in another profile for the same game (loading a saved AI)."""
+        current = self._require()
+        if profile.game_id != current.game_id:
+            raise ConfigurationError(
+                f"Those rewards are for {profile.game_id!r}, not the connected game."
+            )
+        self._profile = profile
+        self._detector = ExploitDetector(
+            profile,
+            self._tally,
+            window=self._exploit_window,
+            min_reward=self._exploit_min_reward,
+        )
+        self._warnings.clear()
+        self._current = None
+        self._announce(RewardProfileChanged((), profile.ids(), (), "loaded"))
+
     def save(self) -> Path | None:
         if self._store is None or self._profile is None:
             return None

@@ -101,21 +101,24 @@ def test_store_keeps_games_apart_and_lists_names(store: SavedAiStore, tmp_path: 
     a = sample("AI A")
     b = sample("ai b")
     other = SavedAi("AI A", "other/game:1", **parts("other/game:1"))
-    path = store.save(a)
+    path = store.save(a.to_dict())
     assert path == store.path_for(GAME, "AI A") and path.is_file()
-    store.save(b)
-    store.save(other)
+    store.save(b.to_dict())
+    store.save(other.to_dict())
     assert store.games() == ("other/game:1", GAME)
     assert store.names(GAME) == ("AI A", "ai b")
     assert store.names("other/game:1") == ("AI A",)
     assert store.names("nope") == ()
     assert store.exists(GAME, "AI A") and not store.exists(GAME, "AI C")
-    assert store.load(GAME, "AI A") == a
-    assert store.load("other/game:1", "AI A") == other
+    assert SavedAi.from_dict(store.load(GAME, "AI A")) == a
+    assert SavedAi.from_dict(store.load("other/game:1", "AI A")) == other
     # saving again under the same name replaces it
     newer = SavedAi("AI A", GAME, notes="second", **parts())
-    store.save(newer)
-    assert store.load(GAME, "AI A").notes == "second" and store.names(GAME) == ("AI A", "ai b")
+    store.save(newer.to_dict())
+    assert store.load(GAME, "AI A")["notes"] == "second"
+    assert store.names(GAME) == ("AI A", "ai b")
+    with pytest.raises(ConfigurationError, match="Only a saved AI's own data"):
+        store.save({"name": "x", "game_id": GAME})
     assert store.delete(GAME, "AI A") and not store.delete(GAME, "AI A")
     assert store.names(GAME) == ("ai b",)
     with pytest.raises(ConfigurationError, match="No saved AI called 'AI A'"):
@@ -129,14 +132,14 @@ def test_store_keeps_games_apart_and_lists_names(store: SavedAiStore, tmp_path: 
 
 
 def test_store_refuses_a_name_that_clashes_on_disk(store: SavedAiStore) -> None:
-    store.save(sample("AI A"))
+    store.save(sample("AI A").to_dict())
     assert store.path_for(GAME, "AI A") == store.path_for(GAME, "AI_A")
     with pytest.raises(ConfigurationError, match="too close to the saved AI 'AI A'"):
-        store.save(sample("AI_A"))
+        store.save(sample("AI_A").to_dict())
     assert not store.exists(GAME, "AI_A") and store.names(GAME) == ("AI A",)
     with pytest.raises(ConfigurationError, match="No saved AI called 'AI_A'"):
         store.load(GAME, "AI_A")
     assert not store.delete(GAME, "AI_A")
     assert store.exists(GAME, "AI A")
     with pytest.raises(ConfigurationError, match="can't be turned into a file name"):
-        store.save(sample("???"))
+        store.save(sample("???").to_dict())
