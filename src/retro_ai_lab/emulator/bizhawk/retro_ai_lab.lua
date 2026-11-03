@@ -360,19 +360,23 @@ local function domains()
   return out
 end
 
+-- Only pad entries that are pressed-or-not count as buttons; analog axes
+-- (numbers) are left out.
 local function button_names()
   local names = {}
   local ok, pad = pcall(joypad.get, 1)
   if ok and type(pad) == "table" then
-    for name in pairs(pad) do
-      names[#names + 1] = name
+    for name, value in pairs(pad) do
+      if type(value) == "boolean" then
+        names[#names + 1] = name
+      end
     end
   end
   if #names == 0 then
     ok, pad = pcall(joypad.get)
     if ok and type(pad) == "table" then
-      for name in pairs(pad) do
-        if name:sub(1, 3) == "P1 " then
+      for name, value in pairs(pad) do
+        if type(value) == "boolean" and name:sub(1, 3) == "P1 " then
           names[#names + 1] = name:sub(4)
         end
       end
@@ -383,6 +387,15 @@ local function button_names()
 end
 
 local handlers = {}
+
+local function command_names()
+  local names = json.array({})
+  for name in pairs(handlers) do
+    names[#names + 1] = name
+  end
+  table.sort(names)
+  return names
+end
 
 function handlers.hello(req)
   if not free_run then
@@ -396,6 +409,7 @@ function handlers.hello(req)
     hash = gameinfo.getromhash(),
     domains = domains(),
     buttons = button_names(),
+    commands = command_names(),
   }
 end
 

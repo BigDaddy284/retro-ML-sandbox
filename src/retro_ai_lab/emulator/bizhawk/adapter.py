@@ -18,9 +18,11 @@ from retro_ai_lab.core import (
     ConfigurationError,
     EmulatorDisconnectedError,
     GameInfo,
+    MemoryRegion,
     ProtocolError,
 )
 from retro_ai_lab.emulator.base import EmulatorAdapter
+from retro_ai_lab.emulator.bizhawk.description import Description
 from retro_ai_lab.emulator.bizhawk.protocol import (
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -59,6 +61,8 @@ class BizHawkAdapter(EmulatorAdapter):
         self._call_timeout_s = float(call_timeout_s)
         self._link: Link | None = None
         self._hello: dict[str, Any] = {}
+        self._description: Description | None = None
+        self._free_run = False
 
     # ------------------------------------------------------------ queries
 
@@ -74,6 +78,18 @@ class BizHawkAdapter(EmulatorAdapter):
     def hello(self) -> dict[str, Any]:
         """The script's answer to ``hello`` (empty when not connected)."""
         return dict(self._hello)
+
+    @property
+    def description(self) -> Description:
+        """The validated ``hello``: game, buttons, domains, commands."""
+        self._require_connected()
+        assert self._description is not None
+        return self._description
+
+    @property
+    def free_run(self) -> bool:
+        """True when the game runs between the app's steps (ARCHITECTURE.md §5.3)."""
+        return self._free_run
 
     def ping(self) -> None:
         """Round trip to the script; raises if the link is gone."""
@@ -92,15 +108,19 @@ class BizHawkAdapter(EmulatorAdapter):
                     f"The bridge script speaks protocol {version!r} but this app needs "
                     f"{PROTOCOL_VERSION}. Use the retro_ai_lab.lua that came with this app."
                 )
+            description = Description.from_hello(answer)
         except BaseException:
             link.close()
             raise
         self._link = link
         self._hello = answer
+        self._description = description
+        self._free_run = False
 
     def _do_disconnect(self) -> None:
         link, self._link = self._link, None
         self._hello = {}
+        self._description = None
         if link is None:
             return
         try:
@@ -112,16 +132,16 @@ class BizHawkAdapter(EmulatorAdapter):
             link.close()
 
     def _do_capabilities(self) -> Capabilities:
-        return Capabilities()
+        return self.description.capabilities(free_run=self._free_run)
 
     def _do_game_info(self) -> GameInfo:
-        system = str(self._hello.get("system") or "").strip() or "Unknown system"
-        rom = str(self._hello.get("rom") or "").strip() or "Untitled game"
-        rom_hash = self._hello.get("hash")
-        return GameInfo(system, rom, rom_hash=str(rom_hash) if rom_hash else None)
+        return self.description.game_info
 
     def _do_buttons(self) -> Sequence[Button]:
-        return ()
+        return self.description.buttons
+
+    def _do_memory_regions(self) -> Sequence[MemoryRegion]:
+        return self.description.regions
 
     # ------------------------------------------------------------ helpers
 
@@ -139,6 +159,7 @@ class BizHawkAdapter(EmulatorAdapter):
     def _drop(self) -> None:
         link, self._link = self._link, None
         self._hello = {}
+        self._description = None
         if link is not None:
             link.close()
         self.mark_disconnected()

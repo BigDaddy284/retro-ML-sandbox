@@ -19,11 +19,13 @@ from typing import Any
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.emulator.bizhawk.protocol import DEFAULT_HOST, PROTOCOL_VERSION
-from retro_ai_lab.emulator.fake.toy_racer import ToyRacer
+from retro_ai_lab.emulator.fake.toy_racer import BUTTONS, RAM_SIZE, ToyRacer
 
 SYSTEM = "TOY"
 ROM_NAME = "Toy Racer"
 BIZHAWK_VERSION = "simulator"
+DOMAIN = "RAM"
+PAD = tuple(b.label for b in BUTTONS)  # the labels an EmuHawk pad would list
 _ACCEPT_POLL_S = 0.05
 
 Handler = Callable[[dict[str, Any]], dict[str, Any]]
@@ -42,6 +44,7 @@ class BizHawkSimulator:
         answer: bool = True,
         garbage: bool = False,
         drop_after: int | None = None,
+        no_game: bool = False,
     ) -> None:
         if drop_after is not None and drop_after < 0:
             raise ConfigurationError("drop_after must be >= 0 or None.")
@@ -52,6 +55,7 @@ class BizHawkSimulator:
         self._answer = answer
         self._garbage = garbage
         self._drop_after = drop_after
+        self._no_game = no_game
         self._server: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -235,11 +239,12 @@ class BizHawkSimulator:
         return {
             "script": self._script_version,
             "bizhawk": BIZHAWK_VERSION,
-            "system": SYSTEM,
-            "rom": ROM_NAME,
+            "system": "NULL" if self._no_game else SYSTEM,
+            "rom": "" if self._no_game else ROM_NAME,
             "hash": f"toyracer-{self._game.seed}",
-            "domains": [],
-            "buttons": [],
+            "domains": [{"name": DOMAIN, "size": RAM_SIZE}],
+            "buttons": list(PAD),
+            "commands": sorted(self._handlers()),
         }
 
     def _bye(self, request: dict[str, Any]) -> dict[str, Any]:
