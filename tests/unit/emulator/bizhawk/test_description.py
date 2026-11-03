@@ -66,9 +66,9 @@ def test_description_from_a_good_hello() -> None:
 @pytest.mark.parametrize(
     ("patch", "match"),
     [
-        ({"system": "NULL"}, "Load a game in EmuHawk first"),
-        ({"rom": ""}, "Load a game in EmuHawk first"),
-        ({"rom": None}, "Load a game in EmuHawk first"),
+        ({"system": "NULL"}, "Load a game in the emulator first"),
+        ({"rom": ""}, "Load a game in the emulator first"),
+        ({"rom": None}, "Load a game in the emulator first"),
         ({"system": 7}, "'system' must be text"),
         ({"buttons": "A"}, "'buttons' must be a list of names"),
         ({"buttons": ["A", 3]}, "'buttons' must be a list of names"),

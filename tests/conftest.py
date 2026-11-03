@@ -14,19 +14,17 @@ import pytest
 REAL_EMULATOR_ENV = ("RETRO_AI_LAB_EMULATOR_PATH", "RETRO_AI_LAB_TEST_ROM")
 
 
-def _real_emulator_configured() -> bool:
-    return all(os.environ.get(name) for name in REAL_EMULATOR_ENV)
-
-
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    if _real_emulator_configured():
-        return
-    reason = (
-        "real emulator not configured: set "
-        + " and ".join(REAL_EMULATOR_ENV)
-        + " (see TESTING_STRATEGY.md §2.4)"
-    )
-    marker = pytest.mark.skip(reason=reason)
     for item in items:
-        if "real_emulator" in item.keywords:
-            item.add_marker(marker)
+        marker = item.get_closest_marker("real_emulator")
+        if marker is None:
+            continue
+        env = tuple(marker.kwargs.get("env", REAL_EMULATOR_ENV))
+        if all(os.environ.get(name) for name in env):
+            continue
+        reason = (
+            "real emulator not configured: set "
+            + " and ".join(env)
+            + " (see TESTING_STRATEGY.md §2.4)"
+        )
+        item.add_marker(pytest.mark.skip(reason=reason))

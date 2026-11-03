@@ -14,7 +14,7 @@ import binascii
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from retro_ai_lab.core import (
     Button,
@@ -31,6 +31,7 @@ from retro_ai_lab.emulator.base import EmulatorAdapter
 from retro_ai_lab.emulator.bizhawk.description import Description
 from retro_ai_lab.emulator.bizhawk.image import decode_image
 from retro_ai_lab.emulator.bizhawk.protocol import (
+    BIZHAWK_HINT,
     DEFAULT_HOST,
     DEFAULT_PORT,
     PROTOCOL_VERSION,
@@ -51,6 +52,9 @@ bus would swamp both the line protocol and the discovery engine.
 class BizHawkAdapter(EmulatorAdapter):
     name = "bizhawk"
     display_name = "BizHawk (EmuHawk)"
+    emulator_name: ClassVar[str] = "BizHawk"  # in messages
+    script_path: ClassVar[Path] = SCRIPT_PATH  # the bridge script this adapter talks to
+    open_hint: ClassVar[str] = BIZHAWK_HINT  # what to do when nothing listens
 
     def __init__(
         self,
@@ -83,6 +87,7 @@ class BizHawkAdapter(EmulatorAdapter):
         self._hello: dict[str, Any] = {}
         self._description: Description | None = None
         self._free_run = False
+        self._hold = True
         self._held: frozenset[Button] = frozenset()
 
     # ------------------------------------------------------------ queries
@@ -111,6 +116,15 @@ class BizHawkAdapter(EmulatorAdapter):
     def held(self) -> frozenset[Button]:
         """The buttons currently held down in the emulator."""
         return self._held
+
+    @property
+    def hold(self) -> bool:
+        """True when the bridge holds the game still between requests (ARCHITECTURE §5.3).
+
+        A bridge that can't pause (mGBA) says ``hold: false`` in its handshake: the game
+        runs on between steps, and a step's reads describe the frame it was answered on.
+        """
+        return self._hold
 
     @property
     def free_run(self) -> bool:
@@ -146,10 +160,17 @@ class BizHawkAdapter(EmulatorAdapter):
         return True
 
     def _do_connect(self, timeout_s: float) -> None:
+        cls = type(self)
         try:
-            link = open_link(self._host, self._port, timeout_s=timeout_s)
+            link = open_link(
+                self._host,
+                self._port,
+                timeout_s=timeout_s,
+                emulator=cls.emulator_name,
+                hint=cls.open_hint,
+            )
         except EmulatorError as exc:
-            raise EmulatorError(f"{exc} The script is at {SCRIPT_PATH}.") from exc
+            raise EmulatorError(f"{exc} The script is at {cls.script_path}.") from exc
         try:
             answer = link.call("hello", timeout_s=timeout_s, script=PROTOCOL_VERSION)
             version = answer.get("script")
@@ -166,12 +187,14 @@ class BizHawkAdapter(EmulatorAdapter):
         self._hello = answer
         self._description = description
         self._free_run = False
+        self._hold = answer.get("hold") is not False
 
     def _do_disconnect(self) -> None:
         link, self._link = self._link, None
         self._hello = {}
         self._description = None
         self._held = frozenset()
+        self._hold = True
         if link is None:
             return
         try:
@@ -257,6 +280,7 @@ class BizHawkAdapter(EmulatorAdapter):
         self._hello = {}
         self._description = None
         self._held = frozenset()
+        self._hold = True
         if link is not None:
             link.close()
         self.mark_disconnected()

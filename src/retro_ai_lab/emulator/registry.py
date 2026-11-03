@@ -77,10 +77,12 @@ def default_registry() -> AdapterRegistry:
     """The registry the application uses: every adapter that ships."""
     from retro_ai_lab.emulator.bizhawk import BizHawkAdapter
     from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
+    from retro_ai_lab.emulator.mgba import MgbaAdapter
 
     registry = AdapterRegistry()
     registry.register(FakeEmulatorAdapter)
     registry.register(BizHawkAdapter)
+    registry.register(MgbaAdapter)
     return registry
 
 

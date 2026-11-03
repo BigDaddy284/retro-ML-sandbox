@@ -101,9 +101,11 @@ def test_non_adapter_classes_rejected(not_adapter: Any) -> None:
 
 def test_default_registry_ships_the_fake_and_bizhawk_adapters() -> None:
     from retro_ai_lab.emulator.bizhawk import BizHawkAdapter
+    from retro_ai_lab.emulator.mgba import MgbaAdapter
 
     reg = default_registry()
-    assert reg.names() == ("fake", "bizhawk")
+    assert reg.names() == ("fake", "bizhawk", "mgba")
+    assert reg.get("mgba") is MgbaAdapter and issubclass(MgbaAdapter, BizHawkAdapter)
     assert reg.get("bizhawk") is BizHawkAdapter
     assert isinstance(reg.create("bizhawk", port=43111), BizHawkAdapter)
     assert "fake" in reg
