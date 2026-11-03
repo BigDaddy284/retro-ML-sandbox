@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-815: every run writes `<data dir>/logs/retro-ai-lab.log` (startup header, Qt / window / event-loop milestones, uncaught exceptions) so a silent start can be diagnosed; the README says where to find it.
 - T-814: README explains downloading the built Windows app from GitHub Actions; the emulator guides give the bridge script's path inside the built app.
 - T-813: README "Setting up on Windows" for non-developers; docs/BIZHAWK.md and docs/MGBA.md point at it and spell out the Lua Console / scripting window clicks.
 - T-812: documentation refresh (README status, ARCHITECTURE layers and package layout, ADR-010 accepted, TESTING_STRATEGY test layers) to match the code.

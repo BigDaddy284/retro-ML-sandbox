@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from collections.abc import Callable, Sequence
 
@@ -14,6 +15,8 @@ from retro_ai_lab.ui.main_window import MainWindow
 
 APP_NAME = "Retro AI Lab"
 ORGANISATION = "RetroAILab"
+
+log = logging.getLogger(__name__)
 
 
 def create_app(argv: Sequence[str] | None = None) -> QApplication:
@@ -40,13 +43,17 @@ def run_app(
     delay, which is how the launch smoke test runs the real entry point.
     """
     app = create_app(argv)
+    log.info("Qt application created (platform %s)", app.platformName())
     window = MainWindow(context)
     window.show()
+    log.info("Main window shown")
     if before_exec is not None:
         QTimer.singleShot(0, lambda: before_exec(app, window))
     if exit_after_ms is not None:
         QTimer.singleShot(max(0, exit_after_ms), app.quit)
-    return int(app.exec())
+    code = int(app.exec())
+    log.info("Event loop finished with code %d", code)
+    return code
 
 
 __all__ = ["APP_NAME", "ORGANISATION", "create_app", "run_app"]

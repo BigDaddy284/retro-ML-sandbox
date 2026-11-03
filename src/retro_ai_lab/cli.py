@@ -36,7 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _default_launch(argv: Sequence[str]) -> int:
-    # Imported lazily so ``--version`` works without loading Qt.
+    # The log file first, so a start that never shows a window still leaves a trace;
+    # Qt is imported lazily so ``--version`` works without loading it.
+    from retro_ai_lab.core.logbook import setup_logging
+
+    setup_logging()
     from retro_ai_lab.ui.app import run_app
 
     args = build_parser().parse_args(argv)
