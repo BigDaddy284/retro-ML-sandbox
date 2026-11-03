@@ -219,3 +219,52 @@ def test_without_a_store_nothing_is_saved(
     connection.connect("fake", seed=3)
     rewards.increase("reset:*")
     assert rewards.save() is None and rewards.saves == 0 and rewards.store is None
+
+
+# ------------------------------------------------------------ T-405
+
+
+def test_farming_is_announced_once_per_window_and_clears(
+    connection: ConnectionService, discovery: DiscoveryService, bus: EventBus
+) -> None:
+    from retro_ai_lab.services import ExploitSuspected
+
+    rewards = RewardService(connection, discovery, bus, exploit_window=100, exploit_min_reward=20)
+    seen: list[ExploitSuspected] = []
+    bus.subscribe(ExploitSuspected, seen.append)
+    connection.connect("fake", seed=3)
+    k = teach(discovery, bus)
+    score = k.at(RAM, LAYOUT.score)
+    checkpoint = k.at(RAM, LAYOUT.checkpoint)
+    assert score and checkpoint
+
+    def gain(frame: int) -> None:
+        bus.publish(
+            DiscoveryUpdated((), (), (GameEvent(EventKind.SCORE_GAIN, frame, score.id, ""),), ())
+        )
+
+    for f in range(10, 40, 10):
+        gain(f)  # 15 points: not enough yet
+    assert seen == [] and rewards.current_warning is None
+    gain(40)
+    assert len(seen) == 1 and seen[0].frame == 40 and seen[0].warning.kind == "farming"
+    assert rewards.current_warning is seen[0] and rewards.warnings == (seen[0],)
+    gain(50)
+    assert len(seen) == 1  # same cause, same window: said once
+    # A checkpoint inside the window means progress: no new warning, and after a window the
+    # old one lapses.
+    bus.publish(
+        DiscoveryUpdated((), (), (GameEvent(EventKind.PROGRESS, 60, checkpoint.id, ""),), ())
+    )
+    assert len(seen) == 1 and rewards.current_warning is seen[0]
+    bus.publish(
+        DiscoveryUpdated((), (), (GameEvent(EventKind.PROGRESS, 150, checkpoint.id, ""),), ())
+    )
+    assert rewards.current_warning is None
+    # Farming again much later is a fresh warning.
+    for f in range(400, 450, 10):
+        gain(f)
+    assert len(seen) == 2 and seen[1].frame == 430
+    connection.disconnect()
+    connection.connect("fake", seed=3)
+    assert rewards.warnings == () and rewards.current_warning is None

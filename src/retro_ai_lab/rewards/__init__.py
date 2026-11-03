@@ -1,5 +1,6 @@
 """Reward system (Phase 4): how children tell the AI what matters."""
 
+from retro_ai_lab.rewards.exploitation import ExploitDetector, ExploitWarning
 from retro_ai_lab.rewards.model import (
     MAX_VALUE,
     SCHEMA_VERSION,
@@ -31,6 +32,8 @@ __all__ = [
     "Behaviour",
     "BehaviourTotal",
     "Category",
+    "ExploitDetector",
+    "ExploitWarning",
     "Personality",
     "RewardEntry",
     "RewardProfile",
