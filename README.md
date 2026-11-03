@@ -97,6 +97,14 @@ prints how many frames the clock managed against how many it wanted, what each
 bridge command cost, what the app's own bookkeeping took per step and per
 picture, and the longest stall of the window's thread.
 
+## Arranging the panels
+
+Every panel can be dragged by its title bar to another edge of the window,
+dropped onto another panel to make tabs, pulled out as its own window, or
+resized by the bars between panels. The **Panels** button on the toolbar hides
+or shows each one and has **Reset layout** to put everything back. The
+arrangement is remembered between runs.
+
 ## Windows build
 
 Every push to `main` runs the **Package** workflow, which builds `RetroAILab.exe` with PyInstaller, launches it as a smoke test and uploads the folder as the `RetroAILab-windows` artifact (Actions tab → latest Package run → Artifacts). To build locally: `pip install pyinstaller && pyinstaller packaging/retro_ai_lab.spec --noconfirm`.

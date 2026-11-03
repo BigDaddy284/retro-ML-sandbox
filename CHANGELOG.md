@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Added: the six panels are dock widgets that can be dragged to another edge, tabbed together, floated as their own windows, resized, hidden and shown again from the toolbar's Panels menu, with Reset layout; the arrangement is remembered between runs (T-837).
 - Changed: "Practise fast" now asks the emulator for its top speed (64x on EmuHawk) while the AI trains and puts 1x back on pause, stop or a return to "Watch it play"; the Game panel shows 2 pictures a second meanwhile so the link belongs to the training steps; the bridge script restores 100% when the app leaves (T-836).
 - Fixed: picture and sound memory (OAM, nametables, VRAM, palettes, CGRAM, APU RAM) is no longer watched; on the user's Super Mario Bros. it made 1646 watched values and 1442 suggested rewards, and its bouncing sprite bytes read as lives lost and as resets, ending every go after a step or two (T-835).
 - Test: the Game panel's dropped-link test no longer races its own 60 fps frame pump (it failed once on Windows CI, reproduced 2 times in 60 under CPU load); it now stops the pump after the first frame and spends the one remaining operation itself; the profiling tool's test allows the one step that can be in flight when a run ends, and the tool runs its timed play on a local event loop so a test run after it still waits properly (T-834).

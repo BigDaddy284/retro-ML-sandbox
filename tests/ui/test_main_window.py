@@ -8,12 +8,12 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QSplitter
+from PySide6.QtWidgets import QApplication, QDockWidget, QLabel, QMainWindow, QToolButton
 from pytestqt.qtbot import QtBot
 
 from retro_ai_lab import __version__
 from retro_ai_lab.ui.app import APP_NAME, create_app
-from retro_ai_lab.ui.main_window import WINDOW_TITLE, MainWindow
+from retro_ai_lab.ui.main_window import PANELS_MENU, RESET_LAYOUT, WINDOW_TITLE, MainWindow
 from retro_ai_lab.ui.panels import PANELS, Panel, PanelSpec
 
 
@@ -56,7 +56,123 @@ def test_all_six_panels_present_with_child_friendly_titles(qtbot: QtBot) -> None
         assert w.panel(p.key) is p
         placeholder = p.content.findChild(QLabel, f"panel_{p.key}_placeholder")
         assert placeholder is not None and placeholder.text() == p.spec.blurb
-    assert isinstance(w.centralWidget(), QSplitter)
+        # T-837: every panel sits in a dock named after it.
+        dock = w.dock(p.key)
+        assert isinstance(dock, QDockWidget) and dock.widget() is p
+        assert dock.objectName() == f"dock_{p.key}" and dock.windowTitle() == p.title
+    assert w.centralWidget() is None
+
+
+AREA = Qt.DockWidgetArea
+DEFAULT_AREAS = {
+    "game": AREA.LeftDockWidgetArea,
+    "activity": AREA.RightDockWidgetArea,
+    "rewards": AREA.RightDockWidgetArea,
+    "progress": AREA.BottomDockWidgetArea,
+    "learning": AREA.BottomDockWidgetArea,
+    "compare": AREA.BottomDockWidgetArea,
+}
+
+
+def _layout(w: MainWindow) -> dict[str, tuple[bool, bool, Qt.DockWidgetArea]]:
+    """(visible, floating, area) per panel key."""
+    return {
+        d.objectName()[5:]: (d.isVisible(), d.isFloating(), w.dockWidgetArea(d)) for d in w.docks
+    }
+
+
+def test_default_layout_shows_all_six_together(qtbot: QtBot) -> None:
+    """T-837: DESIGN §10's "all visible together" is the default arrangement."""
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.show()
+    assert _layout(w) == {key: (True, False, area) for key, area in DEFAULT_AREAS.items()}
+    feature = QDockWidget.DockWidgetFeature
+    for dock in w.docks:
+        for wanted in (
+            feature.DockWidgetMovable,
+            feature.DockWidgetFloatable,
+            feature.DockWidgetClosable,
+        ):
+            assert dock.features() & wanted
+        assert dock.allowedAreas() == AREA.AllDockWidgetAreas
+    assert w.isDockNestingEnabled()
+    assert w.dockOptions() & QMainWindow.DockOption.AllowTabbedDocks
+    assert w.layout_path is None  # tests forget the layout
+
+
+def test_a_hidden_panel_comes_back_from_the_panels_menu(qtbot: QtBot) -> None:
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.show()
+    menu = w.panels_menu
+    assert menu.title() == PANELS_MENU
+    actions = [a for a in menu.actions() if not a.isSeparator()]
+    assert [a.text() for a in actions] == [*(p.title for p in w.panels), RESET_LAYOUT]
+    tick = actions[2]
+    assert tick.isCheckable() and tick.isChecked()
+    w.dock("rewards").close()
+    assert not w.dock("rewards").isVisible() and not w.panel("rewards").isVisible()
+    assert not tick.isChecked()
+    assert all(w.dock(k).isVisible() for k in DEFAULT_AREAS if k != "rewards")
+    tick.trigger()
+    assert w.dock("rewards").isVisible() and w.panel("rewards").isVisible()
+    button = w.findChild(QToolButton, "panels_button")
+    assert button is not None and button.menu() is menu and button.text() == PANELS_MENU
+
+
+def test_the_layout_is_remembered_between_runs(qtbot: QtBot, tmp_path: Path) -> None:
+    path = tmp_path / "layout.bin"
+    w = MainWindow(layout_path=path)
+    qtbot.addWidget(w)
+    w.show()
+    assert w.layout_path == path and not path.exists()
+    w.dock("compare").setFloating(True)
+    w.dock("rewards").close()
+    w.removeDockWidget(w.dock("learning"))
+    w.addDockWidget(AREA.LeftDockWidgetArea, w.dock("learning"))
+    w.dock("learning").show()
+    assert w.close() and path.is_file()
+
+    again = MainWindow(layout_path=path)
+    qtbot.addWidget(again)
+    again.show()
+    layout = _layout(again)
+    assert layout["compare"][1] and layout["compare"][0]
+    assert not layout["rewards"][0]
+    assert layout["learning"] == (True, False, AREA.LeftDockWidgetArea)
+    assert layout["game"] == (True, False, AREA.LeftDockWidgetArea)
+    again.close()
+
+
+def test_reset_layout_puts_every_panel_back(qtbot: QtBot) -> None:
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.show()
+    w.dock("compare").setFloating(True)
+    w.dock("rewards").close()
+    w.removeDockWidget(w.dock("game"))
+    w.addDockWidget(AREA.BottomDockWidgetArea, w.dock("game"))
+    w.dock("game").show()
+    assert _layout(w) != {key: (True, False, area) for key, area in DEFAULT_AREAS.items()}
+    reset = next(a for a in w.panels_menu.actions() if a.text() == RESET_LAYOUT)
+    reset.trigger()
+    assert _layout(w) == {key: (True, False, area) for key, area in DEFAULT_AREAS.items()}
+    assert all(a.isChecked() for a in w.panels_menu.actions() if a.isCheckable())
+
+
+def test_a_bad_layout_file_is_ignored(qtbot: QtBot, tmp_path: Path) -> None:
+    path = tmp_path / "layout.bin"
+    path.write_bytes(b"not a layout at all")
+    w = MainWindow(layout_path=path)
+    qtbot.addWidget(w)
+    w.show()
+    assert _layout(w) == {key: (True, False, area) for key, area in DEFAULT_AREAS.items()}
+    missing = MainWindow(layout_path=tmp_path / "nowhere" / "layout.bin")
+    qtbot.addWidget(missing)
+    missing.show()
+    assert _layout(missing) == {key: (True, False, area) for key, area in DEFAULT_AREAS.items()}
+    assert missing.close() and (tmp_path / "nowhere" / "layout.bin").is_file()
 
 
 def test_panel_specs_are_unique_and_plain() -> None:
