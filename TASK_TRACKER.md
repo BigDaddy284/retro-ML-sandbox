@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** Phase 8 breakdown (T-801 onwards)
+- **Current task:** T-802 – Saved AI service: save the current AI under a name, load one back, delete
 - **Last approved checkpoint:** `main` after T-709 (PR #58)
 - **Open blockers:** none for development. ADR-005 (BizHawk bridge) is now Accepted with its real-emulator verification left to T-117 on the user's Windows PC. ADR-006 (first demo game) is still *Proposed*: the user picks the game. ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -85,6 +85,14 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-708 | Hierarchical learning: a skill per goal step; the active step picks the skill | 7 | Done | 6/6 | see PR #57 |
 | T-709 | Better progress detection on a longer look (checkpoint vs position, lap vs flag) | 7 | Done | 5/5 | see PR #58 |
 | E-8 | Expansion (VBA-M, comparison, sharing, competitions) | 8 | Epic | – | – |
+| T-801 | Saved AIs: a named snapshot of rewards, goal and brain per game, on disk | 8 | Done | 5/5 | see PR #67 |
+| T-802 | Saved AI service: save the current AI under a name, load one back, delete; events | 8 | – | – | – |
+| T-803 | Comparison: rewards, objectives, time, attempts, successes and behaviour differences between saved AIs, in child words | 8 | – | – | – |
+| T-804 | "Compare AIs" panel: save as, load, delete, comparison table, two curves on one graph | 8 | – | – | – |
+| T-805 | Sharing: export a saved AI as one file and import one safely (schema, size, same game) | 8 | – | – | – |
+| T-806 | Competitions: a challenge (game, start state, fixed settings, goes) and a scoreboard of saved AIs run under it | 8 | – | – | – |
+| T-807 | Research mode: advanced view with editable learning settings, the current situation's values and a CSV step log | 8 | – | – | – |
+| T-808 | Second emulator adapter spike: VBA-M feasibility and ADR (docs only) | 8 | – | – | – |
 
 The **first working demonstration** (DESIGN.md §17) is reached at the end of E-5 plus the minimum of E-6, first on the Fake Emulator and then on a real game via BizHawk.
 
@@ -1084,6 +1092,25 @@ DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical l
 - **Commit:** see PR #66. **PR:** #66.
 - **Completion report:** The BizHawk adapter is now in the app: the console picker offers "BizHawk (EmuHawk)" and a failed connect tells the child where the script is. The link watchdog works for a socket adapter through a new `check_link()` hook: the connection service used `is_connected`, which for BizHawk only changed after a failed request, so a crashed EmuHawk would have gone unnoticed in hold mode; the adapter now peeks the socket (zero-timeout select, `MSG_PEEK`) and drops the link when the peer has gone, with the loss reported once as before. What CI cannot answer is written down for the user: `tests/real_emulator/test_bizhawk.py` launches EmuHawk with `--lua`, checks hold-mode stepping (exact frame counts and a still game between steps), reads, screenshots, input, speed, states and the disconnect, and prints timings; `docs/BIZHAWK.md` explains the setup and what to paste back. ADR-005 stays Accepted with that run as its outstanding evidence; the free-run fallback (`set_free_run`) is ready if frame advance turns out not to move a paused EmuHawk.
 
+### E-8 – Expansion: breakdown
+DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §16 Phase 8. The order is chosen so each task is useful on its own: a saved AI is worth having before comparing two, comparing before sharing, sharing before competing. The "AI configuration" of §11 is called a *saved AI* in the app: a name, the rewards, the goal and the brain, saved together per game, so AI A and AI B can be trained on the same game and set side by side. T-801 to T-808 are listed in the summary table; each gets its own section when started.
+
+### T-801 – Saved AIs: a named snapshot of rewards, goal and brain per game
+- **Status:** Done
+- **Phase:** 8
+- **Objective:** The record a child saves as "AI A": its name, the game, when it was saved, a note, and the three parts that make the AI what it is (reward profile, goal, brain), as one JSON file that can be listed, loaded and deleted per game. Everything later in Phase 8 (loading, comparing, sharing, competing) works on this record.
+- **Scope:** `comparison/saved_ai.py`: `SavedAi(name, game_id, created, notes, rewards, goal, brain)` holding the parts as the plain dictionaries their own `to_dict` produce (no classes from the layers above storage), `to_dict`/`from_dict` with a schema number, `check_name` (1 to 40 printable characters, trimmed), validation that every part is an object for the same game; convenience properties `episodes`, `total_steps`, `algorithm`, `personality` read from the parts. `storage/saved_ais.py`: `SavedAiStore(folder)` with one folder per game and one file per saved AI (`names(game_id)`, `games()`, `exists`, `save`, `load`, `delete`), refusing a name whose file would collide with a differently spelled one ("AI A" vs "AI_A"), skipping foreign files, atomic writes. **Out of scope:** taking the snapshot from the live services (T-802), comparing (T-803).
+- **Acceptance criteria:**
+  1. A `SavedAi` round-trips through `to_dict`/`from_dict` and through the store unchanged; `created` is an ISO 8601 UTC timestamp made at construction when not given.
+  2. Bad names (empty, blank, over 40 characters, control characters) and bad data (a part that is not an object, a part for another game, a newer schema, a missing part) raise `ConfigurationError` with a message naming the problem.
+  3. The store lists names per game in alphabetical order, keeps games apart, loads what was saved, deletes, and ignores files that are not saved AIs; a name whose file name clashes with another saved name is refused rather than overwriting it.
+  4. The convenience properties read `episodes`, `total_steps`, `algorithm` and `personality` out of the parts and are safe when a part lacks them.
+- **Expected changes:** `src/retro_ai_lab/comparison/{__init__,saved_ai}.py`, `src/retro_ai_lab/storage/saved_ais.py`, `storage/__init__.py`, tests.
+- **Test plan:** unit – model round trip and validation; store list/save/load/delete/clash/foreign files. Regression – full suite.
+- **Results:** 5 tests (9 cases with parametrisation) pass; full suite 897 passed, 5 skipped on Python 3.13 and 3.11; ruff and mypy strict clean.
+- **Commit:** see PR #67. **PR:** #67.
+- **Completion report:** A saved AI is a plain record of dictionaries, checked but not rebuilt, so a file can be listed and validated without a connected game or an action space; T-802 rebuilds the parts through the services that own them. Files carry `"kind": "saved_ai"` so the store can tell its own files from anything else in the folder, and the store refuses a second name that maps to the same file ("AI A" / "AI_A") instead of silently replacing the first. The per-game folder uses the same safe-name rule as the other stores.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -1155,5 +1182,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
 - Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56). T-708 completed (PR #57). T-709 completed (PR #58): Phase 7 complete.
-- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame. T-115 completed (PR #64): memory reads with a region size cap. T-116 completed (PR #65): step, speed and save states; every capability on; the episode runner drives the adapter. T-117 completed (PR #66): BizHawk in the app, socket probe for the watchdog, opt-in real-emulator test and docs/BIZHAWK.md; the real run waits for the user's Windows PC.
+- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame. T-115 completed (PR #64): memory reads with a region size cap. T-116 completed (PR #65): step, speed and save states; every capability on; the episode runner drives the adapter. T-117 completed (PR #66): BizHawk in the app, socket probe for the watchdog, opt-in real-emulator test and docs/BIZHAWK.md; the real run waits for the user's Windows PC. Phase 8 broken down (T-801..T-808). T-801 completed (PR #67): saved AI record and store.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
