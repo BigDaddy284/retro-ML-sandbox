@@ -15,7 +15,10 @@ a = Analysis(
     ["../src/retro_ai_lab/__main__.py"],
     pathex=["../src"],
     binaries=[],
-    datas=[],
+    datas=[
+        # The BizHawk bridge script ships next to the adapter package.
+        ("../src/retro_ai_lab/emulator/bizhawk/retro_ai_lab.lua", "retro_ai_lab/emulator/bizhawk"),
+    ],
     hiddenimports=hidden,
     hookspath=[],
     runtime_hooks=[],
