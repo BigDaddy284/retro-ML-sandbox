@@ -190,6 +190,10 @@ class QLearningAgent:
     def greedy(self, state: State) -> int:
         return self._table.best(state)
 
+    def values(self, state: State) -> tuple[float, ...]:
+        """The table's score for every action in a situation (zeros when unseen)."""
+        return self._table.values(state)
+
     def policy(self) -> dict[str, int]:
         return {key: self._table.best(State.from_key(key)) for key in self._table.known_states()}
 
@@ -222,6 +226,12 @@ class QLearningAgent:
         self._epsilon = _check(other.epsilon, "epsilon", 0.0, 1.0)
         self._updates = other.updates
         self._episodes = other.episodes
+
+    def configure(self, settings: Settings) -> None:
+        if not isinstance(settings, Settings):
+            raise ConfigurationError("Learning settings must be a Settings.")
+        self._settings = settings
+        self._epsilon = settings.epsilon
 
     def reset(self) -> None:
         self._last_decision = None

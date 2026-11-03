@@ -87,6 +87,14 @@ class Learner(Protocol):
 
     def greedy(self, state: State) -> int: ...
 
+    def values(self, state: State) -> tuple[float, ...]:
+        """What it thinks every move in the space is worth in a situation."""
+        ...
+
+    def configure(self, settings: Any) -> None:
+        """Learn with these :class:`Settings` from now on (exploration restarts from them)."""
+        ...
+
     def learn(
         self, state: State, action: int, reward: float, next_state: State, done: bool = False
     ) -> float: ...

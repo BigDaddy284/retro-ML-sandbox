@@ -169,6 +169,8 @@ class EpisodeRunner:
         self._same_state = 0
         self._last_buttons: frozenset[str] = frozenset()
         self._last_action: int | None = None
+        self._last_state: State | None = None
+        self._last_reward = 0.0
         self._signals = EpisodeSignals(bus)
         self._buttons: dict[str, Button] = {}
         self._state: State | None = None
@@ -213,6 +215,16 @@ class EpisodeRunner:
     def last_action(self) -> int | None:
         """The action behind the last step; None for an unstick press."""
         return self._last_action
+
+    @property
+    def last_state(self) -> State | None:
+        """The situation the last step's move was chosen in."""
+        return self._last_state
+
+    @property
+    def last_reward(self) -> float:
+        """The reward the last step collected."""
+        return self._last_reward
 
     @property
     def unsticks(self) -> int:
@@ -312,6 +324,8 @@ class EpisodeRunner:
         """After the frames passed: collect the reward, read the next state, learn."""
         self._frames += frames
         reward, resets = self._signals.take()
+        self._last_state = state
+        self._last_reward = reward
         # Putting the game back to the checkpoint looks like a restart to the engine, and
         # it may only notice a few frames later: a "reset" that soon after a restore is
         # the restore itself, not the game starting over.

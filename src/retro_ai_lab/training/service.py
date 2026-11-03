@@ -35,7 +35,7 @@ from retro_ai_lab.learning.promotion import convert, promote
 from retro_ai_lab.learning.qlearning import QLearningAgent, Settings
 from retro_ai_lab.learning.replay import Transition
 from retro_ai_lab.learning.skills import SkillsLearner
-from retro_ai_lab.learning.state import StateEncoder
+from retro_ai_lab.learning.state import State, StateEncoder
 from retro_ai_lab.rewards.exploitation import ExploitWarning
 from retro_ai_lab.rewards.goals import Goal
 from retro_ai_lab.rewards.model import RewardProfile
@@ -91,6 +91,9 @@ class TrainingStepped:
     frame: int
     buttons: frozenset[str]
     decision: Decision | None  # None when the child played or Start was pressed to unstick
+    step: int = 0  # the step's number within the go (1-based)
+    reward: float = 0.0  # what the step collected
+    situation: str = ""  # the state key the move was chosen in
 
 
 class TrainingService:
@@ -345,6 +348,37 @@ class TrainingService:
             self._prepare_checkpoint()
         self._announce("mode change")
 
+    @property
+    def settings(self) -> Settings:
+        """The learning settings the brain in use learns with (new brains start from them)."""
+        if self._agent is not None:
+            found = getattr(self._agent, "settings", None)
+            if isinstance(found, Settings):
+                return found
+        return self._settings
+
+    def set_settings(self, settings: Settings) -> None:
+        """Learn with these settings from now on; idle only. Applied to the brain in use."""
+        if not isinstance(settings, Settings):
+            raise ConfigurationError("Learning settings must be a Settings.")
+        if self._status is not Status.IDLE:
+            raise ConfigurationError("Stop training before changing the learning settings.")
+        self._settings = settings
+        if self._agent is not None:
+            self._agent.configure(settings)
+            self.save()
+        self._announce("settings")
+
+    def current_state(self) -> State | None:
+        """The situation the game is in now, as the AI sees it (None without a game)."""
+        if not self._enabled or self._encoder is None:
+            return None
+        snapshot = self._observation.latest
+        if snapshot is None:
+            return None
+        self._encoder.refresh()  # discoveries may have changed since the last go
+        return self._encoder.encode(snapshot)
+
     def set_algorithm(self, algorithm: str) -> str:
         """Choose how the AI learns; converts the current brain when the choice differs.
 
@@ -493,9 +527,7 @@ class TrainingService:
             decision = self._agent.last_decision if self._agent is not None else None
             if runner.last_action is None:
                 decision = None
-            self._bus.publish(
-                TrainingStepped(self._observation.frame, runner.last_buttons, decision)
-            )
+            self._bus.publish(_stepped(self._observation.frame, runner, decision))
         # Link loss closes the go from the disconnect handler, so check it's still open.
         if not went_on and runner.state is not None:
             self._record(runner.finish())
@@ -672,7 +704,7 @@ class TrainingService:
         self._pick_skill()
         went_on = runner.observe_step(held, frames)
         self._total_steps += 1
-        self._bus.publish(TrainingStepped(frame, runner.last_buttons, None))
+        self._bus.publish(_stepped(frame, runner, None))
         if not went_on and runner.state is not None:
             self._record(runner.finish())
 
@@ -772,6 +804,18 @@ class TrainingService:
 
     def _announce(self, reason: str) -> None:
         self._bus.publish(TrainingStateChanged(self._status, self._mode, reason))
+
+
+def _stepped(frame: int, runner: EpisodeRunner, decision: Decision | None) -> TrainingStepped:
+    state = runner.last_state
+    return TrainingStepped(
+        frame,
+        runner.last_buttons,
+        decision,
+        step=runner.steps,
+        reward=runner.last_reward,
+        situation=state.key if state is not None else "",
+    )
 
 
 def _check_algorithm(name: str) -> None:
