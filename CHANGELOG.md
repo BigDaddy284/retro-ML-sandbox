@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-607: "What's this?" on every panel opens a shared tips window explaining the panel and the ideas behind it (AI, machine learning, reinforcement learning, rewards, neural networks, training, decisions, exploring, reward exploitation, learning in steps) in simple or grown-up words.
 - T-606: First working demonstration on the Fake Emulator (DESIGN.md §17) as an end-to-end test; counters left out of the AI's view of the game; stale suggested goal steps retired; a checkpoint restore no longer ends a go as a "reset"; PySide6 is kept below 6.12 on Python 3.11 (6.12.0 leaks a reference per signal and aborts after a few thousand events) with a guard test.
 - T-605: The Learning panel says how the AI's favourite moves changed over recent goes and suggests what to try next.
 - T-604: The activity panel says what the AI is pressing and why (trying something new or its best known move), its last moves, and the goal step it is working on; `TrainingStepped` events.

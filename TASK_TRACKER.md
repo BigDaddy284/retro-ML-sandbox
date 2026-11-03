@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-607 – Educational tips ("What's this?" explanations for every panel)
-- **Last approved checkpoint:** `main` after T-505 (PRs #41–#48 merging in order as CI passes)
+- **Current task:** Phase 7 planning (real emulator; needs ADR-005 / ADR-006 sign-off)
+- **Last approved checkpoint:** `main` after T-505 (PRs #41–#49 merging in order as CI passes)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -73,7 +73,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-604 | AI activity: current and previous actions, exploring vs best-known, current objective | 6 | Done | 6/6 | see PR #46 |
 | T-605 | Behaviour changes and suggested experiments: what the AI now does differently, what to try next | 6 | Done | 4/4 | see PR #47 |
 | T-606 | First working demonstration on the Fake Emulator: DESIGN.md §17 steps 1–10 as one scripted test, including rewards changing behaviour | 6 | Done | 5/5 | see PR #48 |
-| T-607 | Educational tips: "What's this?" explanations in simple and advanced words for every panel | 6 | Planned | – | – |
+| T-607 | Educational tips: "What's this?" explanations in simple and advanced words for every panel | 6 | Done | 6/6 | see PR #49 |
 | E-7 | Advanced Learning (DQN, hierarchical RL, demonstrations) | 7 | Epic | – | – |
 | E-8 | Expansion (VBA-M, comparison, sharing, competitions) | 8 | Epic | – | – |
 
@@ -787,6 +787,20 @@ Live and background training and the guided and manual modes were delivered in P
 - **Results:** 5 / 5 passed / 0 failed / 0 excluded (761 in the full suite, on Python 3.13 with PySide6 6.12.0 and on Python 3.11 with PySide6 6.11.3). Lint, format and strict mypy clean.
 - **Completion report:** Measured on fake seed 5 with agent seed 7, over the last 10 of 30 goes: points-lover mean speed 1.20, score 331, 90 steps, reward +7.6; careful AI speed 0.39, score 247, 150 steps, reward −82. The careful AI still clips obstacles while exploring (an obstacle stops the car and costs a life), so "never crashes" is not claimed; the robust difference is speed and survival. Discovery still calls the checkpoint byte a position and the lap a flag at 2400 frames, so the suggested goal steps are switched off for the run and the child's own step is used; better progress detection is a Phase 7 refinement. Milestone 1 of DESIGN.md §17 is met on the synthetic game.
 
+### T-607 – Educational tips
+- **Status:** Done
+- **Phase:** 6
+- **Objective:** DESIGN.md §12: every panel can explain itself and the ideas behind it in simple words, with an advanced explanation for older children and adults, covering all ten listed topics (AI, machine learning, reinforcement learning, rewards and penalties, neural networks, training and experimentation, decision-making, exploration versus exploitation, reward exploitation, hierarchical learning).
+- **Scope:** `education.tips`: pure data. `Tip(key, title, simple, advanced, see_also)`, `TIPS` (one per panel key plus one per §12 topic), `tip_for(key)` (unknown key raises `ConfigurationError`), `TOPIC_KEYS`, `PANEL_TIP` mapping panel key to tip key. `ui.tips`: `TipDialog(parent)`, a non-modal window with a topic list, a "Use grown-up words" switch that is remembered while the app runs, the explanation, and "See also" buttons that jump between tips; `show_tip(key)`, `current_key`, `advanced`, `set_advanced(bool)`, `title_text`, `body_text`, `see_also_keys()`. `ui.panels`: each `Panel` header gets a "What's this?" button (`help_button`) emitting `help_requested(key)`; `MainWindow.tip_dialog` opens on it. **Out of scope:** lessons or quizzes, per-widget tooltips beyond the panel level (later refinement), translations.
+- **Acceptance criteria:**
+  1. There is a tip for every panel and every §12 topic; keys are unique; every tip has a title, a simple text and a longer advanced text; simple texts avoid jargon ("algorithm", "policy", "Q-value", "epsilon", "gradient", "hyperparameter"); every see-also key exists.
+  2. `tip_for` raises a clear error for an unknown key.
+  3. Clicking a panel's "What's this?" shows that panel's tip; the switch changes the text and stays switched for the next tip; see-also buttons move to the linked tip; the topic list reaches every tip.
+  4. The main window owns one dialog shared by all five panels; showing it twice doesn't open two windows.
+- **Test plan:** data completeness, jargon and link checks; unknown key; dialog through the panel buttons with level switching and see-also; main window wiring.
+- **Results:** 6 / 6 passed / 0 failed / 0 excluded (766 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** The tips live in a new `education` package as plain data, so the same words can later feed tooltips or a printed sheet. Each simple telling is checked against a short jargon list by the tests, so a later edit can't quietly slip "epsilon" into the child's version. Phase 6 is complete: DESIGN.md §10, §12, §16 and §17 are covered on the Fake Emulator.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -845,5 +859,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-505 completed (PR #40).
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
-- Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator.
+- Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

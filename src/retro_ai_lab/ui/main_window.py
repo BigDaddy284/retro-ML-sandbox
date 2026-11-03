@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMainWindow, QSplitter, QStatusBar, QToolBar, QWidget
 
 from retro_ai_lab import __version__
+from retro_ai_lab.education import PANEL_TIP
 from retro_ai_lab.services import ConnectionFailed, EmulatorConnected, EmulatorDisconnected
 from retro_ai_lab.ui.connect_bar import ConnectBar
 from retro_ai_lab.ui.context import AppContext
@@ -16,6 +17,7 @@ from retro_ai_lab.ui.learning_panel import LearningPanel
 from retro_ai_lab.ui.link_watchdog import LinkWatchdog
 from retro_ai_lab.ui.panels import PANELS, Panel
 from retro_ai_lab.ui.rewards_panel import RewardsPanel
+from retro_ai_lab.ui.tips import TipDialog
 
 WINDOW_TITLE = "Retro AI Lab"
 
@@ -29,6 +31,9 @@ class MainWindow(QMainWindow):
         self._context = context if context is not None else AppContext()
 
         self._panels: dict[str, Panel] = {spec.key: Panel(spec) for spec in PANELS}
+        self._tips = TipDialog(self)
+        for panel in self._panels.values():
+            panel.help_requested.connect(self.explain)
         self._game_panel = GamePanel(self._context)
         self._panels["game"].set_body(self._game_panel)
         self._discovery_panel = DiscoveryPanel(self._context)
@@ -122,6 +127,14 @@ class MainWindow(QMainWindow):
 
     def panel(self, key: str) -> Panel:
         return self._panels[key]
+
+    @property
+    def tip_dialog(self) -> TipDialog:
+        return self._tips
+
+    def explain(self, panel_key: str) -> None:
+        """Open the "What's this?" window on ``panel_key``'s tip."""
+        self._tips.show_tip(PANEL_TIP[panel_key])
 
     @property
     def panels(self) -> tuple[Panel, ...]:
