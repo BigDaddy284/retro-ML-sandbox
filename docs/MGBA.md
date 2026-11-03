@@ -22,7 +22,9 @@ from 127.0.0.1).
 1. Open mGBA and load the ROM (File > Load ROM).
 2. Open the scripting window: **Tools > Scripting...**, then in that window
    **File > Load script**, browse to the checkout and pick
-   `src\retro_ai_lab\emulator\mgba\retro_ai_lab.lua`. No Lua knowledge is
+   `src\retro_ai_lab\emulator\mgba\retro_ai_lab.lua` (in the built app it is
+   `_internal\retro_ai_lab\emulator\mgba\retro_ai_lab.lua` next to
+   `RetroAILab.exe`). No Lua knowledge is
    needed. The scripting console prints
    `Retro AI Lab is waiting for the app on port 43110.` Leave the window open.
 3. In Retro AI Lab pick **mGBA** in the console box and press **Connect**. The
