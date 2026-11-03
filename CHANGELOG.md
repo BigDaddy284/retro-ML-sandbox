@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Fixed: picture and sound memory (OAM, nametables, VRAM, palettes, CGRAM, APU RAM) is no longer watched; on the user's Super Mario Bros. it made 1646 watched values and 1442 suggested rewards, and its bouncing sprite bytes read as lives lost and as resets, ending every go after a step or two (T-835).
 - Test: the Game panel's dropped-link test no longer races its own 60 fps frame pump (it failed once on Windows CI, reproduced 2 times in 60 under CPU load); it now stops the pump after the first frame and spends the one remaining operation itself; the profiling tool's test allows the one step that can be in flight when a run ends, and the tool runs its timed play on a local event loop so a test run after it still waits properly (T-834).
 - Fixed: NesHawk's "CPU registers" pseudo-domain threw on every frame step after the handshake had probed it; register domains are no longer watched, and any region the emulator refuses mid-game is dropped from the next step instead of stopping the game. EmuHawk's "<picture> saved." message on every screenshot is silenced while connected (T-833).
 - Fixed: on the user's EmuHawk one memory domain threw a .NET exception on every read, which stopped every frame step with an error that named nothing. The BizHawk script now leaves out, at connect, any domain it cannot read (and says which in the Lua console), and a read that fails later names the domain, address and length (T-832).
