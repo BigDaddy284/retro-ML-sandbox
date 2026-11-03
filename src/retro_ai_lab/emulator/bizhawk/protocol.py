@@ -187,6 +187,7 @@ class Link:
         self._report_every_s = report_every_s
         self._clock = clock
         self._stats: dict[str, CallStats] = {}
+        self._totals: dict[str, CallStats] = {}
         self._window_started = clock()
 
     @property
@@ -194,11 +195,21 @@ class Link:
         """Per-command timings for the current window."""
         return dict(self._stats)
 
-    def summary(self) -> str:
-        """One line, slowest command (by total time) first."""
-        if not self._stats:
+    @property
+    def totals(self) -> Mapping[str, CallStats]:
+        """Per-command timings since the link opened (never reset, T-830)."""
+        return dict(self._totals)
+
+    def summary(self, *, lifetime: bool = False) -> str:
+        """One line, slowest command (by total time) first.
+
+        ``lifetime`` describes every call since the link opened instead of
+        the current window.
+        """
+        stats = self._totals if lifetime else self._stats
+        if not stats:
             return "no calls"
-        ordered = sorted(self._stats.items(), key=lambda item: item[1].total_s, reverse=True)
+        ordered = sorted(stats.items(), key=lambda item: item[1].total_s, reverse=True)
         return "; ".join(stats.describe(name) for name, stats in ordered)
 
     @property
@@ -229,6 +240,7 @@ class Link:
 
     def _record(self, cmd: str, elapsed_s: float) -> None:
         self._stats.setdefault(cmd, CallStats()).add(elapsed_s)
+        self._totals.setdefault(cmd, CallStats()).add(elapsed_s)
         now = self._clock()
         window = now - self._window_started
         if self._report_every_s > 0 and window >= self._report_every_s:

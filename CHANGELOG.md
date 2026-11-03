@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- A profiling tool, `python -m retro_ai_lab.tools.profile_play`, plays for a few seconds in the real window against the simulator or a running emulator and prints what the emulator's round trips and the app's own per-frame work cost; the bridge link now also keeps per-command totals since connect (T-830).
 - Fixed: closing the window while a frame step was still waiting on the emulator logged an uncaught "Signal source has been deleted" error from the worker thread (T-829).
 - When a frame step or a picture fails, the Game panel's status line says what the emulator answered (once per new message, also in the log) instead of counting the failure silently (T-828).
 - Fixed: with BizHawk, the app watched every memory domain every frame, ROMs and the whole system bus included (about 100 KB a frame on a NES, with reads that can poke hardware registers), which could make each frame step take seconds and the screen stay blank. Only live RAM is watched now (T-827).
