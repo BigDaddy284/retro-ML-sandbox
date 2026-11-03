@@ -8,7 +8,14 @@ from retro_ai_lab.core.errors import (
     RetroAILabError,
     UnsupportedCapabilityError,
 )
-from retro_ai_lab.core.types import Button, Capabilities, Frame, GameInfo, MemoryRegion
+from retro_ai_lab.core.types import (
+    Button,
+    Capabilities,
+    Frame,
+    GameInfo,
+    MemoryRegion,
+    StepResult,
+)
 
 __all__ = [
     "Button",
@@ -21,5 +28,6 @@ __all__ = [
     "MemoryRegion",
     "ProtocolError",
     "RetroAILabError",
+    "StepResult",
     "UnsupportedCapabilityError",
 ]

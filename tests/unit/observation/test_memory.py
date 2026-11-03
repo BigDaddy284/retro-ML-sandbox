@@ -193,3 +193,18 @@ def test_ring_rejects_non_snapshots() -> None:
 
 def test_ring_default_capacity_is_ten_seconds_at_sixty_fps() -> None:
     assert SnapshotRing().capacity == 600
+
+
+def test_capture_is_one_request_on_a_socket_backend() -> None:
+    """T-822: a snapshot of every region is one read_many, not one read per region."""
+    from retro_ai_lab.emulator.bizhawk.simulator import BizHawkSimulator
+
+    with BizHawkSimulator() as sim:
+        service = ConnectionService(default_registry(), EventBus())
+        service.connect("bizhawk", port=sim.port, call_timeout_s=2.0, timeout_s=2.0)
+        cap = MemoryCapture(service)
+        before = len(sim.requests)
+        snapshot = cap.capture(7)
+        assert len(sim.requests) == before + 1 and sim.requests[-1]["cmd"] == "read"
+        assert snapshot.frame == 7 and snapshot.get("ram") == sim.game.ram
+        service.disconnect()

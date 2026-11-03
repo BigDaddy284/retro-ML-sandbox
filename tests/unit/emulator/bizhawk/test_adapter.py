@@ -418,3 +418,45 @@ def test_missing_emulator_advice_names_the_script() -> None:
         adapter.connect(timeout_s=1.0)
     assert "Couldn't find BizHawk" in str(info.value)
     assert not adapter.is_connected
+
+
+# ------------------------------------------------------------ T-822 bundles
+
+
+def test_bundled_step_is_one_request_against_the_simulator() -> None:
+    from retro_ai_lab.core import StepResult
+
+    with BizHawkSimulator() as sim:
+        adapter = BizHawkAdapter(port=sim.port, call_timeout_s=2.0)
+        adapter.connect(timeout_s=2.0)
+        ram = next(r for r in adapter.memory_regions() if r.name == "ram")
+        before = len(sim.requests)
+        result = adapter.step(
+            4, pressed={Button("up", "Up")}, reads=[("ram", 0, ram.size)], screenshot=True
+        )
+        assert len(sim.requests) == before + 1
+        request = sim.requests[-1]
+        assert request["cmd"] == "step" and request["frames"] == 4
+        assert request["buttons"]["Up"] is True and request["screenshot"] is True
+        assert len(request["reads"]) == 1 and request["reads"][0]["len"] == ram.size
+        assert isinstance(result, StepResult) and result.frames == 4
+        assert result.reads == (sim.game.ram,)
+        assert result.frame is not None and result.frame.size == sim.game.render().size
+        assert sim.game.state.speed > 0  # the button was held through the step
+
+        before = len(sim.requests)
+        chunks = adapter.read_many([("ram", 0, 2), ("ram", 2, 2)])
+        assert len(sim.requests) == before + 1 and sim.requests[-1]["cmd"] == "read"
+        assert len(sim.requests[-1]["reads"]) == 2
+        assert b"".join(chunks) == sim.game.ram[:4]
+        adapter.disconnect()
+
+
+def test_bundled_step_refuses_a_lying_answer() -> None:
+    with BizHawkSimulator(short_reads=True) as sim:
+        adapter = BizHawkAdapter(port=sim.port, call_timeout_s=2.0)
+        adapter.connect(timeout_s=2.0)
+        with pytest.raises(ConfigurationError, match="bytes for a"):
+            adapter.step(1, reads=[("ram", 0, 8)])
+        assert adapter.is_connected
+        adapter.disconnect()
