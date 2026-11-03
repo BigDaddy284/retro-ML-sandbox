@@ -373,3 +373,45 @@ def test_doubt_reset_adds_the_evidence_once_and_announces(
     with pytest.raises(UnsupportedCapabilityError):
         connection.disconnect()
         discovery.doubt_reset((a.id,))
+
+
+def test_memory_from_several_threads_is_observed_one_at_a_time(
+    connection: ConnectionService,
+    observation: ObservationService,
+    bus: EventBus,
+) -> None:
+    """T-847: snapshots come from the play clock's worker and the GUI thread at once."""
+    import sys
+    import threading
+
+    discovery = DiscoveryService(connection, observation, bus, review_every=50)
+    connection.connect("fake", seed=5)
+    k = discovery.knowledge
+    assert k is not None
+    k.propose("ram", LAYOUT.score, kind=VariableKind.SCORE, name="Score")
+    k.propose("ram", LAYOUT.lives, kind=VariableKind.LIVES, name="Lives")
+    play(connection, observation, 60)
+    events = [e for e in (observation.observe() for _ in range(8)) if e is not None]
+    assert len(events) == 8
+    failures: list[BaseException] = []
+
+    def publish(times: int) -> None:
+        try:
+            for i in range(times):
+                bus.publish(events[i % len(events)])
+        except BaseException as exc:
+            failures.append(exc)
+
+    before = discovery.reviews
+    interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    threads = [threading.Thread(target=publish, args=(100,), daemon=True) for _ in range(4)]
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+    finally:
+        sys.setswitchinterval(interval)
+    assert not any(t.is_alive() for t in threads) and failures == []
+    assert discovery.reviews == before + 400 // 50  # every snapshot counted, none lost

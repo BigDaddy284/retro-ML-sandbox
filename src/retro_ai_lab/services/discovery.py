@@ -23,6 +23,7 @@ so the UI can show what the AI is doing.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -106,6 +107,9 @@ class DiscoveryService:
         self._look: LongLook | None = None
         self._finder: RelationshipFinder | None = None
         self._events = EventLog()
+        # Snapshots arrive from the play clock's worker and from the GUI thread
+        # (T-818); the detector, finder and long look are driven one at a time (T-847).
+        self._lock = threading.RLock()
         self._harness: ExperimentHarness | None = None
         self._buttons: tuple[str, ...] = ()
         self._since_review = 0
@@ -195,27 +199,30 @@ class DiscoveryService:
         itself does not change) and the detector leaves it out of the reset
         judgement from then on. Returns the variables changed.
         """
-        k = self._require()
-        changed: list[Variable] = []
-        for var_id in dict.fromkeys(variable_ids):
-            if var_id not in k or any(e.kind == CYCLES for e in k.get(var_id).evidence):
-                continue
-            changed.append(
-                k.support(
-                    var_id,
-                    Evidence(
-                        CYCLES,
-                        "Goes back to its first value every few frames; that is not the "
-                        "game starting over.",
-                        0.0,
-                    ),
+        with self._lock:
+            k = self._require()
+            changed: list[Variable] = []
+            for var_id in dict.fromkeys(variable_ids):
+                if var_id not in k or any(e.kind == CYCLES for e in k.get(var_id).evidence):
+                    continue
+                changed.append(
+                    k.support(
+                        var_id,
+                        Evidence(
+                            CYCLES,
+                            "Goes back to its first value every few frames; that is not the "
+                            "game starting over.",
+                            0.0,
+                        ),
+                    )
                 )
-            )
-        if changed:
-            names = ", ".join(v.display_name for v in changed)
-            log.info("%s cycle back to their start; no longer reading that as a restart.", names)
-            self._announce(DiscoveryUpdated((), tuple(changed), (), ()))
-        return tuple(changed)
+            if changed:
+                names = ", ".join(v.display_name for v in changed)
+                log.info(
+                    "%s cycle back to their start; no longer reading that as a restart.", names
+                )
+                self._announce(DiscoveryUpdated((), tuple(changed), (), ()))
+            return tuple(changed)
 
     def summary(self) -> str:
         """One line for the status bar / panel header."""
@@ -268,47 +275,52 @@ class DiscoveryService:
         return imported
 
     def _adopt(self, knowledge: Knowledge) -> None:
-        self._knowledge = knowledge
-        self._detector = EventDetector(knowledge)
-        self._finder = RelationshipFinder(knowledge, window=self._event_window)
-        self._look = LongLook(knowledge)
+        with self._lock:
+            self._knowledge = knowledge
+            self._detector = EventDetector(knowledge)
+            self._finder = RelationshipFinder(knowledge, window=self._event_window)
+            self._look = LongLook(knowledge)
 
     def review(self) -> DiscoveryUpdated:
         """Turn the statistics gathered so far into proposals, right now."""
-        k = self._require()
-        self._set_stage(
-            "thinking", "Looking for values that behave like scores, lives or counters."
-        )
-        added = propose_candidates(k, find_candidates(self._observation.tracker))
-        changed = self._look.review() if self._look is not None else ()
-        self._reviews += 1
-        self._since_review = 0
-        update = DiscoveryUpdated(added, changed, (), ())
-        self._announce(update)
-        self._set_stage("watching", self.summary())
-        return update
+        with self._lock:
+            k = self._require()
+            self._set_stage(
+                "thinking", "Looking for values that behave like scores, lives or counters."
+            )
+            added = propose_candidates(k, find_candidates(self._observation.tracker))
+            changed = self._look.review() if self._look is not None else ()
+            self._reviews += 1
+            self._since_review = 0
+            update = DiscoveryUpdated(added, changed, (), ())
+            self._announce(update)
+            self._set_stage("watching", self.summary())
+            return update
 
     def experiment(self) -> DiscoveryUpdated:
         """Try every button from the current situation and learn what each does."""
-        k = self._require()
-        if self._harness is None or not self._harness.available():
-            raise UnsupportedCapabilityError(
-                "save_states", "This emulator can't run experiments (no save states)."
+        with self._lock:
+            k = self._require()
+            if self._harness is None or not self._harness.available():
+                raise UnsupportedCapabilityError(
+                    "save_states", "This emulator can't run experiments (no save states)."
+                )
+            self._set_stage("experimenting", "Trying each button to see what it changes.")
+            self._harness.checkpoint()
+            try:
+                links = find_input_links(self._harness, self._buttons)
+            finally:
+                self._since_experiment = 0
+            touched = apply_input_links(k, links)
+            self._experiments += 1
+            added = tuple(
+                v for v in touched if not any(e.kind != "input-linked" for e in v.evidence)
             )
-        self._set_stage("experimenting", "Trying each button to see what it changes.")
-        self._harness.checkpoint()
-        try:
-            links = find_input_links(self._harness, self._buttons)
-        finally:
-            self._since_experiment = 0
-        touched = apply_input_links(k, links)
-        self._experiments += 1
-        added = tuple(v for v in touched if not any(e.kind != "input-linked" for e in v.evidence))
-        changed = tuple(v for v in touched if v not in added)
-        update = DiscoveryUpdated(added, changed, (), ())
-        self._announce(update)
-        self._set_stage("watching", self.summary())
-        return update
+            changed = tuple(v for v in touched if v not in added)
+            update = DiscoveryUpdated(added, changed, (), ())
+            self._announce(update)
+            self._set_stage("watching", self.summary())
+            return update
 
     # ------------------------------------------------------------- events
 
@@ -347,6 +359,10 @@ class DiscoveryService:
         self._set_stage("idle", "Not watching a game.")
 
     def _on_memory(self, event: MemoryObserved) -> None:
+        with self._lock:
+            self._observe_memory(event)
+
+    def _observe_memory(self, event: MemoryObserved) -> None:
         if not self._enabled or self._knowledge is None:
             return
         assert self._detector is not None and self._finder is not None
