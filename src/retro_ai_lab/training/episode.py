@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 
 from retro_ai_lab.core import Button, ConfigurationError, EmulatorError
 from retro_ai_lab.core.events import EventBus
@@ -84,8 +85,30 @@ class EpisodeResult:
     steps: int
     frames: int
     reward: float
-    ended_by: str  # "reset", "max_steps", "disconnected", "stopped"
+    ended_by: str  # "reset", "max_steps", "disconnected", "stopped", "mode change"
     states_seen: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "steps": self.steps,
+            "frames": self.frames,
+            "reward": self.reward,
+            "ended_by": self.ended_by,
+            "states_seen": self.states_seen,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EpisodeResult:
+        try:
+            return cls(
+                int(data["steps"]),
+                int(data["frames"]),
+                float(data["reward"]),
+                str(data["ended_by"]),
+                int(data["states_seen"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ConfigurationError(f"Bad go result: {exc}") from exc
 
 
 class EpisodeRunner:

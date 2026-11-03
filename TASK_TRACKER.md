@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-506 – Learning persistence
+- **Current task:** T-507 – Learning panel
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -64,7 +64,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-503 | Tabular Q-learning agent: choose, learn, explore less over time, JSON round-trip | 5 | Done | 5/5 | see PR #38 |
 | T-504 | Episode runner: act, advance, collect rewards from the services, learn, stop on reset; checkpoint restarts | 5 | Done | 7/7 | see PR #39 |
 | T-505 | Training service: independent / guided / manual modes, start / pause / stop, episode history, live or fast | 5 | Done | 11/11 | see PR #40 |
-| T-506 | Learning persistence: the AI's brain saved per game and restored on connect | 5 | Planned | – | – |
+| T-506 | Learning persistence: the AI's brain saved per game and restored on connect | 5 | Done | 8/8 | see PR #41 |
 | T-507 | Learning panel: mode picker, Start / Pause / Stop, Live / Fast, status and recent episodes | 5 | Planned | – | – |
 | E-6 | Training Interface (live/background, modes, graphs, history) | 6 | Epic | – | – |
 | E-7 | Advanced Learning (DQN, hierarchical RL, demonstrations) | 7 | Epic | – | – |
@@ -663,8 +663,24 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 11 / 11 passed / 0 failed / 0 excluded (720 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Two things surfaced in testing. Putting the game back to the checkpoint looks like a restart to the understanding engine, so the runner now starts listening for rewards only after the first observation of a go (otherwise every checkpoint go ended at step one). And link loss closes the go from inside the disconnect handler, so `step()` checks the go is still open before closing it again. In manual mode the service listens to the play clock's observations rather than driving frames itself, which keeps the child's inputs untouched.
 
+### T-506 – Learning persistence
+- **Status:** Done
+- **Phase:** 5
+- **Objective:** What the AI has learned survives closing the app (DESIGN.md Phase 5 "training history", §9 "results can be reviewed afterwards"): the brain for each game is saved to disk and picked up again the next time that game is connected, together with the history of its goes.
+- **Scope:** `training.brain`: `Brain(game_id, agent, goes, episodes, total_steps)` with `to_dict` / `from_dict(data, space=)` (schema 1; refuses a newer schema; `EpisodeResult` and `EpisodeRecord` gain `to_dict` / `from_dict`). `storage.brains`: `BrainStore(folder)` mirroring the other stores (`path_for`, `games`, `exists`, `save(brain)`, `load(game_id)`, `delete`) plus `export_brain` / `load_brain`, keeping the file plain JSON so the storage layer stays below training. `TrainingService(..., store=None)` gains `store`, `game_id`, `saves`, `fresh_start` (why a saved brain wasn't used, if it wasn't), `brain()`, `save()` and `forget()` (start the AI from scratch and delete its file; refused while a go is running); on connect a saved brain for the game is loaded when its controls match the connected game's, otherwise (or on a damaged file) a fresh one starts and `fresh_start` says why; the brain is saved after every finished go and on disconnect. `AppContext` gains `brain_store` under `data_dir / "brains"`. **Out of scope:** the panel (T-507), exporting / importing brains by hand from the UI (later phase).
+- **Acceptance criteria:**
+  1. A brain round-trips through the store with its Q-table, settings, exploration rate, random state, counts and goes; a damaged or newer file is refused with a clear error; the store lists games and deletes.
+  2. Reconnecting the same game restores the agent (same table, counts, epsilon) and the history; `summary()` says how much it already knows.
+  3. A brain saved for a game with different controls, or a damaged file, gives a fresh brain and `fresh_start` says why; nothing raises.
+  4. The brain is saved after every go and on disconnect; `save()` works by hand; nothing is saved without a store or while disconnected.
+  5. `forget()` wipes the brain and its file while idle and is refused mid-go.
+  6. The app context wires the store.
+- **Test plan:** brain round-trip and refusals; store listing and deletion; reconnect restores; mismatched controls and damaged file; autosave on go end and disconnect; forget; app context.
+- **Results:** 8 / 8 passed / 0 failed / 0 excluded (728 in the full suite; two T-505 tests updated for the restored history). Lint, format and strict mypy clean.
+- **Completion report:** `Mode`, `Speed`, `Status` and `EpisodeRecord` moved to `training.records` so the brain can import them without pulling in the services. The brain file keeps the agent's random state, so a reloaded AI makes exactly the choice it would have made. Go numbering carries on across sessions; the history kept in memory is bounded, so `episodes` is stored separately from the goes.
+
 ### Later Phase 5 tasks
-T-506 and T-507 as listed in the summary table; each gets its own section when started.
+T-507 as listed in the summary table; each gets its own section when started.
 
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
@@ -722,4 +738,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-503 completed (PR #38).
 - T-504 completed (PR #39).
 - T-505 completed (PR #40).
+- T-506 completed (PR #41).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

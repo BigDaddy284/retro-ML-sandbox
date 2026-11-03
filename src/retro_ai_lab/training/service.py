@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass
-from enum import Enum
+from pathlib import Path
 
 from retro_ai_lab.core import ConfigurationError, EmulatorError
 from retro_ai_lab.core.events import EventBus
@@ -25,9 +25,11 @@ from retro_ai_lab.services.connection import (
     EmulatorConnected,
     EmulatorDisconnected,
 )
-from retro_ai_lab.services.discovery import DiscoveryService
+from retro_ai_lab.services.discovery import DiscoveryService, game_id_for
 from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.observer import MemoryObserved, ObservationService
+from retro_ai_lab.storage.brains import BrainStore
+from retro_ai_lab.training.brain import Brain
 from retro_ai_lab.training.episode import (
     DEFAULT_FRAMES_PER_STEP,
     DEFAULT_MAX_STEPS,
@@ -35,63 +37,10 @@ from retro_ai_lab.training.episode import (
     EpisodeResult,
     EpisodeRunner,
 )
+from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
 
 CHECKPOINT_SLOT = "training"
 DEFAULT_HISTORY = 200
-
-
-class Mode(Enum):
-    INDEPENDENT = "independent"
-    GUIDED = "guided"
-    MANUAL = "manual"
-
-    @property
-    def label(self) -> str:
-        return {
-            Mode.INDEPENDENT: "On its own",
-            Mode.GUIDED: "With your help",
-            Mode.MANUAL: "You play",
-        }[self]
-
-    @property
-    def description(self) -> str:
-        return {
-            Mode.INDEPENDENT: "The AI plays and learns by itself.",
-            Mode.GUIDED: "The AI plays while you change rewards and goals.",
-            Mode.MANUAL: "You play; the AI watches and learns from you.",
-        }[self]
-
-    @property
-    def ai_plays(self) -> bool:
-        return self is not Mode.MANUAL
-
-    @property
-    def allows_guidance(self) -> bool:
-        """May the child change rewards and goals while a go is running?"""
-        return self is not Mode.INDEPENDENT
-
-
-class Speed(Enum):
-    LIVE = "live"  # one step per game tick: watch the AI play
-    FAST = "fast"  # as many steps as fit: background practice
-
-    @property
-    def label(self) -> str:
-        return "Watch it play" if self is Speed.LIVE else "Practise fast"
-
-
-class Status(Enum):
-    IDLE = "idle"
-    RUNNING = "running"
-    PAUSED = "paused"
-
-
-@dataclass(frozen=True, slots=True)
-class EpisodeRecord:
-    number: int  # 1-based, since connect
-    mode: Mode
-    result: EpisodeResult
-    frame: int  # observation frame when the go ended
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +70,7 @@ class TrainingService:
         unstick_after: int | None = DEFAULT_UNSTICK_AFTER,
         settings: Settings | None = None,
         seed: int | None = None,
+        store: BrainStore | None = None,
     ) -> None:
         if frames_per_step < 1:
             raise ConfigurationError("frames_per_step must be at least 1.")
@@ -138,7 +88,11 @@ class TrainingService:
         self._unstick_after = unstick_after
         self._settings = settings or Settings()
         self._seed = seed
+        self._store = store
         self._history: deque[EpisodeRecord] = deque(maxlen=history)
+        self._game_id: str | None = None
+        self._saves = 0
+        self._fresh_start = ""
         self._agent: QLearningAgent | None = None
         self._encoder: StateEncoder | None = None
         self._harness: ExperimentHarness | None = None
@@ -218,6 +172,32 @@ class TrainingService:
     def frames_per_step(self) -> int:
         return self._frames_per_step
 
+    @property
+    def store(self) -> BrainStore | None:
+        return self._store
+
+    @property
+    def game_id(self) -> str | None:
+        return self._game_id
+
+    @property
+    def saves(self) -> int:
+        """Times the brain was written to disk since connect."""
+        return self._saves
+
+    @property
+    def fresh_start(self) -> str:
+        """Why a saved brain wasn't used this time (empty when it was, or there was none)."""
+        return self._fresh_start
+
+    def brain(self) -> Brain | None:
+        """What the AI knows about the connected game; None when disconnected."""
+        if not self._enabled or self._agent is None or self._game_id is None:
+            return None
+        return Brain(
+            self._game_id, self._agent, tuple(self._history), self._episodes, self._total_steps
+        )
+
     def summary(self) -> str:
         if not self._enabled:
             return "Connect a game to start training."
@@ -288,6 +268,31 @@ class TrainingService:
         self._status = Status.IDLE
         self._announce("stop")
 
+    def save(self) -> Path | None:
+        """Write the brain to disk now. None without a store or a brain."""
+        brain = self.brain()
+        if self._store is None or brain is None:
+            return None
+        path = self._store.save(brain.to_dict())
+        self._saves += 1
+        return path
+
+    def forget(self) -> None:
+        """Start the AI from scratch for this game and delete what was saved."""
+        if self._status is not Status.IDLE:
+            raise ConfigurationError("Stop training before starting the AI from scratch.")
+        if self.brain() is None or self._agent is None or self._game_id is None:
+            raise ConfigurationError("There is no brain to forget.")
+        self._agent = QLearningAgent(self._agent.space, self._settings, seed=self._seed)
+        self._history.clear()
+        self._episodes = 0
+        self._total_steps = 0
+        self._runner = None
+        self._fresh_start = ""
+        if self._store is not None:
+            self._store.delete(self._game_id)
+        self._announce("forget")
+
     def step(self) -> bool:
         """One act-advance-learn step in an AI mode. Returns True if a step was taken.
 
@@ -354,9 +359,24 @@ class TrainingService:
             self._agent = None
             self._encoder = None
             self._harness = None
+            self._game_id = None
             return
+        info = event.game_info
+        self._game_id = game_id_for(info.system, info.title, info.rom_hash)
+        self._saves = 0
         space = ActionSpace.from_buttons(event.buttons)
         self._agent = QLearningAgent(space, self._settings, seed=self._seed)
+        self._fresh_start = ""
+        if self._store is not None and self._store.exists(self._game_id):
+            try:
+                brain = Brain.from_dict(self._store.load(self._game_id), space=space)
+            except ConfigurationError as exc:
+                self._fresh_start = f"Couldn't use the saved brain, so starting afresh: {exc}"
+            else:
+                self._agent = brain.agent
+                self._history.extend(brain.goes)
+                self._episodes = brain.episodes
+                self._total_steps = brain.total_steps
         self._encoder = StateEncoder(knowledge)
         self._harness = (
             ExperimentHarness(self._connection, slot=CHECKPOINT_SLOT)
@@ -368,6 +388,8 @@ class TrainingService:
         was_running = self._status is not Status.IDLE
         if was_running:
             self._close_episode("disconnected")
+        if self._enabled:
+            self.save()
         self._enabled = False
         self._harness = None
         self._status = Status.IDLE
@@ -452,6 +474,8 @@ class TrainingService:
         record = EpisodeRecord(self._episodes, self._mode, result, self._observation.frame)
         self._history.append(record)
         self._bus.publish(EpisodeFinished(record))
+        if self._connection.is_connected:
+            self.save()
 
     def _announce(self, reason: str) -> None:
         self._bus.publish(TrainingStateChanged(self._status, self._mode, reason))
@@ -464,10 +488,6 @@ def _goes(n: int) -> str:
 __all__ = [
     "CHECKPOINT_SLOT",
     "EpisodeFinished",
-    "EpisodeRecord",
-    "Mode",
-    "Speed",
-    "Status",
     "TrainingService",
     "TrainingStateChanged",
 ]
