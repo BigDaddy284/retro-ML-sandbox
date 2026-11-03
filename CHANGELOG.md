@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Fixed: closing the window while a frame step was still waiting on the emulator logged an uncaught "Signal source has been deleted" error from the worker thread (T-829).
 - When a frame step or a picture fails, the Game panel's status line says what the emulator answered (once per new message, also in the log) instead of counting the failure silently (T-828).
 - Fixed: with BizHawk, the app watched every memory domain every frame, ROMs and the whole system bus included (about 100 KB a frame on a NES, with reads that can poke hardware registers), which could make each frame step take seconds and the screen stay blank. Only live RAM is watched now (T-827).
 - The game runs at console speed, 60 frames a second, when you play it yourself; it ran at 30 before. Pictures still refresh 30 times a second (T-826).

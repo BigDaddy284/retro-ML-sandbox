@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QGridLayout, QLabel, QPushButton, QVBoxLayout, QWi
 from retro_ai_lab.core import Button, EmulatorDisconnectedError
 from retro_ai_lab.services import EmulatorConnected, EmulatorDisconnected
 from retro_ai_lab.ui.context import AppContext
+from retro_ai_lab.ui.worker import report
 
 # Keyboard keys for the button names most consoles use. Unlisted buttons are
 # only reachable from the on-screen pad.
@@ -74,9 +75,9 @@ class _SendTask(QRunnable):
         try:
             self._context.connection.call(lambda a: a.set_input(held))
         except Exception as exc:
-            self.signals.done.emit(exc)
+            report(self.signals.done, exc)
         else:
-            self.signals.done.emit(None)
+            report(self.signals.done, None)
 
 
 class ControllerPad(QWidget):
