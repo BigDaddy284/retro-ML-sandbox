@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Changed: the long look (which notices counters that step at the same few places) no longer keeps pairing a value that steps nearly every frame, shows more than 16 faces, or stepped at too many places; with 1,600 believed values over a moving title demo that pairing was the largest cost of every training step (T-849).
 - Changed: when training starts (and after a go that ended stuck or on a restart) the AI first checks whether its buttons change anything in the game; if not, it searches for the button that gets the game going right away instead of waiting for goes to prove the game is ignoring it (T-848).
 - Fixed: a `dictionary changed size during iteration` error from the goal service while the AI played (the knowledge was read on one thread while the relationship finder rewrote it on another); the knowledge and the discovery service now take a lock (T-847).
 - Fixed: a handful of values back at their start while hundreds of others are not no longer ends a go as "the game started over"; a restart now means at least half of everything that has moved goes home together (T-846).
