@@ -35,6 +35,7 @@ from retro_ai_lab.training import (
     TrainingStateChanged,
 )
 from retro_ai_lab.ui.context import AppContext
+from retro_ai_lab.ui.learning_graph import LearningGraph
 
 IDLE_TEXT = "Connect to a game, then press Start to let the AI learn it."
 COLUMNS = ("Go", "How", "Steps", "Points", "Ended by")
@@ -99,6 +100,8 @@ class LearningPanel(QWidget):
         self._status.setObjectName("learning_status")
         self._status.setWordWrap(True)
 
+        self._graph = LearningGraph(self)
+
         self._tree = QTreeWidget(self)
         self._tree.setObjectName("goes_tree")
         self._tree.setColumnCount(len(COLUMNS))
@@ -127,6 +130,7 @@ class LearningPanel(QWidget):
         layout.addLayout(pickers)
         layout.addLayout(buttons)
         layout.addWidget(self._status)
+        layout.addWidget(self._graph, 2)
         layout.addWidget(self._tree, 1)
         layout.addWidget(self._note)
 
@@ -168,6 +172,10 @@ class LearningPanel(QWidget):
     @property
     def speed(self) -> Speed:
         return Speed(self._speed.currentData())
+
+    @property
+    def graph(self) -> LearningGraph:
+        return self._graph
 
     @property
     def ticking(self) -> bool:
@@ -289,6 +297,7 @@ class LearningPanel(QWidget):
         self._status.setText("\n".join(lines))
 
     def _show_goes(self) -> None:
+        self._graph.set_curve(self._training.curve())
         self._tree.clear()
         for record in reversed(self._training.history[-MAX_ROWS:]):
             self._tree.addTopLevelItem(QTreeWidgetItem(list(go_cells(record))))

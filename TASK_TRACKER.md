@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-602 – Learning graph widget
+- **Current task:** T-603 – Progress panel training stats
 - **Last approved checkpoint:** `main` after T-409 (PRs #36–#42 merging in order as CI passes)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -68,7 +68,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-507 | Learning panel: mode picker, Start / Pause / Stop, Live / Fast, status and recent episodes | 5 | Done | 7/7 | see PR #42 |
 | E-6 | Training Interface (live/background, modes, graphs, history) | 6 | Epic | – | – |
 | T-601 | Learning curve: per-go points, rolling average, best go, trend and success rate in plain words | 6 | Done | 7/7 | see PR #43 |
-| T-602 | Learning graph widget: points per go and the rolling average, drawn in the Learning panel | 6 | Planned | – | – |
+| T-602 | Learning graph widget: points per go and the rolling average, drawn in the Learning panel | 6 | Done | 4/4 | see PR #44 |
 | T-603 | Progress panel: training attempts, success rate and trend beside the goal | 6 | Planned | – | – |
 | T-604 | AI activity: current and previous actions, exploring vs best-known, current objective | 6 | Planned | – | – |
 | T-605 | Behaviour changes and suggested experiments: what the AI now does differently, what to try next | 6 | Planned | – | – |
@@ -720,6 +720,19 @@ Live and background training and the guided and manual modes were delivered in P
 - **Results:** 7 / 7 passed / 0 failed / 0 excluded (742 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Phase 6 was broken into T-601..T-607 before starting. Reviewing the service for this task found that a link dropping while the start checkpoint was being taken left training "running" with no game; `start()` now refuses with a clear message. The link-loss panel test was made deterministic (LIVE ticks rather than timed FAST slices).
 
+### T-602 – Learning graph widget
+- **Status:** Done
+- **Phase:** 6
+- **Objective:** Show the learning curve as a picture in the Learning panel (DESIGN.md §10 "learning progress", §16 "learning graphs"): one dot per go for the points it scored, a line for the rolling average, the best go marked, and a caption in plain words.
+- **Scope:** `ui.learning_graph`: `plot_points(curve, width, height, margin)` (pure geometry: x spaced evenly by go, y scaled so the zero line is drawn when rewards straddle it; returns `PlotLayout(dots, line, zero_y, best)` in widget pixels) and `LearningGraph(QWidget)` with `set_curve(curve)`, `curve`, `caption` (the curve's `describe()`, or an invitation when there are no goes), `layout()` (the geometry for the current size), `paintEvent` drawing background, zero line, dots (green for gains, orange for losses, the best ringed), average line and a one-line legend; `minimumHeight` 120. `LearningPanel` gains `graph` (between the status and the goes list), refreshed with the goes list. **Out of scope:** zooming, several curves at once (experiment comparison, Phase 8), exporting the picture.
+- **Acceptance criteria:**
+  1. Geometry is right by hand: evenly spaced goes, the highest reward at the top margin, the lowest at the bottom, the zero line between them when rewards straddle zero and absent otherwise; a single go sits centred; the empty curve gives an empty layout.
+  2. The widget draws something different once a curve is set (a rendered image is no longer blank) and its caption follows the curve's description; the empty caption invites the child to press Start.
+  3. The Learning panel shows the graph and updates it as goes finish and on connect / disconnect.
+- **Test plan:** geometry by hand (several, one, none, all-negative, all-positive); rendering changes; caption texts; panel integration.
+- **Results:** 4 / 4 passed / 0 failed / 0 excluded (746 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Drawn with QPainter rather than a plotting library, so the Windows build gains no dependency; the geometry is a pure function and the rendering test checks pixel colours at the computed dot positions.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -778,5 +791,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-505 completed (PR #40).
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
-- Phase 6 broken into T-601..T-607. T-601 completed (PR #43).
+- Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
