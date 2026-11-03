@@ -28,8 +28,11 @@ def test_profiles_a_run_on_the_simulator(qapp: QApplication) -> None:
     assert report.failure is None
     assert report.link_summary.startswith("step \u00d7")  # the slowest command first
     assert "hello \u00d71" in report.link_summary
-    assert report.step_work.count == report.steps  # every step was timed
-    assert report.picture_work.count == report.pictures
+    # Every step the clock counted was timed on the worker; one more step may
+    # have been in flight when time ran out (timed on the worker, never
+    # delivered to the clock), which is what CI on Windows saw (T-834).
+    assert report.steps <= report.step_work.count <= report.steps + 1
+    assert report.pictures <= report.picture_work.count <= report.pictures + 1
     assert report.longest_stall_s > 0
     lines = report.lines()
     assert lines[0].startswith("Played 0.") and "no failures" in lines[0]

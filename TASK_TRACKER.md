@@ -119,7 +119,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-831 | BizHawk hold mode: a step unpauses, runs its frames and pauses again (a paused EmuHawk never wakes `emu.frameadvance()`); the Lua host runs EmuHawk's loop order | 8 | Done | 1/1 (+host model) | see PR #97 |
 | T-832 | BizHawk script offers only domains it can read (first-byte probe at hello); a failed read names domain, address and length | 8 | Done | 2/2 | see PR #98 |
 | T-833 | Register domains not watched; a region refused mid-game is dropped and the capture replans; EmuHawk screenshot messages silenced while connected | 8 | Done | 4/4 | see PR #99 |
-| T-834 | Deterministic dropped-link Game panel test (the pump's own timer raced the hand tick) | 8 | Done | 1/1 | see PR #100 |
+| T-834 | Deterministic dropped-link Game panel test (the pump's own timer raced the hand tick); profiling test allows the step in flight at the end | 8 | Done | 2/2 | see PR #100 |
 
 The **first working demonstration** (DESIGN.md §17) is reached at the end of E-5 plus the minimum of E-6, first on the Fake Emulator and then on a real game via BizHawk.
 
@@ -1597,9 +1597,9 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Status:** Done
 - **Phase:** 8 (CI, found on PR #99)
 - **Objective:** `test_dropped_link_is_reported_in_plain_words` failed once on `windows-latest / py3.12` (the view still held a frame after the drop) while passing everywhere else; it passed 15 of 15 locally but failed 2 of 60 runs under full CPU load. The test connects a fake emulator that drops on its second operation, waits for the pump's first frame, then ticks the pump by hand expecting that tick to be the second operation. The pump's 60 fps timer kept running meanwhile, so under load a timer tick spent the operation first: the hand tick found a capture in flight (or the link already gone) and returned False, or its frame landed after the disconnect had cleared the view.
-- **Scope:** The test builds its own panel at 1 fps, pauses the clock before connecting, stops the pump after the first frame and waits until nothing is in flight, then ticks by hand; the cleared view is awaited rather than asserted at once. No production change. **Out of scope:** the pump itself (its generation counter is right: a late result is dropped; only the test's assumption was wrong).
+- **Scope:** The test builds its own panel at 1 fps, pauses the clock before connecting, stops the pump after the first frame and waits until nothing is in flight, then ticks by hand; the cleared view is awaited rather than asserted at once. No production change. Also `test_profiles_a_run_on_the_simulator` (T-830), which failed on the same job on this PR with the worker's step count one above the clock's: a step in flight when the run ends is timed on the worker but never delivered to the clock, so the test now allows that one step (and picture). **Out of scope:** the pump itself (its generation counter is right: a late result is dropped; only the test's assumption was wrong).
 - **Acceptance criteria:** 0 failures in 60 runs under CPU load (was 2); the UI suite passes on 3.13 and 3.11.
-- **Expected changes:** `tests/ui/test_game_panel.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Expected changes:** `tests/ui/test_game_panel.py`, `tests/ui/test_profile_play.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
 - **Test plan:** the stress loop above (the scratch script runs the test 60 times with one CPU hog per core); UI suite on both Pythons.
 - **Results:** 0 failures in 60 stressed runs; UI suite 189 passed on 3.13 and on 3.11; ruff clean.
 - **Commit:** see PR #100. **PR:** #100.
