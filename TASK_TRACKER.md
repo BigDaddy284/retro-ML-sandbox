@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-205 (Ready)
-- **Last approved checkpoint:** `main` after T-204
+- **Current task:** Phase 3 planning (next: E-3 tasks)
+- **Last approved checkpoint:** `main` after T-205
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -38,7 +38,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-202 | Memory change detection (frame-to-frame diff) | 2 | Done | 26/26 | see PR #15 |
 | T-203 | Screen observation: frame diff and change regions | 2 | Done | 20/20 | see PR #16 |
 | T-204 | Input recording (who pressed what, when) | 2 | Done | 19/19 | see PR #17 |
-| T-205 | Save-state experiment harness (repeatable trials) | 2 | – | – | – |
+| T-205 | Save-state experiment harness (repeatable trials) | 2 | Done | 12/12 | see PR #18 |
 | E-3 | Game Understanding (variables, events, relationships, confidence) | 3 | Epic | – | – |
 | E-4 | Reward System (controls, categories, personalities, goals, objectives) | 4 | Epic | – | – |
 | E-5 | Basic Learning (tabular Q-learning, save/load) | 5 | Epic | – | – |
@@ -300,6 +300,20 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 19 / 19 passed / 0 failed / 0 excluded (494 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Inputs are stored as names, not `Button` objects, so logs are portable across adapters and serialisable. Only the final held set of a frame is kept because the emulator only ever sees one input per frame.
 
+### T-205 – Save-state experiment harness (repeatable trials)
+- **Status:** Done
+- **Phase:** 2
+- **Objective:** Let the app try an input for a few frames from a saved checkpoint, see exactly what changed in memory and on screen, put the game back, and compare trials that differ only in their inputs to find the bytes those inputs influence (DESIGN.md §5 steps 2–5 and §10 "use save states to repeat experiments safely").
+- **Scope:** `services.experiments` (`ExperimentHarness` with `available`, `checkpoint`, `restore`, `run`, `run_many`, `compare`; `Trial`, `Comparison`, `constant_plan`). Requires save states, memory read, input and frame advance; screen capture is optional. **Out of scope:** scheduling experiments automatically and interpreting the results (Phase 3 E-3), UI.
+- **Acceptance criteria:**
+  1. Unavailable (clear `UnsupportedCapabilityError`/`EmulatorDisconnectedError`) until a capable emulator is connected; refuses to run or restore without a checkpoint.
+  2. A trial starts from the checkpoint, applies the per-frame plan, captures before/after memory (and screen when available), releases all buttons and restores the checkpoint by default; two identical trials give identical results.
+  3. Empty plans and unknown buttons are rejected; link loss mid-trial propagates and forgets the checkpoint.
+  4. `compare` reports every byte whose final value differs between trials and the bytes that changed in all of them; on the toy racer it isolates speed for "up" and lane for "left" without any game knowledge, and never flags header bytes.
+- **Test plan:** constant plan validation; availability/capability gating; bad slot; checkpoint required; run + restore on the toy racer; repeatability; per-frame plan without restore then restore; empty plan/unknown buttons; no screen capture; link loss; compare discovery; compare rejections.
+- **Results:** 12 / 12 passed / 0 failed / 0 excluded (506 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Phase 2 (observation) is complete on the fake emulator: memory snapshots, diffs, screen diffs, input log and the experiment harness give Phase 3 everything it needs to start discovering what bytes mean.
+
 ### Later Phase 2 tasks
 Details will be written into this file when each becomes the next task, following the template.
 
@@ -330,5 +344,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-202 completed (PR #15).
 - T-203 completed (PR #16). NumPy is now a runtime dependency (ADR-008).
 - T-204 completed (PR #17).
-- Next: T-205.
+- T-205 completed (PR #18). Phase 2 complete on the fake emulator.
+- Next: Phase 3 (E-3) task breakdown, then T-301.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
