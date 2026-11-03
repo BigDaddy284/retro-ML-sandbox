@@ -1,9 +1,12 @@
-"""T-010: the play clock advances frames while playing."""
+"""T-010: the play clock advances frames while playing (T-818: off the GUI thread)."""
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from pytestqt.qtbot import QtBot
 
 from retro_ai_lab.core import Capabilities
@@ -46,7 +49,7 @@ def test_runs_on_connect_and_advances_the_game(
     assert clock.available and clock.running
     assert clock.interval_ms == 10
     qtbot.waitUntil(lambda: game(context).game.state.frame >= 5)
-    assert clock.frames >= 5
+    qtbot.waitUntil(lambda: clock.frames >= 5)  # the count lands when the step reports back
     context.connection.disconnect()
     assert not clock.running and not clock.available
     assert states[0] is True and states[-1] is False
@@ -149,6 +152,7 @@ def test_keyboard_play_in_main_window_moves_the_car(qtbot: QtBot, context: AppCo
     qtbot.mouseClick(w.game_panel.play_button, Qt.MouseButton.LeftButton)
     assert w.game_panel.play_button.text() == "Play"
     assert not w.game_panel.clock.running
+    qtbot.waitUntil(lambda: not w.game_panel.clock.in_flight)  # the step underway finishes
     frame = game(context).game.state.frame
     qtbot.wait(40)
     assert game(context).game.state.frame == frame
@@ -167,6 +171,130 @@ def test_clock_feeds_the_observation_service(clock: PlayClock, context: AppConte
     assert obs.latest.get("ram") == game(context).game.ram
     clock.tick(1)
     assert len(obs.ring) == 2 and obs.tracker.transitions == 1
+
+
+# ----------------------------------------------------- T-818 off the GUI thread
+
+
+class _SlowStep:
+    """Makes the fake adapter's step wait for a gate, and records its thread."""
+
+    def __init__(self, adapter: FakeEmulatorAdapter) -> None:
+        self.gate = threading.Event()
+        self.threads: list[int] = []
+        original = adapter._do_advance_frames
+
+        def slow(n: int) -> None:
+            self.threads.append(threading.get_ident())
+            self.gate.wait(5)
+            original(n)
+
+        adapter._do_advance_frames = slow  # type: ignore[method-assign]
+
+
+def _paused(clock: PlayClock, context: AppContext) -> _SlowStep:
+    context.connection.connect("fake")
+    clock.pause()
+    return _SlowStep(game(context))
+
+
+def test_pulse_steps_off_the_gui_thread_and_reports_on_it(
+    qtbot: QtBot, clock: PlayClock, context: AppContext
+) -> None:
+    slow = _paused(clock, context)
+    slow.gate.set()
+    assert clock.pulse()
+    assert clock.in_flight and clock.frames == 0
+    qtbot.waitUntil(lambda: clock.frames == 1)
+    assert not clock.in_flight
+    assert slow.threads and slow.threads[0] != threading.get_ident()
+    assert game(context).game.state.frame == 1
+    obs = context.observation
+    assert obs.frame == 1 and obs.latest is not None and obs.latest.frame == 1
+
+
+def test_pulse_skips_while_a_step_is_in_flight(
+    qtbot: QtBot, clock: PlayClock, context: AppContext
+) -> None:
+    slow = _paused(clock, context)
+    assert clock.pulse()
+    assert clock.pulse() is False
+    assert clock.pulse() is False
+    assert clock.skipped == 2
+    slow.gate.set()
+    qtbot.waitUntil(lambda: clock.frames == 1)
+    assert len(slow.threads) == 1 and game(context).game.state.frame == 1
+    assert clock.pulse()
+    qtbot.waitUntil(lambda: clock.frames == 2)
+
+
+def test_gui_events_keep_flowing_while_a_step_is_slow(
+    qtbot: QtBot, clock: PlayClock, context: AppContext
+) -> None:
+    """The user's complaint: the window must not wait for the emulator."""
+    slow = _paused(clock, context)
+    clock.play()
+    qtbot.waitUntil(lambda: clock.in_flight)
+    fired: list[float] = []
+    started = time.perf_counter()
+    QTimer.singleShot(0, lambda: fired.append(time.perf_counter() - started))
+    qtbot.waitUntil(lambda: bool(fired))
+    assert fired[0] < 0.1 and clock.in_flight  # the step is still behind the gate
+    slow.gate.set()
+    qtbot.waitUntil(lambda: clock.frames >= 1)
+    clock.pause()
+
+
+def test_a_step_finishing_after_pause_is_not_counted(
+    qtbot: QtBot, clock: PlayClock, context: AppContext
+) -> None:
+    slow = _paused(clock, context)
+    assert clock.pulse()
+    clock.play()  # running again...
+    clock.pause()  # ...and paused while the step is still underway
+    slow.gate.set()
+    qtbot.waitUntil(lambda: not clock.in_flight)
+    assert clock.frames == 0  # the emulator finished its frame, but the clock moved on
+    assert game(context).game.state.frame == 1
+    assert clock.pulse()
+    qtbot.waitUntil(lambda: clock.frames == 1)
+
+
+def test_drop_found_on_the_worker_stops_the_clock(
+    qtbot: QtBot, clock: PlayClock, context: AppContext
+) -> None:
+    context.connection.connect("fake", drop_after_ops=0)
+    assert clock.running
+    assert clock.pulse()
+    qtbot.waitUntil(lambda: not clock.running)
+    assert not context.connection.is_connected
+    assert clock.frames == 0
+
+
+def test_transient_error_on_the_worker_is_counted(
+    qtbot: QtBot, clock: PlayClock, context: AppContext
+) -> None:
+    from retro_ai_lab.core import EmulatorError
+
+    context.connection.connect("fake")
+    clock.pause()
+    adapter = game(context)
+    original = adapter._do_advance_frames
+    calls = {"n": 0}
+
+    def flaky(n: int) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise EmulatorError("hiccup")
+        original(n)
+
+    adapter._do_advance_frames = flaky  # type: ignore[method-assign]
+    assert clock.pulse()
+    qtbot.waitUntil(lambda: clock.errors == 1)
+    assert clock.frames == 0
+    assert clock.pulse()
+    qtbot.waitUntil(lambda: clock.frames == 1)
+    assert clock.errors == 1
 
 
 def test_context_owns_a_discovery_service(context: AppContext) -> None:

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -99,6 +100,9 @@ class ConnectionService:
         self._state = ConnectionState.DISCONNECTED
         self._adapter: EmulatorAdapter | None = None
         self._session: Session | None = None
+        # Workers (frame pump, play clock) may find a dropped link at the same
+        # moment; the loss is still recorded and announced exactly once.
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------ queries
 
@@ -217,11 +221,14 @@ class ConnectionService:
     # ------------------------------------------------------------ helpers
 
     def _finish_disconnect(self, *, expected: bool, reason: str) -> None:
-        name = self._session.adapter_name if self._session else "unknown"
-        self._adapter = None
-        self._session = None
-        self._set_state(ConnectionState.DISCONNECTED, None)
-        self._bus.publish(EmulatorDisconnected(name, expected, reason))
+        with self._lock:
+            if self._state is not ConnectionState.CONNECTED:
+                return  # another thread already recorded this loss
+            name = self._session.adapter_name if self._session else "unknown"
+            self._adapter = None
+            self._session = None
+            self._set_state(ConnectionState.DISCONNECTED, None)
+            self._bus.publish(EmulatorDisconnected(name, expected, reason))
 
     def _set_state(self, new: ConnectionState, adapter_name: str | None) -> None:
         old = self._state

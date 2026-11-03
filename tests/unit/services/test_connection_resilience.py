@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
+import threading
 from typing import Any
 
 import pytest
 
-from retro_ai_lab.core import EmulatorError
+from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.registry import default_registry
@@ -128,3 +130,34 @@ def test_unexpected_exception_during_disconnect_propagates_but_state_is_clean(
     assert service.state is ConnectionState.DISCONNECTED
     assert service.adapter is None
     assert len(events) == 1 and events[0].expected
+
+
+# ----------------------------------------------------------- T-818 threads
+
+
+def test_two_workers_dropping_at_once_report_the_loss_once(
+    service: ConnectionService, events: list[Any]
+) -> None:
+    """The frame pump and the play clock may both hit the dead link together."""
+    service.connect("fake")
+    adapter = fake(service)
+    start = threading.Barrier(2)
+
+    def op(_: Any) -> None:
+        start.wait(5)
+        adapter.mark_disconnected()
+        raise EmulatorDisconnectedError("The emulator went away.")
+
+    def worker() -> None:
+        with contextlib.suppress(EmulatorDisconnectedError):
+            service.call(op)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(5)
+    assert service.state is ConnectionState.DISCONNECTED
+    assert [e for e in events if isinstance(e, EmulatorDisconnected)] == [
+        EmulatorDisconnected("fake", False, "The emulator went away.")
+    ]
