@@ -8,7 +8,10 @@ Living description of how Retro AI Lab is structured. Updated whenever a task ch
 ┌──────────────────────────────────────────────────────────────┐
 │ ui/            PySide6 views + view-models (no business logic) │
 ├──────────────────────────────────────────────────────────────┤
+│ comparison/    saved AIs, comparison, sharing, competitions   │
+├──────────────────────────────────────────────────────────────┤
 │ services/      Session orchestration: connect, observe, train │
+│ education/     tips in simple and grown-up words              │
 ├──────────┬──────────────┬─────────────┬──────────────────────┤
 │ training/│ learning/    │ rewards/    │ understanding/       │
 │ modes,   │ algorithms   │ rewards,    │ variable discovery,  │
@@ -17,38 +20,45 @@ Living description of how Retro AI Lab is structured. Updated whenever a task ch
 ├──────────┴──────────────┴─────────────┴──────────────────────┤
 │ observation/   frames, memory snapshots, diffs, input logs   │
 ├──────────────────────────────────────────────────────────────┤
-│ emulator/      Adapter interface + adapters (BizHawk, VBA-M,  │
-│                Fake)                                          │
+│ emulator/      Adapter interface + adapters (Fake, BizHawk,   │
+│                mGBA)                                          │
 ├──────────────────────────────────────────────────────────────┤
-│ storage/       SQLite + JSON: projects, game knowledge,       │
-│                checkpoints, training history                  │
+│ storage/       JSON files per game: knowledge, rewards, goals,│
+│                brains, saved AIs                              │
 └──────────────────────────────────────────────────────────────┘
 core/  shared domain types, events, errors, config (used by every layer)
 ```
 
 Dependencies point downward only. `ui` depends on `services`; nothing below `services` imports Qt.
 
-## 2. Package layout (planned)
+## 2. Package layout
 
 ```
 src/retro_ai_lab/
-  core/            types, errors, event bus, settings
+  core/            types, errors, event bus, paths
   emulator/
-    base.py        EmulatorAdapter protocol, Capabilities, Button, Frame, MemoryRegion
-    fake/          synthetic game + FakeEmulatorAdapter
-    bizhawk/       adapter + Lua bridge script
-    vbam/          adapter (later)
-  observation/
-  understanding/
-  rewards/
-  learning/
-  training/
-  storage/
-  services/
-  ui/
-  testing/         reusable fakes for tests and demo mode
+    base.py        EmulatorAdapter (final public methods, _do_* hooks)
+    registry.py    AdapterRegistry, default_registry() = fake, bizhawk, mgba
+    fake/          Toy Racer + FakeEmulatorAdapter (the practice console)
+    bizhawk/       adapter, line protocol, hello description, PNG decoding,
+                   BizHawkSimulator, retro_ai_lab.lua (EmuHawk)
+    mgba/          MgbaAdapter (the BizHawk adapter under mGBA's name), retro_ai_lab.lua (mGBA)
+  observation/     frames, memory snapshots, diffs, input log
+  understanding/   knowledge, variables, events, relations, confidence
+  rewards/         reward profile, personalities, suggestions, exploitation, goals
+  learning/        action space, state encoder, Q-table, DQN (NumPy), skills, greedy player
+  training/        episode runner, training service, brain, curve, insights, research (step log)
+  comparison/      saved AI, store-facing service, compare, sharing, competition
+  education/       tips
+  storage/         JSON stores: knowledge, rewards, goals, brains, saved AIs, snapshots
+  services/        connection, observer, discovery, rewards, goals, experiments
+  ui/              main window, six panels, connect bar, research dialog, graphs
+  testing/         AdapterContract shared by every adapter's tests
 tests/
-  unit/ integration/ emulator/ real_emulator/ ui/ learning/
+  unit/            per package; unit/emulator/{bizhawk,mgba}/ run the real Lua scripts under lupa
+  integration/     layers wired together over the practice console
+  ui/              pytest-qt, offscreen
+  real_emulator/   opt-in (env vars), BizHawk and mGBA on the user's PC
 ```
 
 ## 3. Emulator adapter contract
@@ -103,7 +113,7 @@ Status: **Accepted** (in force), **Proposed** (needs user sign-off before work d
 | ADR-007 | Real-emulator tests are opt-in (env vars) and backed by manual verification on the user's Windows PC | Accepted | Only honest way to cover emulator behaviour that CI can't run. |
 | ADR-008 | NumPy is a runtime dependency from Phase 2 (screen diffs) onwards | Accepted | Pixel work in pure Python is too slow at real console resolutions; PyTorch (Phase 5) depends on NumPy anyway, so this adds nothing new to the final package. |
 | ADR-009 | Phase 7 neural learners (DQN) are implemented on NumPy behind a `Learner` interface; PyTorch is a later, optional backend | Accepted | The states here are a few dozen binned numbers, which a two-layer network in NumPy trains in real time. PyTorch adds ~200 MB to the Windows build (and gigabytes with CUDA on Linux), which is a lot for a children's app and for CI; the `Learner` contract (T-701) makes a PyTorch learner a drop-in later without touching the training service, the brain store or the panels. Overturn by adding `torch` as an optional extra and registering a learner. |
-| ADR-010 | The second real adapter targets mGBA (Lua scripting with sockets, 0.10+) rather than VBA-M; Game Boy family games are reachable today through BizHawk's cores; VBA-M is revisited when its Lua engine ships in a release; see §6 | Proposed (T-808 spike, docs only; a real-machine check is part of the adapter task) | The released VBA-M (v2.2.3) has no scripting or remote-control interface: its only external route is a GDB stub (SDL port, GBA only) that reads memory but can't press buttons, step frames or take save states. VBA-M's unreleased Lua engine has no socket library, no screenshot and no range reads. mGBA's scripting API has everything the bridge protocol needs, one call each. |
+| ADR-010 | The second real adapter targets mGBA (Lua scripting with sockets, 0.10+) rather than VBA-M; Game Boy family games are reachable today through BizHawk's cores; VBA-M is revisited when its Lua engine ships in a release; see §6 | Accepted (T-808 spike; script T-810; adapter T-811; the real-machine checks of §6.4 are pending on the user's PC) | The released VBA-M (v2.2.3) has no scripting or remote-control interface: its only external route is a GDB stub (SDL port, GBA only) that reads memory but can't press buttons, step frames or take save states. VBA-M's unreleased Lua engine has no socket library, no screenshot and no range reads. mGBA's scripting API has everything the bridge protocol needs, one call each. |
 
 ## 5. BizHawk bridge protocol (ADR-005, T-110)
 
@@ -184,6 +194,10 @@ DESIGN.md §7 names "VisualBoyAdvance / VBA-M" beside BizHawk as a practical emu
 3. **mGBA matches the bridge protocol one call to one.** Its scripting API (0.10 and later) has sockets, a game title and checksum for the game id, range reads with named domains and sizes (the `hello` domain list), key setting, `runFrame()`, screenshots, and save states to slots or buffers. The `mGBA-http` project runs a socket server inside an mGBA script with these calls, so the route is known to work. The adapter would reuse the §5 protocol unchanged and the `BizHawkSimulator`/`lupa` test approach; the Lua script is a second file with the same commands. To verify on a real machine: whether `runFrame()` steps a paused emulator (hold mode) or whether the script must drive from the `frame` callback (free-run mode), and whether speed can be set from a script.
 4. **Game Boy family games are already covered.** BizHawk runs GB, GBC and GBA through its Gambatte and mGBA cores, so the child can play these games with the existing adapter today. A second adapter adds a second emulator, not new games.
 
+### 6.3 Decision (ADR-010, Accepted)
+
+The second real adapter is mGBA, built as `emulator/mgba/` with a shipped `retro_ai_lab.lua` that speaks the §5 protocol (T-810, T-811); its real-machine checks (§6.4) run alongside BizHawk's (T-117) on the user's PC. VBA-M stays on the list: the objective in DESIGN.md §7 is kept, and the adapter is revisited when a VBA-M release ships the Lua engine, with the limitation (no screen capture, a slower transport) recorded then. Overturn by a VBA-M release that adds sockets or a screenshot call, or by the user preferring VBA-M for a reason the spike didn't see.
+
 ### 6.4 The mGBA bridge script (T-810)
 
 `retro_ai_lab/emulator/mgba/retro_ai_lab.lua` speaks the §5 protocol unchanged, so the adapter, the simulator and the tests carry over. The differences come from mGBA's API, not the protocol:
@@ -200,7 +214,3 @@ DESIGN.md §7 names "VisualBoyAdvance / VBA-M" beside BizHawk as a practical emu
 | speed | `client.speedmode` | no `speed` command, so `speed_control` is off |
 
 Still to verify on a real mGBA (the first T-811 run): that `readRange` takes bus addresses (`base + addr`) rather than offsets; the error value `receive` returns when the app closes the socket; that `saveStateBuffer` without flags is accepted; whether `platform()` names match `C.PLATFORM` keys; screenshot file format and cost; how many frames a round trip costs at full speed (the game runs on between requests, so a training step's reads describe the frame the answer was built on, up to a frame later than the last held input).
-
-### 6.3 Decision (ADR-010, Proposed)
-
-The second real adapter is mGBA, built as `emulator/mgba/` with a shipped `retro_ai_lab.lua` that speaks the §5 protocol, after the BizHawk adapter has been verified on the user's PC (T-117's real run). VBA-M stays on the list: the objective in DESIGN.md §7 is kept, and the adapter is revisited when a VBA-M release ships the Lua engine, with the limitation (no screen capture, a slower transport) recorded then. Overturn by a VBA-M release that adds sockets or a screenshot call, or by the user preferring VBA-M for a reason the spike didn't see.
