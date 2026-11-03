@@ -314,3 +314,52 @@ def test_wake_button_round_trips(knowledge: Knowledge) -> None:
         Knowledge.from_dict({**data, "wake_button": 3})
     with pytest.raises(ConfigurationError):
         Knowledge.from_dict({**data, "wake_button": ""})
+
+
+def test_the_knowledge_can_be_read_while_another_thread_rewrites_it() -> None:
+    """T-847: the finder rewrote relationships on the play clock's worker while a handler
+    on the GUI thread walked them: "dictionary changed size during iteration"."""
+    import sys
+    import threading
+
+    from retro_ai_lab.understanding.knowledge import Relationship
+
+    k = Knowledge("g")
+    for i in range(400):
+        k.propose("ram", i, kind=VariableKind.FLAG, name=f"f{i}", evidence=[Evidence("t", "", 3.0)])
+
+    def rel(i: int, j: int) -> Relationship:
+        return Relationship(f"flag_on:v{i}", f"flag_on:v{j}", 3, 5, 5, 10)
+
+    stop = threading.Event()
+    failures: list[BaseException] = []
+
+    def writer() -> None:
+        n = 0
+        try:
+            while not stop.is_set():
+                n += 1
+                for i in range(1, 60):
+                    k.set_relationship(rel(i, (i + n) % 400 + 1))
+                for i in range(1, 60):
+                    k.remove_relationship(rel(i, (i + n) % 400 + 1).id)
+                k.support("v1", Evidence("t", "", 0.1))
+        except BaseException as exc:
+            failures.append(exc)
+
+    interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)  # switch threads as often as possible
+    t = threading.Thread(target=writer, daemon=True)
+    t.start()
+    try:
+        for _ in range(300):
+            k.confident_relationships()
+            k.relationships()
+            list(k)
+            k.to_dict()
+            k.confident()
+    finally:
+        stop.set()
+        t.join(timeout=10)
+        sys.setswitchinterval(interval)
+    assert not t.is_alive() and failures == []

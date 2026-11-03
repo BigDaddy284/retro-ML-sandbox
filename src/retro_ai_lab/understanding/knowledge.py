@@ -12,6 +12,7 @@ DESIGN.md §3.5 and §3.6 drive the shape of this module:
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -332,6 +333,10 @@ class Knowledge:
         self._variables: dict[str, Variable] = {}
         self._relationships: dict[str, Relationship] = {}
         self._version = 0
+        # Snapshots are observed on the play clock's worker and on the GUI thread
+        # (T-818), so the finder may rewrite relationships while a handler on the
+        # other thread walks them (T-847). Every walk and every edit takes this.
+        self._lock = threading.RLock()
         # The button the AI found gets this game going when it stops listening
         # (a title screen, game over); worked out by experiment, never assumed (T-844).
         self.wake_button: str | None = None
@@ -353,7 +358,8 @@ class Knowledge:
         return len(self._variables)
 
     def __iter__(self) -> Iterator[Variable]:
-        return iter(self._variables.values())
+        with self._lock:
+            return iter(tuple(self._variables.values()))
 
     def __contains__(self, var_id: str) -> bool:
         return var_id in self._variables
@@ -366,13 +372,15 @@ class Knowledge:
 
     def at(self, region: str, offset: int) -> Variable | None:
         """The variable that starts at this location, if any."""
-        for v in self._variables.values():
-            if v.region == region and v.offset == offset:
-                return v
+        with self._lock:
+            for v in self._variables.values():
+                if v.region == region and v.offset == offset:
+                    return v
         return None
 
     def by_kind(self, kind: VariableKind) -> tuple[Variable, ...]:
-        return tuple(v for v in self._variables.values() if v.kind is kind and not v.rejected)
+        with self._lock:
+            return tuple(v for v in self._variables.values() if v.kind is kind and not v.rejected)
 
     def best(self, kind: VariableKind) -> Variable | None:
         """The most trusted non-rejected variable of a kind."""
@@ -384,32 +392,36 @@ class Knowledge:
         )
 
     def confident(self, at_least: Confidence = Confidence.MEDIUM) -> tuple[Variable, ...]:
-        return tuple(
-            v for v in self._variables.values() if not v.rejected and at_least <= v.confidence
-        )
+        with self._lock:
+            return tuple(
+                v for v in self._variables.values() if not v.rejected and at_least <= v.confidence
+            )
 
     def needs_help(self) -> tuple[Variable, ...]:
         """Beliefs that are worth asking a person about (DESIGN.md §3.4)."""
-        return tuple(
-            v
-            for v in self._variables.values()
-            if not v.rejected
-            and not v.confirmed
-            and v.confidence in (Confidence.LOW, Confidence.MEDIUM)
-        )
+        with self._lock:
+            return tuple(
+                v
+                for v in self._variables.values()
+                if not v.rejected
+                and not v.confirmed
+                and v.confidence in (Confidence.LOW, Confidence.MEDIUM)
+            )
 
     # ----------------------------------------------------------- editing
 
     def add(self, variable: Variable) -> Variable:
-        if variable.id in self._variables:
-            raise ConfigurationError(f"Variable {variable.id!r} already exists.")
-        clash = self.at(variable.region, variable.offset)
-        if clash is not None and not clash.rejected:
-            raise ConfigurationError(
-                f"{variable.region}[{variable.offset}] is already {clash.id!r}; update it instead."
-            )
-        self._variables[variable.id] = variable
-        self._version += 1
+        with self._lock:
+            if variable.id in self._variables:
+                raise ConfigurationError(f"Variable {variable.id!r} already exists.")
+            clash = self.at(variable.region, variable.offset)
+            if clash is not None and not clash.rejected:
+                raise ConfigurationError(
+                    f"{variable.region}[{variable.offset}] is already {clash.id!r}; "
+                    "update it instead."
+                )
+            self._variables[variable.id] = variable
+            self._version += 1
         return variable
 
     def new_id(self) -> str:
@@ -435,16 +447,18 @@ class Knowledge:
         )
 
     def update(self, var_id: str, **changes: Any) -> Variable:
-        current = self.get(var_id)
-        if "id" in changes:
-            raise ConfigurationError("A variable's id can't change.")
-        updated = replace(current, **changes)
-        self._variables[var_id] = updated
-        self._version += 1
+        with self._lock:
+            current = self.get(var_id)
+            if "id" in changes:
+                raise ConfigurationError("A variable's id can't change.")
+            updated = replace(current, **changes)
+            self._variables[var_id] = updated
+            self._version += 1
         return updated
 
     def support(self, var_id: str, *evidence: Evidence) -> Variable:
-        return self.update(var_id, evidence=self.get(var_id).evidence + tuple(evidence))
+        with self._lock:
+            return self.update(var_id, evidence=self.get(var_id).evidence + tuple(evidence))
 
     def confirm(self, var_id: str, *, by: str = "user") -> Variable:
         """A person says the belief is right."""
@@ -485,14 +499,16 @@ class Knowledge:
         )
 
     def remove(self, var_id: str) -> None:
-        self.get(var_id)
-        del self._variables[var_id]
-        self._version += 1
+        with self._lock:
+            self.get(var_id)
+            del self._variables[var_id]
+            self._version += 1
 
     # ----------------------------------------------------- relationships
 
     def relationships(self) -> tuple[Relationship, ...]:
-        return tuple(self._relationships.values())
+        with self._lock:
+            return tuple(self._relationships.values())
 
     def relationship(self, rel_id: str) -> Relationship:
         try:
@@ -502,46 +518,54 @@ class Knowledge:
 
     def set_relationship(self, rel: Relationship) -> Relationship:
         """Add or replace the counts of a relationship, keeping a person's verdict."""
-        current = self._relationships.get(rel.id)
-        if current is not None and (current.confirmed or current.rejected):
-            rel = replace(
-                rel, confirmed=current.confirmed, rejected=current.rejected, notes=current.notes
-            )
-        self._relationships[rel.id] = rel
+        with self._lock:
+            current = self._relationships.get(rel.id)
+            if current is not None and (current.confirmed or current.rejected):
+                rel = replace(
+                    rel, confirmed=current.confirmed, rejected=current.rejected, notes=current.notes
+                )
+            self._relationships[rel.id] = rel
         return rel
 
     def confirm_relationship(self, rel_id: str) -> Relationship:
-        rel = replace(self.relationship(rel_id), confirmed=True, rejected=False)
-        self._relationships[rel_id] = rel
+        with self._lock:
+            rel = replace(self.relationship(rel_id), confirmed=True, rejected=False)
+            self._relationships[rel_id] = rel
         return rel
 
     def reject_relationship(self, rel_id: str) -> Relationship:
-        rel = replace(self.relationship(rel_id), rejected=True, confirmed=False)
-        self._relationships[rel_id] = rel
+        with self._lock:
+            rel = replace(self.relationship(rel_id), rejected=True, confirmed=False)
+            self._relationships[rel_id] = rel
         return rel
 
     def remove_relationship(self, rel_id: str) -> None:
-        self.relationship(rel_id)
-        del self._relationships[rel_id]
+        with self._lock:
+            self.relationship(rel_id)
+            del self._relationships[rel_id]
 
     def confident_relationships(
         self, at_least: Confidence = Confidence.LOW
     ) -> tuple[Relationship, ...]:
-        return tuple(
-            r for r in self._relationships.values() if not r.rejected and at_least <= r.confidence
-        )
+        with self._lock:
+            return tuple(
+                r
+                for r in self._relationships.values()
+                if not r.rejected and at_least <= r.confidence
+            )
 
     # ------------------------------------------------------ serialisation
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema": SCHEMA_VERSION,
-            "game_id": self.game_id,
-            "title": self.title,
-            "variables": [v.to_dict() for v in self._variables.values()],
-            "relationships": [r.to_dict() for r in self._relationships.values()],
-            "wake_button": self.wake_button,
-        }
+        with self._lock:
+            return {
+                "schema": SCHEMA_VERSION,
+                "game_id": self.game_id,
+                "title": self.title,
+                "variables": [v.to_dict() for v in self._variables.values()],
+                "relationships": [r.to_dict() for r in self._relationships.values()],
+                "wake_button": self.wake_button,
+            }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Knowledge:
