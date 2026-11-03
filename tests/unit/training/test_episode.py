@@ -272,3 +272,25 @@ def test_runner_reports_every_learned_step_with_its_source(lab: Lab) -> None:
     assert learned[0].action == r.last_action and learned[0].state == first
     assert learned[0].next_state == r.state
     r.finish()
+
+
+def test_a_training_step_is_one_request_on_a_socket_backend(lab: Lab) -> None:
+    """T-824: buttons, frames and the memory snapshot travel in one step request."""
+    from retro_ai_lab.emulator.bizhawk.simulator import BizHawkSimulator
+
+    with BizHawkSimulator() as sim:
+        lab.connection.connect("bizhawk", port=sim.port, call_timeout_s=2.0, timeout_s=2.0)
+        teach(lab)
+        r = runner(lab, frames_per_step=3, max_steps=5)
+        before = len(sim.requests)
+        result = r.run_episode()
+        assert result.steps == 5 and result.frames == 15
+        steps = [q for q in sim.requests[before:] if q["cmd"] == "step"]
+        others = [q["cmd"] for q in sim.requests[before:] if q["cmd"] != "step"]
+        assert len(steps) == 5 and all(q["frames"] == 3 for q in steps)
+        assert all("buttons" in q and [d["domain"] for d in q["reads"]] == ["RAM"] for q in steps)
+        # Besides the steps: the opening snapshot of the episode and the release at the end.
+        assert others == ["read", "input"]
+        assert sim.requests[before]["cmd"] == "read"
+        assert lab.observation.latest is not None and lab.observation.frame >= 15
+        lab.connection.disconnect()

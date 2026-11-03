@@ -292,10 +292,14 @@ class EpisodeRunner:
         self._last_buttons = frozenset(names)
         self._last_action = action
         try:
-            self._connection.call(lambda a: a.set_input(held))
+            # One request per step (T-824): the buttons, the frames and the
+            # memory snapshot after them travel together.
             self._observation.record_input(names, "ai")
-            self._connection.call(lambda a: a.advance_frames(self._frames_per_step))
-            self._observation.advance(self._frames_per_step)
+            frames = self._frames_per_step
+            reads = self._observation.snapshot_reads()
+            pressed = frozenset(held)
+            result = self._connection.call(lambda a: a.step(frames, pressed=pressed, reads=reads))
+            self._observation.advance(frames, snapshot=result.reads if reads else None)
         except EmulatorError:
             self._ended_by = "disconnected"
             self._signals.stop()
