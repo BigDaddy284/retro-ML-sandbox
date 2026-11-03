@@ -9,6 +9,7 @@ from retro_ai_lab.understanding.knowledge import (
     VariableKind,
     confidence_from_evidence,
 )
+from retro_ai_lab.understanding.linking import InputLinks, apply_input_links, find_input_links
 from retro_ai_lab.understanding.variables import Candidate, find_candidates, propose_candidates
 
 __all__ = [
@@ -16,10 +17,13 @@ __all__ = [
     "Confidence",
     "Encoding",
     "Evidence",
+    "InputLinks",
     "Knowledge",
     "Variable",
     "VariableKind",
+    "apply_input_links",
     "confidence_from_evidence",
     "find_candidates",
+    "find_input_links",
     "propose_candidates",
 ]

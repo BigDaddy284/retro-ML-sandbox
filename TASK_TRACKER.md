@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-303 (Ready)
-- **Last approved checkpoint:** `main` after T-302
+- **Current task:** T-304 (Ready)
+- **Last approved checkpoint:** `main` after T-303
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -42,7 +42,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | E-3 | Game Understanding (variables, events, relationships, confidence) | 3 | Epic | – | – |
 | T-301 | Knowledge model: variables, evidence, confidence, JSON store | 3 | Done | 40/40 | see PR #19 |
 | T-302 | Variable candidate finder from change statistics (counters, bounded values, 16-bit pairs) | 3 | Done | 9/9 (+ diff) | see PR #20 |
-| T-303 | Input linking via experiments: which inputs move which bytes | 3 | – | – | – |
+| T-303 | Input linking via experiments: which inputs move which bytes | 3 | Done | 7/7 | see PR #21 |
 | T-304 | Event detection: progression steps, resets, game over | 3 | – | – | – |
 | T-305 | Relationship discovery between events and variables | 3 | – | – | – |
 | T-306 | Discovery runner: automatic observe-experiment-propose loop with progress events | 3 | – | – | – |
@@ -350,6 +350,21 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 9 / 9 passed / 0 failed / 0 excluded (555 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** The first version treated "monotonic" strictly and found nothing on a realistic drive, because restarts reset the score and position. Rules now tolerate resets (`mostly_up`, pair detection allows stray drops) and classification quality on the toy racer is as listed above. Lane and the input mask are labelled "progress" for now; T-303's input linking is expected to correct them.
 
+### T-303 – Input linking via experiments
+- **Status:** Done
+- **Phase:** 3
+- **Objective:** Run the active-discovery loop of DESIGN.md §3.4 for the controller: from a checkpoint, hold each button for a few frames and find which bytes it moves compared with doing nothing, then fold that into the knowledge as evidence, relabels and new proposals.
+- **Scope:** `understanding.linking` (`InputLinks`, `find_input_links(harness, buttons, frames=8, repeats=2)` with unstable-byte exclusion from repeated idle trials, `apply_input_links(knowledge, links)`), new `VariableKind.INPUT` for the controller mirror. **Out of scope:** button combinations and held-duration effects (later discovery passes), scheduling (T-306).
+- **Acceptance criteria:**
+  1. On the toy racer, Up moves speed and position, Left/Right move the lane, B brakes, the input byte mirrors every button, and header/noise bytes are never linked; the game is restored afterwards.
+  2. Bytes that differ between identical idle trials are reported as unstable and excluded from every link.
+  3. Bad arguments (no buttons, non-positive frames/repeats, no checkpoint, unknown buttons) are `ConfigurationError`s.
+  4. Applying links adds "changes when X is held" evidence once (idempotent), relabels unknown/progress values moved by a direction button as positions, labels a location moved by every tested button as the controller mirror (only with 3+ buttons tested), proposes linked bytes nobody knew about, and never changes a confirmed label or touches a rejected location.
+  5. End to end: statistics (T-302) then linking relabel the lane as a position, find the controller byte, and raise speed to at least Medium.
+- **Test plan:** toy racer links; unstable exclusion with a non-saved RNG; argument rejections; apply evidence/relabel/propose and idempotence; confirmed/rejected respected; too few buttons; end to end.
+- **Results:** 7 / 7 passed / 0 failed / 0 excluded (562 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** First attempt checkpointed at top speed, where Up changes nothing; the fixture now checkpoints at a middling speed, which is also what the discovery runner (T-306) should do: try buttons from several different game situations.
+
 ### Later Phase 3 tasks
 Details will be written into this file when each becomes the next task, following the template.
 
@@ -383,5 +398,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-205 completed (PR #18). Phase 2 complete on the fake emulator.
 - Phase 3 broken into T-301..T-308. T-301 completed (PR #19).
 - T-302 completed (PR #20).
-- Next: T-303.
+- T-303 completed (PR #21).
+- Next: T-304.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

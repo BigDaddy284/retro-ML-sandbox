@@ -86,6 +86,7 @@ class VariableKind(Enum):
     SPEED = "speed"
     PROGRESS = "progress"  # level, lap, checkpoint, quest step
     FLAG = "flag"  # game over, paused, in menu
+    INPUT = "input"  # a mirror of the controller itself, not game state
 
     @property
     def label(self) -> str:
