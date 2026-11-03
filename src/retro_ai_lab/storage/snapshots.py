@@ -45,6 +45,10 @@ class SnapshotArchive:
             raise ConfigurationError(f"Can't open snapshot archive {self._path}: {exc}") from exc
         self._db.execute("PRAGMA foreign_keys = ON")
         self._db.execute("PRAGMA journal_mode = WAL")
+        # WAL + NORMAL never corrupts the file; at worst the last few snapshots
+        # before a power cut are lost. FULL costs one fsync per snapshot, which
+        # on Windows runners took ~11 ms each and made recording stutter.
+        self._db.execute("PRAGMA synchronous = NORMAL")
         self._db.executescript(_SCHEMA)
         self._seq: dict[int, int] = {}
 

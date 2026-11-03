@@ -25,6 +25,7 @@ class PlayClock(QObject):
         if fps <= 0:
             raise ValueError("fps must be positive")
         self._connection: ConnectionService = context.connection
+        self._observation = context.observation
         self._timer = QTimer(self)
         self._timer.setInterval(max(1, 1000 // fps))
         self._timer.timeout.connect(self.tick)
@@ -97,6 +98,7 @@ class PlayClock(QObject):
             self._errors += 1
             return False
         self._frames += n
+        self._observation.advance(n)
         return True
 
     # ------------------------------------------------------------ internal

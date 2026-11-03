@@ -12,6 +12,7 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 from PySide6.QtCore import QObject, Signal
+from shiboken6 import isValid
 
 from retro_ai_lab.core.events import EventBus
 
@@ -26,7 +27,14 @@ class EventBridge(QObject):
         self._bus = bus
         self._local = EventBus()
         self._received.connect(self._local.publish)  # AutoConnection: queued across threads
-        self._unsubscribe = bus.subscribe(object, self._received.emit)
+        self._unsubscribe = bus.subscribe(object, self._forward)
+        # Qt may delete the C++ side while the bus still holds the handler
+        # (a context outliving its window in tests); drop forwarding then.
+        self.destroyed.connect(self._unsubscribe)
+
+    def _forward(self, event: Any) -> None:
+        if isValid(self):
+            self._received.emit(event)
 
     def subscribe(self, event_type: type[E], handler: Callable[[E], None]) -> Callable[[], None]:
         return self._local.subscribe(event_type, handler)

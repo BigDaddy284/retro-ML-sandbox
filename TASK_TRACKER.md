@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-202 (Ready)
-- **Last approved checkpoint:** `main` after T-201
+- **Current task:** T-203 (Ready)
+- **Last approved checkpoint:** `main` after T-202
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -35,7 +35,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-116 | BizHawk adapter: frame advance, speed, save states | 1 | – | – | – |
 | T-117 | BizHawk adapter: disconnect handling and real-emulator verification | 1 | – | – | – |
 | T-201 | Memory snapshot capture and storage | 2 | Done | 46/46 | see PR #14 |
-| T-202 | Memory change detection (frame-to-frame diff) | 2 | – | – | – |
+| T-202 | Memory change detection (frame-to-frame diff) | 2 | Done | 26/26 | see PR #15 |
 | T-203 | Screen observation: frame diff and change regions | 2 | – | – | – |
 | T-204 | Input recording (who pressed what, when) | 2 | – | – | – |
 | T-205 | Save-state experiment harness (repeatable trials) | 2 | – | – | – |
@@ -258,6 +258,20 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 46 / 46 passed / 0 failed / 0 excluded (429 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** One row per region per snapshot so a single region's history can be read cheaply by the discovery engine. WAL journal mode for concurrent reads later.
 
+### T-202 – Memory change detection (frame-to-frame diff)
+- **Status:** Done
+- **Phase:** 2
+- **Objective:** Tell exactly which bytes changed between frames, accumulate per-byte behaviour over a run (change rate, direction, range), and feed snapshots automatically while the game plays so the understanding engine has data without touching the emulator.
+- **Scope:** `observation.diff` (`ByteChange`, `SnapshotDiff`, `diff_snapshots`, `ByteStats`, `ChangeTracker` with `classify()` into constant/noise/state/unknown), `services.observer.ObservationService` (+ `MemoryObserved` event) owned by `AppContext` and driven by `PlayClock.tick`. `EventBridge` now drops its bus subscription when its Qt object is destroyed. **Out of scope:** screen diffs (T-203), persisting diffs (the archive stores snapshots; diffs are recomputed).
+- **Acceptance criteria:**
+  1. Diff lists every changed byte with old/new values in region/offset order, is empty for equal snapshots, and rejects mismatched regions or sizes.
+  2. Tracker stats are exact (samples, changes, ups/downs, min/max, distinct) and the classifier separates the toy racer's noise bytes and timer from its header constants and its real state bytes without any game knowledge.
+  3. The observation service is idle until a memory-capable emulator connects, snapshots on every advance, publishes `MemoryObserved`, resets on reconnect, counts transient read errors, and goes quiet on link loss without counting it as an error.
+  4. The play clock feeds the service on every tick.
+- **Test plan:** diff empty/ordered/rejections, property-based diff vs naive comparison, immutability; tracker seed/transition/ups-downs/rates, unknown byte, bad input, reset, classify groups, unknown before enough data, bad noise rate, intersection helper, toy-racer discovery; service idle/connect/advance/reset/no-memory/dropped link/transient error/ring capacity/negative; UI clock feeds service; deleted bridge stops forwarding.
+- **Results:** 26 / 26 passed / 0 failed / 0 excluded (455 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** The noise/state split is the first step of discovery (Phase 3): on the toy racer it already isolates the four noise bytes, the timer and the low frame-counter byte as noise and the header as constant, leaving position/lane/speed/score/input as candidate state. A bridge deletion bug surfaced when the clock began publishing events after a test window was torn down; fixed by unsubscribing on `destroyed` and checking validity before emitting. CI on Windows/py3.11 then failed the T-201 archive performance gate (11.4 s for 1000 snapshots): each append did a full fsync. Switched the archive to `PRAGMA synchronous = NORMAL` under WAL (safe against corruption; 1000 snapshots now take ~0.1 s). Also made `observation.memory`'s import of `services` type-only, which removed a circular import that only import order had been hiding.
+
 ### Later Phase 2 tasks
 Details will be written into this file when each becomes the next task, following the template.
 
@@ -285,5 +299,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-011 completed (PR #12).
 - T-012 completed (PR #13). Phase 1 is complete on the fake emulator; T-110+ (BizHawk) wait on ADR-005 sign-off.
 - T-201 completed (PR #14).
-- Next: T-202.
+- T-202 completed (PR #15).
+- Next: T-203.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

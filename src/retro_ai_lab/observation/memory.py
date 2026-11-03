@@ -12,11 +12,13 @@ from collections import deque
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from retro_ai_lab.core import ConfigurationError, MemoryRegion
 from retro_ai_lab.emulator.base import EmulatorAdapter
-from retro_ai_lab.services import ConnectionService
+
+if TYPE_CHECKING:
+    from retro_ai_lab.services import ConnectionService
 
 
 @dataclass(frozen=True, slots=True)
