@@ -184,6 +184,23 @@ DESIGN.md §7 names "VisualBoyAdvance / VBA-M" beside BizHawk as a practical emu
 3. **mGBA matches the bridge protocol one call to one.** Its scripting API (0.10 and later) has sockets, a game title and checksum for the game id, range reads with named domains and sizes (the `hello` domain list), key setting, `runFrame()`, screenshots, and save states to slots or buffers. The `mGBA-http` project runs a socket server inside an mGBA script with these calls, so the route is known to work. The adapter would reuse the §5 protocol unchanged and the `BizHawkSimulator`/`lupa` test approach; the Lua script is a second file with the same commands. To verify on a real machine: whether `runFrame()` steps a paused emulator (hold mode) or whether the script must drive from the `frame` callback (free-run mode), and whether speed can be set from a script.
 4. **Game Boy family games are already covered.** BizHawk runs GB, GBC and GBA through its Gambatte and mGBA cores, so the child can play these games with the existing adapter today. A second adapter adds a second emulator, not new games.
 
+### 6.4 The mGBA bridge script (T-810)
+
+`retro_ai_lab/emulator/mgba/retro_ai_lab.lua` speaks the §5 protocol unchanged, so the adapter, the simulator and the tests carry over. The differences come from mGBA's API, not the protocol:
+
+| | BizHawk script | mGBA script |
+|---|---|---|
+| loop | the script owns the loop (`emu.frameadvance()` / `emu.yield()`) | event-driven: `callbacks:add("frame")`, `callbacks:add("keysRead")`, socket `received` events polled once a frame |
+| run modes | hold (paused between requests) or free run | free run only: mGBA has no pause from a script, so `mode` is accepted and does nothing |
+| `step` | runs the frames inside the handler and answers | arms a counter; the answer is sent from the `frame` callback once the frames have passed; another request meanwhile is refused ("A step is still running") |
+| input | `joypad.set` of a table every frame | a key mask (`C.GBA_KEY`/`C.GB_KEY` bits) set with `emu:setKeys` on every `keysRead` |
+| memory | named domains, `read_bytes_as_array` | `emu.memory` domains; `readRange(base + addr, len)` |
+| game id | `gameinfo.getromname()`, `getromhash()` | `getGameTitle()` (or the game code), CRC32 from `checksum()` as 8 hex digits; `hello` also carries `code` and `emulator = "mGBA"` |
+| save states | files in the temp folder | `saveStateBuffer()` / `loadStateBuffer()` kept in a table by slot name (lost when the script stops) |
+| speed | `client.speedmode` | no `speed` command, so `speed_control` is off |
+
+Still to verify on a real mGBA (the first T-811 run): that `readRange` takes bus addresses (`base + addr`) rather than offsets; the error value `receive` returns when the app closes the socket; that `saveStateBuffer` without flags is accepted; whether `platform()` names match `C.PLATFORM` keys; screenshot file format and cost; how many frames a round trip costs at full speed (the game runs on between requests, so a training step's reads describe the frame the answer was built on, up to a frame later than the last held input).
+
 ### 6.3 Decision (ADR-010, Proposed)
 
 The second real adapter is mGBA, built as `emulator/mgba/` with a shipped `retro_ai_lab.lua` that speaks the §5 protocol, after the BizHawk adapter has been verified on the user's PC (T-117's real run). VBA-M stays on the list: the objective in DESIGN.md §7 is kept, and the adapter is revisited when a VBA-M release ships the Lua engine, with the limitation (no screen capture, a slower transport) recorded then. Overturn by a VBA-M release that adds sockets or a screenshot call, or by the user preferring VBA-M for a reason the spike didn't see.

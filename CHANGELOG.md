@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-810: a bridge script for mGBA (0.10+) speaking the same protocol as the BizHawk one (free-run only: mGBA scripts can't pause), tested in CI under lupa over real TCP; the `mgba` adapter follows in T-811.
 - T-809: a Research window off the toolbar for grown-ups and researchers: edit the learning settings, see what the AI thinks every move is worth in the situation now, and save or clear the step log (CSV). The app keeps the step log whether or not the window is open.
 - T-808: ARCHITECTURE §6 and ADR-010: VBA-M feasibility spike for the second emulator adapter (docs only); mGBA proposed as the second adapter, VBA-M revisited when a release ships its Lua engine.
 - T-807: research mode service layer: a bounded step log fed by training (go, step, frame, situation, buttons, explored, value, reward) with CSV export; the AI's value for every move in the situation in front of it; learning settings read and applied to the brain in use (`TrainingService.set_settings`), saved with the brain. Every learner answers `values` and `configure`.
