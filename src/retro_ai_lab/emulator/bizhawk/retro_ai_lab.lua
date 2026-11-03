@@ -85,8 +85,10 @@ do
     ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t",
   }
 
+  -- Escape exactly the bytes JSON requires (controls, quote, backslash) and
+  -- DEL. Not %c: on Windows that class also matches bytes of UTF-8 sequences.
   local function encode_string(s)
-    local escaped = s:gsub('[%c"\\]', function(c)
+    local escaped = s:gsub('[\0-\31\127"\\]', function(c)
       return escapes[c] or string.format("\\u%04x", c:byte())
     end)
     return '"' .. escaped .. '"'

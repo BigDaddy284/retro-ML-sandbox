@@ -147,12 +147,11 @@ class Link:
 
 def open_link(host: str, port: int, *, timeout_s: float) -> Link:
     """Connect to the bridge; failures become child-readable errors."""
+    # A refused connection surfaces as ConnectionRefusedError on Linux but as a
+    # timeout on Windows (which keeps retrying until the deadline), so every
+    # failure to connect gets the same advice.
     try:
         sock = socket.create_connection((host, port), timeout=timeout_s)
-    except TimeoutError as exc:
-        raise EmulatorError(
-            f"BizHawk did not answer on port {port} within {timeout_s:g} seconds."
-        ) from exc
     except OSError as exc:
         raise EmulatorError(
             f"Couldn't find BizHawk on port {port}. Open retro_ai_lab.lua in EmuHawk's "

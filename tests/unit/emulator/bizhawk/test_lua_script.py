@@ -142,6 +142,21 @@ def test_lua_json_agrees_with_python(value: Any) -> None:
     assert json.loads(encoded) == _lossy(value)
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "\x8d",  # a C1 control: U+008D is UTF-8 C2 8D
+        "Í",  # U+00CD is C3 8D: byte 0x8D must not be escaped on its own (Windows %c did)
+        '\x00\x1f\x7f"\\',
+        "é€𝄞",
+    ],
+)
+def test_lua_json_keeps_utf8_bytes_whole(value: str) -> None:
+    internals = _INTERNALS
+    encoded = internals.json.encode(internals.json.decode(json.dumps(value).encode("utf-8")))
+    assert json.loads(encoded) == value
+
+
 @settings(max_examples=100, deadline=None)
 @given(st.binary(max_size=200))
 def test_lua_base64_agrees_with_python(data: bytes) -> None:
