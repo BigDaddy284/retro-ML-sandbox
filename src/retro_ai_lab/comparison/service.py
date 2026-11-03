@@ -7,9 +7,11 @@ for their current state and hands a saved state back through their own
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 
 from retro_ai_lab.comparison.saved_ai import SavedAi, check_name
+from retro_ai_lab.comparison.sharing import export_saved_ai, import_saved_ai
 from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.rewards.goals import Goal
@@ -25,7 +27,7 @@ from retro_ai_lab.training.service import TrainingService
 class SavedAiChanged:
     game_id: str
     name: str
-    reason: str  # "saved", "loaded", "deleted"
+    reason: str  # "saved", "loaded", "deleted", "imported"
 
 
 class SavedAiService:
@@ -111,6 +113,39 @@ class SavedAiService:
             return False
         self._bus.publish(SavedAiChanged(game_id, name, "deleted"))
         return True
+
+    # ------------------------------------------------------------ sharing
+
+    def export_to(self, name: str, path: str | Path) -> Path:
+        """Write the saved AI ``name`` to ``path`` for a friend."""
+        return export_saved_ai(self.get(name), path)
+
+    def import_from(self, path: str | Path) -> SavedAi:
+        """Keep a friend's saved AI for the connected game, never replacing one of ours."""
+        game_id = self._require()
+        saved = import_saved_ai(path)
+        if saved.game_id != game_id:
+            raise ConfigurationError(
+                "That shared AI is for another game. Connect to that game, then load it."
+            )
+        taken = set(self._store.names(game_id))
+        name, n = saved.name, 2
+        while name in taken or self._clashes(game_id, name):
+            name = f"{saved.name} ({n})"
+            n += 1
+        if name != saved.name:
+            saved = replace(saved, name=name)
+        self._store.save(saved.to_dict())
+        self._bus.publish(SavedAiChanged(game_id, saved.name, "imported"))
+        return saved
+
+    def _clashes(self, game_id: str, name: str) -> bool:
+        """Would ``name`` land on another saved AI's file?"""
+        try:
+            path = self._store.path_for(game_id, name)
+        except ConfigurationError:
+            return False
+        return path.exists() and not self._store.exists(game_id, name)
 
     # ------------------------------------------------------------ helpers
 

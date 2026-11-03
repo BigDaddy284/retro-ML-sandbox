@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-805 – Sharing: export and import a saved AI safely
+- **Current task:** T-806 – Competitions: a challenge and a scoreboard of saved AIs
 - **Last approved checkpoint:** `main` after T-709 (PR #58)
 - **Open blockers:** none for development. ADR-005 (BizHawk bridge) is now Accepted with its real-emulator verification left to T-117 on the user's Windows PC. ADR-006 (first demo game) is still *Proposed*: the user picks the game. ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -89,7 +89,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-802 | Saved AI service: save the current AI under a name, load one back, delete; events | 8 | Done | 5/5 | see PR #68 |
 | T-803 | Comparison: rewards, objectives, time, attempts, successes and behaviour differences between saved AIs, in child words | 8 | Done | 5/5 | see PR #69 |
 | T-804 | "Compare AIs" panel: save as, load, delete, comparison table, two curves on one graph | 8 | Done | 5/5 | see PR #70 |
-| T-805 | Sharing: export a saved AI as one file and import one safely (schema, size, same game) | 8 | – | – | – |
+| T-805 | Sharing: export a saved AI as one file and import one safely (schema, size, same game) | 8 | Done | 5/5 | see PR #71 |
 | T-806 | Competitions: a challenge (game, start state, fixed settings, goes) and a scoreboard of saved AIs run under it | 8 | – | – | – |
 | T-807 | Research mode: advanced view with editable learning settings, the current situation's values and a CSV step log | 8 | – | – | – |
 | T-808 | Second emulator adapter spike: VBA-M feasibility and ADR (docs only) | 8 | – | – | – |
@@ -1161,6 +1161,22 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #70. **PR:** #70.
 - **Completion report:** DESIGN.md §10 names five panels; comparison (§11) earns a sixth in the bottom row rather than a dialog, because the child is meant to keep the table in view while changing rewards and training again. The panel holds no logic: it asks the service for the saved AIs, builds the table from T-803's scorecards and leaders, and shows T-803's sentences. One curve still draws on the graph after a deletion (a single curve is useful context even if it is not a comparison). Loading does not save the current AI first; the tip says so plainly and the name box sits right above the table for that reason. A damaged saved-AI file is skipped by the panel rather than breaking it.
 
+### T-805 – Sharing: export and import a saved AI safely
+- **Status:** Done
+- **Phase:** 8
+- **Objective:** DESIGN.md §13's first step: a child can hand a saved AI to a friend as one file and load one a friend sent, and "imported projects and models must be handled safely": a shared file can never crash the app, run anything, write outside the saved-AI folder, or quietly replace what the child already has.
+- **Scope:** `comparison/sharing.py`: `export_saved_ai(saved, path)` writes the saved AI's dictionary with the app version as `.json`; `import_saved_ai(path, *, max_bytes=MAX_SHARE_BYTES)` reads it back with the checks in order: the file size (refused above 32 MiB before reading), strict JSON (NaN/Infinity refused, must be an object, nesting limited), `kind` must be `saved_ai`, `SavedAi.from_dict` validation, and every part rebuilt through its own `from_dict` (`RewardProfile`, `Goal`, `Brain` incl. the learner) so a damaged part is found at import time, not when loaded; every refusal is a `ConfigurationError` in plain words. `SavedAiService.export_to(name, path)` and `import_from(path)`: the imported AI must be for the connected game; it is stored under its own name, or "name (2)", "name (3)" when that name is taken, never replacing; `SavedAiChanged("imported")`. `ComparePanel`: "Share…" (save dialog) and "Load a shared AI…" (open dialog) buttons backed by testable `export_selected_to(path)` / `import_from(path)` with outcomes in the note. **Out of scope:** merging two AIs, cloud sharing, competitions (T-806).
+- **Acceptance criteria:**
+  1. Export then import gives back an equal saved AI; the file is plain JSON with `kind`, `schema` and `app_version`.
+  2. Import refuses, with a plain message and no file written: a missing file, a file above the size cap, non-JSON, JSON with NaN, a list, deeply nested JSON, another kind, a newer schema, a part that does not rebuild (bad learner), a saved AI for another game.
+  3. Importing a name that exists stores it as "name (2)" and says so; the existing saved AI is untouched.
+  4. The panel's Share writes the selected AI and names the file; Load a shared AI lists the new row and refreshes the comparison; errors land in the note; both disabled while disconnected (Share also with no selection).
+- **Expected changes:** `comparison/sharing.py`, `comparison/service.py`, `comparison/__init__.py`, `ui/compare_panel.py`, tests.
+- **Test plan:** unit – round trip; each refusal; rename on clash; service same-game rule and events. UI – panel share/load and notes. Regression – full suite.
+- **Results:** 5 new tests (4 unit incl. 12 refusal cases, 1 UI) pass; full suite 928 passed, 5 skipped on Python 3.13 and 3.11; ruff and mypy strict clean.
+- **Commit:** see PR #71. **PR:** #71.
+- **Completion report:** "Handled safely" (DESIGN.md §13) is read as: a shared file is data checked before it is kept, never code, never a path. The import checks run cheapest first (size before reading, strict JSON with NaN refused, a nesting cap, the envelope) and end by rebuilding each part through its own `from_dict`, so a brain with an unknown algorithm or a reward list of nonsense is refused with a plain sentence at import rather than failing later inside Load. An imported AI never replaces one of ours: it is stored under "name (2)", skipping also names whose file would collide with another saved AI's. The file carries `app_version` for later migrations but nothing about the sender.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -1232,5 +1248,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
 - Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56). T-708 completed (PR #57). T-709 completed (PR #58): Phase 7 complete.
-- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame. T-115 completed (PR #64): memory reads with a region size cap. T-116 completed (PR #65): step, speed and save states; every capability on; the episode runner drives the adapter. T-117 completed (PR #66): BizHawk in the app, socket probe for the watchdog, opt-in real-emulator test and docs/BIZHAWK.md; the real run waits for the user's Windows PC. Phase 8 broken down (T-801..T-808). T-801 completed (PR #67): saved AI record and store. T-802 completed (PR #68): saved AI service (save as, load, delete) wired into the app context. T-803 completed (PR #69): scorecards, leaders, behaviour differences and the comparison in words. T-804 completed (PR #70): the Compare AIs panel with table, words and shared-scale graph.
+- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame. T-115 completed (PR #64): memory reads with a region size cap. T-116 completed (PR #65): step, speed and save states; every capability on; the episode runner drives the adapter. T-117 completed (PR #66): BizHawk in the app, socket probe for the watchdog, opt-in real-emulator test and docs/BIZHAWK.md; the real run waits for the user's Windows PC. Phase 8 broken down (T-801..T-808). T-801 completed (PR #67): saved AI record and store. T-802 completed (PR #68): saved AI service (save as, load, delete) wired into the app context. T-803 completed (PR #69): scorecards, leaders, behaviour differences and the comparison in words. T-804 completed (PR #70): the Compare AIs panel with table, words and shared-scale graph. T-805 completed (PR #71): share a saved AI as a file and import one safely.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
