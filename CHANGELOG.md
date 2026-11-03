@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- The play clock steps the game on a worker thread as well, and a link dropped by two workers at once is reported once (T-818).
 - Frame capture runs on a worker thread, so the window stays responsive with a real emulator connected; adapters serialise their operations across threads (T-817).
 - BizHawk: `socket.lua` and a `luasocket` folder (Archipelago's MIT LuaSocket DLLs) ship next to the bridge script, because EmuHawk has no socket library; README Credits section (T-816).
 - T-815: every run writes `<data dir>/logs/retro-ai-lab.log` (startup header, Qt / window / event-loop milestones, uncaught exceptions) so a silent start can be diagnosed; the README says where to find it.
