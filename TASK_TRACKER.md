@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** Phase 6 planning (T-601 onwards)
-- **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
+- **Current task:** T-602 – Learning graph widget
+- **Last approved checkpoint:** `main` after T-409 (PRs #36–#42 merging in order as CI passes)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -67,6 +67,13 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-506 | Learning persistence: the AI's brain saved per game and restored on connect | 5 | Done | 8/8 | see PR #41 |
 | T-507 | Learning panel: mode picker, Start / Pause / Stop, Live / Fast, status and recent episodes | 5 | Done | 7/7 | see PR #42 |
 | E-6 | Training Interface (live/background, modes, graphs, history) | 6 | Epic | – | – |
+| T-601 | Learning curve: per-go points, rolling average, best go, trend and success rate in plain words | 6 | Done | 7/7 | see PR #43 |
+| T-602 | Learning graph widget: points per go and the rolling average, drawn in the Learning panel | 6 | Planned | – | – |
+| T-603 | Progress panel: training attempts, success rate and trend beside the goal | 6 | Planned | – | – |
+| T-604 | AI activity: current and previous actions, exploring vs best-known, current objective | 6 | Planned | – | – |
+| T-605 | Behaviour changes and suggested experiments: what the AI now does differently, what to try next | 6 | Planned | – | – |
+| T-606 | First working demonstration on the Fake Emulator: DESIGN.md §17 steps 1–10 as one scripted test, including rewards changing behaviour | 6 | Planned | – | – |
+| T-607 | Educational tips: "What's this?" explanations in simple and advanced words for every panel | 6 | Planned | – | – |
 | E-7 | Advanced Learning (DQN, hierarchical RL, demonstrations) | 7 | Epic | – | – |
 | E-8 | Expansion (VBA-M, comparison, sharing, competitions) | 8 | Epic | – | – |
 
@@ -696,6 +703,23 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Completion report:** Phase 5 is complete: the AI can be started from the window, plays the toy racer on its own or learns from the child, and its brain is kept between sessions. The hand-over lives in the game panel (it listens for training state changes) so the Learning panel never reaches into another panel. A test showed that a disconnect note was wiped by the disconnect event itself, so the panel now clears notes only on connect.
 
 
+### Phase 6 breakdown
+Live and background training and the guided and manual modes were delivered in Phase 5 (T-505, T-507), so Phase 6 covers the rest of DESIGN.md §16 "Training Interface" together with the §10 panel contents not yet shown (AI decisions, training attempts, success rate, trends, behaviour changes, suggested experiments), the §12 explanations, and the §17 demonstration on the Fake Emulator. Tasks T-601 to T-607 as in the summary table; each gets its own section when started.
+
+### T-601 – Learning curve
+- **Status:** Done
+- **Phase:** 6
+- **Objective:** Turn the history of goes into something a child can read and a graph can draw (DESIGN.md §10 Learning "learning progress", Progress "training attempts, success rate, performance trends", §16 Phase 6 "learning graphs, training history").
+- **Scope:** `training.curve`: `CurvePoint(number, reward, steps, average)` and `LearningCurve(goes, window=10)` with `points` (one per go, `average` the rolling mean over the last `window` goes), `rewards`, `best` (highest-scoring go), `longest`, `latest_average`, `earlier_average` (the window before the latest), `trend` ("improving", "slipping", "steady" or "too early" before `2 * window` goes; a change counts when it exceeds a tenth of the rewards' spread), `attempts`, `successes` and `success_rate` (goes in which at least one objective was completed), `describe()` in a child's words; `EpisodeSignals` counts objective completions and `EpisodeResult` gains `objectives` (default 0 for files saved before); `TrainingService.curve(window=)`. **Out of scope:** drawing (T-602), showing it in the panels (T-602/T-603).
+- **Acceptance criteria:**
+  1. Points, rolling averages, best and longest goes match a hand-computed example; the empty curve is safe everywhere.
+  2. Trend is "too early" with fewer than `2 * window` goes, then improving / slipping / steady as the latest window compares with the one before, ignoring tiny changes.
+  3. Success rate counts goes with a completed objective; runner results carry the count; old saved results load with 0.
+  4. `describe()` reads naturally in every case; `window` must be at least 1.
+- **Test plan:** hand-computed curve; empty and single-go curves; trend cases; success rate from runner results and from loaded data; description texts; service integration.
+- **Results:** 7 / 7 passed / 0 failed / 0 excluded (742 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Phase 6 was broken into T-601..T-607 before starting. Reviewing the service for this task found that a link dropping while the start checkpoint was being taken left training "running" with no game; `start()` now refuses with a clear message. The link-loss panel test was made deterministic (LIVE ticks rather than timed FAST slices).
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -754,4 +778,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-505 completed (PR #40).
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
+- Phase 6 broken into T-601..T-607. T-601 completed (PR #43).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

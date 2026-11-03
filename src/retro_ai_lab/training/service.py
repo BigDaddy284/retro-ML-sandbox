@@ -30,6 +30,7 @@ from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.observer import MemoryObserved, ObservationService
 from retro_ai_lab.storage.brains import BrainStore
 from retro_ai_lab.training.brain import Brain
+from retro_ai_lab.training.curve import DEFAULT_WINDOW, LearningCurve
 from retro_ai_lab.training.episode import (
     DEFAULT_FRAMES_PER_STEP,
     DEFAULT_MAX_STEPS,
@@ -198,6 +199,10 @@ class TrainingService:
             self._game_id, self._agent, tuple(self._history), self._episodes, self._total_steps
         )
 
+    def curve(self, window: int = DEFAULT_WINDOW) -> LearningCurve:
+        """How the goes kept in the history have been going."""
+        return LearningCurve(self._history, window)
+
     def summary(self) -> str:
         if not self._enabled:
             return "Connect a game to start training."
@@ -246,6 +251,8 @@ class TrainingService:
                 raise ConfigurationError("mode must be a Mode.")
             self._mode = mode
         self._prepare_checkpoint()
+        if not self._enabled:  # the link dropped while the checkpoint was being taken
+            raise ConfigurationError("The game went away just as training was starting.")
         self._status = Status.RUNNING
         self._announce("start")
 

@@ -224,3 +224,5 @@ def test_short_training_run_learns_some_situations(lab: Lab) -> None:
     assert len(agent.table) >= 3
     assert all(x.ended_by in ("max_steps", "reset") for x in results)
     assert agent.epsilon < 0.5
+    # Reaching a checkpoint completes the suggested objective, and the go says so.
+    assert sum(x.objectives for x in results) >= 1 and any(x.succeeded for x in results)
