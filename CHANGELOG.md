@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-503: Tabular Q-learning agent: epsilon-greedy choice, textbook update, exploration decaying per episode, plain-words stats, JSON round-trip that refuses mismatched controls.
 - T-502: Action space built from the emulator's buttons: do nothing, singles, direction + button combos; pause buttons left out; JSON round-trip.
 - T-501: State encoder: believed variables decoded from a snapshot and binned into a small, stable state for the learner.
 - T-409: Goals panel in the Progress slot: name the goal, see each step with its detection, confidence and status, add steps (detected or by hand), reorder, tick off, set what a step comes after, switch on or off, start again.
