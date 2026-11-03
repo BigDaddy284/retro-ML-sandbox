@@ -132,3 +132,67 @@ def test_the_long_look_picks_up_knowledge_changes() -> None:
         look.observe(MemorySnapshot(i, {RAM: row}))
     assert late.id in look.watching
     assert look.observed == 200
+
+
+# ------------------------------------------------------------ T-849
+
+
+def test_values_that_cannot_be_checkpoint_counters_stop_being_paired() -> None:
+    """A timer stepping every frame and a counter cycling 0..7 are dropped; the real
+    checkpoint and lap keep their evidence."""
+    from retro_ai_lab.understanding.longlook import FEW_VALUES, SETTLED, TOO_FAST
+
+    k = knowledge()
+    timer = k.propose(RAM, 7, kind=VariableKind.PROGRESS, name="Timer", evidence=SURE)
+    cycler = k.propose(RAM, 8, kind=VariableKind.PROGRESS, name="Cycler", evidence=SURE)
+    rows = [row + bytes([i & 0xFF, i % 8]) for i, row in enumerate(frames(200))]
+    look = LongLook(k)
+    for i, row in enumerate(rows):
+        look.observe(MemorySnapshot(i, {RAM: row}))
+        if i == FEW_VALUES:  # the timer has shown 17 faces by now
+            assert timer.id not in look.tracking
+        if i == SETTLED // 2:  # the cycler is not judged until it has settled
+            assert cycler.id in look.tracking
+    assert timer.id not in look.tracking and cycler.id not in look.tracking
+    assert TOO_FAST == 8 and SETTLED == 64
+    checkpoint, lap = var(k, CHECKPOINT), var(k, LAP)
+    assert checkpoint.id in look.tracking and lap.id in look.tracking
+    look.review()
+    assert SAME_PLACES in kinds(k, CHECKPOINT) and COUNTS_ROUNDS in kinds(k, LAP)
+    assert kinds(k, 7) == {"test"} and kinds(k, 8) == {"test"}
+
+
+def test_a_pair_with_too_many_places_is_dropped() -> None:
+    """A stepper that stepped at more driver values than can make FEW_PLACES places."""
+    from retro_ai_lab.understanding.longlook import MAX_PLACE_VALUES
+
+    assert MAX_PLACE_VALUES == 40
+    k = Knowledge("test")
+    driver = k.propose(RAM, 0, kind=VariableKind.POSITION, name="Pos", evidence=SURE)
+    stepper = k.propose(RAM, 1, kind=VariableKind.PROGRESS, name="Count", evidence=SURE)
+    look = LongLook(k)
+    count = 0
+    for i in range(1000):
+        if i % 20 == 19:
+            count = (count + 1) % 8  # slow enough, few faces, at a new place each time
+        look.observe(MemorySnapshot(i, {RAM: bytes([(i * 7) % 251, count])}))
+    assert stepper.id in look.tracking  # still a candidate against other drivers
+    assert look._steppers[stepper.id].dead == {driver.id}
+    assert look._steppers[stepper.id].places == {}
+    look.review()
+    assert kinds(k, 1) == {"test"}
+
+
+def test_many_fast_values_are_all_unpaired_after_settling() -> None:
+    """200 fast steppers and 200 drivers: the quadratic work ends once they settle."""
+    from retro_ai_lab.understanding.longlook import SETTLED
+
+    k = Knowledge("test")
+    for i in range(200):
+        k.propose(RAM, i, kind=VariableKind.PROGRESS, evidence=SURE)  # driver and stepper
+        k.propose(RAM, 200 + i, kind=VariableKind.FLAG, evidence=SURE)  # stepper only
+    look = LongLook(k)
+    for i in range(SETTLED + 2):
+        row = bytes([(i + j) % 8 for j in range(200)]) + bytes([(i + j) % 3 for j in range(200)])
+        look.observe(MemorySnapshot(i, {RAM: row}))
+    assert len(look.watching) == 400 and look.tracking == ()

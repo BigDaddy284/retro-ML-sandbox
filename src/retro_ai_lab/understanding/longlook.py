@@ -35,6 +35,12 @@ FEW_PLACES = 8  # distinct driver values that still count as "the same few place
 FEW_VALUES = 16  # a stepper with more values than this is a position, not a checkpoint
 WIDE = 2 * FEW_PLACES  # a driver needs this much range for "the same few places" to mean much
 PLACE_SLACK = 4  # driver values this close together count as one place (it moves a few a frame)
+# Bounds on the pairing work (T-849): on a title demo hundreds of believed values
+# step every frame, and recording where every driver was for each of them was
+# quadratic in the believed values and the largest cost of a training step.
+SETTLED = 64  # observations of a stepper before its rate is judged
+TOO_FAST = 8  # a stepper up on more than one observation in this many is a timer, not a counter
+MAX_PLACE_VALUES = FEW_PLACES * (PLACE_SLACK + 1)  # more driver values than can make FEW_PLACES
 THIRD_VALUE = "third-value"
 SAME_PLACES = "same-places"
 COUNTS_ROUNDS = "counts-rounds"
@@ -50,6 +56,15 @@ class _Stepper:
     # driver id -> driver value at a step -> what the stepper stepped to there
     places: dict[str, dict[int, Counter[int]]] = field(default_factory=dict)
     rounds: Counter[str] = field(default_factory=Counter)  # driver id -> starts-over at steps
+    seen: int = 0  # observations since first watched (T-849)
+    tracking: bool = True  # still worth pairing with the drivers
+    dead: set[str] = field(default_factory=set)  # drivers it stepped at too many places of
+
+    def stop_tracking(self) -> None:
+        self.tracking = False
+        self.places.clear()
+        self.rounds.clear()
+        self.dead.clear()
 
 
 @dataclass
@@ -122,6 +137,11 @@ class LongLook:
     def watching(self) -> tuple[str, ...]:
         return tuple(self._steppers)
 
+    @property
+    def tracking(self) -> tuple[str, ...]:
+        """The watched steppers still being paired with the drivers (T-849)."""
+        return tuple(i for i, s in self._steppers.items() if s.tracking)
+
     def reset(self) -> None:
         self._steppers.clear()
         self._drivers.clear()
@@ -177,18 +197,48 @@ class LongLook:
                 self._steppers[var.id] = _Stepper(value, {value})
                 continue
             stepper.distinct.add(value)
+            stepper.seen += 1
             if value > stepper.last:
                 stepper.ups += 1
-                for driver_id, driver_value in now.items():
-                    if driver_id == var.id:
-                        continue
-                    at = stepper.places.setdefault(driver_id, {})
-                    at.setdefault(driver_value, Counter())[value] += 1
-                    if driver_id in started_over:
-                        stepper.rounds[driver_id] += 1
+                if stepper.tracking and (
+                    len(stepper.distinct) > FEW_VALUES
+                    or (stepper.seen >= SETTLED and stepper.ups * TOO_FAST > stepper.seen)
+                ):
+                    stepper.stop_tracking()  # too many faces, or too fast, for a counter
+                if stepper.tracking:
+                    self._record_places(var.id, stepper, value, now, started_over)
             elif value < stepper.last:
                 stepper.downs += 1
             stepper.last = value
+
+    @staticmethod
+    def _record_places(
+        var_id: str,
+        stepper: _Stepper,
+        value: int,
+        now: dict[str, int],
+        started_over: set[str],
+    ) -> None:
+        """Note where every driver is as this stepper steps up."""
+        dead = stepper.dead
+        places = stepper.places
+        for driver_id, driver_value in now.items():
+            if driver_id == var_id or driver_id in dead:
+                continue
+            at = places.get(driver_id)
+            if at is None:
+                at = places[driver_id] = {}
+            counter = at.get(driver_value)
+            if counter is None:
+                if len(at) >= MAX_PLACE_VALUES:
+                    # Stepped at too many places of this driver for "the same few".
+                    del places[driver_id]
+                    dead.add(driver_id)
+                    continue
+                counter = at[driver_value] = Counter()
+            counter[value] += 1
+            if driver_id in started_over:
+                stepper.rounds[driver_id] += 1
 
     def review(self) -> tuple[Variable, ...]:
         """Write what the long look found into the knowledge; returns the variables changed."""
@@ -279,10 +329,13 @@ __all__ = [
     "FEW_PLACES",
     "FEW_VALUES",
     "LONG_LOOK_KINDS",
+    "MAX_PLACE_VALUES",
     "MIN_STEPS",
     "PLACE_SLACK",
     "SAME_PLACES",
+    "SETTLED",
     "THIRD_VALUE",
+    "TOO_FAST",
     "WIDE",
     "LongLook",
     "cluster_places",
