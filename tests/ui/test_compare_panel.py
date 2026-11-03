@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from pytestqt.qtbot import QtBot
 
+from retro_ai_lab.comparison import Challenge
 from retro_ai_lab.training import EpisodeRecord, EpisodeResult, LearningCurve, Mode
 from retro_ai_lab.ui.compare_panel import (
     COLUMNS,
@@ -183,3 +184,28 @@ def test_share_and_load_a_shared_ai(
     assert panel.note_text.startswith("Can't read the shared AI")
     assert not panel.export_selected_to(tmp_path / "nope" / "deep" / "x.json")
     assert panel.note_text.startswith("Can't write the shared AI")
+
+
+def test_race_button_and_scoreboard(qtbot: QtBot, panel: ComparePanel, context: AppContext) -> None:
+    assert not widget(panel, "race_button").isEnabled()  # type: ignore[attr-defined]
+    assert not panel.race() and "Connect to a game" in panel.note_text
+    connect(context)
+    t = context.training
+    t.train(1)
+    assert panel.save_now("AI A")
+    assert not widget(panel, "race_button").isEnabled()  # type: ignore[attr-defined]
+    assert not panel.race() and panel.note_text == "Pick at least two saved AIs to race."
+    t.train(1)
+    assert panel.save_now("AI B")
+    assert widget(panel, "race_button").isEnabled()  # type: ignore[attr-defined]
+    assert panel.scoreboard_text == ""
+    assert panel.race(Challenge(goes=1, max_steps=10))
+    assert panel.note_text.endswith(("won the race.", "was a tie."))
+    assert panel.scoreboard_text.startswith(("AI A wins!", "AI B wins!", "It's a tie"))
+    assert "1. AI" in panel.scoreboard_text and "2. AI" in panel.scoreboard_text
+    t.start()
+    assert not widget(panel, "race_button").isEnabled()  # type: ignore[attr-defined]
+    t.stop()
+    assert widget(panel, "race_button").isEnabled()  # type: ignore[attr-defined]
+    context.connection.disconnect()
+    assert panel.scoreboard_text == ""

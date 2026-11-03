@@ -9,6 +9,12 @@ from retro_ai_lab.comparison.compare import (
     behaviour_differences,
     describe,
 )
+from retro_ai_lab.comparison.competition import (
+    Challenge,
+    CompetitionFinished,
+    Entry,
+    Scoreboard,
+)
 from retro_ai_lab.comparison.saved_ai import MAX_NAME_LENGTH, SavedAi, check_name
 from retro_ai_lab.comparison.service import SavedAiChanged, SavedAiService
 from retro_ai_lab.comparison.sharing import export_saved_ai, import_saved_ai
@@ -18,10 +24,14 @@ __all__ = [
     "MEASURES",
     "AiComparison",
     "BehaviourDifference",
+    "Challenge",
+    "CompetitionFinished",
+    "Entry",
     "Measure",
     "SavedAi",
     "SavedAiChanged",
     "SavedAiService",
+    "Scoreboard",
     "Scorecard",
     "behaviour_differences",
     "check_name",
