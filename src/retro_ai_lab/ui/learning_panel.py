@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
+from retro_ai_lab.learning import algorithm_choices, describe_algorithm
 from retro_ai_lab.services import EmulatorConnected, EmulatorDisconnected
 from retro_ai_lab.training import (
     EpisodeFinished,
@@ -82,6 +83,13 @@ class LearningPanel(QWidget):
         for sp in Speed:
             self._speed.addItem(sp.label, sp.value)
         self._speed.activated.connect(self._on_speed_activated)
+        self._algorithm = QComboBox(self)
+        self._algorithm.setObjectName("algorithm_combo")
+        for name in algorithm_choices():
+            label, text = describe_algorithm(name)
+            self._algorithm.addItem(label, name)
+            self._algorithm.setItemData(self._algorithm.count() - 1, text, 3)  # tooltip role
+        self._algorithm.activated.connect(self._on_algorithm_activated)
 
         self._start = QPushButton("Start", self)
         self._start.setObjectName("start_button")
@@ -122,6 +130,8 @@ class LearningPanel(QWidget):
         pickers.addWidget(self._mode, 1)
         pickers.addWidget(QLabel("Speed", self))
         pickers.addWidget(self._speed, 1)
+        pickers.addWidget(QLabel("How the AI learns", self))
+        pickers.addWidget(self._algorithm, 1)
         buttons = QHBoxLayout()
         buttons.addWidget(self._start)
         buttons.addWidget(self._pause)
@@ -179,6 +189,10 @@ class LearningPanel(QWidget):
         return Speed(self._speed.currentData())
 
     @property
+    def algorithm(self) -> str:
+        return str(self._algorithm.currentData())
+
+    @property
     def graph(self) -> LearningGraph:
         return self._graph
 
@@ -208,6 +222,17 @@ class LearningPanel(QWidget):
 
     def choose_speed(self, speed: Speed) -> None:
         self._call(lambda: self._training.set_speed(speed))
+        self.refresh()
+
+    def choose_algorithm(self, algorithm: str) -> None:
+        note = ""
+
+        def change() -> None:
+            nonlocal note
+            note = self._training.set_algorithm(algorithm)
+
+        if self._call(change):
+            self._note.setText(note)
         self.refresh()
 
     def start(self) -> None:
@@ -249,8 +274,10 @@ class LearningPanel(QWidget):
         idle = t.status is Status.IDLE
         self._set_combo(self._mode, t.mode.value)
         self._set_combo(self._speed, t.speed.value)
+        self._set_combo(self._algorithm, t.algorithm)
         self._mode.setEnabled(enabled)
         self._speed.setEnabled(enabled)
+        self._algorithm.setEnabled(enabled and idle)
         self._start.setEnabled(enabled and idle)
         self._pause.setEnabled(enabled and not idle)
         self._pause.setText("Resume" if t.status is Status.PAUSED else "Pause")
@@ -300,7 +327,10 @@ class LearningPanel(QWidget):
             pressed = " + ".join(sorted(episode.last_buttons)) or "nothing"
             lines.append(f"Pressing: {pressed}.")
         if t.agent is not None:
-            lines.append(t.agent.stats())
+            lines.append(
+                f"Learning with the {describe_algorithm(t.agent.algorithm)[0].lower()}. "
+                + t.agent.stats()
+            )
         if t.fresh_start:
             lines.append(t.fresh_start)
         self._status.setText("\n".join(lines))
@@ -338,9 +368,14 @@ class LearningPanel(QWidget):
     def _on_speed_activated(self, index: int) -> None:
         self.choose_speed(Speed(self._speed.itemData(index)))
 
+    def _on_algorithm_activated(self, index: int) -> None:
+        self.choose_algorithm(str(self._algorithm.itemData(index)))
+
     def _on_state_changed(self, event: TrainingStateChanged) -> None:
         if event.reason == "disconnected":
             self._note.setText("The game went away, so training stopped.")
+        elif event.reason == "promoted":
+            self._note.setText(self._training.last_change)
         self.refresh()
 
     def _on_episode_finished(self, event: EpisodeFinished) -> None:

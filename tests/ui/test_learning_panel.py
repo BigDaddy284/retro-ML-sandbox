@@ -213,3 +213,34 @@ def test_panel_unsubscribes_when_destroyed(qtbot: QtBot, context: AppContext) ->
     qtbot.waitUntil(lambda: context.bridge.handler_count() < before)
     connect(context)
     context.connection.disconnect()
+
+
+def test_how_the_ai_learns_picker(panel: LearningPanel, context: AppContext) -> None:
+    from retro_ai_lab.learning import AUTO, DQN, Q_TABLE, DQNLearner, QLearningAgent
+
+    combo = panel.findChild(object, "algorithm_combo")
+    assert combo is not None and not combo.isEnabled()  # type: ignore[attr-defined]
+    labels = [combo.itemText(i) for i in range(combo.count())]  # type: ignore[attr-defined]
+    assert labels == ["Choose for me", "Simple table", "Neural network"]
+    assert panel.algorithm == AUTO
+    connect(context)
+    t = context.training
+    assert combo.isEnabled() and isinstance(t.agent, QLearningAgent)  # type: ignore[attr-defined]
+    assert "simple table" in panel.status_text
+    panel.choose_mode(Mode.INDEPENDENT)
+    panel.start()
+    assert not combo.isEnabled()  # type: ignore[attr-defined]
+    panel.choose_algorithm(DQN)  # refused while training, explained
+    assert "Stop training" in panel.note_text and isinstance(t.agent, QLearningAgent)
+    while panel.tick():
+        if t.episodes:
+            break
+    panel.stop()
+    panel.choose_algorithm(DQN)
+    assert panel.algorithm == DQN and t.algorithm == DQN
+    assert isinstance(t.agent, DQNLearner) and "neural network" in panel.note_text
+    assert "neural network" in panel.status_text
+    panel.choose_algorithm(Q_TABLE)
+    assert isinstance(t.agent, QLearningAgent) and "simple table" in panel.note_text
+    panel.choose_algorithm(AUTO)
+    assert panel.algorithm == AUTO and isinstance(t.agent, QLearningAgent)

@@ -16,7 +16,7 @@ from typing import Any, ClassVar
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning.actions import ActionSpace
-from retro_ai_lab.learning.learner import Q_TABLE, Decision, register_learner
+from retro_ai_lab.learning.learner import Q_TABLE, Decision, Learner, register_learner
 from retro_ai_lab.learning.state import State
 
 SCHEMA_VERSION = 1
@@ -216,6 +216,12 @@ class QLearningAgent:
             self._settings.epsilon_min, self._epsilon * self._settings.epsilon_decay
         )
         return self._epsilon
+
+    def resume_from(self, other: Learner) -> None:
+        """Carry on another learner's exploration and counts (when a brain changes kind)."""
+        self._epsilon = _check(other.epsilon, "epsilon", 0.0, 1.0)
+        self._updates = other.updates
+        self._episodes = other.episodes
 
     def reset(self) -> None:
         self._last_decision = None

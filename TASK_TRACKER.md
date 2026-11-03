@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-706 – Automatic algorithm choice and the "How the AI learns" control (Phase 7)
+- **Current task:** T-707 – Learning from demonstrations (Phase 7)
 - **Last approved checkpoint:** `main` after T-507 (PRs #43–#49 merging in order as CI passes; T-701 stacked on them)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only the BizHawk work (T-110 onward). ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -80,7 +80,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-703 | Feature vectors: a situation as numbers a neural network can read | 7 | Done | 6/6 | see PR #52 |
 | T-704 | Small neural network in NumPy (layers, Adam, gradient check; no new dependency) | 7 | Done | 6/6 | see PR #53 |
 | T-705 | DQN learner: network, target network and replay; learns a synthetic task; saves and reloads | 7 | Done | 6/6 | see PR #54 |
-| T-706 | Automatic algorithm choice (table while the game is small, network when it grows) and a "How the AI learns" control | 7 | Ready | – | – |
+| T-706 | Automatic algorithm choice (table while the game is small, network when it grows) and a "How the AI learns" control | 7 | Done | 7/7 | see PR #55 |
 | T-707 | Learning from demonstrations: the child's play is kept as experience the AI learns from | 7 | Ready | – | – |
 | T-708 | Hierarchical learning: a skill per goal step; the active step picks the skill | 7 | Ready | – | – |
 | T-709 | Better progress detection on a longer look (checkpoint vs position, lap vs flag) | 7 | Ready | – | – |
@@ -901,6 +901,23 @@ DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical l
 - **Commit:** see PR. **PR:** #54.
 - **Completion report:** `DQNLearner` as planned, registered as `"dqn"`. It reuses `Settings` for gamma and the exploration schedule (`alpha` is unused; the network has its own learning rate in `DQNConfig`), the feature map, the network and the replay buffer from T-702..T-704. The learning test shows it solving the two-state chain in 400 steps and a six-square corridor with a reward only at the end in 1500 steps with a 16-unit hidden layer. The saved brain holds both networks, the replay memory, the known situations and the random states, so the next choice and the next training step after a reload are bit-for-bit the same; a brain saved without the memory or the random states still loads. The service test runs three goes with `algorithm="dqn"` on the Fake Emulator and restores the brain on reconnect. Known limitation: the replay memory makes the saved brain larger (about 200 bytes per transition, 10 000 at most).
 
+### T-706 – Automatic algorithm choice and the "How the AI learns" control
+- **Status:** Done
+- **Phase:** 7
+- **Objective:** DESIGN.md §6.1: "select appropriate algorithms automatically by default" while "advanced users can experiment with different approaches". The AI starts with the simple table and moves to the neural network when the game grows, without losing what it learned; the child can also pick how the AI learns.
+- **Scope:** `learning.learner`: `AUTO = "auto"`, `algorithm_choices()` (`auto` + the registered names), `describe_algorithm(name) -> (label, description)` in plain words. `learning.promotion`: `promote(table_agent, ...) -> (DQNLearner, agreement)` distils the table into a fresh network (trains on every known row, carries over exploration and counts, remembers the states), `demote(dqn) -> QLearningAgent` fills a table from the network's values for every situation it knows, `convert(agent, algorithm, ...)` picks one or returns the agent unchanged. `DQNLearner.values(state)` and `known_states()`; `resume_from(other)` on both learners. `TrainingService`: default `algorithm=AUTO` (new brains start as `q_table`), `promote_at=DEFAULT_PROMOTE_AT` (1000 known situations); after a go closes under `auto` with a table that large the brain is promoted, announced as a `"promoted"` state change with `last_change` in plain words; `set_algorithm(name)` (idle only) converts the current brain when the choice differs and returns the note. `LearningPanel`: a "How the AI learns" picker (`algorithm_combo`), the status says which the AI is using, promotions and conversions are noted. **Out of scope:** demonstrations (T-707), hierarchical skills (T-708), promoting by anything other than known situations.
+- **Acceptance criteria:**
+  1. `promote` gives a DQN whose greedy move agrees with the table on at least 90% of known situations, knows the same situations, and carries exploration, steps and goes; `demote` gives a table whose rows equal the network's values; `convert` to the same algorithm returns the agent itself and refuses an unknown name.
+  2. With `algorithm="auto"` a new brain is a table; once a go ends with at least `promote_at` known situations the brain is a DQN with the same history and counts, a `"promoted"` change is announced once, the saved brain records `dqn`, and a reconnect restores the DQN with no second promotion.
+  3. `set_algorithm` refuses an unknown name and a change while training; choosing `dqn` converts a table brain (and `q_table` converts it back) and saves; choosing `auto` keeps the current brain; new brains follow the choice.
+  4. The panel's picker lists the choices with plain labels, follows the service, is disabled while training, converts the brain with a note, and the status names what the AI learns with; a promotion is noted.
+  5. Every existing training, panel and demonstration test still passes with the new default.
+- **Expected changes:** `learning/learner.py`, `learning/promotion.py` (new), `learning/dqn.py`, `learning/qlearning.py`, `learning/__init__.py`, `training/service.py`, `ui/learning_panel.py`, `tests/unit/learning/test_promotion.py` (new), `tests/unit/training/test_service.py`, `tests/ui/test_learning_panel.py`.
+- **Test plan:** unit – promote / demote / convert and the labels; service auto-promotion with a small `promote_at`, persistence and reconnect; `set_algorithm` refusals and conversions; panel picker and notes. Regression – full suite.
+- **Results:** 7 / 7 passed / 0 failed / 0 excluded (4 promotion tests, 2 service tests, 1 panel test; 802 in the full suite, on Python 3.13 and 3.11). Lint, format and strict mypy clean.
+- **Commit:** see PR. **PR:** #55.
+- **Completion report:** As planned. Distilling a table into the network showed that the feature vector had too little contrast for small values (lanes 0..2 differed by 1/24), so `FeatureMap` now gives every variable three slots (present, bucket / bins, bucket / (bins + 16)); the T-703 tests were updated for it. `DQNLearner.distil` trains full-batch on every known row and stops early once the greedy moves all agree (the default 64×64 network agrees fully on the test table; a 16-unit one at a high learning rate does not, so the quick test config now uses 0.003). The service promotes under `auto` right after a go closes (before the save), so the saved brain already records `dqn`, and a `"promoted"` state change carries `last_change` to the panel. `set_algorithm` converts either way and keeps exploration, steps and goes. The choices are listed as auto, table, network (the learning order of DESIGN.md §6.1). Known limitation: a demoted table only knows the situations the network had in memory.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -960,5 +977,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
-- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54).
+- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

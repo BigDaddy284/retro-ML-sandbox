@@ -21,14 +21,15 @@ import numpy as np
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning.actions import ActionSpace
 from retro_ai_lab.learning.features import DEFAULT_WIDTH, FeatureMap
-from retro_ai_lab.learning.learner import Decision, register_learner
+from retro_ai_lab.learning.learner import Decision, Learner, register_learner
 from retro_ai_lab.learning.network import DEFAULT_LEARNING_RATE, Network
-from retro_ai_lab.learning.qlearning import Settings, _check, _rng_state
+from retro_ai_lab.learning.qlearning import QTable, Settings, _check, _rng_state
 from retro_ai_lab.learning.replay import DEFAULT_CAPACITY, ReplayBuffer, Transition
 from retro_ai_lab.learning.state import State
 
 SCHEMA_VERSION = 1
 DQN = "dqn"
+DEFAULT_DISTIL_STEPS = 1000  # full-batch training steps when a table is absorbed
 
 
 def _positive(value: Any, what: str) -> int:
@@ -194,9 +195,17 @@ class DQNLearner:
         row = self._net.forward(self._features.vector(state)[None, :])[0]
         return [float(v) for v in row]
 
+    def values(self, state: State) -> tuple[float, ...]:
+        """The network's score for every action in a situation."""
+        return tuple(self._q(state))
+
     def value(self, state: State, action: int) -> float:
         self._space[action]
         return self._q(state)[action]
+
+    def known_states(self) -> tuple[State, ...]:
+        """The situations in memory, oldest first."""
+        return tuple(self._seen.values())
 
     def _best(self, values: list[float], rng: Random | None = None) -> int:
         top = max(values)
@@ -261,6 +270,39 @@ class DQNLearner:
         self._trained += 1
         if self._trained % self._config.target_sync == 0:
             self._target.load_from(self._net)
+
+    def distil(self, table: QTable, *, steps: int = DEFAULT_DISTIL_STEPS) -> float:
+        """Learn a Q-table's rows outright; returns how often the greedy moves then agree."""
+        if table.actions != len(self._space):
+            raise ConfigurationError("The table does not match the controls.")
+        if steps < 1:
+            raise ConfigurationError("steps must be at least 1.")
+        states = [State.from_key(key) for key in table.known_states()]
+        if not states:
+            return 1.0
+        x = self._features.batch(states)
+        targets = np.array([table.values(s) for s in states], dtype=np.float64)
+        theirs = np.array([table.best(s) for s in states])
+
+        def agreement() -> float:
+            return float(np.mean(self._net.forward(x).argmax(axis=1) == theirs))
+
+        score = agreement()
+        for step in range(1, steps + 1):
+            self._net.train_step(x, targets)
+            if step % 50 == 0 or step == steps:
+                score = agreement()
+                if score == 1.0:
+                    break
+        self._target.load_from(self._net)
+        self._remember(*states)
+        return score
+
+    def resume_from(self, other: Learner) -> None:
+        """Carry on another learner's exploration and counts (when a brain changes kind)."""
+        self._epsilon = _check(other.epsilon, "epsilon", 0.0, 1.0)
+        self._updates = other.updates
+        self._episodes = other.episodes
 
     def end_episode(self) -> float:
         self._episodes += 1
@@ -340,4 +382,4 @@ class DQNLearner:
         return agent
 
 
-__all__ = ["DQN", "SCHEMA_VERSION", "DQNConfig", "DQNLearner"]
+__all__ = ["DEFAULT_DISTIL_STEPS", "DQN", "SCHEMA_VERSION", "DQNConfig", "DQNLearner"]

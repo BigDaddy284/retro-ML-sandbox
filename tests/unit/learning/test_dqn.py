@@ -40,7 +40,7 @@ LEFT, RIGHT = 0, 1
 SPACE = ActionSpace([frozenset({"left"}), frozenset({"right"})])
 A = State((("x", 0),))
 B = State((("x", 1),))
-QUICK = DQNConfig(hidden=(16,), batch_size=8, warmup=8, target_sync=20, learning_rate=0.01)
+QUICK = DQNConfig(hidden=(16,), batch_size=8, warmup=8, target_sync=20, learning_rate=0.003)
 
 
 def chain(agent: Learner, steps: int) -> None:

@@ -16,6 +16,23 @@ from retro_ai_lab.learning.actions import ActionSpace
 from retro_ai_lab.learning.state import State
 
 Q_TABLE = "q_table"
+AUTO = "auto"  # not a learner: the training service picks one and moves up as the game grows
+
+_LABELS: dict[str, tuple[str, str]] = {
+    AUTO: (
+        "Choose for me",
+        "Starts with the simple table and moves to a neural network when the game grows.",
+    ),
+    Q_TABLE: (
+        "Simple table",
+        "Keeps a score for every move in every situation it has seen. Best for small games.",
+    ),
+    "dqn": (
+        "Neural network",
+        "Guesses scores for situations it has never seen from ones like them. "
+        "Better once the game gets big.",
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +117,22 @@ def algorithms() -> tuple[str, ...]:
     return tuple(sorted(_REGISTRY))
 
 
+def algorithm_choices() -> tuple[str, ...]:
+    """What the child can pick: "choose for me", the table, then the other learners."""
+    rest = tuple(name for name in algorithms() if name != Q_TABLE)
+    return (AUTO, Q_TABLE, *rest) if Q_TABLE in _REGISTRY else (AUTO, *rest)
+
+
+def describe_algorithm(name: str) -> tuple[str, str]:
+    """(label, one plain sentence) for a choice."""
+    if name not in algorithm_choices():
+        raise ConfigurationError(
+            f"There is no learning algorithm called {name!r} "
+            f"(choices: {', '.join(algorithm_choices())})."
+        )
+    return _LABELS.get(name, (name.replace("_", " ").capitalize(), "An experimental learner."))
+
+
 def _factory(name: object) -> type[Any]:
     if not isinstance(name, str) or name not in _REGISTRY:
         choices = ", ".join(algorithms()) or "none registered"
@@ -125,10 +158,13 @@ def learner_from_dict(data: dict[str, Any], *, space: ActionSpace | None = None)
 
 
 __all__ = [
+    "AUTO",
     "Q_TABLE",
     "Decision",
     "Learner",
+    "algorithm_choices",
     "algorithms",
+    "describe_algorithm",
     "learner_from_dict",
     "make_learner",
     "register_learner",
