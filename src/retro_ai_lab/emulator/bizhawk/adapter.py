@@ -26,6 +26,7 @@ from retro_ai_lab.core import (
     GameInfo,
     MemoryRegion,
     ProtocolError,
+    StepResult,
 )
 from retro_ai_lab.emulator.base import EmulatorAdapter
 from retro_ai_lab.emulator.bizhawk.description import Description
@@ -221,12 +222,33 @@ class BizHawkAdapter(EmulatorAdapter):
         return tuple(r for r in self.description.regions if r.size <= self._max_region_bytes)
 
     def _do_read_memory(self, region: str, offset: int, length: int) -> bytes:
-        domain = self.description.domain_names[region]
-        answer = self._call("read", reads=[{"domain": domain, "addr": offset, "len": length}])
-        reads = answer.get("reads")
-        if not isinstance(reads, list) or len(reads) != 1 or not isinstance(reads[0], str):
-            raise ProtocolError("The emulator's answer to a read was not one base64 string.")
-        return _b64decode(reads[0], "memory")
+        return self._do_read_many([(region, offset, length)])[0]
+
+    def _do_read_many(self, reads: Sequence[tuple[str, int, int]]) -> Sequence[bytes]:
+        answer = self._call("read", reads=self._read_requests(reads))
+        return self._reads_from(answer, len(reads))
+
+    def _do_step(
+        self,
+        frames: int,
+        pressed: frozenset[Button] | None,
+        reads: Sequence[tuple[str, int, int]],
+        screenshot: bool,
+    ) -> StepResult:
+        """One ``step`` request carries buttons, frames, reads and the screenshot."""
+        fields: dict[str, Any] = {"frames": frames}
+        if pressed is not None:
+            fields["buttons"] = self._button_fields(pressed)
+        if reads:
+            fields["reads"] = self._read_requests(reads)
+        if screenshot:
+            fields["screenshot"] = True
+        answer = self._call("step", **fields)
+        if pressed is not None:
+            self._held = pressed
+        data = tuple(self._reads_from(answer, len(reads))) if reads else ()
+        frame = self._frame_from(answer) if screenshot else None
+        return StepResult(frames, data, frame)
 
     def _do_capture_frame(self) -> Frame:
         answer = self._call("screenshot")
@@ -247,12 +269,34 @@ class BizHawkAdapter(EmulatorAdapter):
             raise ConfigurationError(f"No save state in slot {slot!r}.")
 
     def _do_set_input(self, pressed: frozenset[Button]) -> None:
-        names = self.description.button_names
-        down = {b.name for b in pressed}
-        self._call("input", buttons={label: ident in down for ident, label in names.items()})
+        self._call("input", buttons=self._button_fields(pressed))
         self._held = pressed
 
     # ------------------------------------------------------------ helpers
+
+    def _button_fields(self, pressed: frozenset[Button]) -> dict[str, bool]:
+        down = {b.name for b in pressed}
+        return {label: ident in down for ident, label in self.description.button_names.items()}
+
+    def _read_requests(self, reads: Sequence[tuple[str, int, int]]) -> list[dict[str, Any]]:
+        domains = self.description.domain_names
+        return [
+            {"domain": domains[region], "addr": offset, "len": length}
+            for region, offset, length in reads
+        ]
+
+    @staticmethod
+    def _reads_from(answer: dict[str, Any], count: int) -> list[bytes]:
+        reads = answer.get("reads")
+        if (
+            not isinstance(reads, list)
+            or len(reads) != count
+            or not all(isinstance(r, str) for r in reads)
+        ):
+            raise ProtocolError(
+                f"The emulator's answer did not hold {count} base64 read(s) as asked."
+            )
+        return [_b64decode(text, "memory") for text in reads]
 
     def _frame_from(self, answer: dict[str, Any]) -> Frame:
         image = answer.get("image")

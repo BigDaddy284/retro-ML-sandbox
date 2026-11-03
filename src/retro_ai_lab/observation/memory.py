@@ -133,8 +133,8 @@ class MemoryCapture:
             )
         if not names:
             raise ConfigurationError("This emulator exposes no memory regions.")
-        data = {n: adapter.read_memory(n, 0, regions[n].size) for n in names}
-        return MemorySnapshot(frame, data)
+        chunks = adapter.read_many([(n, 0, regions[n].size) for n in names])  # one request
+        return MemorySnapshot(frame, dict(zip(names, chunks, strict=True)))
 
 
 class SnapshotRing:

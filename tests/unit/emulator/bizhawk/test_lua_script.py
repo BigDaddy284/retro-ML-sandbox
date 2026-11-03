@@ -398,3 +398,23 @@ def _lossy(value: Any) -> Any:
     if isinstance(value, list):
         return [_lossy(v) for v in value if v is not None]
     return value
+
+
+def test_bundled_step_through_the_real_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-822: the adapter's step() is one request to the script, reads and screenshot included."""
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    with LuaScriptHost() as host:
+        host.write_screenshots = True
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
+        adapter.connect(timeout_s=5.0)
+        ram = next(r for r in adapter.memory_regions() if r.name == "ram")
+        before = host.frames
+        result = adapter.step(
+            2, pressed={Button("up", "Up")}, reads=[("ram", 0, ram.size)], screenshot=True
+        )
+        assert host.frames == before + 2
+        assert result.reads == (host.game.ram,)
+        assert result.frame is not None and result.frame.number == host.frames
+        adapter.disconnect()

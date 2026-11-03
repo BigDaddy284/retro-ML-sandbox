@@ -17,6 +17,7 @@ from retro_ai_lab.core import (
     Frame,
     GameInfo,
     MemoryRegion,
+    StepResult,
     UnsupportedCapabilityError,
 )
 from retro_ai_lab.emulator import DEFAULT_CONNECT_TIMEOUT_S, EmulatorAdapter
@@ -432,3 +433,100 @@ def test_check_link_answers_at_once_while_another_thread_holds_the_adapter() -> 
     assert adapter.check_link() is True
     adapter.mark_disconnected()
     assert adapter.check_link() is False
+
+
+# ------------------------------------------------------------ T-822 bundles
+
+
+def test_step_composes_input_advance_reads_and_screenshot_in_order(
+    adapter: RecordingAdapter,
+) -> None:
+    result = adapter.step(3, pressed={A}, reads=[("ram", 0, 4), ("ram", 4, 2)], screenshot=True)
+    assert result == StepResult(3, (bytes([0, 1, 2, 3]), bytes([4, 5])), Frame(1, 1, 1, b"\x00"))
+    assert [name for name, _ in adapter.calls[1:]] == ["input", "advance", "read", "read", "frame"]
+    assert adapter.calls[1] == ("input", frozenset({A}))
+    assert adapter.calls[2] == ("advance", 3)
+
+
+def test_step_defaults_to_one_plain_frame(adapter: RecordingAdapter) -> None:
+    assert adapter.step() == StepResult(1)
+    assert [name for name, _ in adapter.calls[1:]] == ["advance"]
+
+
+def test_step_checks_each_capability_only_when_used() -> None:
+    a = RecordingAdapter(Capabilities(frame_advance=True))
+    a.connect()
+    assert a.step(2) == StepResult(2)
+    with pytest.raises(UnsupportedCapabilityError, match="input"):
+        a.step(1, pressed={A})
+    with pytest.raises(UnsupportedCapabilityError, match="memory_read"):
+        a.step(1, reads=[("ram", 0, 1)])
+    with pytest.raises(UnsupportedCapabilityError, match="screen_capture"):
+        a.step(1, screenshot=True)
+    assert [name for name, _ in a.calls[1:]] == ["advance"]  # nothing reached the backend
+    a2 = RecordingAdapter(Capabilities(memory_read=True))
+    a2.connect()
+    with pytest.raises(UnsupportedCapabilityError, match="frame_advance"):
+        a2.step()
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"frames": 0}, "frame count"),
+        ({"pressed": {Button("turbo", "Turbo")}}, "Unknown buttons"),
+        ({"reads": [("vram", 0, 1)]}, "Unknown memory region"),
+        ({"reads": [("ram", 10, 10)]}, "outside region"),
+        ({"reads": [("ram", -1, 1)]}, "offset"),
+        ({"reads": [("ram", 0)]}, "Each read must be"),
+    ],
+)
+def test_step_rejects_bad_requests_before_the_backend(
+    adapter: RecordingAdapter, kwargs: dict[str, Any], match: str
+) -> None:
+    frames = kwargs.pop("frames", 1)
+    with pytest.raises(ConfigurationError, match=match):
+        adapter.step(frames, **kwargs)
+    assert adapter.calls[1:] == []
+
+
+def test_step_refuses_a_short_read_and_a_missing_screenshot() -> None:
+    class Short(RecordingAdapter):
+        def _do_read_memory(self, region: str, offset: int, length: int) -> bytes:
+            return b"x"
+
+    a = Short()
+    a.connect()
+    with pytest.raises(ConfigurationError, match="1 bytes for a 4-byte read"):
+        a.step(1, reads=[("ram", 0, 4)])
+
+    class Blind(RecordingAdapter):
+        def _do_step(self, frames: int, pressed: Any, reads: Any, screenshot: bool) -> StepResult:
+            return StepResult(frames)
+
+    b = Blind()
+    b.connect()
+    with pytest.raises(ConfigurationError, match="without the screenshot"):
+        b.step(1, screenshot=True)
+    with pytest.raises(ConfigurationError, match="answered 0 reads for 1"):
+        b.step(1, reads=[("ram", 0, 1)])
+
+
+def test_step_requires_a_connection() -> None:
+    with pytest.raises(EmulatorDisconnectedError):
+        RecordingAdapter().step()
+
+
+def test_read_many_returns_bytes_in_order(adapter: RecordingAdapter) -> None:
+    assert adapter.read_many([("ram", 2, 3), ("ram", 0, 1)]) == (bytes([2, 3, 4]), bytes([0]))
+    assert adapter.read_many([]) == ()
+    assert [c for c in adapter.calls if c[0] == "read"] == [
+        ("read", ("ram", 2, 3)),
+        ("read", ("ram", 0, 1)),
+    ]
+    with pytest.raises(ConfigurationError, match="Unknown memory region"):
+        adapter.read_many([("ram", 0, 1), ("rom", 0, 1)])
+    blind = RecordingAdapter(Capabilities(frame_advance=True))
+    blind.connect()
+    with pytest.raises(UnsupportedCapabilityError):
+        blind.read_many([("ram", 0, 1)])

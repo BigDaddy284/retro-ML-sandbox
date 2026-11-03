@@ -87,6 +87,8 @@ class EmulatorAdapter(ABC):
     def capture_frame(self) -> Frame                                        # screen_capture
     def set_input(self, pressed: Iterable[Button]) -> None                  # input
     def advance_frames(self, n: int = 1) -> None                            # frame_advance
+    def read_many(self, reads: Sequence[tuple[str, int, int]]) -> tuple[bytes, ...]   # memory_read, one request
+    def step(self, frames=1, *, pressed=None, reads=(), screenshot=False) -> StepResult  # T-822: one request
     def set_speed(self, multiplier: float) -> None                          # speed_control
     def save_state(self, slot: str) -> None / load_state(...)               # save_states
 ```
@@ -97,6 +99,7 @@ Rules enforced by the base class:
 - Bad arguments (unknown region or button, out-of-range read, non-positive speed or frame count, unsafe slot name) raise `ConfigurationError`.
 - A backend that returns the wrong number of bytes from a read is reported as an error rather than passed through.
 - Hooks for optional capabilities have defaults that raise `UnsupportedCapabilityError`, so an adapter only implements what it supports.
+- `step` and `read_many` (T-822) bundle what the UI needs each frame; their default hooks compose the primitives, and `BizHawkAdapter` sends one `step` / one `read` request instead. Each part of a `step` is checked only when used, so a step without a screenshot works on an emulator that cannot capture its screen.
 - One conversation at a time (T-817): every public operation holds the adapter's re-entrant lock, because the Game panel captures frames on a worker thread while the GUI thread (play clock, training, watchdog) may be talking to the same socket. `check_link()` never waits for that lock: if another thread holds it, the link is evidently in use and the answer is True.
 
 **Threads in the UI (T-817).** The GUI thread must never wait on an emulator. A real one answers over a socket in tens of milliseconds, and on the user's PC 30 screenshot round trips a second on the GUI thread made the window unusable. `ConnectBar` connects on a `QThreadPool`; `FramePump` captures each frame, `PlayClock` steps each frame and takes the memory snapshot after it (T-818), and `ControllerPad` sends each change of the held buttons (T-821, merging changes made while one is in flight), on their own one-thread pools and report back by signal; a tick that finds the previous one still running is skipped, so the real rate settles to what the link delivers. Services publish events from whichever thread they run on and `EventBridge` delivers them on the GUI thread; `ConnectionService` records a dropped link once even when two workers find it together. The training tick still runs on the GUI thread.

@@ -227,4 +227,25 @@ class Frame:
         return cls(**picked)
 
 
-__all__ = ["Button", "Capabilities", "Frame", "GameInfo", "MemoryRegion"]
+@dataclass(frozen=True, slots=True)
+class StepResult:
+    """What one bundled ``step`` brought back (T-822).
+
+    ``reads`` holds one ``bytes`` per requested read, in request order;
+    ``frame`` is the screenshot taken after the last frame, if one was asked
+    for.
+    """
+
+    frames: int
+    reads: tuple[bytes, ...] = ()
+    frame: Frame | None = None
+
+    def __post_init__(self) -> None:
+        _require_int(self.frames, "StepResult frames", minimum=1)
+        if not isinstance(self.reads, tuple) or not all(isinstance(r, bytes) for r in self.reads):
+            raise ConfigurationError("StepResult reads must be a tuple of bytes.")
+        if self.frame is not None and not isinstance(self.frame, Frame):
+            raise ConfigurationError("StepResult frame must be a Frame or None.")
+
+
+__all__ = ["Button", "Capabilities", "Frame", "GameInfo", "MemoryRegion", "StepResult"]

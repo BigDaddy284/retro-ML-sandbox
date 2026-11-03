@@ -28,6 +28,7 @@ from retro_ai_lab.core import (
     Frame,
     GameInfo,
     MemoryRegion,
+    StepResult,
     UnsupportedCapabilityError,
 )
 
@@ -145,24 +146,72 @@ class EmulatorAdapter(ABC):
         with self._lock:
             self._require_connected()
             self._require("memory_read")
-            regions = {r.name: r for r in self._do_memory_regions()}
-            if region not in regions:
-                raise ConfigurationError(
-                    f"Unknown memory region {region!r}; available: {sorted(regions)}."
-                )
-            _check_int(offset, "offset", minimum=0)
-            _check_int(length, "length", minimum=0)
-            if not regions[region].contains(offset, length):
-                raise ConfigurationError(
-                    f"Read of {length} bytes at {offset} is outside region "
-                    f"{region!r} (size {regions[region].size})."
-                )
+            self._check_reads([(region, offset, length)])
             data = self._do_read_memory(region, offset, length)
-            if len(data) != length:
-                raise ConfigurationError(
-                    f"Backend returned {len(data)} bytes for a {length}-byte read."
-                )
+            _check_read_length(data, length)
             return data
+
+    @final
+    def read_many(self, reads: Sequence[tuple[str, int, int]]) -> tuple[bytes, ...]:
+        """Several reads in one go (one request on a socket backend, T-822).
+
+        Each read is ``(region, offset, length)``; the result holds the bytes
+        in the same order.
+        """
+        with self._lock:
+            self._require_connected()
+            self._require("memory_read")
+            wanted = self._check_reads(reads)
+            if not wanted:
+                return ()
+            data = tuple(self._do_read_many(wanted))
+            if len(data) != len(wanted):
+                raise ConfigurationError(
+                    f"Backend answered {len(data)} reads for {len(wanted)} requested."
+                )
+            for chunk, (_, _, length) in zip(data, wanted, strict=True):
+                _check_read_length(chunk, length)
+            return data
+
+    @final
+    def step(
+        self,
+        frames: int = 1,
+        *,
+        pressed: Iterable[Button] | None = None,
+        reads: Sequence[tuple[str, int, int]] = (),
+        screenshot: bool = False,
+    ) -> StepResult:
+        """Hold ``pressed`` (if given), advance ``frames``, then read and look.
+
+        One round trip on a socket backend (T-822). Each part is checked only
+        when it is used: a step with no screenshot works on an emulator that
+        cannot capture its screen.
+        """
+        with self._lock:
+            self._require_connected()
+            self._require("frame_advance")
+            _check_int(frames, "frame count", minimum=1)
+            held: frozenset[Button] | None = None
+            if pressed is not None:
+                self._require("input")
+                held = self._check_buttons(pressed)
+            wanted: tuple[tuple[str, int, int], ...] = ()
+            if reads:
+                self._require("memory_read")
+                wanted = self._check_reads(reads)
+            if screenshot:
+                self._require("screen_capture")
+            result = self._do_step(frames, held, wanted, screenshot)
+            if len(result.reads) != len(wanted):
+                raise ConfigurationError(
+                    f"Backend answered {len(result.reads)} reads for {len(wanted)} requested."
+                )
+            for chunk, (_, _, length) in zip(result.reads, wanted, strict=True):
+                _check_read_length(chunk, length)
+            if screenshot and result.frame is None:
+                raise ConfigurationError("Backend stepped without the screenshot asked for.")
+            return result
 
     @final
     def capture_frame(self) -> Frame:
@@ -176,14 +225,7 @@ class EmulatorAdapter(ABC):
         with self._lock:
             self._require_connected()
             self._require("input")
-            pressed_set = frozenset(pressed)
-            known = set(self._do_buttons())
-            unknown = pressed_set - known
-            if unknown:
-                raise ConfigurationError(
-                    f"Unknown buttons for this emulator: {sorted(b.name for b in unknown)}."
-                )
-            self._do_set_input(pressed_set)
+            self._do_set_input(self._check_buttons(pressed))
 
     @final
     def advance_frames(self, n: int = 1) -> None:
@@ -232,6 +274,40 @@ class EmulatorAdapter(ABC):
         if not self._do_capabilities().supports(capability):
             raise UnsupportedCapabilityError(capability)
 
+    @final
+    def _check_buttons(self, pressed: Iterable[Button]) -> frozenset[Button]:
+        pressed_set = frozenset(pressed)
+        unknown = pressed_set - set(self._do_buttons())
+        if unknown:
+            raise ConfigurationError(
+                f"Unknown buttons for this emulator: {sorted(b.name for b in unknown)}."
+            )
+        return pressed_set
+
+    @final
+    def _check_reads(
+        self, reads: Sequence[tuple[str, int, int]]
+    ) -> tuple[tuple[str, int, int], ...]:
+        regions = {r.name: r for r in self._do_memory_regions()}
+        checked = []
+        for item in reads:
+            if not isinstance(item, tuple) or len(item) != 3:
+                raise ConfigurationError("Each read must be (region, offset, length).")
+            region, offset, length = item
+            if region not in regions:
+                raise ConfigurationError(
+                    f"Unknown memory region {region!r}; available: {sorted(regions)}."
+                )
+            _check_int(offset, "offset", minimum=0)
+            _check_int(length, "length", minimum=0)
+            if not regions[region].contains(offset, length):
+                raise ConfigurationError(
+                    f"Read of {length} bytes at {offset} is outside region "
+                    f"{region!r} (size {regions[region].size})."
+                )
+            checked.append((region, offset, length))
+        return tuple(checked)
+
     # ------------------------------------------------- backend hooks (abstract)
 
     @abstractmethod
@@ -275,6 +351,33 @@ class EmulatorAdapter(ABC):
 
     def _do_load_state(self, slot: str) -> None:
         raise UnsupportedCapabilityError("save_states")
+
+    def _do_read_many(self, reads: Sequence[tuple[str, int, int]]) -> Sequence[bytes]:
+        """Hook: several reads. The default asks for each one in turn."""
+        return [self._do_read_memory(region, offset, length) for region, offset, length in reads]
+
+    def _do_step(
+        self,
+        frames: int,
+        pressed: frozenset[Button] | None,
+        reads: Sequence[tuple[str, int, int]],
+        screenshot: bool,
+    ) -> StepResult:
+        """Hook: the bundled step. The default composes the primitive hooks.
+
+        A backend whose transport can do it in one request overrides this.
+        """
+        if pressed is not None:
+            self._do_set_input(pressed)
+        self._do_advance_frames(frames)
+        data = tuple(self._do_read_many(reads)) if reads else ()
+        frame = self._do_capture_frame() if screenshot else None
+        return StepResult(frames, data, frame)
+
+
+def _check_read_length(data: bytes, length: int) -> None:
+    if len(data) != length:
+        raise ConfigurationError(f"Backend returned {len(data)} bytes for a {length}-byte read.")
 
 
 def _check_int(value: object, what: str, *, minimum: int) -> None:
