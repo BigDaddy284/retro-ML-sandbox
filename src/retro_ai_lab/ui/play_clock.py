@@ -27,6 +27,7 @@ from retro_ai_lab.core import Button, Capabilities, EmulatorDisconnectedError, E
 from retro_ai_lab.services import ConnectionService, EmulatorConnected, EmulatorDisconnected
 from retro_ai_lab.services.observer import ObservationService
 from retro_ai_lab.ui.context import AppContext
+from retro_ai_lab.ui.worker import report
 
 DEFAULT_FPS = 60
 
@@ -72,9 +73,9 @@ class _StepTask(QRunnable):
                 screenshot=self._screenshot,
             )
         except Exception as exc:
-            self.signals.done.emit(self._generation, exc)
+            report(self.signals.done, self._generation, exc)
         else:
-            self.signals.done.emit(self._generation, (self._n, frame))
+            report(self.signals.done, self._generation, (self._n, frame))
 
 
 def _step(

@@ -27,6 +27,7 @@ from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.controller_pad import ControllerPad
 from retro_ai_lab.ui.frame_view import FrameView
 from retro_ai_lab.ui.play_clock import PlayClock
+from retro_ai_lab.ui.worker import report
 
 DEFAULT_FPS = 30
 CLOCK_FPS = 60  # the play clock's frame rate (console speed); pictures ride along at DEFAULT_FPS
@@ -56,9 +57,9 @@ class _CaptureTask(QRunnable):
         try:
             frame = self._connection.call(lambda a: a.capture_frame())
         except Exception as exc:
-            self.signals.done.emit(self._generation, exc)
+            report(self.signals.done, self._generation, exc)
         else:
-            self.signals.done.emit(self._generation, frame)
+            report(self.signals.done, self._generation, frame)
 
 
 class FramePump(QObject):
