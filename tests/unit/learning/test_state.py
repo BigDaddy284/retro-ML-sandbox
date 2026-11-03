@@ -73,6 +73,7 @@ def test_encoder_filters_and_refreshes() -> None:
     k.reject(bad.id)
     k.propose(RAM, 2, kind=VariableKind.INPUT, evidence=SURE)
     k.propose(RAM, 3, kind=VariableKind.UNKNOWN, evidence=SURE)
+    k.propose(RAM, 5, kind=VariableKind.COUNTER, evidence=SURE)  # frame counters: noise
     low = k.propose(RAM, 4, kind=VariableKind.LIVES, evidence=MAYBE)
     assert enc.encode(snap(bytes(32))) == State()  # not refreshed yet
     assert [v.id for v in enc.refresh()] == [low.id]

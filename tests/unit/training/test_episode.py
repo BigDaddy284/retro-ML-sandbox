@@ -192,6 +192,30 @@ def test_checkpoint_restarts_from_the_same_place(lab: Lab) -> None:
     assert bare.finish().ended_by == "stopped"
 
 
+def test_a_reset_seen_just_after_a_checkpoint_restore_is_the_restore(lab: Lab) -> None:
+    lab.connection.connect("fake", seed=3)
+    teach(lab)
+    harness = ExperimentHarness(lab.connection)
+    harness.checkpoint()
+    r = runner(lab, frames_per_step=4, max_steps=30, harness=harness, settle_frames=5)
+    r.run_episode()
+    r.begin()  # restores the checkpoint
+    reset = GameEvent(EventKind.RESET, lab.observation.frame + 1, None, "")
+    lab.bus.publish(DiscoveryUpdated((), (), (reset,), ()))
+    assert r.step()  # 4 frames in: the engine is still reacting to the restore
+    assert r.running
+    lab.bus.publish(DiscoveryUpdated((), (), (reset,), ()))
+    assert not r.step()  # 8 frames in: a real restart
+    assert r.finish().ended_by == "reset"
+    # Without a restore nothing is ignored.
+    bare = runner(lab, frames_per_step=4, max_steps=30, settle_frames=5)
+    bare.begin()
+    lab.bus.publish(DiscoveryUpdated((), (), (reset,), ()))
+    assert not bare.step() and bare.finish().ended_by == "reset"
+    with pytest.raises(ConfigurationError):
+        runner(lab, settle_frames=-1)
+
+
 def test_settings_and_misuse(lab: Lab) -> None:
     lab.connection.connect("fake", seed=3)
     teach(lab)

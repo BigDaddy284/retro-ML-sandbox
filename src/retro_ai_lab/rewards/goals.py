@@ -221,6 +221,13 @@ class Goal:
         self._items[objective_id] = updated
         return updated
 
+    def reword(self, objective_id: str, description: str) -> Objective:
+        """Change the wording only, keeping whether the AI suggested it."""
+        current = self.get(objective_id)
+        updated = current.replace(description=description)
+        self._items[objective_id] = updated
+        return updated
+
     def move(self, objective_id: str, position: int) -> None:
         """Put an objective at ``position`` in the list order."""
         self.get(objective_id)
@@ -367,13 +374,30 @@ def suggest_goal(
 def merge_suggestions(
     goal: Goal, knowledge: Knowledge, *, at_least: Confidence = Confidence.LOW
 ) -> tuple[str, ...]:
-    """Add suggested objectives the goal lacks; never touch existing ones. Returns new ids."""
+    """Add suggested objectives the goal lacks and retire stale ones. Returns new ids.
+
+    Objectives the child wrote are never touched. A suggested one is removed when
+    its variable is known but no longer believed to track progress (the AI changed
+    its mind, so any "completion" it saw was a misreading); its wording follows
+    the variable's name.
+    """
     progress = [
         v
         for v in knowledge
         if v.kind is VariableKind.PROGRESS and not v.rejected and v.confidence >= at_least
     ]
     keys = {Trigger(EventKind.PROGRESS, v.id).key: v for v in progress}
+    for o in list(goal):
+        if not o.suggested or o.trigger is None or o.trigger.kind is not EventKind.PROGRESS:
+            continue
+        if o.trigger.key not in keys:
+            vid = o.trigger.variable_id
+            if vid is not None and vid in knowledge:
+                goal.remove(o.id)
+            continue
+        wanted = f"Get further in {keys[o.trigger.key].display_name}"
+        if o.description != wanted:
+            goal.reword(o.id, wanted)
     # Order by relationships: a cause comes before its effect.
     order = {k: i for i, k in enumerate(keys)}
     for rel in knowledge.confident_relationships(Confidence.LOW):
