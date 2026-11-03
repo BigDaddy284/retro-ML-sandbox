@@ -12,10 +12,11 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from random import Random
-from typing import Any
+from typing import Any, ClassVar
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning.actions import ActionSpace
+from retro_ai_lab.learning.learner import Q_TABLE, Decision, register_learner
 from retro_ai_lab.learning.state import State
 
 SCHEMA_VERSION = 1
@@ -111,16 +112,10 @@ class QTable:
         return table
 
 
-@dataclass(frozen=True, slots=True)
-class Decision:
-    """How the last move was picked (for the UI to explain)."""
-
-    action: int
-    explored: bool  # True when it tried something at random
-    value: float  # what the table thought the move was worth
-
-
+@register_learner
 class QLearningAgent:
+    algorithm: ClassVar[str] = Q_TABLE
+
     def __init__(
         self,
         space: ActionSpace,
@@ -154,6 +149,10 @@ class QLearningAgent:
     @property
     def table(self) -> QTable:
         return self._table
+
+    @property
+    def known(self) -> int:
+        return len(self._table)
 
     @property
     def updates(self) -> int:
@@ -191,6 +190,9 @@ class QLearningAgent:
     def greedy(self, state: State) -> int:
         return self._table.best(state)
 
+    def policy(self) -> dict[str, int]:
+        return {key: self._table.best(State.from_key(key)) for key in self._table.known_states()}
+
     # ------------------------------------------------------------ learning
 
     def learn(
@@ -227,6 +229,7 @@ class QLearningAgent:
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema": SCHEMA_VERSION,
+            "algorithm": self.algorithm,
             "space": self._space.to_dict(),
             "settings": self._settings.to_dict(),
             "epsilon": self._epsilon,
@@ -242,6 +245,8 @@ class QLearningAgent:
             schema = int(data.get("schema", SCHEMA_VERSION))
             if schema > SCHEMA_VERSION:
                 raise ConfigurationError(f"This brain is from a newer version (schema {schema}).")
+            if data.get("algorithm", cls.algorithm) != cls.algorithm:
+                raise ConfigurationError("This brain was not learned with a Q-table.")
             saved = ActionSpace.from_dict(data["space"])
             if space is not None and space != saved:
                 raise ConfigurationError(

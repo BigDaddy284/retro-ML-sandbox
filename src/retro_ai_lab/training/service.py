@@ -18,7 +18,8 @@ from pathlib import Path
 from retro_ai_lab.core import ConfigurationError, EmulatorError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.learning.actions import ActionSpace
-from retro_ai_lab.learning.qlearning import Decision, QLearningAgent, Settings
+from retro_ai_lab.learning.learner import Q_TABLE, Decision, Learner, algorithms, make_learner
+from retro_ai_lab.learning.qlearning import Settings
 from retro_ai_lab.learning.state import StateEncoder
 from retro_ai_lab.rewards.exploitation import ExploitWarning
 from retro_ai_lab.rewards.goals import Goal
@@ -91,7 +92,13 @@ class TrainingService:
         settings: Settings | None = None,
         seed: int | None = None,
         store: BrainStore | None = None,
+        algorithm: str = Q_TABLE,
     ) -> None:
+        if algorithm not in algorithms():
+            raise ConfigurationError(
+                f"There is no learning algorithm called {algorithm!r} "
+                f"(choices: {', '.join(algorithms())})."
+            )
         if frames_per_step < 1:
             raise ConfigurationError("frames_per_step must be at least 1.")
         if max_steps < 1:
@@ -108,13 +115,14 @@ class TrainingService:
         self._unstick_after = unstick_after
         self._settings = settings or Settings()
         self._seed = seed
+        self._algorithm = algorithm
         self._store = store
         self._history: deque[EpisodeRecord] = deque(maxlen=history)
         self._policies: deque[tuple[int, dict[str, int]]] = deque(maxlen=DEFAULT_WINDOW + 1)
         self._game_id: str | None = None
         self._saves = 0
         self._fresh_start = ""
-        self._agent: QLearningAgent | None = None
+        self._agent: Learner | None = None
         self._encoder: StateEncoder | None = None
         self._harness: ExperimentHarness | None = None
         self._runner: EpisodeRunner | None = None
@@ -132,6 +140,11 @@ class TrainingService:
         bus.subscribe(MemoryObserved, self._on_memory)
 
     # ------------------------------------------------------------ queries
+
+    @property
+    def algorithm(self) -> str:
+        """The learning algorithm new brains are built with."""
+        return self._algorithm
 
     @property
     def enabled(self) -> bool:
@@ -156,7 +169,7 @@ class TrainingService:
         return self._status is not Status.IDLE and self._mode.ai_plays
 
     @property
-    def agent(self) -> QLearningAgent | None:
+    def agent(self) -> Learner | None:
         return self._agent
 
     @property
@@ -230,7 +243,7 @@ class TrainingService:
         ``window`` goes ago, or the oldest snapshot kept."""
         if self._agent is None or not self._policies:
             return (), 0, 0
-        now = policy_of(self._agent.table)
+        now = policy_of(self._agent)
         candidates = [p for p in self._policies if p[0] <= self._episodes - window]
         then_number, then = candidates[-1] if candidates else self._policies[0]
         goes_ago = self._episodes - then_number
@@ -334,7 +347,9 @@ class TrainingService:
             raise ConfigurationError("Stop training before starting the AI from scratch.")
         if self.brain() is None or self._agent is None or self._game_id is None:
             raise ConfigurationError("There is no brain to forget.")
-        self._agent = QLearningAgent(self._agent.space, self._settings, seed=self._seed)
+        self._agent = make_learner(
+            self._algorithm, self._agent.space, self._settings, seed=self._seed
+        )
         self._history.clear()
         self._policies.clear()
         self._episodes = 0
@@ -425,7 +440,7 @@ class TrainingService:
         self._game_id = game_id_for(info.system, info.title, info.rom_hash)
         self._saves = 0
         space = ActionSpace.from_buttons(event.buttons)
-        self._agent = QLearningAgent(space, self._settings, seed=self._seed)
+        self._agent = make_learner(self._algorithm, space, self._settings, seed=self._seed)
         self._fresh_start = ""
         if self._store is not None and self._store.exists(self._game_id):
             try:
@@ -535,7 +550,7 @@ class TrainingService:
         record = EpisodeRecord(self._episodes, self._mode, result, self._observation.frame)
         self._history.append(record)
         if self._agent is not None:
-            self._policies.append((self._episodes, policy_of(self._agent.table)))
+            self._policies.append((self._episodes, policy_of(self._agent)))
         self._bus.publish(EpisodeFinished(record))
         if self._connection.is_connected:
             self.save()

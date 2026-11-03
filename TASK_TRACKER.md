@@ -5,9 +5,9 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** Phase 7 planning (real emulator; needs ADR-005 / ADR-006 sign-off)
-- **Last approved checkpoint:** `main` after T-505 (PRs #41–#49 merging in order as CI passes)
-- **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
+- **Current task:** T-702 – Experience replay (Phase 7)
+- **Last approved checkpoint:** `main` after T-507 (PRs #43–#49 merging in order as CI passes; T-701 stacked on them)
+- **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only the BizHawk work (T-110 onward). ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
 ## Summary
 
@@ -75,6 +75,15 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-606 | First working demonstration on the Fake Emulator: DESIGN.md §17 steps 1–10 as one scripted test, including rewards changing behaviour | 6 | Done | 5/5 | see PR #48 |
 | T-607 | Educational tips: "What's this?" explanations in simple and advanced words for every panel | 6 | Done | 6/6 | see PR #49 |
 | E-7 | Advanced Learning (DQN, hierarchical RL, demonstrations) | 7 | Epic | – | – |
+| T-701 | Learner interface: any learning algorithm behind one contract; brains record which algorithm they hold | 7 | Done | 5/5 | see PR #50 |
+| T-702 | Experience replay: a bounded memory of past steps the AI can learn from again | 7 | In progress | – | – |
+| T-703 | Feature vectors: a situation as numbers a neural network can read | 7 | Ready | – | – |
+| T-704 | Small neural network in NumPy (layers, Adam, gradient check; no new dependency) | 7 | Ready | – | – |
+| T-705 | DQN learner: network, target network and replay; learns a synthetic task; saves and reloads | 7 | Ready | – | – |
+| T-706 | Automatic algorithm choice (table while the game is small, network when it grows) and a "How the AI learns" control | 7 | Ready | – | – |
+| T-707 | Learning from demonstrations: the child's play is kept as experience the AI learns from | 7 | Ready | – | – |
+| T-708 | Hierarchical learning: a skill per goal step; the active step picks the skill | 7 | Ready | – | – |
+| T-709 | Better progress detection on a longer look (checkpoint vs position, lap vs flag) | 7 | Ready | – | – |
 | E-8 | Expansion (VBA-M, comparison, sharing, competitions) | 8 | Epic | – | – |
 
 The **first working demonstration** (DESIGN.md §17) is reached at the end of E-5 plus the minimum of E-6, first on the Fake Emulator and then on a real game via BizHawk.
@@ -801,6 +810,27 @@ Live and background training and the guided and manual modes were delivered in P
 - **Results:** 6 / 6 passed / 0 failed / 0 excluded (766 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** The tips live in a new `education` package as plain data, so the same words can later feed tooltips or a printed sheet. Each simple telling is checked against a short jargon list by the tests, so a later edit can't quietly slip "epsilon" into the child's version. Phase 6 is complete: DESIGN.md §10, §12, §16 and §17 are covered on the Fake Emulator.
 
+### Phase 7 breakdown
+DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical learning, optional demonstration learning and more sophisticated game understanding. None of it needs a real emulator, so it is built and proven on the Fake Emulator while ADR-005 / ADR-006 wait. Networks run on NumPy (ADR-009). Tasks T-701 to T-709 as in the summary table; each gets its own section when started.
+
+### T-701 – Learner interface
+- **Status:** Done
+- **Phase:** 7
+- **Objective:** Put every learning algorithm behind one contract so the training service, the saved brain, the insights and the panels work the same whether the AI learns with a table or a network (DESIGN.md §6 "the learning engine must be modular").
+- **Scope:** `learning.learner`: a runtime-checkable `Learner` protocol (`algorithm` name, `space`, `epsilon`, `updates`, `episodes`, `known`, `last_decision`, `stats()`, `choose`, `greedy`, `learn`, `end_episode`, `reset`, `policy()` – the best known move per known situation – and `to_dict()`), `Decision` moved here, a registry (`register_learner`, `algorithms()`, `make_learner(name, space, settings, seed)`, `learner_from_dict(data, space)` dispatching on the saved `algorithm`, with `q_table` the default for brains saved before this task). `QLearningAgent` implements it (`algorithm = "q_table"`, `known`, `policy()`, `algorithm` in its JSON). `Brain.agent`, `EpisodeRunner` and `TrainingService` are typed to `Learner`; the service takes `algorithm=` and builds through the registry; `insights.policy_of` takes a learner. **Out of scope:** any new algorithm (T-704/T-705), the UI choice (T-706).
+- **Acceptance criteria:**
+  1. `QLearningAgent` satisfies `Learner` at runtime and `policy()` names the best move for every situation it knows.
+  2. `make_learner` builds a learner by name with the given settings and seed; an unknown name raises `ConfigurationError` naming the choices.
+  3. `learner_from_dict` rebuilds the right class from saved data, treats data without an `algorithm` as `q_table`, and rejects an unknown algorithm or mismatched controls.
+  4. A brain round-trips through the registry and reports its algorithm; a brain claiming an unknown algorithm is refused with a clear message.
+  5. Behaviour changes and experiments work on any learner through the protocol (proven with a stub learner that has no Q-table).
+  6. `TrainingService(algorithm=...)` validates the name up front; every existing training, panel and demonstration test still passes.
+- **Expected changes:** `learning/learner.py` (new), `learning/qlearning.py`, `learning/__init__.py`, `training/brain.py`, `training/episode.py`, `training/insights.py`, `training/service.py`, `tests/unit/learning/test_learner.py` (new), `tests/unit/training/test_insights.py`.
+- **Test plan:** unit – protocol conformance and `policy()`; registry by name, unknown name, settings and seed passed through; `from_dict` with and without `algorithm`, unknown algorithm, wrong controls; brain round-trip and refusal; insights on a stub learner; service rejects a bad algorithm and saves the algorithm name. Regression – full suite.
+- **Results:** 5 / 5 passed / 0 failed / 0 excluded (772 in the full suite, on Python 3.13 with PySide6 6.12.0 and on Python 3.11 with PySide6 6.11.3). Lint, format and strict mypy clean.
+- **Commit:** see PR. **PR:** #50.
+- **Completion report:** The registry holds learner classes by `algorithm` name; `learner_from_dict` reads the name from the saved data and defaults to `q_table`, so every brain saved so far still loads unchanged. `Decision` moved to `learning.learner` (still importable from `learning`). Insights now ask the learner for its `policy()` instead of walking a Q-table, proven with a stub learner that has no table. The service validates the algorithm name in its constructor and builds new brains (connect, forget) through the registry. ADR-009 records that Phase 7 networks are NumPy behind this interface. Known limitation: only `q_table` is registered until T-705.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -860,4 +890,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
+- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
