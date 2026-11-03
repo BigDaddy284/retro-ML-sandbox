@@ -120,6 +120,18 @@ class BizHawkAdapter(EmulatorAdapter):
         self._require_connected()
         self._call("ping")
 
+    def set_free_run(self, free_run: bool) -> None:
+        """Let the game run between steps (True) or hold it (False, the default).
+
+        In free-run the adapter no longer offers ``frame_advance``: see
+        ARCHITECTURE.md §5.3.
+        """
+        if not isinstance(free_run, bool):
+            raise ConfigurationError("free_run must be True or False.")
+        self._require_connected()
+        self._call("mode", free_run=free_run)
+        self._free_run = free_run
+
     # -------------------------------------------------------------- hooks
 
     def _do_connect(self, timeout_s: float) -> None:
@@ -182,6 +194,20 @@ class BizHawkAdapter(EmulatorAdapter):
     def _do_capture_frame(self) -> Frame:
         answer = self._call("screenshot")
         return self._frame_from(answer)
+
+    def _do_advance_frames(self, n: int) -> None:
+        self._call("step", frames=n)
+
+    def _do_set_speed(self, multiplier: float) -> None:
+        self._call("speed", percent=max(1, round(multiplier * 100)))
+
+    def _do_save_state(self, slot: str) -> None:
+        self._call("save", slot=slot)
+
+    def _do_load_state(self, slot: str) -> None:
+        answer = self._call("load", slot=slot)
+        if answer.get("loaded") is not True:
+            raise ConfigurationError(f"No save state in slot {slot!r}.")
 
     def _do_set_input(self, pressed: frozenset[Button]) -> None:
         names = self.description.button_names

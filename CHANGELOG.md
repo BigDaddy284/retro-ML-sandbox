@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-116: The BizHawk adapter advances frames, sets the speed and saves/loads states: the bridge gained `step` (with optional bundled buttons, reads and screenshot), `speed`, `save` and `load`, so every adapter capability is now available on BizHawk and the episode runner drives it unchanged; `set_free_run` switches the bridge between holding the game and letting it run.
 - T-115: The BizHawk adapter reads memory: the bridge's `read` command serves checked reads of any domain from the handshake, the adapter offers domains up to 256 KiB as regions, and the memory observer works on top of it unchanged.
 - T-114: The BizHawk adapter holds controller buttons: `set_input` sends the whole pad to the bridge, which applies it with `joypad.set` before every frame until changed and hands the pad back to the player on disconnect.
 - T-113: The BizHawk adapter captures the screen: the bridge's `screenshot` command writes a PNG via EmuHawk, sends it back, and the adapter decodes it into an RGB frame numbered with the emulator's frame count.

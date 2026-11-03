@@ -492,8 +492,7 @@ function handlers.ping(req)
   return {}
 end
 
-function handlers.input(req)
-  local buttons = req.buttons
+local function set_held(buttons)
   if type(buttons) ~= "table" then
     error("'buttons' must be a table of button names to true or false.", 0)
   end
@@ -509,6 +508,10 @@ function handlers.input(req)
   for name, value in pairs(buttons) do
     held[name] = value
   end
+end
+
+function handlers.input(req)
+  set_held(req.buttons)
   return {}
 end
 
@@ -557,6 +560,64 @@ end
 
 function handlers.read(req)
   return { reads = serve_reads(req.reads) }
+end
+
+local MAX_STEP_FRAMES = 3600
+
+-- Advance the game: hold the pad, run the frames, then report what was asked.
+function handlers.step(req)
+  local frames = req.frames
+  if math.type(frames) ~= "integer" or frames < 1 or frames > MAX_STEP_FRAMES then
+    error("'frames' must be a whole number from 1 to " .. MAX_STEP_FRAMES .. ".", 0)
+  end
+  if req.buttons ~= nil then
+    set_held(req.buttons)
+  end
+  if req.reads ~= nil and type(req.reads) ~= "table" then
+    error("'reads' must be a list of {domain, addr, len}.", 0)
+  end
+  if req.screenshot ~= nil and type(req.screenshot) ~= "boolean" then
+    error("'screenshot' must be true or false.", 0)
+  end
+  for _ = 1, frames do
+    apply_held()
+    emu.frameadvance()
+  end
+  local body = {}
+  if req.reads ~= nil then
+    body.reads = serve_reads(req.reads)
+  end
+  if req.screenshot then
+    body.image = take_screenshot()
+  end
+  return body
+end
+
+function handlers.speed(req)
+  local percent = req.percent
+  if type(percent) ~= "number" or percent ~= percent or percent <= 0 then
+    error("'percent' must be a number above zero.", 0)
+  end
+  client.speedmode(math.max(1, math.floor(percent + 0.5)))
+  return {}
+end
+
+local function state_path(slot)
+  if type(slot) ~= "string" or slot == "" or slot:find("[^%w_]") then
+    error("'slot' must be a name of letters, digits and underscores.", 0)
+  end
+  local dir = os.getenv("TEMP") or os.getenv("TMP") or os.getenv("TMPDIR") or "."
+  return dir .. "/retro_ai_lab_" .. slot .. ".State"
+end
+
+function handlers.save(req)
+  savestate.save(state_path(req.slot), true)
+  return {}
+end
+
+function handlers.load(req)
+  local loaded = savestate.load(state_path(req.slot), true)
+  return { loaded = loaded == true }
 end
 
 function handlers.bye(req)

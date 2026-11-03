@@ -51,10 +51,8 @@ def test_handshake_disconnect_and_idempotence() -> None:
         info = adapter.game_info()
         assert info.system == SYSTEM and info.title == ROM_NAME
         assert info.rom_hash == "toyracer-0"
-        # capabilities follow the simulator's commands: only screenshots so far
-        assert adapter.capabilities() == Capabilities(
-            screen_capture=True, input=True, memory_read=True
-        )
+        # capabilities follow the simulator's commands: all of them now
+        assert adapter.capabilities() == Capabilities.all()
         assert adapter.description.commands == {
             "hello",
             "ping",
@@ -63,6 +61,10 @@ def test_handshake_disconnect_and_idempotence() -> None:
             "screenshot",
             "input",
             "read",
+            "step",
+            "speed",
+            "save",
+            "load",
         }
         assert adapter.buttons() == tuple(Button(b.name, b.label) for b in BUTTONS)
         assert adapter.description.button_names["start"] == "Start"
@@ -271,3 +273,116 @@ def test_options_are_validated_and_script_ships() -> None:
     text = SCRIPT_PATH.read_text(encoding="utf-8")
     assert f"SCRIPT_VERSION = {PROTOCOL_VERSION}" in text
     assert "43110" in text
+
+
+def test_frame_advance_speed_and_states_through_the_simulator() -> None:
+    with BizHawkSimulator() as sim:
+        adapter = BizHawkAdapter(port=sim.port, call_timeout_s=2.0)
+        adapter.connect(timeout_s=2.0)
+        game = sim.game
+        start = game.state.frame
+        adapter.set_input({Button("up", "Up")})
+        adapter.advance_frames(5)
+        assert game.state.frame == start + 5
+        assert game.state.speed > 0  # the held button was applied each frame
+        assert sim.requests[-1] == {"id": sim.requests[-1]["id"], "cmd": "step", "frames": 5}
+        assert sim.paused  # still held between steps
+        adapter.set_input(())
+        adapter.set_speed(1.5)
+        assert sim.speed == 150
+        adapter.set_speed(0.001)
+        assert sim.speed == 1  # never below one percent
+        adapter.save_state("lap_1")
+        assert sim.slots == ("lap_1",)
+        before = game.snapshot()
+        adapter.advance_frames(20)
+        assert game.snapshot() != before
+        adapter.load_state("lap_1")
+        assert game.snapshot() == before
+        with pytest.raises(ConfigurationError, match=r"No save state in slot 'lap_2'"):
+            adapter.load_state("lap_2")
+        assert adapter.is_connected
+        # the base class validates the arguments before anything is sent
+        count = len(sim.requests)
+        for call in (
+            lambda: adapter.advance_frames(0),
+            lambda: adapter.set_speed(0),
+            lambda: adapter.save_state("bad slot"),
+            lambda: adapter.load_state(""),
+        ):
+            with pytest.raises(ConfigurationError):
+                call()
+        assert len(sim.requests) == count
+        # and the script's own refusals come back as emulator errors
+        with pytest.raises(EmulatorError, match="whole number from 1 to 3600"):
+            adapter._call("step", frames=4000)
+        with pytest.raises(EmulatorError, match="letters, digits and underscores"):
+            adapter._call("save", slot="no/slashes")
+        with pytest.raises(EmulatorError, match="number above zero"):
+            adapter._call("speed", percent="fast")
+        adapter.disconnect()
+
+
+def test_free_run_switch_changes_capabilities() -> None:
+    with BizHawkSimulator() as sim:
+        adapter = BizHawkAdapter(port=sim.port, call_timeout_s=2.0)
+        with pytest.raises(EmulatorDisconnectedError):
+            adapter.set_free_run(True)
+        adapter.connect(timeout_s=2.0)
+        assert not adapter.free_run and adapter.capabilities().frame_advance
+        with pytest.raises(ConfigurationError):
+            adapter.set_free_run("yes")  # type: ignore[arg-type]
+        adapter.set_free_run(True)
+        assert adapter.free_run and sim.free_run and not sim.paused
+        assert not adapter.capabilities().frame_advance
+        with pytest.raises(UnsupportedCapabilityError):
+            adapter.advance_frames(1)
+        adapter.set_free_run(False)
+        assert not adapter.free_run and sim.paused
+        assert adapter.capabilities() == Capabilities.all()
+        adapter.advance_frames(1)
+        adapter.disconnect()
+
+
+def test_episode_runner_drives_the_simulator() -> None:
+    from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
+    from retro_ai_lab.learning import ActionSpace, QLearningAgent, Settings, StateEncoder
+    from retro_ai_lab.services import DiscoveryService, DiscoveryUpdated, ObservationService
+    from retro_ai_lab.training import EpisodeRunner
+    from retro_ai_lab.understanding import Encoding, Evidence, VariableKind
+
+    sure = [Evidence("test", "", 6.0)]
+    with BizHawkSimulator() as sim:
+        registry = AdapterRegistry()
+        registry.register(BizHawkAdapter)
+        bus = EventBus(on_error=lambda exc, event, handler: (_ for _ in ()).throw(exc))
+        connection = ConnectionService(registry, bus)
+        observation = ObservationService(connection, bus)
+        discovery = DiscoveryService(connection, observation, bus, experiment_every=None)
+        connection.connect("bizhawk", port=sim.port, call_timeout_s=2.0)
+        k = discovery.knowledge
+        assert k is not None
+        added = (
+            k.propose("ram", LAYOUT.lane, kind=VariableKind.POSITION, name="Lane", evidence=sure),
+            k.propose("ram", LAYOUT.speed, kind=VariableKind.SPEED, name="Speed", evidence=sure),
+            k.propose(
+                "ram",
+                LAYOUT.score,
+                encoding=Encoding.U16LE,
+                kind=VariableKind.SCORE,
+                name="Score",
+                evidence=sure,
+            ),
+        )
+        bus.publish(DiscoveryUpdated(added, (), (), ()))
+        agent = QLearningAgent(ActionSpace.from_buttons(BUTTONS), Settings(epsilon=0.5), seed=1)
+        runner = EpisodeRunner(
+            connection, observation, bus, agent, StateEncoder(k), frames_per_step=3, max_steps=20
+        )
+        start = sim.game.state.frame
+        result = runner.run_episode()
+        assert result.steps == 20 and result.frames == 60 and result.ended_by == "max_steps"
+        assert sim.game.state.frame == start + 60
+        assert [r["cmd"] for r in sim.requests].count("step") == 20
+        assert observation.inputs.by_source("ai")
+        connection.disconnect()

@@ -12,8 +12,9 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from retro_ai_lab.core import Button, EmulatorDisconnectedError, EmulatorError
+from retro_ai_lab.core import Button, ConfigurationError, EmulatorDisconnectedError, EmulatorError
 from retro_ai_lab.emulator.bizhawk import PROTOCOL_VERSION, BizHawkAdapter
+from retro_ai_lab.emulator.fake.toy_racer import ToyRacer
 from tests.unit.emulator.bizhawk.lua_host import (
     BIZHAWK_VERSION,
     PAD_BUTTONS,
@@ -51,7 +52,19 @@ def test_handshake_hold_mode_and_reconnect() -> None:
             {"name": "System Bus", "size": 65536},
         ]
         assert hello["buttons"] == sorted(["Up", "Down", "Left", "Right", "A", "B", "Start"])
-        assert hello["commands"] == ["bye", "hello", "input", "mode", "ping", "read", "screenshot"]
+        assert hello["commands"] == [
+            "bye",
+            "hello",
+            "input",
+            "load",
+            "mode",
+            "ping",
+            "read",
+            "save",
+            "screenshot",
+            "speed",
+            "step",
+        ]
         assert isinstance(hello["frame"], int)
         assert [b.name for b in adapter.buttons()] == [
             "a",
@@ -233,6 +246,95 @@ def test_screenshot_through_the_real_script(
         with pytest.raises(EmulatorError, match="did not write a screenshot"):
             adapter.capture_frame()
         assert adapter.is_connected
+        adapter.disconnect()
+        assert host.error is None
+
+
+def test_step_advances_exactly_and_keeps_the_hold() -> None:
+    with LuaScriptHost() as host:
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
+        adapter.connect(timeout_s=5.0)
+        assert adapter.capabilities().frame_advance
+        assert host.paused
+        before = host.frames
+        reference = ToyRacer(0)
+        reference.restore(host.game.snapshot())
+        adapter.set_input({Button("up", "Up")})
+        adapter.advance_frames(5)
+        assert host.frames == before + 5
+        for _ in range(5):  # the held button went into every one of those frames
+            reference.step(("up",))
+        assert host.game.snapshot() == reference.snapshot()
+        assert host.paused
+        # nothing moves while the app thinks
+        time.sleep(0.2)
+        assert host.frames == before + 5
+        # a bundled step: buttons, reads and a screenshot in one round trip
+        host.write_screenshots = True
+        answer = adapter._call(
+            "step",
+            frames=2,
+            buttons={"Up": False, "A": True},
+            reads=[{"domain": "RAM", "addr": 0, "len": 8}],
+            screenshot=True,
+        )
+        assert host.frames == before + 7
+        assert host.pressed == () and host.last_pad is not None
+        assert host.last_pad[0][b"A"] is True and host.last_pad[0][b"Up"] is False
+        assert base64.b64decode(answer["reads"][0]) == bytes(host.game.ram[:8])
+        assert base64.b64decode(answer["image"])[:8] == b"\x89PNG\r\n\x1a\n"
+        assert answer["frame"] == host.game.state.frame
+        for bad in ({"frames": 0}, {"frames": 3601}, {"frames": 1.5}, {"frames": "3"}):
+            with pytest.raises(EmulatorError, match="whole number from 1 to 3600"):
+                adapter._call("step", **bad)
+        with pytest.raises(EmulatorError, match="'reads' must be a list"):
+            adapter._call("step", frames=1, reads="RAM")
+        with pytest.raises(EmulatorError, match="'screenshot' must be true or false"):
+            adapter._call("step", frames=1, screenshot=1)
+        with pytest.raises(EmulatorError, match="has no button 'Turbo'"):
+            adapter._call("step", frames=1, buttons={"Turbo": True})
+        assert host.frames == before + 7  # refused steps move nothing
+        adapter.disconnect()
+        assert host.error is None
+
+
+def test_speed_and_save_states_through_the_real_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setenv("TMP", str(tmp_path))
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    with LuaScriptHost() as host:
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
+        adapter.connect(timeout_s=5.0)
+        caps = adapter.capabilities()
+        assert caps.speed_control and caps.save_states
+        adapter.set_speed(1.5)
+        assert host.speed == 150
+        adapter.set_speed(0.004)
+        assert host.speed == 1
+        adapter._call("speed", percent=249.6)
+        assert host.speed == 250
+        for bad in ("fast", 0, -1, True):
+            with pytest.raises(EmulatorError, match="number above zero"):
+                adapter._call("speed", percent=bad)
+        adapter.set_input({Button("up", "Up")})
+        adapter.advance_frames(3)
+        adapter.save_state("lap_1")
+        snapshot = host.game.snapshot()
+        assert [Path(p.decode()) for p in host.states] == [tmp_path / "retro_ai_lab_lap_1.State"]
+        adapter.advance_frames(10)
+        assert host.game.snapshot() != snapshot
+        adapter.load_state("lap_1")
+        assert host.game.snapshot() == snapshot
+        with pytest.raises(ConfigurationError, match=r"No save state in slot 'lap_2'"):
+            adapter.load_state("lap_2")
+        for bad in ("", "no/slashes", "..", 7, None):
+            with pytest.raises(EmulatorError, match="letters, digits and underscores"):
+                adapter._call("save", slot=bad)
+            with pytest.raises(EmulatorError, match="letters, digits and underscores"):
+                adapter._call("load", slot=bad)
+        assert host.paused and adapter.is_connected
         adapter.disconnect()
         assert host.error is None
 

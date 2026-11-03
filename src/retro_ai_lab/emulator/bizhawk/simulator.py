@@ -74,6 +74,8 @@ class BizHawkSimulator:
         self._client: socket.socket | None = None
         self._closing = False
         self._held: dict[str, bool] = dict.fromkeys(PAD, False)
+        self._speed: int | None = None
+        self._states: dict[str, bytes] = {}
 
     # ---------------------------------------------------------- lifecycle
 
@@ -152,6 +154,17 @@ class BizHawkSimulator:
     def free_run(self) -> bool:
         with self._lock:
             return self._free_run
+
+    @property
+    def speed(self) -> int | None:
+        """The last speed asked for, in percent."""
+        with self._lock:
+            return self._speed
+
+    @property
+    def slots(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(sorted(self._states))
 
     @property
     def held(self) -> dict[str, bool]:
@@ -249,6 +262,10 @@ class BizHawkSimulator:
             "screenshot": self._screenshot_cmd,
             "input": self._input,
             "read": self._read,
+            "step": self._step,
+            "speed": self._speed_cmd,
+            "save": self._save,
+            "load": self._load,
         }
 
     def _hello(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -295,6 +312,46 @@ class BizHawkSimulator:
             out.append(b64(data))
         return {"reads": out}
 
+    def _step(self, request: dict[str, Any]) -> dict[str, Any]:
+        frames = request.get("frames")
+        if isinstance(frames, bool) or not isinstance(frames, int) or not 1 <= frames <= 3600:
+            raise ConfigurationError("'frames' must be a whole number from 1 to 3600.")
+        if "buttons" in request:
+            self._input(request)
+        with self._lock:
+            pressed = tuple(b.name for b in BUTTONS if self._held.get(b.label, False))
+        for _ in range(frames):
+            self._game.step(pressed)
+        body: dict[str, Any] = {}
+        if "reads" in request:
+            body.update(self._read(request))
+        if request.get("screenshot") is True:
+            body.update(self._screenshot_cmd(request))
+        return body
+
+    def _speed_cmd(self, request: dict[str, Any]) -> dict[str, Any]:
+        percent = request.get("percent")
+        if isinstance(percent, bool) or not isinstance(percent, int | float) or percent <= 0:
+            raise ConfigurationError("'percent' must be a number above zero.")
+        with self._lock:
+            self._speed = max(1, round(percent))
+        return {}
+
+    def _save(self, request: dict[str, Any]) -> dict[str, Any]:
+        slot = _slot(request)
+        with self._lock:
+            self._states[slot] = self._game.snapshot()
+        return {}
+
+    def _load(self, request: dict[str, Any]) -> dict[str, Any]:
+        slot = _slot(request)
+        with self._lock:
+            snapshot = self._states.get(slot)
+        if snapshot is None:
+            return {"loaded": False}
+        self._game.restore(snapshot)
+        return {"loaded": True}
+
     def _input(self, request: dict[str, Any]) -> dict[str, Any]:
         buttons = request.get("buttons")
         if not isinstance(buttons, dict):
@@ -324,6 +381,13 @@ class BizHawkSimulator:
             self._free_run = free_run
             self._paused = not free_run
         return {}
+
+
+def _slot(request: dict[str, Any]) -> str:
+    slot = request.get("slot")
+    if not isinstance(slot, str) or not slot or not slot.replace("_", "").isalnum():
+        raise ConfigurationError("'slot' must be a name of letters, digits and underscores.")
+    return slot
 
 
 def _encode(body: dict[str, Any]) -> bytes:
