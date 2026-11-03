@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-203: Pixel-level frame diffs with grid cell counts, a screen activity tracker, `ScreenObserved` events fed by the game panel; NumPy dependency.
 - T-202: Byte-level memory diffs, per-byte change statistics with noise/state/constant classification, and an observation service fed by the play clock.
 - T-201: Memory snapshots (`MemorySnapshot`, `MemoryCapture`, `SnapshotRing`) and a SQLite `SnapshotArchive`.
 - T-012: PyInstaller spec, launch smoke-test script and a Windows package workflow that uploads a downloadable build.

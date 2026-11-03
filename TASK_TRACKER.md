@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-203 (Ready)
-- **Last approved checkpoint:** `main` after T-202
+- **Current task:** T-204 (Ready)
+- **Last approved checkpoint:** `main` after T-203
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -36,7 +36,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-117 | BizHawk adapter: disconnect handling and real-emulator verification | 1 | – | – | – |
 | T-201 | Memory snapshot capture and storage | 2 | Done | 46/46 | see PR #14 |
 | T-202 | Memory change detection (frame-to-frame diff) | 2 | Done | 26/26 | see PR #15 |
-| T-203 | Screen observation: frame diff and change regions | 2 | – | – | – |
+| T-203 | Screen observation: frame diff and change regions | 2 | Done | 20/20 | see PR #16 |
 | T-204 | Input recording (who pressed what, when) | 2 | – | – | – |
 | T-205 | Save-state experiment harness (repeatable trials) | 2 | – | – | – |
 | E-3 | Game Understanding (variables, events, relationships, confidence) | 3 | Epic | – | – |
@@ -272,6 +272,20 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 26 / 26 passed / 0 failed / 0 excluded (455 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** The noise/state split is the first step of discovery (Phase 3): on the toy racer it already isolates the four noise bytes, the timer and the low frame-counter byte as noise and the header as constant, leaving position/lane/speed/score/input as candidate state. A bridge deletion bug surfaced when the clock began publishing events after a test window was torn down; fixed by unsubscribing on `destroyed` and checking validity before emitting. CI on Windows/py3.11 then failed the T-201 archive performance gate (11.4 s for 1000 snapshots): each append did a full fsync. Switched the archive to `PRAGMA synchronous = NORMAL` under WAL (safe against corruption; 1000 snapshots now take ~0.1 s). Also made `observation.memory`'s import of `services` type-only, which removed a circular import that only import order had been hiding.
 
+### T-203 – Screen observation: frame diff and change regions
+- **Status:** Done
+- **Phase:** 2
+- **Objective:** Detect which parts of the picture change between frames (pixel count, bounding box, per-cell counts on a coarse grid) and accumulate per-cell activity over a run so static HUD areas can be told from the playfield.
+- **Scope:** `observation.screen` (`FrameDiff`, `diff_frames` with threshold and grid, `ScreenTracker` with `activity`, `activity_map`, `classify` into static/active/busy, automatic reset on resolution change), `ObservationService.observe_frame` publishing `ScreenObserved`, `GamePanel` pump feeding it. NumPy added as a runtime dependency (ADR-008). **Out of scope:** object/sprite detection, OCR (Phase 3).
+- **Acceptance criteria:**
+  1. Diff counts changed pixels exactly, reports the inclusive bounding box, distributes counts over grid cells that tile the frame, honours a per-channel threshold, and rejects shape mismatches, bad thresholds and bad grids.
+  2. Tracker activity is the exact fraction of transitions in which each cell changed; classification thresholds are validated.
+  3. Service feeds the tracker from every captured frame while connected, publishes `ScreenObserved`, resets on reconnect; the game panel's pump calls it.
+  4. 60 diffs of a 256x224 RGB frame complete in under 2 s.
+- **Test plan:** array view, cell bounds; identical frames, counts/bbox/cells, threshold, multichannel, rejections, property-based vs naive count and bbox, immutability; tracker seed/accumulate, classify, resolution change/reset, bad input; toy racer moves; performance (slow); service observe_frame; panel pump feeds service.
+- **Results:** 20 / 20 passed / 0 failed / 0 excluded (475 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Fixed a latent circular import (`observation.memory` imported `services` at runtime; now type-only). The panel ticks the pump once on connect so the first screen frame is observed immediately.
+
 ### Later Phase 2 tasks
 Details will be written into this file when each becomes the next task, following the template.
 
@@ -300,5 +314,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-012 completed (PR #13). Phase 1 is complete on the fake emulator; T-110+ (BizHawk) wait on ADR-005 sign-off.
 - T-201 completed (PR #14).
 - T-202 completed (PR #15).
-- Next: T-203.
+- T-203 completed (PR #16). NumPy is now a runtime dependency (ADR-008).
+- Next: T-204.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
