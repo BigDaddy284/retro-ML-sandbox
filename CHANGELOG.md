@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-605: The Learning panel says how the AI's favourite moves changed over recent goes and suggests what to try next.
 - T-604: The activity panel says what the AI is pressing and why (trying something new or its best known move), its last moves, and the goal step it is working on; `TrainingStepped` events.
 - T-603: The Progress panel counts training tries, how often a goal was reached, and the trend.
 - T-602: Learning graph in the Learning panel: a dot per go, the rolling average line, the best go ringed, and a caption in plain words.

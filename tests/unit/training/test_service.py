@@ -509,6 +509,26 @@ def test_curve_reads_the_history(lab: Lab) -> None:
         t.curve(window=0)
 
 
+def test_behaviour_changes_and_experiments_follow_the_goes(lab: Lab) -> None:
+    lab.connect()
+    t = lab.training
+    assert t.behaviour_changes() == ((), 0, 0)
+    assert t.experiments() == ()  # nothing to go on before any go
+    t.train(1)
+    changes, goes_ago, known = t.behaviour_changes()
+    assert goes_ago == 0 and known > 0 and changes == ()  # one snapshot: nothing to compare
+    t.train(3)
+    changes, goes_ago, known = t.behaviour_changes(window=2)
+    assert goes_ago == 2 and known >= 1
+    assert all(c.state_key in t.agent.table.known_states() for c in changes)  # type: ignore[union-attr]
+    changes, goes_ago, known = t.behaviour_changes(window=50)  # further back than we keep
+    assert goes_ago == 3
+    titles = [e.title for e in t.experiments(goal=lab.goals.goal, profile=lab.rewards.profile)]
+    assert "Practise fast" in titles  # four goes: too early to see a trend
+    t.forget()
+    assert t.behaviour_changes() == ((), 0, 0)
+
+
 def test_service_without_a_store_never_saves(tmp_path: Path, lab: Lab) -> None:
     t = TrainingService(lab.connection, lab.observation, lab.discovery, lab.bus, max_steps=5)
     lab.connect()

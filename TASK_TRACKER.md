@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-605 – Behaviour changes and suggested experiments
+- **Current task:** T-606 – First working demonstration on the Fake Emulator
 - **Last approved checkpoint:** `main` after T-409 (PRs #36–#42 merging in order as CI passes)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -71,7 +71,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-602 | Learning graph widget: points per go and the rolling average, drawn in the Learning panel | 6 | Done | 4/4 | see PR #44 |
 | T-603 | Progress panel: training attempts, success rate and trend beside the goal | 6 | Done | 2/2 | see PR #45 |
 | T-604 | AI activity: current and previous actions, exploring vs best-known, current objective | 6 | Done | 6/6 | see PR #46 |
-| T-605 | Behaviour changes and suggested experiments: what the AI now does differently, what to try next | 6 | Planned | – | – |
+| T-605 | Behaviour changes and suggested experiments: what the AI now does differently, what to try next | 6 | Done | 4/4 | see PR #47 |
 | T-606 | First working demonstration on the Fake Emulator: DESIGN.md §17 steps 1–10 as one scripted test, including rewards changing behaviour | 6 | Planned | – | – |
 | T-607 | Educational tips: "What's this?" explanations in simple and advanced words for every panel | 6 | Planned | – | – |
 | E-7 | Advanced Learning (DQN, hierarchical RL, demonstrations) | 7 | Epic | – | – |
@@ -759,6 +759,19 @@ Live and background training and the guided and manual modes were delivered in P
 - **Results:** 6 / 6 passed / 0 failed / 0 excluded (754 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Listening to `InputRecorded` turned out wrong: a repeated "do nothing" records no input, so the strip missed moves. The service now publishes `TrainingStepped(frame, buttons, decision)` for every step (both modes), and the strip redraws at most once per event-loop turn so fast training doesn't flood the labels. The runner exposes `last_action` (None for an unstick press) so the strip can say "to get the game going again".
 
+### T-605 – Behaviour changes and suggested experiments
+- **Status:** Done
+- **Phase:** 6
+- **Objective:** Fill the last two lines of the Learning panel from DESIGN.md §10 ("AI behaviour changes", "identified improvements", "suggested experiments"): tell the child how the AI's habits have changed over recent goes and what to try next, in plain words.
+- **Scope:** `training.insights`: `policy_of(table)` (the best known move per situation), `compare_policies(before, after)` → `BehaviourChange(state_key, before, after)` for situations whose best move changed, `describe_changes(changes, known, goes_ago, knowledge, space)` ("Over the last 10 goes the AI changed its mind in 12 of 40 situations. Where Lane=2, Speed=3 it used to press up; now it presses up + a."), `Experiment(title, why)` and `suggest_experiments(curve, agent, warning, goal, profile)` (rule-based, at most three: keep going while it is still mostly exploring; practise fast when the trend is too early; raise the reward for the step it is working on when nothing has been reached; lower a farmed reward when the exploit detector is warning; add a harder step when goals are reached often; try another personality when it is slipping). `TrainingService` keeps a snapshot of the policy at the end of every go (the last `window + 1`) and offers `behaviour_changes(window=)` and `experiments()`. `LearningPanel` gains `learning_insights` (`insights_text`) under the graph, refreshed when a go finishes. **Out of scope:** comparing two AIs (Phase 8 experiments), explaining a single move's values (a later "look inside" view).
+- **Acceptance criteria:**
+  1. Policies compare by hand; descriptions name situations with the knowledge's variable names and moves with the space's labels; nothing to say before two snapshots exist.
+  2. Each suggestion rule fires on its case and not otherwise; at most three are offered; every suggestion has a reason.
+  3. After goes the service reports changes against the snapshot `window` goes ago (or the oldest kept); the panel shows the text and updates per go; disconnect clears it.
+- **Test plan:** policy comparison and wording; suggestion rules; service snapshots over goes; panel text.
+- **Results:** 4 / 4 passed / 0 failed / 0 excluded (757 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** The suggestions are deliberately simple rules with a reason attached, so a child can see why each is offered; they will be revisited once real games show which ones help. Policy snapshots are taken once per go, so comparing habits costs nothing during play.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -817,5 +830,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-505 completed (PR #40).
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
-- Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46).
+- Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

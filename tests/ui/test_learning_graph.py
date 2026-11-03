@@ -80,10 +80,14 @@ def test_panel_shows_and_updates_the_graph(qtbot: QtBot, tmp_path: Path) -> None
     panel.show()
     assert panel.graph.curve.attempts == 0 and panel.graph.caption == EMPTY_CAPTION
     connect(context)
+    assert panel.insights_text.startswith("Finish a few goes")
     context.training.train(2)
     assert panel.graph.curve.attempts == 2
+    assert panel.insights_text.startswith("Over the last 1 go the AI ")
+    assert "\nTry next: " in panel.insights_text
     assert panel.graph.caption.startswith("2 goes so far")
     context.connection.disconnect()
     assert panel.graph.curve.attempts == 2  # the picture stays for review
+    assert panel.insights_text == ""
     connect(context)
     assert panel.graph.curve.attempts == 2  # loaded back with the brain
