@@ -111,6 +111,15 @@ class QTable:
         return table
 
 
+@dataclass(frozen=True, slots=True)
+class Decision:
+    """How the last move was picked (for the UI to explain)."""
+
+    action: int
+    explored: bool  # True when it tried something at random
+    value: float  # what the table thought the move was worth
+
+
 class QLearningAgent:
     def __init__(
         self,
@@ -124,6 +133,7 @@ class QLearningAgent:
         self._epsilon = self._settings.epsilon
         self._rng = Random(seed)
         self._table = QTable(len(space))
+        self._last_decision: Decision | None = None
         self._updates = 0
         self._episodes = 0
 
@@ -164,10 +174,19 @@ class QLearningAgent:
 
     # ------------------------------------------------------------ acting
 
+    @property
+    def last_decision(self) -> Decision | None:
+        return self._last_decision
+
     def choose(self, state: State) -> int:
         if self._rng.random() < self._epsilon:
-            return self._space.sample(self._rng)
-        return self._table.best(state, self._rng)
+            action = self._space.sample(self._rng)
+            explored = True
+        else:
+            action = self._table.best(state, self._rng)
+            explored = False
+        self._last_decision = Decision(action, explored, self._table.value(state, action))
+        return action
 
     def greedy(self, state: State) -> int:
         return self._table.best(state)
@@ -197,6 +216,7 @@ class QLearningAgent:
         return self._epsilon
 
     def reset(self) -> None:
+        self._last_decision = None
         self._table = QTable(len(self._space))
         self._epsilon = self._settings.epsilon
         self._updates = 0
@@ -247,4 +267,4 @@ def _rng_state(saved: Any) -> tuple[int, tuple[int, ...], None]:
     return int(version), tuple(int(x) for x in internal), None if gauss is None else gauss
 
 
-__all__ = ["SCHEMA_VERSION", "QLearningAgent", "QTable", "Settings"]
+__all__ = ["SCHEMA_VERSION", "Decision", "QLearningAgent", "QTable", "Settings"]
