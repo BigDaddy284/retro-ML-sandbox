@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-502: Action space built from the emulator's buttons: do nothing, singles, direction + button combos; pause buttons left out; JSON round-trip.
 - T-501: State encoder: believed variables decoded from a snapshot and binned into a small, stable state for the learner.
 - T-409: Goals panel in the Progress slot: name the goal, see each step with its detection, confidence and status, add steps (detected or by hand), reorder, tick off, set what a step comes after, switch on or off, start again.
 - T-408: Goal service: one saved goal per game with suggested objectives added as the AI learns, objectives ticked off from game events, setback penalties, and child edits that are saved and announced.

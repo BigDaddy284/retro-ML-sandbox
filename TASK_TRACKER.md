@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-502 – Action space
+- **Current task:** T-503 – Tabular Q-learning agent
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -60,7 +60,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-409 | Goals panel: edit the objective structure, see completion and confidence | 4 | Done | 6/6 | see PR #35 |
 | E-5 | Basic Learning (tabular Q-learning, save/load) | 5 | Epic | – | – |
 | T-501 | State encoder: believed variables binned into a small discrete state | 5 | Done | 6/6 | see PR #36 |
-| T-502 | Action space from the emulator's buttons (singles and sensible combos) | 5 | Planned | – | – |
+| T-502 | Action space from the emulator's buttons (singles and sensible combos) | 5 | Done | 5/5 | see PR #37 |
 | T-503 | Tabular Q-learning agent: choose, learn, explore less over time, JSON round-trip | 5 | Planned | – | – |
 | T-504 | Episode runner: act, advance, collect rewards from the services, learn, stop on reset; checkpoint restarts | 5 | Planned | – | – |
 | T-505 | Training service: independent / guided / manual modes, start / pause / stop, episode history, live or fast | 5 | Planned | – | – |
@@ -603,6 +603,19 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 6 / 6 passed / 0 failed / 0 excluded (692 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** One binning rule for every kind (exact below `bins`, doubling above) keeps lanes, speeds and lives precise while positions and scores collapse to a dozen buckets; the toy racer drive visits well under 200 states.
 
+### T-502 – Action space
+- **Status:** Done
+- **Phase:** 5
+- **Objective:** Give the learner a small, fixed menu of things it can do with the controller (DESIGN.md Phase 5 "basic action selection") built from whatever buttons the connected emulator reports, so the same learner works on any game.
+- **Scope:** `learning.actions`: `Action(index, buttons)` with `label`; `ActionSpace.from_buttons(buttons, *, combos=True, exclude=("start", "select"))` giving "do nothing", every single button, and every direction + one non-direction button combo (opposite directions never together); `ActionSpace(actions)` with `__len__`, `__getitem__`, `index_of(buttons)`, `buttons_for(index)`, `sample(rng)`, `to_dict`/`from_dict` (so a saved brain keeps its action order), and `matches(buttons)` to map a human's input to the nearest action for demonstrations later. Pause/menu buttons are left out of the learner's menu by default so it can't pause the game on itself. **Out of scope:** the agent (T-503).
+- **Acceptance criteria:**
+  1. The toy racer's seven buttons give: nothing, up, down, left, right, a, b, and the eight direction+button combos (start excluded) in a stable order.
+  2. Duplicate or empty button lists, unknown names and bad indices are rejected; `exclude` and `combos=False` work; a space with every button excluded still has "do nothing".
+  3. Round-trip through JSON keeps the order; `index_of` / `buttons_for` are inverses; `sample` only returns valid indices; `matches` picks the exact action or the largest subset.
+- **Test plan:** toy racer menu; options; validation; JSON and lookups; sampling (hypothesis); matching.
+- **Results:** 5 / 5 passed / 0 failed / 0 excluded (697 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Combos are direction + one other button only (15 actions on the toy racer); a tabular learner can't afford more, and it covers steer-and-accelerate and run-and-jump.
+
 ### Later Phase 5 tasks
 T-502 to T-507 as listed in the summary table; each gets its own section when started.
 
@@ -658,4 +671,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-408 completed (PR #34).
 - T-409 completed (PR #35). Phase 4 complete on the fake emulator.
 - Phase 5 broken into T-501..T-507. T-501 completed (PR #36).
+- T-502 completed (PR #37).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
