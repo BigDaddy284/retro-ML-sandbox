@@ -17,10 +17,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, SignalInstance
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
-from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError, Frame
+from retro_ai_lab.core import EmulatorDisconnectedError, Frame
 from retro_ai_lab.services import ConnectionService, EmulatorConnected, EmulatorDisconnected
 from retro_ai_lab.training import TrainingStateChanged
 from retro_ai_lab.ui.context import AppContext
@@ -32,12 +32,15 @@ DEFAULT_FPS = 30
 CLOCK_FPS = 60  # the play clock's frame rate (console speed); pictures ride along at DEFAULT_FPS
 NOT_CONNECTED = "Not connected. Connect to a game to see it here."
 NO_SCREEN = "This emulator can't show its screen, but the AI can still play."
+STEP_FAILED = "The emulator did not finish a frame step:"
+CAPTURE_FAILED = "The emulator did not send a picture:"
 
 log = logging.getLogger(__name__)
 
 
 class _CaptureSignals(QObject):
     done = Signal(int, object)  # the capture's generation, then the Frame or the exception
+    failed = Signal(str)  # a capture went wrong: the message, once per new message (T-828)
 
 
 class _CaptureTask(QRunnable):
@@ -83,6 +86,8 @@ class FramePump(QObject):
         self._generation = 0  # bumped by stop(): results from before it are dropped
         self._skipped = 0
         self._captured = 0
+        self._last_failure: str | None = None
+        self._signals = _CaptureSignals()
 
     @property
     def running(self) -> bool:
@@ -114,6 +119,23 @@ class FramePump(QObject):
     def captured(self) -> int:
         """Frames delivered since the pump was made."""
         return self._captured
+
+    @property
+    def failed(self) -> SignalInstance:
+        """Emits the message of a failed capture, once per new message (T-828)."""
+        return self._signals.failed
+
+    @property
+    def last_failure(self) -> str | None:
+        return self._last_failure
+
+    def _failed(self, message: str) -> None:
+        self._errors += 1
+        if message == self._last_failure:
+            return
+        self._last_failure = message
+        log.warning("Frame capture failed: %s", message)
+        self._signals.failed.emit(message)
 
     def start(self) -> None:
         self._timer.start()
@@ -158,19 +180,15 @@ class FramePump(QObject):
         if isinstance(result, EmulatorDisconnectedError):
             self.stop()
             return
-        if isinstance(result, EmulatorError):
-            self._errors += 1
-            return
         if isinstance(result, Exception):
-            self._errors += 1
-            log.warning("Frame capture failed: %s", result)
+            self._failed(str(result).strip() or result.__class__.__name__)
             return
         if not isinstance(result, Frame):
-            self._errors += 1
-            log.warning("Frame capture returned %r.", type(result).__name__)
+            self._failed(f"The capture returned {type(result).__name__!r}, not a frame.")
             return
         self._latest = result
         self._captured += 1
+        self._last_failure = None
         for cb in self._on_frame:
             cb(result)  # type: ignore[operator]
 
@@ -202,6 +220,7 @@ class GamePanel(QWidget):
         self._pad = ControllerPad(context, self)
         self._clock.set_inputs(lambda: self._pad.held)
         self._clock.frame_captured.connect(self._on_clock_frame)
+        self._clock.step_failed.connect(self._on_step_failed)
 
         controls = QHBoxLayout()
         controls.addWidget(self._play_button)
@@ -216,6 +235,7 @@ class GamePanel(QWidget):
         self._pump = FramePump(context.connection, fps=fps, parent=self)
         self._pump.subscribe(context.observation.observe_frame)
         self._pump.subscribe(self._on_frame)
+        self._pump.failed.connect(self._on_capture_failed)
         self._ai_had_controls = False
         self._resume_clock = False
         unsubscribe = (
@@ -318,6 +338,13 @@ class GamePanel(QWidget):
         else:
             self.set_status(f"Lost the game: {event.reason} {NOT_CONNECTED}")
 
+    def _on_step_failed(self, message: str) -> None:
+        """A frame step went wrong: say so where the user looks (T-828)."""
+        self.set_status(f"{self._status_prefix()} {STEP_FAILED} {message}")
+
+    def _on_capture_failed(self, message: str) -> None:
+        self.set_status(f"{self._status_prefix()} {CAPTURE_FAILED} {message}")
+
     def _on_clock_frame(self, frame: Frame) -> None:
         """A screenshot that rode along on a frame step (T-823)."""
         self._context.observation.observe_frame(frame)
@@ -338,4 +365,13 @@ def _release(pump: FramePump, unsubscribe: tuple[Callable[[], None], ...]) -> No
         off()
 
 
-__all__ = ["CLOCK_FPS", "DEFAULT_FPS", "NOT_CONNECTED", "NO_SCREEN", "FramePump", "GamePanel"]
+__all__ = [
+    "CAPTURE_FAILED",
+    "CLOCK_FPS",
+    "DEFAULT_FPS",
+    "NOT_CONNECTED",
+    "NO_SCREEN",
+    "STEP_FAILED",
+    "FramePump",
+    "GamePanel",
+]

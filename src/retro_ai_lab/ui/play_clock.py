@@ -100,6 +100,7 @@ def _step(
 class PlayClock(QObject):
     state_changed = Signal(bool)  # running?
     frame_captured = Signal(object)  # the Frame a step brought back (T-823)
+    step_failed = Signal(str)  # a step went wrong: the message, once per new message (T-828)
 
     def __init__(
         self,
@@ -121,6 +122,7 @@ class PlayClock(QObject):
         self._screenshot_every = screenshot_every
         self._pulses = 0
         self._frames_captured = 0
+        self._last_failure: str | None = None
         self._timer = QTimer(self)
         self._timer.setInterval(max(1, 1000 // fps))
         self._timer.timeout.connect(self.pulse)
@@ -192,6 +194,11 @@ class PlayClock(QObject):
         """Screenshots delivered through :attr:`frame_captured` since connect."""
         return self._frames_captured
 
+    @property
+    def last_failure(self) -> str | None:
+        """What the latest step said went wrong, or None after a good step."""
+        return self._last_failure
+
     def set_inputs(self, provider: InputsProvider | None) -> None:
         """Name who knows the held buttons (the pad); each step carries them.
 
@@ -251,16 +258,13 @@ class PlayClock(QObject):
         if isinstance(result, EmulatorDisconnectedError):
             self._stop()
             return
-        if isinstance(result, EmulatorError):
-            self._errors += 1
-            return
         if isinstance(result, Exception):
-            self._errors += 1
-            log.warning("Frame step failed: %s", result)
+            self._failed(result)
             return
         if isinstance(result, tuple):
             frames, frame = result
             self._frames += frames
+            self._last_failure = None
             if frame is not None:
                 self._frames_captured += 1
                 self.frame_captured.emit(frame)
@@ -279,11 +283,27 @@ class PlayClock(QObject):
         except EmulatorDisconnectedError:
             self._stop()
             return False
-        except EmulatorError:
-            self._errors += 1
+        except EmulatorError as exc:
+            self._failed(exc)
             return False
         self._frames += n
+        self._last_failure = None
         return True
+
+    def _failed(self, exc: Exception) -> None:
+        """Count a failed step and say so once, until the message changes (T-828).
+
+        A step that fails every frame would otherwise fill the log and the
+        window 60 times a second, and a step that fails silently leaves the
+        user with a blank screen and no clue.
+        """
+        self._errors += 1
+        message = str(exc).strip() or exc.__class__.__name__
+        if message == self._last_failure:
+            return
+        self._last_failure = message
+        log.warning("Frame step failed: %s", message)
+        self.step_failed.emit(message)
 
     # ------------------------------------------------------------ internal
 
