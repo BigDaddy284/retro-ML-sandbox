@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-204 (Ready)
-- **Last approved checkpoint:** `main` after T-203
+- **Current task:** T-205 (Ready)
+- **Last approved checkpoint:** `main` after T-204
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -37,7 +37,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-201 | Memory snapshot capture and storage | 2 | Done | 46/46 | see PR #14 |
 | T-202 | Memory change detection (frame-to-frame diff) | 2 | Done | 26/26 | see PR #15 |
 | T-203 | Screen observation: frame diff and change regions | 2 | Done | 20/20 | see PR #16 |
-| T-204 | Input recording (who pressed what, when) | 2 | – | – | – |
+| T-204 | Input recording (who pressed what, when) | 2 | Done | 19/19 | see PR #17 |
 | T-205 | Save-state experiment harness (repeatable trials) | 2 | – | – | – |
 | E-3 | Game Understanding (variables, events, relationships, confidence) | 3 | Epic | – | – |
 | E-4 | Reward System (controls, categories, personalities, goals, objectives) | 4 | Epic | – | – |
@@ -286,6 +286,20 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 20 / 20 passed / 0 failed / 0 excluded (475 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Fixed a latent circular import (`observation.memory` imported `services` at runtime; now type-only). The panel ticks the pump once on connect so the first screen frame is observed immediately.
 
+### T-204 – Input recording (who pressed what, when)
+- **Status:** Done
+- **Phase:** 2
+- **Objective:** Record every change of the held button set with the frame it took effect on and its source (human, ai, replay), so inputs can be lined up against memory and screen changes and stored with a session.
+- **Scope:** `observation.inputs` (`InputEvent`, `HeldSpan`, `InputLog` with `record`, `held_at`, `spans`, `frames_held`, `presses`, `by_source`, JSON round trip, bounded capacity), `ObservationService.record_input` publishing `InputRecorded` and tagging the current frame, `ControllerPad` recording every send as `human`, `SnapshotArchive.append_input`/`inputs` (new `inputs` table). **Out of scope:** replaying a log into the emulator (T-205 / Phase 4), AI inputs (Phase 5 plugs into the same `record_input`).
+- **Acceptance criteria:**
+  1. Events validate frame, names and source and round-trip through JSON.
+  2. The log stores only changes, keeps frames monotonic, collapses several changes on one frame to the final state, answers `held_at` exactly for any frame, and forgets the oldest events when full (counting drops).
+  3. Hold lengths and press counts are exact.
+  4. Pad presses land in the log tagged `human` with the frame the observation service is on; the log clears on reconnect; inputs persist per session in the archive and are deleted with it.
+- **Test plan:** event normalisation/round trip, rejection matrix, bad dicts; log changes-only, same-frame replacement, backwards frames, `held_at`/spans/by_source, hold lengths/presses, capacity, serialisation and order check, property-based `held_at` vs naive model; service tagging and publish, bad source, reset; archive per-session order, cascade delete, bad session, bad type; pad records human input.
+- **Results:** 19 / 19 passed / 0 failed / 0 excluded (494 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Inputs are stored as names, not `Button` objects, so logs are portable across adapters and serialisable. Only the final held set of a frame is kept because the emulator only ever sees one input per frame.
+
 ### Later Phase 2 tasks
 Details will be written into this file when each becomes the next task, following the template.
 
@@ -315,5 +329,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-201 completed (PR #14).
 - T-202 completed (PR #15).
 - T-203 completed (PR #16). NumPy is now a runtime dependency (ADR-008).
-- Next: T-204.
+- T-204 completed (PR #17).
+- Next: T-205.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from retro_ai_lab.core import Capabilities, EmulatorError, Frame
+from retro_ai_lab.core import Capabilities, ConfigurationError, EmulatorError, Frame
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import BUTTONS, LAYOUT
@@ -172,3 +172,30 @@ def test_observe_frame_tracks_screen_and_publishes(
 
 def fake_frame() -> Frame:
     return Frame(4, 4, 1, bytes(16))
+
+
+# ------------------------------------------------------------- inputs (T-204)
+
+
+def test_record_input_tags_the_current_frame_and_publishes(
+    observer: ObservationService, connection: ConnectionService, bus: EventBus
+) -> None:
+    from retro_ai_lab.services.observer import InputRecorded
+
+    seen: list[InputRecorded] = []
+    bus.subscribe(InputRecorded, seen.append)
+    assert observer.record_input(["up"]) is None  # not connected
+    connection.connect("fake")
+    first = observer.record_input(["up"])
+    assert first is not None and first.event.frame == 0 and first.event.source == "human"
+    observer.advance(4)
+    assert observer.record_input(["up"]) is None  # unchanged
+    second = observer.record_input(["up", "a"], "ai")
+    assert second is not None and second.event.frame == 4
+    assert observer.inputs.held_at(2) == {"up"}
+    assert seen == [first, second]
+    with pytest.raises(ConfigurationError):
+        observer.record_input(["up"], "ghost")
+    connection.disconnect()
+    connection.connect("fake")
+    assert len(observer.inputs) == 0

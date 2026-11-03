@@ -174,3 +174,17 @@ def test_transient_send_error_is_counted(pad: ControllerPad, context: AppContext
     pad.release("up")
     assert adapter.held == frozenset()
     assert pad.send_errors == 1
+
+
+def test_pad_input_is_recorded_as_human(pad: ControllerPad, context: AppContext) -> None:
+    """T-204: every pad change lands in the input log tagged with the frame."""
+    context.connection.connect("fake")
+    pad.press("up")
+    context.observation.advance(3)
+    pad.press("a")
+    pad.release("up")
+    log = context.observation.inputs
+    assert [(e.frame, set(e.buttons), e.source) for e in log] == [
+        (0, {"up"}, "human"),
+        (3, {"a"}, "human"),
+    ]

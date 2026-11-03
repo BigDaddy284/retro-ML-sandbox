@@ -7,12 +7,14 @@ later query can pull a single region's history without decoding the rest.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 from types import TracebackType
 
 from retro_ai_lab.core import ConfigurationError
+from retro_ai_lab.observation.inputs import InputEvent
 from retro_ai_lab.observation.memory import MemorySnapshot
 
 _SCHEMA = """
@@ -31,6 +33,14 @@ CREATE TABLE IF NOT EXISTS snapshots (
     PRIMARY KEY (session_id, seq, region)
 );
 CREATE INDEX IF NOT EXISTS snapshots_by_session ON snapshots(session_id, seq);
+CREATE TABLE IF NOT EXISTS inputs (
+    session_id  INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    seq         INTEGER NOT NULL,
+    frame       INTEGER NOT NULL,
+    buttons     TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    PRIMARY KEY (session_id, seq)
+);
 """
 
 
@@ -163,6 +173,35 @@ class SnapshotArchive:
             (session_id, region),
         ).fetchall()
         return [(int(f), bytes(d)) for f, d in rows]
+
+    # ------------------------------------------------------------- inputs
+
+    def append_input(self, session_id: int, event: InputEvent) -> int:
+        """Store one input change; returns its sequence number in the session."""
+        if not isinstance(event, InputEvent):
+            raise ConfigurationError("append_input needs an InputEvent.")
+        self._require_session(session_id)
+        row = self._db.execute(
+            "SELECT COALESCE(MAX(seq), -1) + 1 FROM inputs WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        seq = int(row[0])
+        self._db.execute(
+            "INSERT INTO inputs(session_id, seq, frame, buttons, source) VALUES (?, ?, ?, ?, ?)",
+            (session_id, seq, event.frame, json.dumps(sorted(event.buttons)), event.source),
+        )
+        return seq
+
+    def inputs(self, session_id: int) -> list[InputEvent]:
+        rows = self._db.execute(
+            "SELECT frame, buttons, source FROM inputs WHERE session_id = ? ORDER BY seq",
+            (session_id,),
+        ).fetchall()
+        return [InputEvent(int(f), frozenset(json.loads(b)), str(s)) for f, b, s in rows]
+
+    def _require_session(self, session_id: int) -> None:
+        exists = self._db.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if exists is None:
+            raise ConfigurationError(f"No session {session_id} in the archive.")
 
 
 __all__ = ["SnapshotArchive"]
