@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** none – T-114 done; next: T-115 (BizHawk adapter: memory reads)
+- **Current task:** none – T-115 done; next: T-116 (BizHawk adapter: frame advance, speed, save states)
 - **Last approved checkpoint:** `main` after T-709 (PR #58)
 - **Open blockers:** none for development. ADR-005 (BizHawk bridge) is now Accepted with its real-emulator verification left to T-117 on the user's Windows PC. ADR-006 (first demo game) is still *Proposed*: the user picks the game. ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -31,8 +31,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-112 | BizHawk adapter: capabilities and game info | 1 | Done | 26/26 | see PR #61 |
 | T-113 | BizHawk adapter: frame capture | 1 | Done | 5/5 | see PR #62 |
 | T-114 | BizHawk adapter: controller input | 1 | Done | 2/2 | see PR #63 |
-| T-115 | BizHawk adapter: memory reads | 1 | Ready | – | – |
-| T-116 | BizHawk adapter: frame advance, speed, save states | 1 | – | – | – |
+| T-115 | BizHawk adapter: memory reads | 1 | Done | 2/2 | see PR #64 |
+| T-116 | BizHawk adapter: frame advance, speed, save states | 1 | Ready | – | – |
 | T-117 | BizHawk adapter: disconnect handling and real-emulator verification | 1 | – | – | – |
 | T-201 | Memory snapshot capture and storage | 2 | Done | 46/46 | see PR #14 |
 | T-202 | Memory change detection (frame-to-frame diff) | 2 | Done | 26/26 | see PR #15 |
@@ -1037,6 +1037,22 @@ DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical l
 - **Commit:** see PR. **PR:** #63.
 - **Completion report:** The script sets the *whole* pad every frame (each button true or false) rather than only the pressed ones: `joypad.set` with a partial table would leave the other buttons to the player's controller, and a stray press from a child mid-training would change what the AI learned. The pad names come from the handshake, so both the prefixed (`P1 A`) and per-controller (`A`) naming styles are handled in one place. Once the app disconnects the script stops calling `joypad.set` altogether, which hands the controller straight back to the player (a set only lasts one frame in EmuHawk). The test that proves acceleration runs the real script in free-run mode against the Toy Racer: Up held through the script makes the car speed up, releasing stops it.
 
+### T-115 – BizHawk adapter: memory reads
+- **Status:** Done
+- **Phase:** 1 (BizHawk)
+- **Objective:** `memory_regions()` and `read_memory(region, offset, length)` on the BizHawk adapter return the emulator's memory, so the memory observation and discovery layers work unchanged on a real game.
+- **Scope:** Script: `read` command with `reads: [{domain, addr, len}]` answered with `reads: [base64…]`; each read is checked against the domains from the handshake (known name, whole-number address and length, inside the domain) and served with `memory.read_bytes_as_array(addr, len, domain)`, turned into a string in chunks (`string.char` with `table.unpack` has a stack limit). Adapter: `_do_memory_regions` lists the handshake's domains up to `max_region_bytes` (default 256 KiB; the memory observer reads every region whole every frame, and a multi-megabyte bus would swamp a line protocol and the discovery engine alike; `description.regions` still lists everything); `_do_read_memory` sends one read with the domain's EmuHawk name and decodes the answer; bad base64 is a `ProtocolError`, a short answer is caught by the base class. `memory_read` turns on through T-112's rule once `read` exists and a region survives the cap. Simulator: `read` over the Toy Racer's RAM with a `short_reads` fault. **Out of scope:** bundling reads into `step` (T-116), measuring how much memory per frame the real bridge can carry (T-117).
+- **Acceptance criteria:**
+  1. Against the simulator, `memory_read` is true, `memory_regions()` is the 32-byte `ram` region, and `read_memory` returns the Toy Racer's RAM (whole and in part); the base class refuses an unknown region and an out-of-range read before anything is sent; the simulator refuses an unknown domain, bad numbers and a read past the end with messages; a short answer is reported; bad base64 is a `ProtocolError`.
+  2. With `max_region_bytes` below the RAM size, `memory_regions()` is empty and `memory_read` is false, while `description.regions` still lists the domain.
+  3. Through the real script under `lupa`, `read_memory("ram", …)` equals the stub's RAM, a 64 KiB `system_bus` read works, several reads in one request come back in order, and the refusals have messages.
+  4. The memory observation service, pointed at the adapter over the simulator, takes a snapshot that equals the Toy Racer's RAM.
+- **Expected changes:** `adapter.py`, `simulator.py`, `retro_ai_lab.lua`, `tests/unit/emulator/bizhawk/{test_adapter,test_lua_script}.py`.
+- **Test plan:** unit – adapter against the simulator (reads, refusals, cap); script under lupa (reads, batch, refusals); observation service over the adapter. Regression – full suite.
+- **Results:** 2 / 2 passed / 0 failed / 0 excluded (adapter-vs-simulator with the observer, refusals, short answers and the size cap; script-under-lupa with whole, partial, empty, 64 KiB and batched reads plus six refusals; 879 in the full suite, on Python 3.13 and 3.11). Lint, format and strict mypy clean.
+- **Commit:** see PR. **PR:** #64.
+- **Completion report:** The memory observer reads every region whole on every capture, which is fine for a console's work RAM and hopeless for a 16 MB bus, so the adapter offers only domains up to `max_region_bytes` (256 KiB by default) and reports `memory_read` false if none survive; the handshake's full list stays visible in `description.regions`. The script converts `read_bytes_as_array`'s table to a string 4096 entries at a time because `table.unpack` of a 64 K table overflows the C stack. Reads are a list on the wire already, so `step` (T-116) can bundle them. The honest open question is throughput: a Lua table of 128 K numbers plus base64 per frame on a real EmuHawk is a T-117 measurement, and if it is too slow the observer will need to read only the regions it has learned to care about.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -1108,5 +1124,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
 - Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56). T-708 completed (PR #57). T-709 completed (PR #58): Phase 7 complete.
-- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame.
+- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame. T-115 completed (PR #64): memory reads with a region size cap.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
