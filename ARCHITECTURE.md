@@ -52,7 +52,7 @@ src/retro_ai_lab/
   education/       tips
   storage/         JSON stores: knowledge, rewards, goals, brains, saved AIs, snapshots
   services/        connection, observer, discovery, rewards, goals, experiments
-  ui/              main window, six panels, connect bar, research dialog, graphs
+  ui/              main window (six panels in dock widgets), connect bar, research dialog, graphs
   testing/         AdapterContract shared by every adapter's tests
   tools/           developer tools: profile_play (what a play session costs, T-830)
 tests/
@@ -102,6 +102,8 @@ Rules enforced by the base class:
 - Hooks for optional capabilities have defaults that raise `UnsupportedCapabilityError`, so an adapter only implements what it supports.
 - `step` and `read_many` (T-822) bundle what the UI needs each frame; their default hooks compose the primitives, and `BizHawkAdapter` sends one `step` / one `read` request instead. Each part of a `step` is checked only when used, so a step without a screenshot works on an emulator that cannot capture its screen.
 - One conversation at a time (T-817): every public operation holds the adapter's re-entrant lock, because the Game panel captures frames on a worker thread while the GUI thread (play clock, training, watchdog) may be talking to the same socket. `check_link()` never waits for that lock: if another thread holds it, the link is evidently in use and the answer is True.
+
+**Panels are docks (T-837).** `MainWindow` has no central widget: each `Panel` sits in a `QDockWidget` named `dock_<key>`, movable, floatable, closable, with nested and tabbed docks allowed, so the six can be rearranged, tabbed, floated, hidden and brought back from the toolbar's "Panels" menu (`toggleViewAction` per dock, then "Reset layout"). The default arrangement is DESIGN §10's all-visible layout (Game left, activity over rewards right, the other three along the bottom). `saveState`/`restoreState` keep the arrangement in `layout.bin` under the data folder, written on close; a missing or unusable file means the default, and tests build windows without one.
 
 **Threads in the UI (T-817).** The GUI thread must never wait on an emulator. A real one answers over a socket in tens of milliseconds, and on the user's PC 30 screenshot round trips a second on the GUI thread made the window unusable. `ConnectBar` connects on a `QThreadPool`; `FramePump` captures each frame, `PlayClock` steps each frame and takes the memory snapshot after it (T-818), and `ControllerPad` sends each change of the held buttons (T-821, merging changes made while one is in flight), on their own one-thread pools and report back by signal; a tick that finds the previous one still running is skipped, so the real rate settles to what the link delivers. Services publish events from whichever thread they run on and `EventBridge` delivers them on the GUI thread; `ConnectionService` records a dropped link once even when two workers find it together. The training tick still runs on the GUI thread. A worker reports through `ui.worker.report`, which drops the report when the signal's owner was deleted while the request was out (the window closed during a five-second timeout, T-829).
 

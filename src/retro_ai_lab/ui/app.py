@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication
 
 from retro_ai_lab import __version__
 from retro_ai_lab.ui.context import AppContext
-from retro_ai_lab.ui.main_window import MainWindow
+from retro_ai_lab.ui.main_window import LAYOUT_FILE, MainWindow
 
 APP_NAME = "Retro AI Lab"
 ORGANISATION = "RetroAILab"
@@ -44,7 +44,9 @@ def run_app(
     """
     app = create_app(argv)
     log.info("Qt application created (platform %s)", app.platformName())
-    window = MainWindow(context)
+    if context is None:
+        context = AppContext()
+    window = MainWindow(context, layout_path=context.data_dir / LAYOUT_FILE)
     window.show()
     log.info("Main window shown")
     if before_exec is not None:
