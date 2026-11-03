@@ -16,7 +16,10 @@ Two questions, both answered by experiment from a save state:
 * :func:`find_wake_button`: press one button, wait for the game to settle
   (a "WORLD 1-1" splash takes a few seconds), then ask the first question
   again. The first button that makes inputs matter is the answer, and the
-  game is left running from there.
+  game is left running from there. A press that changed something lasting
+  while the game stays deaf is the most promising kind (Start during a
+  title demo only brings the title screen back; the next press starts the
+  game), so such a button is pressed again, a few times at most (T-851).
 """
 
 from __future__ import annotations
@@ -37,10 +40,12 @@ log = logging.getLogger(__name__)
 
 WAKE_SLOT = "wakeup"  # where the search keeps the spot it is probing from
 START_SLOT = "wakeup_start"  # where the game was when the search began
+PRESS_SLOT = "wakeup_press"  # where a promising button left the game, for the next press
 DEFAULT_PER_BUTTON = 5  # frames each button is held, in turn, in the "busy" probe
 DEFAULT_SETTLE = 10  # idle frames at the end of a probe, for controller mirrors
 DEFAULT_HOLD = 8  # frames a candidate button is held
-DEFAULT_WAIT = 180  # frames to let the game settle after the press (a splash screen)
+DEFAULT_WAIT = 300  # frames to let the game settle after the press (a splash screen)
+DEFAULT_PRESSES = 3  # most presses of one button while each keeps changing something
 
 
 def inputs_matter(
@@ -90,22 +95,25 @@ def find_wake_button(
     wait: int = DEFAULT_WAIT,
     per_button: int = DEFAULT_PER_BUTTON,
     settle: int = DEFAULT_SETTLE,
+    presses: int = DEFAULT_PRESSES,
 ) -> str | None:
     """Try each candidate (``first`` first) until the playing buttons matter again.
 
     ``candidates`` are every button the console has; ``playing`` are the ones
     the AI plays with. A candidate counts when its press changes something
     lasting (the memory after pressing it and waiting differs from just
-    waiting) and the playing buttons matter afterwards. Returns the button's
-    name with the game left running after its press, or None with the game
-    back where it was.
+    waiting) and the playing buttons matter afterwards. When the press changed
+    something lasting but the playing buttons still do not matter, the same
+    button is pressed again from where it left the game, up to ``presses``
+    times in all. Returns the button's name with the game left running after
+    its press, or None with the game back where it was.
     """
     names = tuple(dict.fromkeys(candidates))
     plays = tuple(dict.fromkeys(playing))
     if not names or not plays:
         raise ConfigurationError("find_wake_button needs candidate and playing buttons.")
-    if hold < 1 or wait < 0:
-        raise ConfigurationError("hold must be positive and wait non-negative.")
+    if hold < 1 or wait < 0 or presses < 1:
+        raise ConfigurationError("hold and presses must be positive and wait non-negative.")
     if first is not None and first in names:
         names = (first, *(n for n in names if n != first))
     known = _buttons(connection)
@@ -116,12 +124,24 @@ def find_wake_button(
     again = _play(connection, capture, START_SLOT, [((), hold + wait)])
     unstable = _differences(baseline, again)
     for name in names:
-        after = _play(connection, capture, START_SLOT, [((known[name],), hold), ((), wait)])
-        if not (_differences(baseline, after) - unstable):
-            continue  # the press changed nothing lasting
-        if inputs_matter(connection, plays, per_button=per_button, settle=settle):
-            log.info("Pressing %s gets the game going.", known[name].label)
-            return name
+        press: list[tuple[tuple[Button, ...], int]] = [((known[name],), hold), ((), wait)]
+        slot, before = START_SLOT, baseline
+        for pressed in range(1, presses + 1):
+            after = _play(connection, capture, slot, press)
+            if not (_differences(before, after) - unstable):
+                break  # the press changed nothing lasting
+            if inputs_matter(connection, plays, per_button=per_button, settle=settle):
+                label = known[name].label
+                if pressed == 1:
+                    log.info("Pressing %s gets the game going.", label)
+                else:
+                    log.info("Pressing %s %d times gets the game going.", label, pressed)
+                return name
+            # The game is where the press left it (inputs_matter put it back); press
+            # again from here, compared with just waiting from here.
+            connection.call(lambda a: a.save_state(PRESS_SLOT))
+            slot = PRESS_SLOT
+            before = _play(connection, capture, PRESS_SLOT, [((), hold + wait)])
     connection.call(lambda a: a.load_state(START_SLOT))
     log.info("No button got the game going: tried %s.", ", ".join(names))
     return None
@@ -186,8 +206,10 @@ def _differences(a: MemorySnapshot, b: MemorySnapshot) -> frozenset[tuple[str, i
 __all__ = [
     "DEFAULT_HOLD",
     "DEFAULT_PER_BUTTON",
+    "DEFAULT_PRESSES",
     "DEFAULT_SETTLE",
     "DEFAULT_WAIT",
+    "PRESS_SLOT",
     "START_SLOT",
     "WAKE_SLOT",
     "find_wake_button",

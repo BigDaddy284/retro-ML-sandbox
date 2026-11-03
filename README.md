@@ -103,8 +103,10 @@ Press Start in the Learning panel wherever the game is, even on its title
 screen. The AI first checks whether its buttons change anything in the game.
 If the game ignores it (a demo is playing, or the game is over), it tries
 every button on the controller, one at a time, until it finds the one that
-gets the game going, remembers it for that game, and presses it whenever the
-game stops listening again. It checks again after a go that ended stuck or
+gets the game going (pressing a button again, a few times at most, when a press
+changed the screen but the game still ignores it, as Start does on a title
+demo), remembers it for that game, and presses it whenever the game stops
+listening again. It checks again after a go that ended stuck or
 with the game starting over. The Discovery panel's summary says
 what it found ("Start gets the game going."). To practise one part of a game,
 play to it yourself and press "Pin this spot" first.
