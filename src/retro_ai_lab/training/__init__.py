@@ -3,6 +3,7 @@
 from retro_ai_lab.training.brain import Brain
 from retro_ai_lab.training.curve import CurvePoint, LearningCurve
 from retro_ai_lab.training.episode import EpisodeResult, EpisodeRunner, EpisodeSignals
+from retro_ai_lab.training.insights import BehaviourChange, Experiment
 from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
 from retro_ai_lab.training.service import (
     EpisodeFinished,
@@ -12,6 +13,7 @@ from retro_ai_lab.training.service import (
 )
 
 __all__ = [
+    "BehaviourChange",
     "Brain",
     "CurvePoint",
     "EpisodeFinished",
@@ -19,6 +21,7 @@ __all__ = [
     "EpisodeResult",
     "EpisodeRunner",
     "EpisodeSignals",
+    "Experiment",
     "LearningCurve",
     "Mode",
     "Speed",

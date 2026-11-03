@@ -20,6 +20,9 @@ from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.learning.actions import ActionSpace
 from retro_ai_lab.learning.qlearning import Decision, QLearningAgent, Settings
 from retro_ai_lab.learning.state import StateEncoder
+from retro_ai_lab.rewards.exploitation import ExploitWarning
+from retro_ai_lab.rewards.goals import Goal
+from retro_ai_lab.rewards.model import RewardProfile
 from retro_ai_lab.services.connection import (
     ConnectionService,
     EmulatorConnected,
@@ -37,6 +40,13 @@ from retro_ai_lab.training.episode import (
     DEFAULT_UNSTICK_AFTER,
     EpisodeResult,
     EpisodeRunner,
+)
+from retro_ai_lab.training.insights import (
+    BehaviourChange,
+    Experiment,
+    compare_policies,
+    policy_of,
+    suggest_experiments,
 )
 from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
 
@@ -100,6 +110,7 @@ class TrainingService:
         self._seed = seed
         self._store = store
         self._history: deque[EpisodeRecord] = deque(maxlen=history)
+        self._policies: deque[tuple[int, dict[str, int]]] = deque(maxlen=DEFAULT_WINDOW + 1)
         self._game_id: str | None = None
         self._saves = 0
         self._fresh_start = ""
@@ -212,6 +223,30 @@ class TrainingService:
         """How the goes kept in the history have been going."""
         return LearningCurve(self._history, window)
 
+    def behaviour_changes(
+        self, window: int = DEFAULT_WINDOW
+    ) -> tuple[tuple[BehaviourChange, ...], int, int]:
+        """(changes, goes compared over, situations known now) against the policy
+        ``window`` goes ago, or the oldest snapshot kept."""
+        if self._agent is None or not self._policies:
+            return (), 0, 0
+        now = policy_of(self._agent.table)
+        candidates = [p for p in self._policies if p[0] <= self._episodes - window]
+        then_number, then = candidates[-1] if candidates else self._policies[0]
+        goes_ago = self._episodes - then_number
+        if goes_ago <= 0:
+            return (), 0, len(now)
+        return compare_policies(then, now), goes_ago, len(now)
+
+    def experiments(
+        self,
+        warning: ExploitWarning | None = None,
+        goal: Goal | None = None,
+        profile: RewardProfile | None = None,
+    ) -> tuple[Experiment, ...]:
+        """Things worth trying next, from the curve, the agent and what the caller knows."""
+        return suggest_experiments(self.curve(), self._agent, warning, goal, profile)
+
     def summary(self) -> str:
         if not self._enabled:
             return "Connect a game to start training."
@@ -301,6 +336,7 @@ class TrainingService:
             raise ConfigurationError("There is no brain to forget.")
         self._agent = QLearningAgent(self._agent.space, self._settings, seed=self._seed)
         self._history.clear()
+        self._policies.clear()
         self._episodes = 0
         self._total_steps = 0
         self._runner = None
@@ -371,6 +407,7 @@ class TrainingService:
         caps = event.capabilities
         knowledge = self._discovery.knowledge
         self._history.clear()
+        self._policies.clear()
         self._episodes = 0
         self._total_steps = 0
         self._runner = None
@@ -497,6 +534,8 @@ class TrainingService:
         self._episodes += 1
         record = EpisodeRecord(self._episodes, self._mode, result, self._observation.frame)
         self._history.append(record)
+        if self._agent is not None:
+            self._policies.append((self._episodes, policy_of(self._agent.table)))
         self._bus.publish(EpisodeFinished(record))
         if self._connection.is_connected:
             self.save()

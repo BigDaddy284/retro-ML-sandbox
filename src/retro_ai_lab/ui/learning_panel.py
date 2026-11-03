@@ -34,6 +34,7 @@ from retro_ai_lab.training import (
     Status,
     TrainingStateChanged,
 )
+from retro_ai_lab.training.insights import describe_changes, describe_experiments
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.learning_graph import LearningGraph
 
@@ -101,6 +102,9 @@ class LearningPanel(QWidget):
         self._status.setWordWrap(True)
 
         self._graph = LearningGraph(self)
+        self._insights = QLabel("", self)
+        self._insights.setObjectName("learning_insights")
+        self._insights.setWordWrap(True)
 
         self._tree = QTreeWidget(self)
         self._tree.setObjectName("goes_tree")
@@ -131,6 +135,7 @@ class LearningPanel(QWidget):
         layout.addLayout(buttons)
         layout.addWidget(self._status)
         layout.addWidget(self._graph, 2)
+        layout.addWidget(self._insights)
         layout.addWidget(self._tree, 1)
         layout.addWidget(self._note)
 
@@ -176,6 +181,10 @@ class LearningPanel(QWidget):
     @property
     def graph(self) -> LearningGraph:
         return self._graph
+
+    @property
+    def insights_text(self) -> str:
+        return self._insights.text()
 
     @property
     def ticking(self) -> bool:
@@ -296,8 +305,29 @@ class LearningPanel(QWidget):
             lines.append(t.fresh_start)
         self._status.setText("\n".join(lines))
 
+    def _show_insights(self) -> None:
+        t = self._training
+        if not t.enabled or t.space is None:
+            self._insights.setText("")
+            return
+        changes, goes_ago, known = t.behaviour_changes()
+        knowledge = self._context.discovery.knowledge
+        rewards = self._context.rewards
+        current = rewards.current_warning
+        experiments = t.experiments(
+            current.warning if current is not None else None,
+            self._context.goals.goal,
+            rewards.profile,
+        )
+        self._insights.setText(
+            describe_changes(changes, known, goes_ago, knowledge, t.space)
+            + "\n"
+            + describe_experiments(experiments)
+        )
+
     def _show_goes(self) -> None:
         self._graph.set_curve(self._training.curve())
+        self._show_insights()
         self._tree.clear()
         for record in reversed(self._training.history[-MAX_ROWS:]):
             self._tree.addTopLevelItem(QTreeWidgetItem(list(go_cells(record))))
