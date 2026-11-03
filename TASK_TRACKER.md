@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-304 (Ready)
-- **Last approved checkpoint:** `main` after T-303
+- **Current task:** T-305 (Ready)
+- **Last approved checkpoint:** `main` after T-304
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -43,7 +43,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-301 | Knowledge model: variables, evidence, confidence, JSON store | 3 | Done | 40/40 | see PR #19 |
 | T-302 | Variable candidate finder from change statistics (counters, bounded values, 16-bit pairs) | 3 | Done | 9/9 (+ diff) | see PR #20 |
 | T-303 | Input linking via experiments: which inputs move which bytes | 3 | Done | 7/7 | see PR #21 |
-| T-304 | Event detection: progression steps, resets, game over | 3 | – | – | – |
+| T-304 | Event detection: progression steps, resets, game over | 3 | Done | 8/8 | see PR #22 |
 | T-305 | Relationship discovery between events and variables | 3 | – | – | – |
 | T-306 | Discovery runner: automatic observe-experiment-propose loop with progress events | 3 | – | – | – |
 | T-307 | "What the AI is doing" panel: discoveries with confidence badges, confirm / correct / reject | 3 | – | – | – |
@@ -365,6 +365,22 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 7 / 7 passed / 0 failed / 0 excluded (562 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** First attempt checkpointed at top speed, where Up changes nothing; the fixture now checkpoints at a middling speed, which is also what the discovery runner (T-306) should do: try buttons from several different game situations.
 
+### T-304 – Event detection: progression steps, resets, game over
+- **Status:** Done
+- **Phase:** 3
+- **Objective:** Read the snapshot stream as a story using the believed variables: progress steps, unusual score jumps, setbacks and recoveries (lives, health), flags switching, and resets (several values back to their starting values at once), so rewards and relationships have events to work with.
+- **Scope:** `understanding.events` (`EventKind`, `GameEvent`, `EventDetector(knowledge, at_least=Low, gain_factor=3)`, `EventLog`). The detector only watches non-rejected progress / score / lives / health / flag variables at or above the confidence floor, re-arms when a variable is edited, and skips variables a snapshot does not cover. **Out of scope:** screen-based events (menus, transitions; a later pass once OCR exists), wiring into the live loop (T-306).
+- **Acceptance criteria:**
+  1. First sight of a variable starts watching without an event; unchanged values produce nothing.
+  2. Progress up → PROGRESS; lives/health down → SETBACK, up → RECOVERY; flag on/off → FLAG_ON/OFF; progress going down alone is not an event.
+  3. RESET only when at least two watched values return to their first-seen values in one frame and at least one dropped.
+  4. SCORE_GAIN fires only for jumps at least `gain_factor` times the running typical step.
+  5. Unknown-confidence, rejected and wrong-kind variables are ignored; the floor is adjustable; knowledge edits re-arm the watch.
+  6. On a 900-frame toy racer drive: checkpoints register as progress, crashes as setbacks, bonuses as score gains, game over as a flag, and the restart as a reset after the flag.
+- **Test plan:** first snapshot; rule matrix; reset rule (two values + drop, one value, no drop); score gain; filtering and floor; edits/reset/bad input/short snapshot; event log; toy racer story.
+- **Results:** 8 / 8 passed / 0 failed / 0 excluded (570 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** One test originally expected a plain recovery on a frame where three values returned home together; the detector's reset rule was right and the test was corrected rather than the rule.
+
 ### Later Phase 3 tasks
 Details will be written into this file when each becomes the next task, following the template.
 
@@ -399,5 +415,6 @@ Details will be written into this file when each becomes the next task, followin
 - Phase 3 broken into T-301..T-308. T-301 completed (PR #19).
 - T-302 completed (PR #20).
 - T-303 completed (PR #21).
-- Next: T-304.
+- T-304 completed (PR #22).
+- Next: T-305.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
