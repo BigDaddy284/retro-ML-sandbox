@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Changed: when training starts (and after a go that ended stuck or on a restart) the AI first checks whether its buttons change anything in the game; if not, it searches for the button that gets the game going right away instead of waiting for goes to prove the game is ignoring it (T-848).
 - Fixed: a `dictionary changed size during iteration` error from the goal service while the AI played (the knowledge was read on one thread while the relationship finder rewrote it on another); the knowledge and the discovery service now take a lock (T-847).
 - Fixed: a handful of values back at their start while hundreds of others are not no longer ends a go as "the game started over"; a restart now means at least half of everything that has moved goes home together (T-846).
 - Fixed: values that go back to their starting value every few frames (an animation counter on Super Mario Bros.' title screen that the AI had taken for a score) ended every go at once as a "restart"; after three such goes in a row the AI notes that those values cycle, says so in the log and the evidence, and stops reading their return as the game starting over (T-845).

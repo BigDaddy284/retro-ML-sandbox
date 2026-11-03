@@ -894,6 +894,10 @@ def test_the_ai_works_out_which_button_starts_the_game(
     lab: Lab, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """T-844: on a screen that ignores the pad the AI tries every button and keeps the one."""
+    import retro_ai_lab.training.service as module
+
+    # The go-start probe (T-848) would find it out first; here the goes have to show it.
+    monkeypatch.setattr(module, "inputs_matter", lambda *args, **kwargs: True)
     k = lab.connect()
     assert k.wake_button is None
     _drive_to_game_over(lab)
@@ -925,6 +929,7 @@ def test_the_ai_works_out_which_button_starts_the_game(
 
 def test_identical_goes_trigger_the_search(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """T-844: two goes with the same states although the buttons differed = a demo."""
+    import retro_ai_lab.training.service as module
     from retro_ai_lab.training.episode import EpisodeRunner
 
     bus = EventBus(on_error=lambda exc, event, handler: (_ for _ in ()).throw(exc))
@@ -944,6 +949,7 @@ def test_identical_goes_trigger_the_search(tmp_path: Path, monkeypatch: pytest.M
     lab = Lab(bus, connection, observation, discovery, None, None, training, [], [])  # type: ignore[arg-type]
     lab.connect()
     _drive_to_game_over(lab)
+    monkeypatch.setattr(module, "inputs_matter", lambda *args, **kwargs: True)  # no T-848 probe
     monkeypatch.setattr(EpisodeRunner, "fingerprint", property(lambda self: ("same",) * 8))
     monkeypatch.setattr(EpisodeRunner, "actions_varied", property(lambda self: True))
     t = lab.training
@@ -1013,3 +1019,52 @@ def test_short_resets_that_differ_are_left_alone(lab: Lab) -> None:
         _end_go_by_reset(lab, ("v3",))
     assert any(e.kind == CYCLES for e in k.get("v3").evidence)
     t.stop()
+
+
+def test_the_first_go_checks_the_game_listens(lab: Lab, caplog: pytest.LogCaptureFixture) -> None:
+    """T-848: no waiting for goes to prove it; the first go asks the game directly."""
+    k = lab.connect()
+    _drive_to_game_over(lab)
+    t = lab.training
+    caplog.set_level(logging.INFO)
+    t.start(Mode.INDEPENDENT)  # the checkpoint is the game-over screen
+    assert t.step()  # the very first step: the search runs, then go 1 begins in the game
+    assert t.wake_button == "start" and k.wake_button == "start"
+    assert t.episodes == 0 and not lab.adapter().game.state.game_over
+    assert "trying each button to get it going" in caplog.text
+    t.stop()
+
+
+def test_a_listening_game_is_probed_only_after_a_go_that_went_wrong(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-848: one probe at Start, none after goes that ran their course, one after a reset."""
+    import retro_ai_lab.training.service as module
+
+    probes: list[int] = []
+    real = module.inputs_matter
+
+    def counting(*args: object, **kwargs: object) -> bool:
+        probes.append(1)
+        return real(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(module, "inputs_matter", counting)
+    lab.connect()
+    t = lab.training
+    t.start(Mode.INDEPENDENT)  # in the game: it listens
+    assert t.step() and probes == [1] and t.wake_button is None
+    while t.episodes < 1:
+        assert t.step()
+    assert t.last is not None and t.last.result.ended_by == "max_steps"
+    assert t.step() and probes == [1]  # go 2 starts without asking again
+    _end_go_by_reset(lab, ("v1",))
+    assert t.step() and probes == [1, 1]  # a reset: ask again
+    t.stop()
+    # No save states: no probe, no error.
+    t2 = lab.training
+    lab.connection.disconnect()
+    lab.connect(capabilities=Capabilities(memory_read=True, frame_advance=True, input=True))
+    probes.clear()
+    t2.start(Mode.INDEPENDENT)
+    assert t2.step() and probes == []
+    t2.stop()
