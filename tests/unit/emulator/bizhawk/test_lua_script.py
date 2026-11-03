@@ -49,7 +49,10 @@ def test_handshake_hold_mode_and_reconnect() -> None:
         assert hello["hash"] == ROM_HASH.decode()
         assert hello["domains"] == [
             {"name": "RAM", "size": 32},
+            {"name": "WRAM", "size": 65536},
             {"name": "System Bus", "size": 65536},
+            {"name": "PRG ROM", "size": 32768},
+            {"name": "CHR VROM", "size": 8192},
         ]
         assert hello["buttons"] == sorted(["Up", "Down", "Left", "Right", "A", "B", "Start"])
         assert hello["commands"] == [
@@ -103,11 +106,21 @@ def test_memory_reads_through_the_real_script() -> None:
         adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
         adapter.connect(timeout_s=5.0)
         assert adapter.capabilities().memory_read
-        assert [r.name for r in adapter.memory_regions()] == ["ram", "system_bus"]
+        # Only live memory is offered (T-827): the bus and the ROMs the script lists are not.
+        assert [r.name for r in adapter.memory_regions()] == ["ram", "wram"]
+        assert [r.name for r in adapter.description.regions] == [
+            "ram",
+            "wram",
+            "system_bus",
+            "prg_rom",
+            "chr_vrom",
+        ]
         assert adapter.read_memory("ram", 0, 32) == host.game.ram
         assert adapter.read_memory("ram", 3, 5) == host.game.ram[3:8]
         assert adapter.read_memory("ram", 0, 0) == b""
-        assert adapter.read_memory("system_bus", 0, 65536) == bytes(65536)  # chunked unpack
+        assert adapter.read_memory("wram", 0, 65536) == bytes(65536)  # chunked unpack
+        with pytest.raises(ConfigurationError, match="Unknown memory region 'system_bus'"):
+            adapter.read_memory("system_bus", 0, 16)
         answer = adapter._call(
             "read",
             reads=[

@@ -29,7 +29,7 @@ SYSTEM = b"NES"
 ROM_NAME = b"Toy Racer (stub)"
 ROM_HASH = b"ABCDEF0123456789"
 BIZHAWK_VERSION = b"2.10"
-DOMAINS = (b"RAM", b"System Bus")
+DOMAINS = (b"RAM", b"WRAM", b"System Bus", b"PRG ROM", b"CHR VROM")
 PAD_BUTTONS = tuple(b.label.encode() for b in BUTTONS)
 TICK_S = 0.0005
 
@@ -339,8 +339,12 @@ class LuaScriptHost:
     def _domainsize(self, name: bytes) -> int:
         if name == b"RAM":
             return RAM_SIZE
-        if name == b"System Bus":
+        if name == b"WRAM" or name == b"System Bus":
             return 65536
+        if name == b"PRG ROM":
+            return 32768
+        if name == b"CHR VROM":
+            return 8192
         return 0
 
     def _readbytes(self, addr: int, length: int, domain: bytes) -> Any:
