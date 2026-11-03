@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Fixed: with BizHawk, the first frame step never finished ("The emulator did not answer within 5 seconds") and EmuHawk sat paused, because a paused EmuHawk never wakes a script waiting in `emu.frameadvance()`. A step now unpauses, runs its frames and pauses again; the Lua test host runs EmuHawk's real loop order so this cannot pass unnoticed again (T-831).
 - A profiling tool, `python -m retro_ai_lab.tools.profile_play`, plays for a few seconds in the real window against the simulator or a running emulator and prints what the emulator's round trips and the app's own per-frame work cost; the bridge link now also keeps per-command totals since connect (T-830).
 - Fixed: closing the window while a frame step was still waiting on the emulator logged an uncaught "Signal source has been deleted" error from the worker thread (T-829).
 - When a frame step or a picture fails, the Game panel's status line says what the emulator answered (once per new message, also in the log) instead of counting the failure silently (T-828).

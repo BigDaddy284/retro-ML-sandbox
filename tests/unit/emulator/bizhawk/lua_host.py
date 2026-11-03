@@ -127,6 +127,7 @@ class LuaScriptHost:
         self.pressed: tuple[str, ...] = ()
         self.last_pad: tuple[dict[bytes, bool], int | None] | None = None
         self.frames = 0
+        self._frame_waiting = False
         self.log: list[bytes] = []
         self.calls: list[str] = []
         self.error: str | None = None
@@ -214,14 +215,31 @@ class LuaScriptHost:
             time.sleep(TICK_S)
 
     def _tick(self) -> bool:
+        """One turn of EmuHawk's main loop (``MainForm.ProgramRunLoop``, T-831).
+
+        The order matters and is EmuHawk's: the pad overrides a script set
+        are latched into the controller at the top of the turn; scripts
+        waiting in ``emu.yield()`` are resumed; then, only when not paused,
+        the overrides are cleared, one frame runs with the latched pad, and
+        every waiting script is resumed, those in ``emu.frameadvance()``
+        included. A paused emulator never wakes a frame-waiting script.
+        """
+        latched = self.pressed  # InputManager.RunControllerChain
+        if not self._frame_waiting and not self._resume():  # ResumeScripts(false)
+            return False
+        if self.paused:
+            return True
+        self.pressed = ()  # ButtonOverrideAdapter.FrameTick
+        self._game.step(latched)
+        self.frames += 1
+        return self._resume()  # UpdateToolsAfter -> ResumeScripts(true)
+
+    def _resume(self) -> bool:
         ok, kind, status = self._step()
         if not ok:
             self.error = kind.decode("utf-8", "replace") if isinstance(kind, bytes) else str(kind)
             return False
-        if kind == b"frame":
-            self._game.step(self.pressed)
-            self.pressed = ()
-            self.frames += 1
+        self._frame_waiting = kind == b"frame"
         return status != b"dead"
 
     def _record(self, call: str, *, paused: bool | None = None) -> None:

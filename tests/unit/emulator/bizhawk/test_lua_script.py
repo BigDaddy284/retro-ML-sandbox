@@ -295,6 +295,35 @@ def test_screenshot_over_the_socket_through_the_real_script(
         assert host.error is None
 
 
+def test_hold_mode_step_unpauses_runs_and_pauses_again() -> None:
+    """T-831: a paused EmuHawk never wakes emu.frameadvance(), so a step unpauses first.
+
+    The host runs EmuHawk's loop order (latch the pad, resume yielders, then
+    a frame only when unpaused), which is how the user's first real run
+    failed: with the old script every step timed out after 5 s.
+    """
+    with LuaScriptHost() as host:
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
+        adapter.connect(timeout_s=5.0)
+        assert host.paused
+        calls_before = len(host.calls)
+        before = host.frames  # the game ran free until hello paused it
+        reference = ToyRacer(0)
+        reference.restore(host.game.snapshot())
+        answer = adapter._call("step", frames=1, buttons={"Up": True})
+        assert answer["frame"] == host.game.state.frame
+        assert host.frames == before + 1 and host.paused
+        reference.step(("up",))  # the pad reached the very first frame
+        assert host.game.snapshot() == reference.snapshot()
+        pad_calls = [c for c in host.calls[calls_before:] if c in ("pause", "unpause")]
+        assert pad_calls == ["unpause", "pause"]
+        assert host.pressed == ()  # nothing left armed for a frame that must not run
+        time.sleep(0.2)
+        assert host.frames == before + 1
+        adapter.disconnect()
+        assert host.error is None
+
+
 def test_step_advances_exactly_and_keeps_the_hold() -> None:
     with LuaScriptHost() as host:
         adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
