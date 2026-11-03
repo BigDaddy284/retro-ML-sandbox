@@ -6,9 +6,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMainWindow, QSplitter, QStatusBar, QToolBar, QWidget
 
 from retro_ai_lab import __version__
+from retro_ai_lab.services import ConnectionFailed, EmulatorConnected, EmulatorDisconnected
 from retro_ai_lab.ui.connect_bar import ConnectBar
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.game_panel import GamePanel
+from retro_ai_lab.ui.link_watchdog import LinkWatchdog
 from retro_ai_lab.ui.panels import PANELS, Panel
 
 WINDOW_TITLE = "Retro AI Lab"
@@ -66,6 +68,16 @@ class MainWindow(QMainWindow):
         self.set_status("Ready. Connect to a game to begin.")
         status.addPermanentWidget(_VersionLabel(self))
 
+        self._watchdog = LinkWatchdog(self._context.connection, parent=self)
+        self._watchdog.start()
+        bridge = self._context.bridge
+        unsubscribe = (
+            bridge.subscribe(EmulatorConnected, self._on_connected),
+            bridge.subscribe(EmulatorDisconnected, self._on_disconnected),
+            bridge.subscribe(ConnectionFailed, self._on_failed),
+        )
+        self.destroyed.connect(lambda *_: [off() for off in unsubscribe])
+
     # ------------------------------------------------------------- API
 
     @property
@@ -87,9 +99,25 @@ class MainWindow(QMainWindow):
     def panels(self) -> tuple[Panel, ...]:
         return tuple(self._panels[spec.key] for spec in PANELS)
 
+    @property
+    def watchdog(self) -> LinkWatchdog:
+        return self._watchdog
+
     def set_status(self, text: str) -> None:
         bar = self.statusBar()
         bar.showMessage(text)
+
+    def _on_connected(self, event: EmulatorConnected) -> None:
+        self.set_status(f"Connected to {event.game_info.title}. Have fun!")
+
+    def _on_disconnected(self, event: EmulatorDisconnected) -> None:
+        if event.expected:
+            self.set_status("Disconnected. Connect to a game to begin.")
+        else:
+            self.set_status(f"Lost the game: {event.reason} You can reconnect from the toolbar.")
+
+    def _on_failed(self, event: ConnectionFailed) -> None:
+        self.set_status(f"Couldn't connect: {event.reason}")
 
 
 class _VersionLabel(QWidget):

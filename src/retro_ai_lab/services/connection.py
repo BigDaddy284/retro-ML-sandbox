@@ -17,6 +17,7 @@ exactly once.
 from __future__ import annotations
 
 import contextlib
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -27,6 +28,7 @@ from retro_ai_lab.core import (
     Capabilities,
     ConfigurationError,
     EmulatorDisconnectedError,
+    EmulatorError,
     GameInfo,
 )
 from retro_ai_lab.core.events import EventBus
@@ -34,6 +36,9 @@ from retro_ai_lab.emulator.base import DEFAULT_CONNECT_TIMEOUT_S, EmulatorAdapte
 from retro_ai_lab.emulator.registry import AdapterRegistry
 
 T = TypeVar("T")
+log = logging.getLogger(__name__)
+
+LINK_LOST = "The emulator went away."
 
 
 class ConnectionState(Enum):
@@ -156,15 +161,39 @@ class ConnectionService:
         )
         return session
 
-    def disconnect(self) -> None:
-        """Close the connection. A no-op when not connected."""
+    def disconnect(self) -> str:
+        """Close the connection. A no-op when not connected.
+
+        Returns the reason recorded in the ``EmulatorDisconnected`` event. A
+        backend that fails while closing is still treated as disconnected
+        (the failure is logged and mentioned in the reason, never raised),
+        because from the child's point of view the game is gone either way.
+        """
         if self._state is not ConnectionState.CONNECTED or self._adapter is None:
-            return
+            return ""
         adapter = self._adapter
+        reason = "Disconnected."
         try:
             adapter.disconnect()
+        except EmulatorError as exc:
+            log.warning("Adapter %s failed while disconnecting: %s", adapter.name, exc)
+            reason = f"Disconnected, although the emulator complained: {_message(exc)}"
         finally:
-            self._finish_disconnect(expected=True, reason="Disconnected.")
+            self._finish_disconnect(expected=True, reason=reason)
+        return reason
+
+    def check(self) -> bool:
+        """Verify the live link is still up; report a silent drop exactly once.
+
+        Returns True if connected after the check. Use it from a watchdog so a
+        link that dies while nothing is being sent is noticed promptly.
+        """
+        if self._state is not ConnectionState.CONNECTED or self._adapter is None:
+            return False
+        if self._adapter.is_connected:
+            return True
+        self._finish_disconnect(expected=False, reason=LINK_LOST)
+        return False
 
     def call(self, operation: Callable[[EmulatorAdapter], T]) -> T:
         """Run ``operation`` on the live adapter.
@@ -179,7 +208,10 @@ class ConnectionService:
         try:
             return operation(adapter)
         except EmulatorDisconnectedError as exc:
-            self._finish_disconnect(expected=False, reason=_message(exc))
+            reason = _message(exc)
+            if reason == str(EmulatorDisconnectedError()):
+                reason = LINK_LOST  # the generic message; say something a child can read
+            self._finish_disconnect(expected=False, reason=reason)
             raise
 
     # ------------------------------------------------------------ helpers
@@ -205,6 +237,7 @@ def _message(exc: BaseException) -> str:
 
 
 __all__ = [
+    "LINK_LOST",
     "ConnectionFailed",
     "ConnectionService",
     "ConnectionState",
