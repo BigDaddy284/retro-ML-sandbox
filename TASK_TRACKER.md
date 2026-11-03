@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** Phase 3 planning (next: E-3 tasks)
-- **Last approved checkpoint:** `main` after T-205
+- **Current task:** T-302 (Ready)
+- **Last approved checkpoint:** `main` after T-301
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -40,6 +40,14 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-204 | Input recording (who pressed what, when) | 2 | Done | 19/19 | see PR #17 |
 | T-205 | Save-state experiment harness (repeatable trials) | 2 | Done | 12/12 | see PR #18 |
 | E-3 | Game Understanding (variables, events, relationships, confidence) | 3 | Epic | – | – |
+| T-301 | Knowledge model: variables, evidence, confidence, JSON store | 3 | Done | 40/40 | see PR #19 |
+| T-302 | Variable candidate finder from change statistics (counters, bounded values, 16-bit pairs) | 3 | – | – | – |
+| T-303 | Input linking via experiments: which inputs move which bytes | 3 | – | – | – |
+| T-304 | Event detection: progression steps, resets, game over | 3 | – | – | – |
+| T-305 | Relationship discovery between events and variables | 3 | – | – | – |
+| T-306 | Discovery runner: automatic observe-experiment-propose loop with progress events | 3 | – | – | – |
+| T-307 | "What the AI is doing" panel: discoveries with confidence badges, confirm / correct / reject | 3 | – | – | – |
+| T-308 | Knowledge persistence wiring: auto-save per game, export / import from the UI | 3 | – | – | – |
 | E-4 | Reward System (controls, categories, personalities, goals, objectives) | 4 | Epic | – | – |
 | E-5 | Basic Learning (tabular Q-learning, save/load) | 5 | Epic | – | – |
 | E-6 | Training Interface (live/background, modes, graphs, history) | 6 | Epic | – | – |
@@ -314,7 +322,21 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 12 / 12 passed / 0 failed / 0 excluded (506 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Phase 2 (observation) is complete on the fake emulator: memory snapshots, diffs, screen diffs, input log and the experiment harness give Phase 3 everything it needs to start discovering what bytes mean.
 
-### Later Phase 2 tasks
+### T-301 – Knowledge model: variables, evidence, confidence, JSON store
+- **Status:** Done
+- **Phase:** 3
+- **Objective:** Give the understanding engine a place to put what it believes, with every belief carrying its evidence and a confidence level that only a person can raise to Confirmed (DESIGN.md §3.5, §3.6).
+- **Scope:** `understanding.knowledge` (`Confidence` ordered enum, `Encoding` with decoders, `VariableKind`, `Evidence`, `Variable` with derived confidence and `decode(snapshot)`, `Knowledge` with propose / add / update / support / confirm / correct / reject / remove, lookups by kind and confidence, `needs_help()`, JSON round trip with schema version), `storage.knowledge.KnowledgeStore` (one JSON file per game, atomic writes, `export`/`load` anywhere). **Out of scope:** producing beliefs (T-302+), events and relationships (T-304/305 extend the model), UI (T-307).
+- **Acceptance criteria:**
+  1. Confidence is ordered; automatic confidence comes from evidence weight thresholds and never reaches Confirmed; a rejected belief reads as Unknown.
+  2. Decoders for u8, s8, u16 LE/BE, BCD and flag are exact and reject wrong widths or non-BCD bytes.
+  3. Knowledge refuses duplicate ids and duplicate live locations, lets a rejected location be re-proposed, keeps user confirm/correct/reject as evidence, and round-trips through JSON (property-tested) including a newer-schema refusal.
+  4. The store writes human-readable JSON atomically, maps awkward game ids to safe file names, ignores foreign files, and reports read/write failures as `ConfigurationError`.
+- **Test plan:** confidence order/labels/thresholds/negative weight; decoder matrix and rejections; variable defaults, evidence accumulation, snapshot decode, rejection matrix, evidence and variable round trips; knowledge empty state, propose/add/lookup, update/support/queries, confirm/correct/reject/remove, round trip, bad dicts, property-based round trip; store folder/round trip, load_or_new/delete, awkward ids, foreign files, export/load errors, file-as-folder.
+- **Results:** 40 / 40 passed / 0 failed / 0 excluded (546 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Phase 3 was broken into T-301..T-308 (table above). Confidence is derived, not stored, so editing evidence can never leave a stale level behind; `new_id()` reserves nothing until `add` succeeds.
+
+### Later Phase 3 tasks
 Details will be written into this file when each becomes the next task, following the template.
 
 ### T-110 – Spike: confirm BizHawk Lua ↔ socket protocol
@@ -345,5 +367,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-203 completed (PR #16). NumPy is now a runtime dependency (ADR-008).
 - T-204 completed (PR #17).
 - T-205 completed (PR #18). Phase 2 complete on the fake emulator.
-- Next: Phase 3 (E-3) task breakdown, then T-301.
+- Phase 3 broken into T-301..T-308. T-301 completed (PR #19).
+- Next: T-302.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
