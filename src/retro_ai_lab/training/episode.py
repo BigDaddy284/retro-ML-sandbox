@@ -10,6 +10,7 @@ episode can start from the same checkpoint (DESIGN.md §9).
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from retro_ai_lab.core import Button, ConfigurationError, EmulatorError
@@ -151,14 +152,22 @@ class EpisodeRunner:
         return self._signals
 
     @property
+    def frames_per_step(self) -> int:
+        return self._frames_per_step
+
+    @property
     def unsticks(self) -> int:
         """Times Start was pressed because nothing was changing (a game-over screen)."""
         return self._unsticks
 
     # ------------------------------------------------------------ driving
 
-    def begin(self) -> State:
-        """Start an episode: restore the checkpoint if there is one, read the first state."""
+    def begin(self, *, restore: bool = True) -> State:
+        """Start an episode: restore the checkpoint if there is one, read the first state.
+
+        ``restore=False`` carries on from wherever the game is, even with a checkpoint
+        (when the child is the one playing).
+        """
         if self.running:
             raise ConfigurationError("An episode is already running.")
         self._steps = 0
@@ -168,16 +177,18 @@ class EpisodeRunner:
         self._ended_by = None
         self._same_state = 0
         self._buttons = {b.name: b for b in self._connection.call(lambda a: a.buttons())}
-        if self._harness is not None and self._harness.has_checkpoint:
+        if restore and self._harness is not None and self._harness.has_checkpoint:
             self._harness.restore()
         self._encoder.refresh()
-        self._signals.start()
+        # Observe before listening: putting the game back to the checkpoint looks like
+        # a restart to the understanding engine, and that must not end the new episode.
         latest = self._observation.observe()
         snapshot = latest.snapshot if latest is not None else self._observation.latest
         if snapshot is None:
             raise ConfigurationError(
                 "Can't see the game's memory, so there is nothing to learn from."
             )
+        self._signals.start()
         self._state = self._encoder.encode(snapshot)
         self._states.add(self._state.key)
         return self._state
@@ -214,7 +225,27 @@ class EpisodeRunner:
             self._ended_by = "disconnected"
             self._signals.stop()
             return False
-        self._frames += self._frames_per_step
+        return self._settle(state, action, self._frames_per_step)
+
+    def observe_step(self, buttons: Iterable[str], frames: int) -> bool:
+        """Learn from a step someone else drove (the child, via the play clock).
+
+        ``buttons`` are what was held and ``frames`` how many frames passed since the
+        last step; the action learned is the one in the space that matches the buttons.
+        Returns False once the episode is over.
+        """
+        if self._state is None:
+            raise ConfigurationError("Call begin() before observe_step().")
+        if self._ended_by is not None:
+            return False
+        if frames < 1:
+            raise ConfigurationError("frames must be at least 1.")
+        action = self._agent.space.matches(buttons).index
+        return self._settle(self._state, action, frames)
+
+    def _settle(self, state: State, action: int | None, frames: int) -> bool:
+        """After the frames passed: collect the reward, read the next state, learn."""
+        self._frames += frames
         reward, resets = self._signals.take()
         snapshot = self._observation.latest
         next_state = self._encoder.encode(snapshot) if snapshot is not None else state

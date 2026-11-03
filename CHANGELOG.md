@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-505: Training service with independent, guided and manual (learn from the child) modes, start / pause / resume / stop, a history of goes, checkpoint restarts and fast or live stepping; wired into the app context.
 - T-504: Episode runner: the agent acts, frames advance, rewards announced by the services are collected and learned from; episodes end on the game's reset, a step limit or link loss; checkpoint restarts; Start pressed when stuck.
 - T-503: Tabular Q-learning agent: epsilon-greedy choice, textbook update, exploration decaying per episode, plain-words stats, JSON round-trip that refuses mismatched controls.
 - T-502: Action space built from the emulator's buttons: do nothing, singles, direction + button combos; pause buttons left out; JSON round-trip.
