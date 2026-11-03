@@ -12,6 +12,7 @@ import pytest
 from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError, ProtocolError
 from retro_ai_lab.emulator.bizhawk.protocol import (
     MAX_LINE,
+    CallStats,
     LineChannel,
     Link,
     decode_response,
@@ -123,3 +124,111 @@ def test_peer_closed_probes_without_sending() -> None:
     assert channel.peer_closed()
     channel.close()
     assert channel.peer_closed()  # our own closed channel counts too, quietly
+
+
+# ------------------------------------------------------------- T-819 timing
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _timed_link(report_every_s: float = 5.0) -> tuple[Link, socket.socket, _Clock]:
+    ours, theirs = socket.socketpair()
+    clock = _Clock()
+    link = Link(LineChannel(ours), timeout_s=1.0, report_every_s=report_every_s, clock=clock)
+    return link, theirs, clock
+
+
+def _answer(theirs: socket.socket, request_id: int) -> None:
+    theirs.sendall(f'{{"id":{request_id},"ok":true}}\n'.encode())
+
+
+def test_link_times_every_call_per_command() -> None:
+    link, theirs, clock = _timed_link()
+    assert link.summary() == "no calls" and link.stats == {}
+
+    # The clock moves while the answer is awaited: patch receive to advance it.
+    original = link._channel.receive_line
+    steps = [0.03, 0.05, 0.02]
+
+    def slow_receive(timeout_s: float) -> bytes:
+        clock.now += steps.pop(0)
+        return original(timeout_s)
+
+    link._channel.receive_line = slow_receive  # type: ignore[method-assign]
+    _answer(theirs, 1)
+    link.call("screenshot")
+    _answer(theirs, 2)
+    link.call("screenshot")
+    _answer(theirs, 3)
+    link.call("step", frames=1)
+    stats = link.stats
+    assert stats["screenshot"].count == 2
+    assert stats["screenshot"].average_s == pytest.approx(0.04)
+    assert stats["screenshot"].max_s == pytest.approx(0.05)
+    assert stats["step"].count == 1 and stats["step"].max_s == pytest.approx(0.02)
+    assert link.summary() == (
+        "screenshot \u00d72 avg 40 ms max 50 ms; step \u00d71 avg 20 ms max 20 ms"
+    )
+    theirs.close()
+
+
+def test_a_failed_call_is_still_timed() -> None:
+    link, theirs, clock = _timed_link()
+    original = link._channel.receive_line
+
+    def slow_receive(timeout_s: float) -> bytes:
+        clock.now += 0.25
+        return original(timeout_s)
+
+    link._channel.receive_line = slow_receive  # type: ignore[method-assign]
+    theirs.sendall(b'{"id":99,"ok":true}\n')  # the wrong id: a protocol error
+    with pytest.raises(ProtocolError):
+        link.call("ping")
+    assert link.stats["ping"].count == 1
+    assert link.stats["ping"].max_s == pytest.approx(0.25)
+    theirs.close()
+
+
+def test_link_reports_once_per_window_and_starts_afresh(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    link, theirs, clock = _timed_link(report_every_s=5.0)
+    with caplog.at_level("INFO", logger="retro_ai_lab.emulator.bizhawk.protocol"):
+        _answer(theirs, 1)
+        link.call("screenshot")
+        assert not caplog.records  # the window is still open
+        clock.now += 5.0
+        _answer(theirs, 2)
+        link.call("step", frames=1)  # the window is over: this call reports
+        assert [r.getMessage() for r in caplog.records] == [
+            "Emulator link, last 5 s: screenshot \u00d71 avg 0 ms max 0 ms; "
+            "step \u00d71 avg 0 ms max 0 ms"
+        ]
+        assert link.stats == {} and link.summary() == "no calls"
+        _answer(theirs, 3)
+        link.call("ping")
+        assert len(caplog.records) == 1  # a new window has begun
+        assert list(link.stats) == ["ping"]
+    theirs.close()
+
+
+def test_an_idle_link_never_reports(caplog: pytest.LogCaptureFixture) -> None:
+    link, theirs, clock = _timed_link(report_every_s=1.0)
+    with caplog.at_level("INFO", logger="retro_ai_lab.emulator.bizhawk.protocol"):
+        clock.now += 60.0
+        assert link.summary() == "no calls"
+    assert not caplog.records
+    theirs.close()
+
+
+def test_call_stats_describe_rounds_to_milliseconds() -> None:
+    stats = CallStats()
+    stats.add(0.0334)
+    stats.add(0.0616)
+    assert stats.describe("screenshot") == "screenshot \u00d72 avg 48 ms max 62 ms"

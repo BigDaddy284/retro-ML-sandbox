@@ -164,7 +164,7 @@ The adapter reports `frame_advance` only in hold mode.
 
 ### 5.4 Throughput expectations
 
-Memory reads are small (the app reads a few regions of up to a few KB per step; base64 adds a third). A screenshot is a PNG written to disk, read back and base64'd in Lua: 10–100 KB and a few milliseconds per frame on a console-sized image, which is fine at the app's observation rate (the services capture frames at a few per second, not every step). If T-117 finds screenshots too slow, `comm.mmfScreenshot()` (a memory-mapped file the app can `mmap` by name on Windows) is the drop-in optimisation.
+Memory reads are small (the app reads a few regions of up to a few KB per step; base64 adds a third). A screenshot is a PNG written to disk, read back and base64'd in Lua: 10–100 KB and a few milliseconds per frame on a console-sized image, which is fine at the app's observation rate (the services capture frames at a few per second, not every step). If T-117 finds screenshots too slow, `comm.mmfScreenshot()` (a memory-mapped file the app can `mmap` by name on Windows) is the drop-in optimisation. `Link` times every call and logs a per-command summary (count, average, slowest) every 5 s (T-819), so the user's log says what each command actually costs before any such change is made.
 
 ### 5.5 Testing without an emulator
 
