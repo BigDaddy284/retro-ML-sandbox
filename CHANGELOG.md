@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Fixed: with BizHawk, the app watched every memory domain every frame, ROMs and the whole system bus included (about 100 KB a frame on a NES, with reads that can poke hardware registers), which could make each frame step take seconds and the screen stay blank. Only live RAM is watched now (T-827).
 - The game runs at console speed, 60 frames a second, when you play it yourself; it ran at 30 before. Pictures still refresh 30 times a second (T-826).
 - On the same PC, screenshots are handed over as a file the app names and reads itself, instead of a base64 copy made in Lua and sent through the socket; `image_transfer="socket"` keeps the old route for an emulator on another PC (T-825).
 - A training step is one request to the emulator as well: buttons, frames and the memory snapshot travel together (T-824).

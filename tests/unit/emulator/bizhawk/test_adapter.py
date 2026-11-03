@@ -508,3 +508,35 @@ def test_a_screenshot_file_the_app_did_not_ask_for_is_refused() -> None:
         with pytest.raises(ProtocolError, match="did not ask for"):
             adapter._frame_from({"image_file": "/somewhere/else.png"})
         adapter.disconnect()
+
+
+# ------------------------------------------------- T-827 live memory only
+
+
+@pytest.mark.parametrize(
+    ("ident", "live"),
+    [
+        ("ram", True),
+        ("wram", True),
+        ("iwram", True),
+        ("ciram", True),
+        ("oam", True),
+        ("sram", True),
+        ("vram", True),
+        ("palette", True),
+        ("io", True),
+        ("chr", True),
+        ("system_bus", False),
+        ("ppu_bus", False),
+        ("prg_rom", False),
+        ("chr_vrom", False),
+        ("rom", False),
+        ("bios", False),
+        ("cart0", False),
+        ("cartram", False),
+    ],
+)
+def test_live_memory_is_ram_not_rom_bus_or_bios(ident: str, live: bool) -> None:
+    from retro_ai_lab.emulator.bizhawk.adapter import is_live_memory
+
+    assert is_live_memory(ident) is live

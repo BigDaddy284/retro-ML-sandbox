@@ -156,7 +156,7 @@ Binary data (memory bytes, screenshots) is base64. `frame` is `emu.framecount()`
 | `ping` | – | – | – | – |
 | `bye` | – | – | closes the connection, unpauses | – |
 
-Names the emulator uses (domains such as `System Bus`, buttons such as `P1 A`) are kept on the Lua side; the adapter maps them to the app's lowercase identifiers (`system_bus`, `a`) and back, so the app's types stay unchanged.
+Names the emulator uses (domains such as `System Bus`, buttons such as `P1 A`) are kept on the Lua side; the adapter maps them to the app's lowercase identifiers (`system_bus`, `a`) and back, so the app's types stay unchanged. The adapter offers only live memory as regions (T-827): domains named for ROM, VROM, BIOS, a bus or a cartridge are listed by the bridge but not watched, since the observer reads every region whole every frame and a NES bus plus ROMs is 100 KB a frame against 2 KB of RAM, and reading a bus can touch hardware registers.
 
 ### 5.3 Timing and the two run modes
 

@@ -87,6 +87,9 @@ disconnect and watch it run again.
 
 * One app connection at a time; a second connection is refused until the
   first disconnects.
+* Only live memory is watched: ROM, BIOS and bus domains (`System Bus`,
+  `PPU Bus`) are left out, because they never change or mirror what RAM
+  already says, and reading a bus can poke hardware registers.
 * Memory regions above 256 KiB (a whole system bus, for example) are not
   offered to the learning side, because the app reads a region whole every
   step. The handshake still lists them.

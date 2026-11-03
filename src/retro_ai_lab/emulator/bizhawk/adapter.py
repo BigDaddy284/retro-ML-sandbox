@@ -55,6 +55,21 @@ The memory observer reads every region whole, every frame; a multi-megabyte
 bus would swamp both the line protocol and the discovery engine.
 """
 
+NOT_LIVE_MEMORY_WORDS = frozenset({"rom", "vrom", "bus", "bios"})
+"""Words in a domain's name that mark it as not worth snapshotting (T-827).
+
+Only live, writable memory tells the AI anything: ROM and BIOS never change,
+and a bus (EmuHawk's ``System Bus``, ``PPU Bus``) mirrors RAM and ROM plus
+hardware registers, some of which change the game's state when read. On a
+NES those domains are 100 KB a frame against 2 KB of RAM.
+"""
+
+
+def is_live_memory(ident: str) -> bool:
+    """Is region ``ident`` (the app's lowercase name) worth reading every frame?"""
+    words = ident.split("_")
+    return not (set(words) & NOT_LIVE_MEMORY_WORDS or ident.startswith("cart"))
+
 
 class BizHawkAdapter(EmulatorAdapter):
     name = "bizhawk"
@@ -250,7 +265,11 @@ class BizHawkAdapter(EmulatorAdapter):
         return self.description.buttons
 
     def _do_memory_regions(self) -> Sequence[MemoryRegion]:
-        return tuple(r for r in self.description.regions if r.size <= self._max_region_bytes)
+        return tuple(
+            r
+            for r in self.description.regions
+            if r.size <= self._max_region_bytes and is_live_memory(r.name)
+        )
 
     def _do_read_memory(self, region: str, offset: int, length: int) -> bytes:
         return self._do_read_many([(region, offset, length)])[0]
@@ -402,5 +421,7 @@ __all__ = [
     "DEFAULT_MAX_REGION_BYTES",
     "IMAGE_TRANSFERS",
     "LOCAL_HOSTS",
+    "NOT_LIVE_MEMORY_WORDS",
     "BizHawkAdapter",
+    "is_live_memory",
 ]
