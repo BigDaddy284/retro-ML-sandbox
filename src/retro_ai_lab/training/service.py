@@ -68,6 +68,7 @@ from retro_ai_lab.training.insights import (
 from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
 
 CHECKPOINT_SLOT = "training"
+PRACTISE_SLOT = "practise"  # the save-state slot of the spot the child pinned (T-508)
 DEFAULT_HISTORY = 200
 DEFAULT_PROMOTE_AT = 1000  # known situations before an "auto" brain moves to a network
 
@@ -159,6 +160,7 @@ class TrainingService:
         self._manual_frames = 0
         self._last_frame = 0
         self._busy = False
+        self._spot_pinned = False
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
         bus.subscribe(MemoryObserved, self._on_memory)
@@ -259,6 +261,11 @@ class TrainingService:
         return self._store
 
     @property
+    def spot_pinned(self) -> bool:
+        """True while a pinned spot (DESIGN.md §9 checkpoint training) is in force."""
+        return self._spot_pinned
+
+    @property
     def game_id(self) -> str | None:
         return self._game_id
 
@@ -334,6 +341,36 @@ class TrainingService:
         return text
 
     # ------------------------------------------------------------ controls
+
+    def pin_spot(self) -> None:
+        """Keep the game's current position: every go and every Start restarts here.
+
+        DESIGN.md §9 "Checkpoint Training": the child plays to the hard part once, pins
+        it, and the AI practises that section until the spot is forgotten.
+        """
+        if not self._enabled:
+            raise ConfigurationError("Connect a game before picking a spot to practise.")
+        if self._status is not Status.IDLE:
+            raise ConfigurationError("Stop training before picking a spot to practise.")
+        harness = self._harness
+        if harness is None or not harness.available():
+            raise UnsupportedCapabilityError(
+                "save_states", "This console can't keep a spot: it has no save states."
+            )
+        self._connection.call(lambda a: a.save_state(PRACTISE_SLOT))
+        self._spot_pinned = True
+        self._announce("spot pinned")
+
+    def unpin_spot(self) -> None:
+        """Forget the pinned spot; goes start wherever the game is again."""
+        if not self._spot_pinned:
+            return
+        self._spot_pinned = False
+        self._announce("spot forgotten")
+
+    def _restore_spot(self) -> None:
+        if self._spot_pinned and self._connection.is_connected:
+            self._connection.call(lambda a: a.load_state(PRACTISE_SLOT))
 
     def set_mode(self, mode: Mode) -> None:
         if not isinstance(mode, Mode):
@@ -600,6 +637,7 @@ class TrainingService:
                     outcomes.append(runner.run_episode())
                 results[name] = tuple(outcomes)
             harness.restore()
+            self._restore_spot()
         finally:
             self._busy = False
             self._runner = None
@@ -672,6 +710,7 @@ class TrainingService:
             self.save()
         self._enabled = False
         self._harness = None
+        self._spot_pinned = False  # save states don't outlive the link
         self._status = Status.IDLE
         if was_running:
             self._announce("disconnected")
@@ -782,6 +821,7 @@ class TrainingService:
             return
         try:
             if self._harness.available():
+                self._restore_spot()  # a pinned spot is where every go starts
                 self._harness.checkpoint()
         except EmulatorError:
             pass  # link loss is announced by the connection service

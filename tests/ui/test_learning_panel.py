@@ -272,3 +272,40 @@ def test_learn_from_my_moves_again(qtbot: QtBot, context: AppContext) -> None:
     learning.rehearse()
     assert agent.updates == before + 3 and "learned from your 3 moves again" in learning.note_text
     w.close()
+
+
+def test_practise_from_here_pins_and_forgets_the_spot(
+    panel: LearningPanel, context: AppContext
+) -> None:
+    from retro_ai_lab.ui.learning_panel import (
+        PIN_TEXT,
+        PINNED_NOTE,
+        SPOT_LINE,
+        UNPIN_TEXT,
+        UNPINNED_NOTE,
+    )
+
+    button = panel.findChild(object, "spot_button")
+    assert button is not None and button.text() == PIN_TEXT and not button.isEnabled()
+    connect(context)
+    t = context.training
+    assert button.isEnabled()
+    panel.toggle_spot()
+    assert t.spot_pinned and button.text() == UNPIN_TEXT
+    assert panel.note_text == PINNED_NOTE and SPOT_LINE in panel.status_text
+    panel.start()
+    assert not button.isEnabled()
+    panel.tick()
+    panel.stop()
+    assert button.isEnabled() and button.text() == UNPIN_TEXT
+    panel.toggle_spot()
+    assert not t.spot_pinned and button.text() == PIN_TEXT
+    assert panel.note_text == UNPINNED_NOTE and SPOT_LINE not in panel.status_text
+    context.connection.disconnect()
+    connect(
+        context,
+        capabilities=Capabilities(
+            memory_read=True, screen_capture=True, frame_advance=True, input=True
+        ),
+    )
+    assert not button.isEnabled()
