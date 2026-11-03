@@ -26,6 +26,12 @@ from tests.unit.emulator.bizhawk.lua_host import (
 )
 
 
+def _registry() -> Any:
+    from retro_ai_lab.emulator.registry import default_registry
+
+    return default_registry()
+
+
 def wait_until(check: Any, *, timeout_s: float = 5.0) -> None:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -92,7 +98,7 @@ def test_handshake_hold_mode_and_reconnect() -> None:
         assert host.frames == frames_before
         adapter.disconnect()
         wait_until(lambda: not host.paused)
-        assert host.calls[-1] == "unpause"
+        assert host.calls[-2:] == ["unpause", "displaymessages"]  # hands the emulator back
         # the emulator runs again, and the script takes a new connection
         wait_until(lambda: host.frames > frames_before)
         adapter.connect(timeout_s=5.0)
@@ -323,7 +329,50 @@ def test_a_read_that_fails_names_the_region() -> None:
         with pytest.raises(EmulatorError, match=r"could not read 8 bytes at 4 of 'RAM': .*peek"):
             adapter.read_memory("ram", 4, 8)
         assert adapter.is_connected  # a refused read is not a lost link
+        # T-833: the region is left out from now on, so the next plan skips it
+        assert adapter.unreadable_regions == {"ram"}
+        assert [r.name for r in adapter.memory_regions()] == ["wram"]
+        assert adapter.read_memory("wram", 0, 4) == bytes(4)
         adapter.disconnect()
+        assert host.error is None
+
+
+def test_a_region_refused_mid_game_is_dropped_and_the_snapshots_go_on() -> None:
+    """T-833: the user's EmuHawk refused 'CPU registers' on every step after hello."""
+    from retro_ai_lab.core.events import EventBus
+    from retro_ai_lab.services import ConnectionService
+    from retro_ai_lab.services.observer import ObservationService
+
+    with LuaScriptHost() as host:
+        bus = EventBus()
+        connection = ConnectionService(_registry(), bus)
+        observation = ObservationService(connection, bus, ring_capacity=10)
+        connection.connect("bizhawk", port=host.port, call_timeout_s=5.0, timeout_s=5.0)
+        assert observation.snapshot_reads() == (("ram", 0, 32), ("wram", 0, 65536))
+        host.unreadable.add(b"WRAM")
+        reads = observation.snapshot_reads()
+        with pytest.raises(EmulatorError, match="could not read 65536 bytes at 0 of 'WRAM'"):
+            connection.call(lambda a: a.step(1, reads=reads))
+        # the next step plans without it and the snapshot lands
+        reads = observation.snapshot_reads()
+        assert reads == (("ram", 0, 32),)
+        result = connection.call(lambda a: a.step(1, reads=reads))
+        event = observation.advance(1, snapshot=result.reads)
+        assert event is not None and event.snapshot.get("ram") == host.game.ram
+        assert observation.observe() is not None  # the unbundled path replans too
+        connection.disconnect()
+        assert host.error is None
+
+
+def test_screenshot_messages_are_off_while_connected() -> None:
+    """T-833: EmuHawk's '<path> saved.' message on every picture is silenced."""
+    with LuaScriptHost() as host:
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
+        assert host.messages_shown
+        adapter.connect(timeout_s=5.0)
+        assert not host.messages_shown
+        adapter.disconnect()
+        wait_until(lambda: host.messages_shown)
         assert host.error is None
 
 

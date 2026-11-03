@@ -73,6 +73,7 @@ return function(py, chunk, lua_port)
     pause = function() py.pause() end,
     unpause = function() py.unpause() end,
     ispaused = function() return py.ispaused() end,
+    displaymessages = function(on) py.displaymessages(on) end,
     getversion = function() return py.version() end,
     speedmode = function(p) py.speedmode(p) end,
     screenshot = function(path) py.screenshot(path) end,
@@ -135,6 +136,7 @@ class LuaScriptHost:
         self.screenshots: list[bytes] = []
         self.write_screenshots = True
         self.unreadable: set[bytes] = set()  # domains whose peek raises (T-832)
+        self.messages_shown = True  # client.displaymessages (T-833)
         self.states: dict[bytes, bytes] = {}
         self._bridge: dict[str, Any] = {
             "bind": self._bind,
@@ -151,6 +153,7 @@ class LuaScriptHost:
             "pause": lambda: self._record("pause", paused=True),
             "unpause": lambda: self._record("unpause", paused=False),
             "ispaused": lambda: self.paused,
+            "displaymessages": self._displaymessages,
             "version": lambda: BIZHAWK_VERSION,
             "speedmode": self._speedmode,
             "screenshot": self._screenshot,
@@ -343,6 +346,10 @@ class LuaScriptHost:
             client.close()
 
     # --------------------------------------------------- emulator stand-ins
+
+    def _displaymessages(self, on: bool) -> None:
+        self._record("displaymessages")
+        self.messages_shown = bool(on)
 
     def _speedmode(self, percent: float) -> None:
         self._record("speedmode")
