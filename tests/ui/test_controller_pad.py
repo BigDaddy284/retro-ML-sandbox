@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from pytestqt.qtbot import QtBot
 
 from retro_ai_lab.core import Capabilities
@@ -53,20 +56,28 @@ def test_builds_buttons_from_the_emulator(pad: ControllerPad, context: AppContex
     assert pad.message == NOT_CONNECTED
 
 
-def test_press_and_release_send_held_set(pad: ControllerPad, context: AppContext) -> None:
+def _delivered(qtbot: QtBot, pad: ControllerPad, context: AppContext) -> frozenset[object]:
+    """Wait for the pad's held set to reach the emulator (it goes by a worker)."""
+    qtbot.waitUntil(lambda: not pad.sending and adapter_of(context).held == pad.held)
+    return adapter_of(context).held
+
+
+def test_press_and_release_send_held_set(
+    qtbot: QtBot, pad: ControllerPad, context: AppContext
+) -> None:
     context.connection.connect("fake")
     seen: list[frozenset[object]] = []
     pad.input_changed.connect(seen.append)
     assert pad.press("up")
-    assert adapter_of(context).held == frozenset({BY_NAME["up"]})
+    assert _delivered(qtbot, pad, context) == frozenset({BY_NAME["up"]})
     assert pad.press("a")
-    assert adapter_of(context).held == frozenset({BY_NAME["up"], BY_NAME["a"]})
+    assert _delivered(qtbot, pad, context) == frozenset({BY_NAME["up"], BY_NAME["a"]})
     assert not pad.press("up")  # already held
     assert pad.release("up")
-    assert adapter_of(context).held == frozenset({BY_NAME["a"]})
+    assert _delivered(qtbot, pad, context) == frozenset({BY_NAME["a"]})
     assert not pad.release("up")
     pad.release_all()
-    assert adapter_of(context).held == frozenset()
+    assert _delivered(qtbot, pad, context) == frozenset()
     pad.release_all()  # nothing held: no extra signal
     assert seen == [
         frozenset({BY_NAME["up"]}),
@@ -86,10 +97,10 @@ def test_on_screen_buttons_by_mouse(qtbot: QtBot, pad: ControllerPad, context: A
     context.connection.connect("fake")
     w = pad.widget_for("b")
     qtbot.mousePress(w, Qt.MouseButton.LeftButton)
-    assert adapter_of(context).held == frozenset({BY_NAME["b"]})
+    assert _delivered(qtbot, pad, context) == frozenset({BY_NAME["b"]})
     assert w.isDown()
     qtbot.mouseRelease(w, Qt.MouseButton.LeftButton)
-    assert adapter_of(context).held == frozenset()
+    assert _delivered(qtbot, pad, context) == frozenset()
 
 
 def test_keyboard_mapping(qtbot: QtBot, pad: ControllerPad, context: AppContext) -> None:
@@ -97,25 +108,25 @@ def test_keyboard_mapping(qtbot: QtBot, pad: ControllerPad, context: AppContext)
     pad.setFocus()
     qtbot.keyPress(pad, Qt.Key.Key_Up)
     qtbot.keyPress(pad, Qt.Key.Key_Z)
-    assert adapter_of(context).held == frozenset({BY_NAME["up"], BY_NAME["a"]})
+    assert _delivered(qtbot, pad, context) == frozenset({BY_NAME["up"], BY_NAME["a"]})
     assert pad.widget_for("up").isDown()
     qtbot.keyRelease(pad, Qt.Key.Key_Up)
-    assert adapter_of(context).held == frozenset({BY_NAME["a"]})
+    assert _delivered(qtbot, pad, context) == frozenset({BY_NAME["a"]})
     qtbot.keyPress(pad, Qt.Key.Key_Return)
-    assert BY_NAME["start"] in adapter_of(context).held
+    assert BY_NAME["start"] in _delivered(qtbot, pad, context)
     qtbot.keyPress(pad, Qt.Key.Key_F5)  # unmapped: ignored
-    assert BY_NAME["start"] in adapter_of(context).held
+    assert BY_NAME["start"] in _delivered(qtbot, pad, context)
     assert len(adapter_of(context).held) == 2
 
 
-def test_auto_repeat_is_ignored(pad: ControllerPad, context: AppContext) -> None:
+def test_auto_repeat_is_ignored(qtbot: QtBot, pad: ControllerPad, context: AppContext) -> None:
     context.connection.connect("fake")
     assert pad.key_down(int(Qt.Key.Key_Up))
     assert not pad.key_down(int(Qt.Key.Key_Up), auto_repeat=True)
     assert not pad.key_up(int(Qt.Key.Key_Up), auto_repeat=True)
-    assert BY_NAME["up"] in adapter_of(context).held
+    assert BY_NAME["up"] in _delivered(qtbot, pad, context)
     assert pad.key_up(int(Qt.Key.Key_Up))
-    assert adapter_of(context).held == frozenset()
+    assert _delivered(qtbot, pad, context) == frozenset()
 
 
 def test_custom_keymap(qtbot: QtBot, context: AppContext) -> None:
@@ -124,7 +135,7 @@ def test_custom_keymap(qtbot: QtBot, context: AppContext) -> None:
     context.connection.connect("fake")
     assert pad.key_down(int(Qt.Key.Key_J))
     assert not pad.key_down(int(Qt.Key.Key_Up))
-    assert adapter_of(context).held == frozenset({BY_NAME["a"]})
+    assert _delivered(qtbot, pad, context) == frozenset({BY_NAME["a"]})
 
 
 def test_emulator_without_input_disables_pad(pad: ControllerPad, context: AppContext) -> None:
@@ -145,16 +156,20 @@ def test_disconnect_releases_everything(pad: ControllerPad, context: AppContext)
     assert seen == [frozenset()]
 
 
-def test_dropped_link_while_sending_does_not_crash(pad: ControllerPad, context: AppContext) -> None:
+def test_dropped_link_while_sending_does_not_crash(
+    qtbot: QtBot, pad: ControllerPad, context: AppContext
+) -> None:
     context.connection.connect("fake", drop_after_ops=0)
     assert pad.press("up")  # the send drops the link
+    qtbot.waitUntil(lambda: pad.message == NOT_CONNECTED)
     assert not context.connection.is_connected
-    assert pad.message == NOT_CONNECTED
     assert pad.held == frozenset()
     assert pad.send_errors == 0  # a drop is not counted as a glitch
 
 
-def test_transient_send_error_is_counted(pad: ControllerPad, context: AppContext) -> None:
+def test_transient_send_error_is_counted(
+    qtbot: QtBot, pad: ControllerPad, context: AppContext
+) -> None:
     from retro_ai_lab.core import EmulatorError
 
     context.connection.connect("fake")
@@ -170,9 +185,9 @@ def test_transient_send_error_is_counted(pad: ControllerPad, context: AppContext
 
     adapter._do_set_input = flaky  # type: ignore[method-assign]
     pad.press("up")
-    assert pad.send_errors == 1
+    qtbot.waitUntil(lambda: pad.send_errors == 1)
     pad.release("up")
-    assert adapter.held == frozenset()
+    assert _delivered(qtbot, pad, context) == frozenset()
     assert pad.send_errors == 1
 
 
@@ -188,3 +203,85 @@ def test_pad_input_is_recorded_as_human(pad: ControllerPad, context: AppContext)
         (0, {"up"}, "human"),
         (3, {"a"}, "human"),
     ]
+
+
+# ------------------------------------------------------ T-821 off the GUI thread
+
+
+class _SlowInput:
+    """Makes the fake adapter's set_input wait for a gate, and records each call."""
+
+    def __init__(self, adapter: FakeEmulatorAdapter) -> None:
+        self.gate = threading.Event()
+        self.calls: list[tuple[int, frozenset[object]]] = []
+        original = adapter._do_set_input
+
+        def slow(pressed: frozenset[object]) -> None:
+            self.calls.append((threading.get_ident(), pressed))
+            self.gate.wait(5)
+            original(pressed)  # type: ignore[arg-type]
+
+        adapter._do_set_input = slow  # type: ignore[method-assign]
+
+
+def test_press_returns_at_once_and_sends_on_a_worker(
+    qtbot: QtBot, pad: ControllerPad, context: AppContext
+) -> None:
+    context.connection.connect("fake")
+    slow = _SlowInput(adapter_of(context))
+    started = time.perf_counter()
+    assert pad.press("up")
+    assert time.perf_counter() - started < 0.5  # did not wait for the emulator
+    assert pad.held == frozenset({BY_NAME["up"]}) and pad.sending
+    fired: list[bool] = []
+    QTimer.singleShot(0, lambda: fired.append(True))
+    qtbot.waitUntil(lambda: bool(fired))  # the window keeps going meanwhile
+    slow.gate.set()
+    qtbot.waitUntil(lambda: not pad.sending)
+    assert len(slow.calls) == 1 and slow.calls[0][0] != threading.get_ident()
+    assert adapter_of(context).held == frozenset({BY_NAME["up"]})
+
+
+def test_changes_during_a_send_are_merged_into_one_more_send(
+    qtbot: QtBot, pad: ControllerPad, context: AppContext
+) -> None:
+    context.connection.connect("fake")
+    slow = _SlowInput(adapter_of(context))
+    assert pad.press("up")
+    assert pad.press("a")  # while "up" is on its way
+    assert pad.release("up")
+    assert pad.sends == 1 and pad.held == frozenset({BY_NAME["a"]})
+    slow.gate.set()
+    qtbot.waitUntil(lambda: pad.sends == 2 and not pad.sending)
+    assert [pressed for _, pressed in slow.calls] == [
+        frozenset({BY_NAME["up"]}),
+        frozenset({BY_NAME["a"]}),
+    ]
+    assert adapter_of(context).held == frozenset({BY_NAME["a"]})
+
+
+def test_a_merged_send_still_goes_out_after_a_glitch(
+    qtbot: QtBot, pad: ControllerPad, context: AppContext
+) -> None:
+    from retro_ai_lab.core import EmulatorError
+
+    context.connection.connect("fake")
+    adapter = adapter_of(context)
+    gate = threading.Event()
+    original = adapter._do_set_input
+    calls: list[frozenset[object]] = []
+
+    def flaky(pressed: frozenset[object]) -> None:
+        calls.append(pressed)
+        if len(calls) == 1:
+            gate.wait(5)
+            raise EmulatorError("glitch")
+        original(pressed)  # type: ignore[arg-type]
+
+    adapter._do_set_input = flaky  # type: ignore[method-assign]
+    assert pad.press("up")
+    assert pad.press("a")  # merged while the first send is failing
+    gate.set()
+    qtbot.waitUntil(lambda: pad.send_errors == 1 and not pad.sending)
+    assert calls == [frozenset({BY_NAME["up"]}), frozenset({BY_NAME["up"], BY_NAME["a"]})]
+    assert adapter.held == frozenset({BY_NAME["up"], BY_NAME["a"]})
