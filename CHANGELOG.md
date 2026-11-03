@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-301: Knowledge model (variables with evidence and derived confidence, user confirm/correct/reject) and a per-game JSON knowledge store with export/import.
 - T-205: Save-state experiment harness: repeatable trials from a checkpoint with memory and screen diffs, and trial comparison to find input-dependent bytes.
 - T-204: Input recording: `InputLog` of held-button changes per frame and source, `InputRecorded` events, pad inputs recorded as human, inputs stored per session in the archive.
 - T-203: Pixel-level frame diffs with grid cell counts, a screen activity tracker, `ScreenObserved` events fed by the game panel; NumPy dependency.
