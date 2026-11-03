@@ -215,6 +215,16 @@ def test_link_reports_once_per_window_and_starts_afresh(
         link.call("ping")
         assert len(caplog.records) == 1  # a new window has begun
         assert list(link.stats) == ["ping"]
+        # T-830: the totals keep every call since the link opened.
+        assert {name: stats.count for name, stats in link.totals.items()} == {
+            "screenshot": 1,
+            "step": 1,
+            "ping": 1,
+        }
+        assert link.summary(lifetime=True) == (
+            "screenshot \u00d71 avg 0 ms max 0 ms; step \u00d71 avg 0 ms max 0 ms; "
+            "ping \u00d71 avg 0 ms max 0 ms"
+        )
     theirs.close()
 
 

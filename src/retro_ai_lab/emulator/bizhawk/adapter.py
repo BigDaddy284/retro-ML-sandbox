@@ -139,6 +139,11 @@ class BizHawkAdapter(EmulatorAdapter):
         return self._image_transfer
 
     @property
+    def link_summary(self) -> str:
+        """What every call since connect cost, slowest command first (T-830)."""
+        return "no calls" if self._link is None else self._link.summary(lifetime=True)
+
+    @property
     def image_path(self) -> str:
         """Where the script writes screenshots when they travel as a file."""
         return self._image_path

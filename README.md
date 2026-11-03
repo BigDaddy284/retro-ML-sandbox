@@ -84,6 +84,19 @@ scripts. See [docs/BIZHAWK.md](docs/BIZHAWK.md) and [docs/MGBA.md](docs/MGBA.md)
 for setup and for the opt-in real-emulator tests that verify each bridge on
 your machine.
 
+To see what playing costs on your PC, run the profiling tool while the
+bridge script is loaded:
+
+```bash
+python -m retro_ai_lab.tools.profile_play --adapter bizhawk   # or: --adapter mgba
+python -m retro_ai_lab.tools.profile_play                     # the built-in simulator, no emulator needed
+```
+
+It plays for five seconds (`--seconds` changes that) in the real window and
+prints how many frames the clock managed against how many it wanted, what each
+bridge command cost, what the app's own bookkeeping took per step and per
+picture, and the longest stall of the window's thread.
+
 ## Windows build
 
 Every push to `main` runs the **Package** workflow, which builds `RetroAILab.exe` with PyInstaller, launches it as a smoke test and uploads the folder as the `RetroAILab-windows` artifact (Actions tab → latest Package run → Artifacts). To build locally: `pip install pyinstaller && pyinstaller packaging/retro_ai_lab.spec --noconfirm`.

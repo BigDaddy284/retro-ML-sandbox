@@ -540,3 +540,16 @@ def test_live_memory_is_ram_not_rom_bus_or_bios(ident: str, live: bool) -> None:
     from retro_ai_lab.emulator.bizhawk.adapter import is_live_memory
 
     assert is_live_memory(ident) is live
+
+
+def test_link_summary_covers_every_call_since_connect() -> None:
+    """T-830: the profiling tool reads the lifetime totals through the adapter."""
+    with BizHawkSimulator() as sim:
+        adapter = BizHawkAdapter(port=sim.port)
+        assert adapter.link_summary == "no calls"
+        adapter.connect(timeout_s=2.0)
+        adapter.step(1)
+        adapter.step(1)
+        summary = adapter.link_summary
+        assert "step \u00d72" in summary and "hello \u00d71" in summary
+        adapter.disconnect()
