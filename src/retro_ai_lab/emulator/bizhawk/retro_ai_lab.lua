@@ -430,6 +430,36 @@ function handlers.mode(req)
   return {}
 end
 
+-- Where screenshots go on their way to the app: the user's temp folder.
+local function screenshot_path()
+  local dir = os.getenv("TEMP") or os.getenv("TMP") or os.getenv("TMPDIR")
+  if dir and dir ~= "" then
+    return dir .. "/retro_ai_lab_frame.png"
+  end
+  return os.tmpname() .. ".png"
+end
+
+local function take_screenshot()
+  local path = screenshot_path()
+  os.remove(path)
+  client.screenshot(path)
+  local file = io.open(path, "rb")
+  if file == nil then
+    error("EmuHawk did not write a screenshot.", 0)
+  end
+  local data = file:read("*a")
+  file:close()
+  os.remove(path)
+  if data == nil or #data == 0 then
+    error("EmuHawk wrote an empty screenshot.", 0)
+  end
+  return base64.encode(data)
+end
+
+function handlers.screenshot(req)
+  return { image = take_screenshot() }
+end
+
 function handlers.bye(req)
   closing = true
   return {}

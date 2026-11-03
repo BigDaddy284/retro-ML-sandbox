@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** none – T-112 done; next: T-113 (BizHawk adapter: frame capture)
+- **Current task:** none – T-113 done; next: T-114 (BizHawk adapter: controller input)
 - **Last approved checkpoint:** `main` after T-709 (PR #58)
 - **Open blockers:** none for development. ADR-005 (BizHawk bridge) is now Accepted with its real-emulator verification left to T-117 on the user's Windows PC. ADR-006 (first demo game) is still *Proposed*: the user picks the game. ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -29,8 +29,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-110 | Spike: confirm BizHawk Lua ↔ socket protocol | 1 | Done | n/a (docs only) | see PR #59 |
 | T-111 | BizHawk adapter: connect and handshake | 1 | Done | 25/25 | see PR #60 |
 | T-112 | BizHawk adapter: capabilities and game info | 1 | Done | 26/26 | see PR #61 |
-| T-113 | BizHawk adapter: frame capture | 1 | Ready | – | – |
-| T-114 | BizHawk adapter: controller input | 1 | – | – | – |
+| T-113 | BizHawk adapter: frame capture | 1 | Done | 5/5 | see PR #62 |
+| T-114 | BizHawk adapter: controller input | 1 | Ready | – | – |
 | T-115 | BizHawk adapter: memory reads | 1 | – | – | – |
 | T-116 | BizHawk adapter: frame advance, speed, save states | 1 | – | – | – |
 | T-117 | BizHawk adapter: disconnect handling and real-emulator verification | 1 | – | – | – |
@@ -1005,6 +1005,22 @@ DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical l
 - **Commit:** see PR. **PR:** #61.
 - **Completion report:** Capabilities are now data from the bridge, not a promise in the adapter: the script lists its command names in `hello`, and each flag needs its command(s) plus the thing it acts on (a button, a domain, hold mode). With only the handshake commands implemented, the adapter reports nothing, so the base class refuses `memory_regions()` even though the regions are already known, which is exactly right until `read` exists (T-115). Names stay EmuHawk's on the wire and become the app's identifiers at the edge, both ways, so later commands can send `System Bus` while the app keeps `system_bus`. An EmuHawk without a game (`system` `NULL`) is refused at connect with a plain instruction.
 
+### T-113 – BizHawk adapter: frame capture
+- **Status:** Done
+- **Phase:** 1 (BizHawk)
+- **Objective:** `capture_frame()` on the BizHawk adapter returns the emulator's screen as a :class:`Frame`.
+- **Scope:** Script: `screenshot` command (`client.screenshot(path)` to a file in the temp folder, read back, base64, file removed; a missing file is an error the app can show). Adapter: `_do_capture_frame` asks for `screenshot`, decodes the PNG into an RGB `Frame` numbered with the response's `frame`; a `null` image is an `EmulatorError`, undecodable bytes a `ProtocolError`. `emulator/bizhawk/image.py`: `decode_image(bytes, number)` and `encode_png(frame)` on QtGui's `QImage` (already a dependency; no QtWidgets, nothing from the UI layer; a 256×240 PNG decodes in under a millisecond, where a pure-Python PNG unfilter would take a tenth of a second). Simulator: `screenshot` answers with the Toy Racer's screen as PNG. Test host: `client.screenshot(path)` writes the Toy Racer's screen to the path so the script's file round trip is real. `screen_capture` turns on by itself through T-112's rule. **Out of scope:** capturing inside `step` (T-116), frame rate tuning on the real machine (T-117).
+- **Acceptance criteria:**
+  1. `encode_png`/`decode_image` round-trip grey, RGB and RGBA frames to an RGB frame with the same pixels; bad bytes raise `ProtocolError`; the frame number is carried.
+  2. Against the simulator, `capabilities().screen_capture` is true and `capture_frame()` equals the Toy Racer's rendered screen (64×48, 3 channels) with the current frame number; `image: null` → `EmulatorError`; bad base64 → `ProtocolError`.
+  3. Through the real script under `lupa`, `capture_frame()` returns the stub's screen, the temp file is gone afterwards, and a screenshot that was not written is reported, not crashed on.
+  4. Nothing else changes: the fake adapter and every upper layer keep passing.
+- **Expected changes:** `emulator/bizhawk/image.py` (new), `adapter.py`, `simulator.py`, `retro_ai_lab.lua`, `tests/unit/emulator/bizhawk/{test_image,test_adapter,test_lua_script,lua_host}.py`, `ARCHITECTURE.md` §5.
+- **Test plan:** unit – image round trips and failures; adapter against the simulator; script under lupa with the real file round trip and the missing-file case. Regression – full suite.
+- **Results:** 5 / 5 passed / 0 failed / 0 excluded (3 image, 1 adapter-vs-simulator with three fault cases, 1 script-under-lupa with the real file round trip and the missing-file case; 875 in the full suite, on Python 3.13 and 3.11). Lint, format and strict mypy clean.
+- **Commit:** see PR. **PR:** #62.
+- **Completion report:** The screenshot goes through a file because that is the only way EmuHawk's Lua gives pixels to a script without the `comm` socket server: `client.screenshot(path)` into the temp folder, read back, base64'd, removed. Under `lupa` the stubbed `client.screenshot` writes a real PNG of the Toy Racer, so the script's file handling is exercised for real, including the case where nothing was written. Decoding uses QtGui's `QImage` (under a millisecond for a console-sized PNG) rather than a hand-written PNG unfilter that would cost a tenth of a second per frame in Python; `QImageWriter` encodes for the simulator and tests because `QImage.save`'s stubs and runtime disagree about the format argument across PySide6 releases. Frames come out as packed RGB; alpha is dropped. The cost of a screenshot on a real machine (PNG encode plus file plus base64 in Lua) is a T-117 measurement; `comm.mmfScreenshot` remains the fallback in ARCHITECTURE.md §5.4.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -1076,5 +1092,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
 - Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56). T-708 completed (PR #57). T-709 completed (PR #58): Phase 7 complete.
-- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands.
+- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

@@ -19,6 +19,7 @@ from typing import Any
 
 import lupa.lua54 as lua54
 
+from retro_ai_lab.emulator.bizhawk.image import encode_png
 from retro_ai_lab.emulator.fake.toy_racer import BUTTONS, RAM_SIZE, ToyRacer
 
 SCRIPT = Path(__file__).resolve().parents[4] / (
@@ -130,6 +131,7 @@ class LuaScriptHost:
         self.error: str | None = None
         self.exit_hooks = 0
         self.screenshots: list[bytes] = []
+        self.write_screenshots = True
         self.states: dict[bytes, bytes] = {}
         self._bridge: dict[str, Any] = {
             "bind": self._bind,
@@ -327,8 +329,11 @@ class LuaScriptHost:
         self.speed = float(percent)
 
     def _screenshot(self, path: bytes) -> None:
+        """``client.screenshot(path)``: write the screen as PNG (unless told not to)."""
         self._record("screenshot")
         self.screenshots.append(path)
+        if self.write_screenshots:
+            Path(path.decode()).write_bytes(encode_png(self._game.render()))
 
     def _domainsize(self, name: bytes) -> int:
         if name == b"RAM":
