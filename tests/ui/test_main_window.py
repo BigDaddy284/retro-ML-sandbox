@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QSplitter
@@ -184,9 +185,9 @@ def test_run_app_exit_after_ms() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_real_entry_point_launches_headless_and_exits_zero() -> None:
+def test_real_entry_point_launches_headless_and_exits_zero(tmp_path: Path) -> None:
     """The launch smoke test: the real CLI, Qt and window in a fresh process."""
-    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen", "RETRO_AI_LAB_DATA_DIR": str(tmp_path)}
     result = subprocess.run(
         [sys.executable, "-m", "retro_ai_lab", "--exit-after-ms", "200"],
         capture_output=True,
@@ -196,3 +197,7 @@ def test_real_entry_point_launches_headless_and_exits_zero() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+    # T-815: the run leaves a log naming the startup milestones.
+    text = (tmp_path / "logs" / "retro-ai-lab.log").read_text(encoding="utf-8")
+    for line in ("starting", "Qt application created", "Main window shown", "Event loop finished"):
+        assert line in text
