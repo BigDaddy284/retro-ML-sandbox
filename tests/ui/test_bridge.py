@@ -68,3 +68,17 @@ def test_detach_stops_forwarding_but_local_publish_still_works(qapp: QApplicatio
     assert seen == []
     assert bridge.publish_local(Ping(6)) == 1
     assert seen == [Ping(6)]
+
+
+def test_deleted_bridge_stops_forwarding(qapp: QApplication) -> None:
+    """T-202: a bridge whose Qt side is gone must not break the bus."""
+    import shiboken6
+
+    bus = EventBus(on_error=lambda exc, event, handler: (_ for _ in ()).throw(exc))
+    bridge = EventBridge(bus)
+    seen: list[Ping] = []
+    bridge.subscribe(Ping, seen.append)
+    bus.publish(Ping(1))
+    shiboken6.delete(bridge)
+    assert bus.publish(Ping(2)) == 0  # handler removed, nothing raised
+    assert seen == [Ping(1)]

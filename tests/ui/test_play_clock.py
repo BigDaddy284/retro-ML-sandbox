@@ -154,3 +154,16 @@ def test_keyboard_play_in_main_window_moves_the_car(qtbot: QtBot, context: AppCo
     assert game(context).game.state.frame == frame
     qtbot.waitUntil(lambda: w.game_panel.view.frame is not None)
     w.close()
+
+
+def test_clock_feeds_the_observation_service(clock: PlayClock, context: AppContext) -> None:
+    """T-202: every tick records a memory snapshot and a diff."""
+    context.connection.connect("fake")
+    clock.pause()
+    assert context.observation.latest is None
+    clock.tick(3)
+    obs = context.observation
+    assert obs.frame == 3 and obs.latest is not None and obs.latest.frame == 3
+    assert obs.latest.get("ram") == game(context).game.ram
+    clock.tick(1)
+    assert len(obs.ring) == 2 and obs.tracker.transitions == 1

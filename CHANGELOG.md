@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-202: Byte-level memory diffs, per-byte change statistics with noise/state/constant classification, and an observation service fed by the play clock.
 - T-201: Memory snapshots (`MemorySnapshot`, `MemoryCapture`, `SnapshotRing`) and a SQLite `SnapshotArchive`.
 - T-012: PyInstaller spec, launch smoke-test script and a Windows package workflow that uploads a downloadable build.
 - T-011: Disconnection handling: link watchdog, resilient disconnect, one-click Reconnect, status-bar messages.
