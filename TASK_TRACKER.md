@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** Phase 5 planning (next: E-5 tasks)
+- **Current task:** T-502 – Action space
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -59,6 +59,13 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-408 | Goal service: per-game goal persistence, completion tracking from events, suggested objectives | 4 | Done | 6/6 | see PR #34 |
 | T-409 | Goals panel: edit the objective structure, see completion and confidence | 4 | Done | 6/6 | see PR #35 |
 | E-5 | Basic Learning (tabular Q-learning, save/load) | 5 | Epic | – | – |
+| T-501 | State encoder: believed variables binned into a small discrete state | 5 | Done | 6/6 | see PR #36 |
+| T-502 | Action space from the emulator's buttons (singles and sensible combos) | 5 | Planned | – | – |
+| T-503 | Tabular Q-learning agent: choose, learn, explore less over time, JSON round-trip | 5 | Planned | – | – |
+| T-504 | Episode runner: act, advance, collect rewards from the services, learn, stop on reset; checkpoint restarts | 5 | Planned | – | – |
+| T-505 | Training service: independent / guided / manual modes, start / pause / stop, episode history, live or fast | 5 | Planned | – | – |
+| T-506 | Learning persistence: the AI's brain saved per game and restored on connect | 5 | Planned | – | – |
+| T-507 | Learning panel: mode picker, Start / Pause / Stop, Live / Fast, status and recent episodes | 5 | Planned | – | – |
 | E-6 | Training Interface (live/background, modes, graphs, history) | 6 | Epic | – | – |
 | E-7 | Advanced Learning (DQN, hierarchical RL, demonstrations) | 7 | Epic | – | – |
 | E-8 | Expansion (VBA-M, comparison, sharing, competitions) | 8 | Epic | – | – |
@@ -582,6 +589,23 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 6 / 6 passed / 0 failed / 0 excluded (686 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** `Goal` defines `__len__`, so an empty goal is falsy; the panel tested `goal is not None` after a test showed the idle text on a fresh goal. A refresh that arrives while Qt is inside a row's tick signal is deferred by one tick (the same Windows use-after-free T-406 hit). Phase 4 (Reward System) is complete on the fake emulator: behaviours with simple controls, categories, personalities, suggestions, farming warnings, and an editable goal with steps.
 
+### T-501 – State encoder
+- **Status:** Done
+- **Phase:** 5
+- **Objective:** Turn what the AI believes about the game into a small discrete state a beginner learner can use (DESIGN.md §6.1 "simple state/action learning, tabular Q-learning"), so that the better the understanding engine gets, the better the learner sees.
+- **Scope:** `learning.state`: `State` (a tuple of `(variable id, bucket)` pairs, hashable, with `key` for storage and `describe(knowledge)`), `StateEncoder(knowledge, at_least=LOW, bins=8)` that decodes every believed variable from a snapshot and bins it with one rule: flags are 0/1; any other value below `bins` is kept exactly (lanes, speeds, lives, laps stay precise) and larger values are grouped by doubling (`bins` + log2(value / bins)), negatives mirrored, so positions and scores become "roughly where / how much"; unknown and input kinds are ignored; `refresh()` re-reads the knowledge (new beliefs widen the state), `variables` lists what is used; `encode(snapshot)` returns the empty state when nothing is believed yet. **Out of scope:** screen-based states (Phase 7), learned features.
+- **Acceptance criteria:**
+  1. Nothing believed → empty state; rejected and too-uncertain variables ignored; refresh picks up new beliefs.
+  2. Binning follows the rule (exact below `bins`, doubling above, negatives mirrored, flags 0/1); bins outside 2..64 rejected.
+  3. States are hashable, round-trip through `key`, and describe themselves in plain words.
+  4. On the toy racer with believed lane, speed, lives and checkpoint, a 900-frame drive visits a small number of states (fewer than 200) while still telling lanes apart.
+- **Test plan:** empty/filters/refresh; binning per kind with boundaries; hashing/key/describe; toy racer state count and lane separation.
+- **Results:** 6 / 6 passed / 0 failed / 0 excluded (692 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** One binning rule for every kind (exact below `bins`, doubling above) keeps lanes, speeds and lives precise while positions and scores collapse to a dozen buckets; the toy racer drive visits well under 200 states.
+
+### Later Phase 5 tasks
+T-502 to T-507 as listed in the summary table; each gets its own section when started.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -633,4 +657,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-407 completed (PR #33).
 - T-408 completed (PR #34).
 - T-409 completed (PR #35). Phase 4 complete on the fake emulator.
+- Phase 5 broken into T-501..T-507. T-501 completed (PR #36).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
