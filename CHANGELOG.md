@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-507: Learning panel (who plays, speed, Start / Pause / Stop, Start from scratch, what the AI is pressing and knows, recent goes); the play clock and pad yield to the AI while it plays.
 - T-506: The AI's brain (Q-table, settings, exploration, random state and the history of goes) is saved per game after every go and on disconnect, and restored on connect; `forget()` starts from scratch.
 - T-505: Training service with independent, guided and manual (learn from the child) modes, start / pause / resume / stop, a history of goes, checkpoint restarts and fast or live stepping; wired into the app context.
 - T-504: Episode runner: the agent acts, frames advance, rewards announced by the services are collected and learned from; episodes end on the game's reset, a step limit or link loss; checkpoint restarts; Start pressed when stuck.

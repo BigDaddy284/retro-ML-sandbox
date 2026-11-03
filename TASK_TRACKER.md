@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-507 – Learning panel
+- **Current task:** Phase 6 planning (T-601 onwards)
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -65,7 +65,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-504 | Episode runner: act, advance, collect rewards from the services, learn, stop on reset; checkpoint restarts | 5 | Done | 7/7 | see PR #39 |
 | T-505 | Training service: independent / guided / manual modes, start / pause / stop, episode history, live or fast | 5 | Done | 11/11 | see PR #40 |
 | T-506 | Learning persistence: the AI's brain saved per game and restored on connect | 5 | Done | 8/8 | see PR #41 |
-| T-507 | Learning panel: mode picker, Start / Pause / Stop, Live / Fast, status and recent episodes | 5 | Planned | – | – |
+| T-507 | Learning panel: mode picker, Start / Pause / Stop, Live / Fast, status and recent episodes | 5 | Done | 7/7 | see PR #42 |
 | E-6 | Training Interface (live/background, modes, graphs, history) | 6 | Epic | – | – |
 | E-7 | Advanced Learning (DQN, hierarchical RL, demonstrations) | 7 | Epic | – | – |
 | E-8 | Expansion (VBA-M, comparison, sharing, competitions) | 8 | Epic | – | – |
@@ -679,8 +679,22 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 8 / 8 passed / 0 failed / 0 excluded (728 in the full suite; two T-505 tests updated for the restored history). Lint, format and strict mypy clean.
 - **Completion report:** `Mode`, `Speed`, `Status` and `EpisodeRecord` moved to `training.records` so the brain can import them without pulling in the services. The brain file keeps the agent's random state, so a reloaded AI makes exactly the choice it would have made. Go numbering carries on across sessions; the history kept in memory is bounded, so `episodes` is stored separately from the goes.
 
-### Later Phase 5 tasks
-T-507 as listed in the summary table; each gets its own section when started.
+### T-507 – Learning panel
+- **Status:** Done
+- **Phase:** 5
+- **Objective:** Give the child the Learning panel of DESIGN.md §10: pick a mode (on its own / with your help / you play), Start, Pause, Stop, watch it play or practise fast, see what the AI is doing and how its recent goes went; and make the game's own controls yield to the AI while it plays (§9 live training).
+- **Scope:** `ui.learning_panel`: `LearningPanel(context)` in the main window's "learning" slot with `mode_combo`, `speed_combo`, `start_button`, `pause_button` (Pause / Resume), `stop_button`, `forget_button` ("Start from scratch"), `learning_status` (the service's summary, what the AI is pressing, what it knows, and why a saved brain wasn't used), `goes_tree` (Go | How | Steps | Points | Ended by; newest first, up to 30) and `learning_note`; a `QTimer` ticker that, while the AI plays, takes one step per game tick in LIVE (`frames_per_step` frames' worth of time) and a 20 ms slice of `run_for` per tick in FAST, and stays off in manual mode (the play clock drives) and while paused; `tick()` for tests. `EpisodeRunner` gains `last_buttons`. `ControllerPad` gains `set_locked(locked)` (held buttons released, pad greyed, "The AI has the controls" message; presses refused). `GamePanel` listens to `TrainingStateChanged`: while `training.ai_in_control` the play clock is paused, the pad locked and the Play button disabled; afterwards the pad unlocks and the clock resumes if the child had it playing. `MainWindow.learning_panel`. **Out of scope:** learning graphs (Phase 6 T-6xx), locking reward edits in independent mode (left to the child's judgement for now; noted for the Phase 6 review).
+- **Acceptance criteria:**
+  1. Idle until connected: controls disabled and the status says to connect; on connect the mode and speed pickers reflect the service and Start is enabled.
+  2. Start runs the AI: the ticker is active, each tick steps the service, Pause reads "Resume" when paused and ticks do nothing, Stop closes the go, lists it, and goes idle; FAST takes several steps per tick.
+  3. While the AI plays, the game panel's play clock is paused, the pad is locked and refuses presses, and the Play button is disabled; after Stop the pad works again and the clock resumes if it had been playing.
+  4. In manual mode the clock keeps running, the pad stays live, the ticker stays off, and the child's play teaches the AI.
+  5. "Start from scratch" is refused (with a note) while running and wipes the brain when idle; link loss mid-go leaves the panel idle and disabled with a note.
+  6. Every error from the service shows in the note rather than raising; the panel unsubscribes when destroyed.
+- **Test plan:** idle and connect; start, tick, pause, resume, stop and the goes list; fast ticks; hand-over with the game panel in a main window; manual mode; forget and disconnect; notes and teardown.
+- **Results:** 7 / 7 passed / 0 failed / 0 excluded (735 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Phase 5 is complete: the AI can be started from the window, plays the toy racer on its own or learns from the child, and its brain is kept between sessions. The hand-over lives in the game panel (it listens for training state changes) so the Learning panel never reaches into another panel. A test showed that a disconnect note was wiped by the disconnect event itself, so the panel now clears notes only on connect.
+
 
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
@@ -739,4 +753,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-504 completed (PR #39).
 - T-505 completed (PR #40).
 - T-506 completed (PR #41).
+- T-507 completed (PR #42). Phase 5 complete.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

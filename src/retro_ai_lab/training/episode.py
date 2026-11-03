@@ -143,6 +143,7 @@ class EpisodeRunner:
         self._unstick_buttons = unstick_buttons
         self._unsticks = 0
         self._same_state = 0
+        self._last_buttons: frozenset[str] = frozenset()
         self._signals = EpisodeSignals(bus)
         self._buttons: dict[str, Button] = {}
         self._state: State | None = None
@@ -177,6 +178,11 @@ class EpisodeRunner:
     @property
     def frames_per_step(self) -> int:
         return self._frames_per_step
+
+    @property
+    def last_buttons(self) -> frozenset[str]:
+        """What was pressed on the last step (for the UI to show)."""
+        return self._last_buttons
 
     @property
     def unsticks(self) -> int:
@@ -239,6 +245,7 @@ class EpisodeRunner:
             action = self._agent.choose(state)
             names = self._agent.space.buttons_for(action)
         held = [self._buttons[n] for n in names]
+        self._last_buttons = frozenset(names)
         try:
             self._connection.call(lambda a: a.set_input(held))
             self._observation.record_input(names, "ai")
@@ -264,6 +271,7 @@ class EpisodeRunner:
         if frames < 1:
             raise ConfigurationError("frames must be at least 1.")
         action = self._agent.space.matches(buttons).index
+        self._last_buttons = self._agent.space.buttons_for(action)
         return self._settle(self._state, action, frames)
 
     def _settle(self, state: State, action: int | None, frames: int) -> bool:
@@ -303,6 +311,7 @@ class EpisodeRunner:
             except EmulatorError:
                 pass  # the connection service reports link loss
         self._agent.end_episode()
+        self._last_buttons = frozenset()
         result = EpisodeResult(
             self._steps, self._frames, self._reward, self._ended_by, len(self._states)
         )
