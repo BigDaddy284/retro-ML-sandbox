@@ -11,6 +11,7 @@ from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
 from retro_ai_lab.emulator.registry import default_registry
 from retro_ai_lab.rewards import Category
+from retro_ai_lab.rewards.suggestions import SuggestionReport, apply_suggestions
 from retro_ai_lab.services import (
     ConnectionService,
     DiscoveryService,
@@ -27,6 +28,7 @@ from retro_ai_lab.understanding import (
     Evidence,
     GameEvent,
     Knowledge,
+    Relationship,
     VariableKind,
 )
 
@@ -268,3 +270,37 @@ def test_farming_is_announced_once_per_window_and_clears(
     connection.disconnect()
     connection.connect("fake", seed=3)
     assert rewards.warnings == () and rewards.current_warning is None
+
+
+def test_relationship_updates_refresh_suggestions_sparingly(
+    connection: ConnectionService,
+    discovery: DiscoveryService,
+    rewards: RewardService,
+    bus: EventBus,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T-842: the finder reports relationships on most steps; rebuild only on real change."""
+    connection.connect("fake")
+    k = teach(discovery, bus)
+    calls: list[int] = []
+    real = apply_suggestions
+
+    def counted(profile: object, knowledge: object, **kw: object) -> SuggestionReport:
+        calls.append(1)
+        return real(profile, knowledge, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("retro_ai_lab.services.rewards.apply_suggestions", counted)
+    weak = Relationship("score_gain:v3", "progress:v2", 1, 3, 3, 5)  # below LOW
+    k.set_relationship(weak)
+    for _ in range(10):
+        bus.publish(DiscoveryUpdated((), (), (), (weak,)))
+    assert calls == [1]  # the first look is taken once, then nothing moved
+    sure = Relationship("score_gain:v3", "progress:v2", 6, 6, 6, 5)  # MEDIUM
+    k.set_relationship(sure)
+    bus.publish(DiscoveryUpdated((), (), (), (sure,)))
+    bus.publish(DiscoveryUpdated((), (), (), (sure,)))
+    assert len(calls) == 2
+    assert rewards.profile is not None
+    assert "This leads to progress" in rewards.profile.get("score_gain:v3").notes
+    bus.publish(DiscoveryUpdated((k.get("v2"),), (), (), ()))  # a variable change: always
+    assert len(calls) == 3

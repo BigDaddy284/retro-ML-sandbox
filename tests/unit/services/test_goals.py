@@ -10,7 +10,7 @@ from retro_ai_lab.core import Capabilities, ConfigurationError, UnsupportedCapab
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
 from retro_ai_lab.emulator.registry import default_registry
-from retro_ai_lab.rewards import Trigger
+from retro_ai_lab.rewards import Trigger, merge_suggestions
 from retro_ai_lab.services import (
     ConnectionService,
     DiscoveryService,
@@ -28,6 +28,7 @@ from retro_ai_lab.understanding import (
     Evidence,
     GameEvent,
     Knowledge,
+    Relationship,
     VariableKind,
 )
 
@@ -241,3 +242,35 @@ def test_damaged_file_starts_fresh_and_no_store_saves_nothing(
     connection.connect("fake", seed=3)
     bare.set_title("x")
     assert bare.save() is None and bare.saves == 0 and bare.store is None
+
+
+def test_relationship_updates_refresh_suggestions_sparingly(
+    connection: ConnectionService,
+    discovery: DiscoveryService,
+    goals: GoalService,
+    bus: EventBus,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T-842: see the reward service's test of the same name."""
+    connection.connect("fake")
+    k = teach(discovery, bus)
+    calls: list[int] = []
+    real = merge_suggestions
+
+    def counted(goal: object, knowledge: object, **kw: object) -> tuple[str, ...]:
+        calls.append(1)
+        return real(goal, knowledge, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("retro_ai_lab.services.goals.merge_suggestions", counted)
+    weak = Relationship("progress:v2", "progress:v3", 1, 3, 3, 5)
+    k.set_relationship(weak)
+    for _ in range(10):
+        bus.publish(DiscoveryUpdated((), (), (), (weak,)))
+    assert calls == [1]
+    sure = Relationship("progress:v3", "progress:v2", 6, 6, 6, 5)  # lap before checkpoint
+    k.set_relationship(sure)
+    bus.publish(DiscoveryUpdated((), (), (), (sure,)))
+    bus.publish(DiscoveryUpdated((), (), (), (sure,)))
+    assert len(calls) == 2
+    bus.publish(DiscoveryUpdated((k.get("v2"),), (), (), ()))
+    assert len(calls) == 3

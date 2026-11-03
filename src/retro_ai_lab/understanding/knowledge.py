@@ -337,10 +337,12 @@ class Knowledge:
 
     @property
     def version(self) -> int:
-        """Goes up on every change to the variables or relationships (T-841).
+        """Goes up on every change to the variables (T-841).
 
-        Anything that keeps a list derived from the knowledge (the event detector's
-        watch list, the long look's) rebuilds it only when this moves.
+        Anything that keeps a list derived from the variables (the event detector's
+        watch list, the long look's) rebuilds it only when this moves. Relationship
+        changes don't count: the finder rewrites every pair's rates on every event,
+        and nothing that caches by version reads them.
         """
         return self._version
 
@@ -503,25 +505,21 @@ class Knowledge:
                 rel, confirmed=current.confirmed, rejected=current.rejected, notes=current.notes
             )
         self._relationships[rel.id] = rel
-        self._version += 1
         return rel
 
     def confirm_relationship(self, rel_id: str) -> Relationship:
         rel = replace(self.relationship(rel_id), confirmed=True, rejected=False)
         self._relationships[rel_id] = rel
-        self._version += 1
         return rel
 
     def reject_relationship(self, rel_id: str) -> Relationship:
         rel = replace(self.relationship(rel_id), rejected=True, confirmed=False)
         self._relationships[rel_id] = rel
-        self._version += 1
         return rel
 
     def remove_relationship(self, rel_id: str) -> None:
         self.relationship(rel_id)
         del self._relationships[rel_id]
-        self._version += 1
 
     def confident_relationships(
         self, at_least: Confidence = Confidence.LOW

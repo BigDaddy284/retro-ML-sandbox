@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import time
 
 import pytest
 
@@ -276,3 +277,21 @@ def test_toy_racer_goal_completes_a_checkpoint() -> None:
             earned += g.observe(e).reward
     checkpoint = next(o for o in g if "Checkpoint" in o.description)
     assert checkpoint.completed and earned >= checkpoint.reward
+
+
+def test_merge_handles_many_objectives_quickly() -> None:
+    """T-842: merging and observing stay linear in the number of objectives."""
+    k = Knowledge("big")
+    for i in range(400):
+        k.propose(RAM, i, kind=VariableKind.PROGRESS, name=f"P{i}", evidence=SURE)
+    goal = Goal("big")
+    started = time.perf_counter()
+    added = merge_suggestions(goal, k)
+    assert len(added) == 400 and merge_suggestions(goal, k) == ()
+    outcome = goal.observe(GameEvent(EventKind.PROGRESS, 1, "v1", "up", 0, 1))
+    assert [o.id for o in outcome.completed] == ["goal:progress:v1"]
+    # The second objective depends on the first, now done: it completes on the same pass.
+    second = goal.observe(GameEvent(EventKind.PROGRESS, 2, "v2", "up", 0, 1))
+    assert [o.id for o in second.completed] == ["goal:progress:v2"]
+    assert goal.ready()[0].id == "goal:progress:v3"
+    assert time.perf_counter() - started < 2.0

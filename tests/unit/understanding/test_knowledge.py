@@ -283,8 +283,9 @@ def test_version_counts_every_change(knowledge: Knowledge) -> None:
     knowledge.confirm_relationship(rel.id)
     knowledge.reject_relationship(rel.id)
     knowledge.remove_relationship(rel.id)
+    assert knowledge.version == 7  # relationships are rewritten every event: not counted
     knowledge.remove(v.id)
-    assert knowledge.version == 12
+    assert knowledge.version == 8
     loaded = Knowledge.from_dict(knowledge.to_dict())
     assert isinstance(loaded.version, int)
 

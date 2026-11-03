@@ -128,6 +128,30 @@ def _build(
     )
 
 
+class RelationshipWatch:
+    """Says whether the relationships the suggestions read have changed (T-842).
+
+    The finder reports changed relationships on most steps of a real game, but
+    the suggestions only read which ones are at least LOW and how sure each is,
+    and that moves rarely. Rebuilding 2,400 behaviours and 800 objectives on
+    every step cost the app more than the emulator's step itself.
+    """
+
+    def __init__(self) -> None:
+        self._seen: frozenset[tuple[str, Confidence]] | None = None
+
+    def changed(self, knowledge: Knowledge) -> bool:
+        """True (once) when the confident relationships differ from the last call."""
+        now = frozenset((r.id, r.confidence) for r in knowledge.confident_relationships())
+        if now == self._seen:
+            return False
+        self._seen = now
+        return True
+
+    def reset(self) -> None:
+        self._seen = None
+
+
 @dataclass(frozen=True, slots=True)
 class SuggestionReport:
     added: tuple[str, ...]
@@ -205,6 +229,7 @@ __all__ = [
     "PROGRESS_BOOST",
     "RESET_KEY",
     "RULES",
+    "RelationshipWatch",
     "SuggestionReport",
     "apply_suggestions",
     "is_automatic",
