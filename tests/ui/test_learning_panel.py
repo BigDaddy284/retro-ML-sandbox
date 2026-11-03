@@ -342,3 +342,22 @@ def test_practise_from_here_pins_and_forgets_the_spot(
         ),
     )
     assert not button.isEnabled()
+
+
+def test_the_note_says_when_the_game_ignores_the_ai(
+    panel: LearningPanel, context: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-852: training that stopped because the game is deaf explains itself."""
+    import retro_ai_lab.training.service as module
+
+    monkeypatch.setattr(module, "find_wake_button", lambda *a, **k: None)
+    connect(context)
+    adapter = context.connection.adapter
+    assert isinstance(adapter, FakeEmulatorAdapter)
+    while not adapter.game.state.game_over:
+        adapter.game.step(["up"])
+    panel.start()
+    assert panel.tick() == 0
+    assert context.training.status is Status.IDLE and not panel.ticking
+    assert "no button gets it going" in panel.note_text
+    assert panel.findChild(object, "start_button").isEnabled()  # type: ignore[union-attr]

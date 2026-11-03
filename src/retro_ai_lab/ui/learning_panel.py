@@ -28,6 +28,7 @@ from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.learning import algorithm_choices, describe_algorithm
 from retro_ai_lab.services import EmulatorConnected, EmulatorDisconnected
 from retro_ai_lab.training import (
+    NOT_LISTENING,
     EpisodeFinished,
     EpisodeRecord,
     Mode,
@@ -426,6 +427,8 @@ class LearningPanel(QWidget):
             self._note.setText("The game went away, so training stopped.")
         elif event.reason == "promoted":
             self._note.setText(self._training.last_change)
+        elif event.reason == "not listening":
+            self._note.setText(NOT_LISTENING)
         self.refresh()
 
     def _on_stepped(self, event: TrainingStepped) -> None:

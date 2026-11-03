@@ -1035,6 +1035,60 @@ def test_the_first_go_checks_the_game_listens(lab: Lab, caplog: pytest.LogCaptur
     t.stop()
 
 
+def test_training_stops_instead_of_playing_a_game_that_ignores_the_ai(
+    lab: Lab, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-852: no points from a demo; after three failed searches training stops and says so."""
+    import retro_ai_lab.training.service as module
+
+    searches: list[int] = []
+    monkeypatch.setattr(module, "find_wake_button", lambda *a, **k: searches.append(1))
+    lab.connect()
+    _drive_to_game_over(lab)
+    t = lab.training
+    caplog.set_level(logging.INFO)
+    frame = lab.adapter().game.state.frame
+    t.start(Mode.INDEPENDENT)
+    assert not t.step()  # no go begins
+    assert t.status is Status.IDLE and t.episodes == 0 and t.episode is None
+    assert len(searches) == module.DEAF_TRIES
+    assert lab.changes[-1].reason == "not listening" and lab.changes[-1].status is Status.IDLE
+    assert module.NOT_LISTENING in caplog.text
+    # The game ran on between the searches (an intro may have been playing).
+    assert lab.adapter().game.state.frame >= frame + (module.DEAF_TRIES - 1) * module.DEAF_WAIT
+    assert "Resting" not in t.summary() and t.summary() == "Ready to train."
+    t.start(Mode.INDEPENDENT)  # Start works again afterwards
+    assert t.status is Status.RUNNING
+    t.stop()
+
+
+def test_a_second_search_after_a_wait_can_still_find_the_button(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-852: a failed search is followed by a wait and another try, not a demo go."""
+    import retro_ai_lab.training.service as module
+
+    real = module.find_wake_button
+    searches: list[int] = []
+
+    def flaky(*args: object, **kwargs: object) -> str | None:
+        searches.append(1)
+        if len(searches) == 1:
+            return None
+        return real(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(module, "find_wake_button", flaky)
+    k = lab.connect()
+    _drive_to_game_over(lab)
+    t = lab.training
+    t.start(Mode.INDEPENDENT)
+    assert t.step()  # the second search found Start; go 1 runs in the game
+    assert t.status is Status.RUNNING and len(searches) == 2
+    assert t.wake_button == "start" and k.wake_button == "start"
+    assert not lab.adapter().game.state.game_over
+    t.stop()
+
+
 def test_a_listening_game_is_probed_only_after_a_go_that_went_wrong(
     lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:

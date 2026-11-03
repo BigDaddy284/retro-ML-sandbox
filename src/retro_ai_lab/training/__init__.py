@@ -14,6 +14,7 @@ from retro_ai_lab.training.research import (
     situation_values,
 )
 from retro_ai_lab.training.service import (
+    NOT_LISTENING,
     EpisodeFinished,
     TrainingService,
     TrainingStateChanged,
@@ -22,6 +23,7 @@ from retro_ai_lab.training.service import (
 
 __all__ = [
     "COLUMNS",
+    "NOT_LISTENING",
     "ActionValue",
     "BehaviourChange",
     "Brain",

@@ -106,7 +106,9 @@ every button on the controller, one at a time, until it finds the one that
 gets the game going (pressing a button again, a few times at most, when a press
 changed the screen but the game still ignores it, as Start does on a title
 demo), remembers it for that game, and presses it whenever the game stops
-listening again. It checks again after a go that ended stuck or
+listening again. If no button works after three tries, training stops and the
+Learning panel says so: get the game going yourself, or pin a spot inside it,
+then press Start again. It checks again after a go that ended stuck or
 with the game starting over. The Discovery panel's summary says
 what it found ("Start gets the game going."). To practise one part of a game,
 play to it yourself and press "Pin this spot" first.
