@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-707 – Learning from demonstrations (Phase 7)
+- **Current task:** T-708 – Hierarchical learning (Phase 7)
 - **Last approved checkpoint:** `main` after T-507 (PRs #43–#49 merging in order as CI passes; T-701 stacked on them)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only the BizHawk work (T-110 onward). ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -81,7 +81,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-704 | Small neural network in NumPy (layers, Adam, gradient check; no new dependency) | 7 | Done | 6/6 | see PR #53 |
 | T-705 | DQN learner: network, target network and replay; learns a synthetic task; saves and reloads | 7 | Done | 6/6 | see PR #54 |
 | T-706 | Automatic algorithm choice (table while the game is small, network when it grows) and a "How the AI learns" control | 7 | Done | 7/7 | see PR #55 |
-| T-707 | Learning from demonstrations: the child's play is kept as experience the AI learns from | 7 | Ready | – | – |
+| T-707 | Learning from demonstrations: the child's play is kept as experience the AI learns from | 7 | Done | 6/6 | see PR #56 |
 | T-708 | Hierarchical learning: a skill per goal step; the active step picks the skill | 7 | Ready | – | – |
 | T-709 | Better progress detection on a longer look (checkpoint vs position, lap vs flag) | 7 | Ready | – | – |
 | E-8 | Expansion (VBA-M, comparison, sharing, competitions) | 8 | Epic | – | – |
@@ -918,6 +918,23 @@ DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical l
 - **Commit:** see PR. **PR:** #55.
 - **Completion report:** As planned. Distilling a table into the network showed that the feature vector had too little contrast for small values (lanes 0..2 differed by 1/24), so `FeatureMap` now gives every variable three slots (present, bucket / bins, bucket / (bins + 16)); the T-703 tests were updated for it. `DQNLearner.distil` trains full-batch on every known row and stops early once the greedy moves all agree (the default 64×64 network agrees fully on the test table; a 16-unit one at a high learning rate does not, so the quick test config now uses 0.003). The service promotes under `auto` right after a go closes (before the save), so the saved brain already records `dqn`, and a `"promoted"` state change carries `last_change` to the panel. `set_algorithm` converts either way and keeps exploration, steps and goes. The choices are listed as auto, table, network (the learning order of DESIGN.md §6.1). Known limitation: a demoted table only knows the situations the network had in memory.
 
+### T-707 – Learning from demonstrations
+- **Status:** Done
+- **Phase:** 7
+- **Objective:** DESIGN.md §6.3 / §9 "Manual mode": the child's play is kept as demonstrations (inputs, situations, what came of them and the reward) that the AI can learn from again later, so showing the AI a trick helps beyond the moment it was shown. Demonstrating stays optional.
+- **Scope:** `learning.demonstrations`: `Demonstrations(capacity=DEFAULT_DEMO_CAPACITY, seed=None)` – a bounded, ordered record of `Transition`s with `source="child"`, `record(...)`, `count`, `__iter__`, `rehearse(learner, *, passes=1) -> int` (feeds every demonstration to `learner.learn` again, oldest first, `passes` times; returns the steps learned), `clear()`, JSON round trip. `EpisodeRunner` gets an optional `on_learned(Transition)` hook called after every learned step with the right `source` ("ai" for its own moves, "child" for observed ones). `Brain` carries `demonstrations` (optional in the saved data; older brains load with none). `TrainingService`: records the child's steps while in manual mode, `demonstrations` property, `rehearse(passes=1) -> int` (idle only), restores and saves them with the brain, clears them on `forget()`, and `summary()` in manual mode counts the moves shown. `LearningPanel`: a "Learn from my moves again" button (`rehearse_button`, enabled when idle and there are demonstrations) and the status says how many moves the child has shown. **Out of scope:** replaying the child's inputs on the emulator, weighting demonstrations above the AI's own experience, importing recordings from files.
+- **Acceptance criteria:**
+  1. `Demonstrations` keeps at most `capacity` transitions (oldest dropped), all marked `child`, round-trips through JSON in order, and refuses bad data; `rehearse` feeds them all, in order, `passes` times and returns the count.
+  2. The runner reports every learned step through `on_learned` with the right source; an unstick press is not reported.
+  3. In manual mode the service records each learned step of the child's as a demonstration; AI modes record none; the demonstrations survive a disconnect and reconnect through the saved brain, and `forget()` clears them; brains saved before this task load with none.
+  4. `rehearse` makes the AI learn from the demonstrations again (its `updates` grow by the count × passes, and a table knows the situations shown) and refuses to run while training; a service without demonstrations rehearses zero.
+  5. The panel's button and status follow the service; pressing the button rehearses and notes how many moves were learned again.
+- **Expected changes:** `learning/demonstrations.py` (new), `learning/__init__.py`, `training/episode.py`, `training/brain.py`, `training/service.py`, `ui/learning_panel.py`, `tests/unit/learning/test_demonstrations.py` (new), `tests/unit/training/test_episode.py`, `tests/unit/training/test_service.py`, `tests/unit/training/test_brain.py`, `tests/ui/test_learning_panel.py`.
+- **Test plan:** unit – demonstrations bounds, order, JSON, rehearse; runner hook and sources; service recording in manual mode only, persistence, forget, rehearse and refusal; brain round trip with and without demonstrations; panel button and status. Regression – full suite.
+- **Results:** 6 / 6 passed / 0 failed / 0 excluded (3 demonstration tests, 1 runner test, 1 service test, 1 panel test; 808 in the full suite, on Python 3.13 and 3.11). Lint, format and strict mypy clean.
+- **Commit:** see PR. **PR:** #56.
+- **Completion report:** As planned. `Demonstrations` wraps a `ReplayBuffer` so the record is bounded and round-trips like the DQN's memory; `clear()` starts the count again. The runner's `on_learned` hook reports every learned step with its source and the service keeps the child's ones; the AI's own steps are never demonstrations. The Learning panel now also refreshes its status on the child's steps (`TrainingStepped` in manual mode), since those do not come through its own tick. Known limitation: rehearsal feeds the moves to whichever learner is current at its normal learning rate; nothing weights them above the AI's own experience.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -977,5 +994,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
-- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55).
+- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

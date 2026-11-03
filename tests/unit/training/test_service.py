@@ -628,3 +628,44 @@ def test_set_algorithm_converts_the_brain_either_way(lab: Lab) -> None:
     assert t.set_algorithm(DQN) == ""  # already there
     t.train(1)
     assert isinstance(t.agent, DQNLearner) and t.episodes == 3
+
+
+# ------------------------------------------------------------ T-707: demonstrations
+
+
+def test_manual_mode_keeps_the_childs_moves_as_demonstrations(lab: Lab) -> None:
+    lab.connect()
+    t = lab.training
+    assert t.demonstrations.count == 0
+    t.train(1)  # the AI's own play is not a demonstration
+    assert t.demonstrations.count == 0
+    t.start(Mode.MANUAL)
+    for _ in range(5):
+        lab.play(["up"], 4)
+    assert t.demonstrations.count == 5 and t.demonstrations.shown == 5
+    assert all(d.source == "child" for d in t.demonstrations)
+    assert "shown the AI 5 moves" in t.summary()
+    with pytest.raises(ConfigurationError, match="Stop training"):
+        t.rehearse()
+    t.stop()
+    agent = t.agent
+    assert agent is not None
+    before = agent.updates
+    assert t.rehearse() == 5 and agent.updates == before + 5
+    assert t.rehearse(passes=2) == 10 and agent.updates == before + 15 and t.saves > 0
+    with pytest.raises(ConfigurationError):
+        t.rehearse(passes=-1)
+    # They survive a reconnect through the saved brain, and a fresh brain has none.
+    lab.connection.disconnect()
+    lab.connect()
+    assert t.demonstrations.count == 5
+    t.forget()
+    assert t.demonstrations.count == 0 and t.rehearse() == 0
+    store = t.store
+    assert store is not None and t.game_id is not None
+    lab.connection.disconnect()
+    data = store.load(t.game_id)
+    del data["demonstrations"]  # a brain saved before T-707
+    store.save(data)
+    lab.connect()
+    assert t.fresh_start == "" and t.demonstrations.count == 0
