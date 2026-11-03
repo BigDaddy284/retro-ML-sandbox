@@ -199,7 +199,7 @@ def test_main_window_connect_bar_drives_game_panel(qtbot: QtBot, context: AppCon
     assert w.connect_bar.parent() is not None
     qtbot.mouseClick(w.connect_bar.connect_button, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: w.game_panel.view.frame is not None)
-    assert w.game_panel.pump.running
+    assert w.game_panel.clock.running and not w.game_panel.pump.running  # T-823
     qtbot.mouseClick(w.connect_bar.disconnect_button, Qt.MouseButton.LeftButton)
     assert w.game_panel.view.frame is None
     assert not w.game_panel.pump.running

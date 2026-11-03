@@ -109,6 +109,7 @@ class MemoryCapture:
         self._connection = connection
         self._wanted = tuple(regions) if regions is not None else None
         self._captures = 0
+        self._plan: tuple[tuple[str, int, int], ...] | None = None
 
     @property
     def captures(self) -> int:
@@ -123,7 +124,29 @@ class MemoryCapture:
         self._captures += 1
         return snapshot
 
-    def _read_all(self, adapter: EmulatorAdapter, frame: int) -> MemorySnapshot:
+    def reads(self) -> tuple[tuple[str, int, int], ...]:
+        """The ``(region, offset, length)`` reads one snapshot needs (T-823).
+
+        Hand them to ``EmulatorAdapter.step(reads=...)`` and give the bytes
+        back to :meth:`from_reads`, so a frame step and its snapshot are one
+        request. The plan is made once per capture object: an emulator's
+        regions do not change while it is connected.
+        """
+        if self._plan is None:
+            self._plan = self._connection.call(self._make_plan)
+        return self._plan
+
+    def from_reads(self, frame: int, chunks: Sequence[bytes]) -> MemorySnapshot:
+        """A snapshot from bytes fetched elsewhere, in :meth:`reads` order."""
+        names = [name for name, _, _ in self.reads()]
+        if len(chunks) != len(names):
+            raise ConfigurationError(
+                f"Got {len(chunks)} region(s) of bytes for {len(names)} planned."
+            )
+        self._captures += 1
+        return MemorySnapshot(frame, dict(zip(names, chunks, strict=True)))
+
+    def _make_plan(self, adapter: EmulatorAdapter) -> tuple[tuple[str, int, int], ...]:
         regions = {r.name: r for r in adapter.memory_regions()}
         names = self._wanted if self._wanted is not None else tuple(regions)
         unknown = [n for n in names if n not in regions]
@@ -133,7 +156,13 @@ class MemoryCapture:
             )
         if not names:
             raise ConfigurationError("This emulator exposes no memory regions.")
-        chunks = adapter.read_many([(n, 0, regions[n].size) for n in names])  # one request
+        return tuple((n, 0, regions[n].size) for n in names)
+
+    def _read_all(self, adapter: EmulatorAdapter, frame: int) -> MemorySnapshot:
+        if self._plan is None:
+            self._plan = self._make_plan(adapter)
+        chunks = adapter.read_many(list(self._plan))  # one request
+        names = [n for n, _, _ in self._plan]
         return MemorySnapshot(frame, dict(zip(names, chunks, strict=True)))
 
 

@@ -208,3 +208,18 @@ def test_capture_is_one_request_on_a_socket_backend() -> None:
         assert len(sim.requests) == before + 1 and sim.requests[-1]["cmd"] == "read"
         assert snapshot.frame == 7 and snapshot.get("ram") == sim.game.ram
         service.disconnect()
+
+
+def test_reads_plan_and_from_reads_build_a_snapshot(service: ConnectionService) -> None:
+    """T-823: the plan feeds a bundled step; its bytes come back as a snapshot."""
+    service.connect("fake", seed=2)
+    cap = MemoryCapture(service)
+    assert cap.reads() == (("ram", 0, RAM_SIZE),)
+    assert cap.reads() is cap.reads()  # planned once
+    result = service.call(lambda a: a.step(1, reads=cap.reads()))
+    snap = cap.from_reads(1, result.reads)
+    assert snap == MemorySnapshot(1, {"ram": fake(service).game.ram}) and cap.captures == 1
+    with pytest.raises(ConfigurationError, match="planned"):
+        cap.from_reads(2, [])
+    with pytest.raises(ConfigurationError, match="Unknown memory regions"):
+        MemoryCapture(service, ["vram"]).reads()

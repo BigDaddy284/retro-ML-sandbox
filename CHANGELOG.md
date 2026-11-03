@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- While the game runs, each frame is one request to the emulator: the play clock's step carries the held buttons, the memory snapshot and (at the picture rate) the screenshot, and the frame pump rests until the game is paused (T-823).
 - Adapters can step, read several memory regions and take a screenshot in one request (`step`, `read_many`), and memory snapshots use one request (T-822).
 - Button presses go to the emulator on a worker thread, so pressing a button no longer stalls the window (T-821).
 - Fixed: pressing Disconnect while the game was being stepped could be reported as a lost link (T-820).

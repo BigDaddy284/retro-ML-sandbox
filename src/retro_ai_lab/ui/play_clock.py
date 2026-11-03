@@ -6,35 +6,52 @@ way; real emulators are driven the same way through their scripts). The
 child can pause and resume; training modes drive the same clock.
 
 The timer's steps run on a worker thread (T-818): a real emulator takes at
-least one frame to answer and the memory snapshot after it is another round
-trip, and the GUI thread must never wait for either. ``tick(n)`` stays
-synchronous for tests and tooling that drive time by hand.
+least one frame to answer, and the GUI thread must never wait for it.
+``tick(n)`` stays synchronous for tests and tooling that drive time by hand.
+
+Each step is one request (T-823): the adapter's bundled ``step`` carries the
+pad's held buttons, the memory reads the observation service wants, and,
+every ``screenshot_every``-th pulse, a screenshot, which comes out of
+:attr:`PlayClock.frame_captured`. A real emulator therefore answers one
+message per frame instead of three.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
 
-from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError
+from retro_ai_lab.core import Button, Capabilities, EmulatorDisconnectedError, EmulatorError
 from retro_ai_lab.services import ConnectionService, EmulatorConnected, EmulatorDisconnected
+from retro_ai_lab.services.observer import ObservationService
 from retro_ai_lab.ui.context import AppContext
 
 DEFAULT_FPS = 60
 
 log = logging.getLogger(__name__)
 
+InputsProvider = Callable[[], "frozenset[Button] | None"]
+Reads = tuple[tuple[str, int, int], ...]
+
 
 class _StepSignals(QObject):
-    done = Signal(int, object)  # the step's generation, then the frame count or the exception
+    done = Signal(int, object)  # the step's generation, then a (frames, Frame|None) or exception
 
 
 class _StepTask(QRunnable):
-    """One ``advance_frames`` plus the memory snapshot after it, off the GUI thread."""
+    """One bundled ``step`` (buttons, frames, memory, screenshot), off the GUI thread."""
 
     def __init__(
-        self, connection: ConnectionService, observation: object, n: int, generation: int
+        self,
+        connection: ConnectionService,
+        observation: ObservationService,
+        n: int,
+        generation: int,
+        *,
+        pressed: frozenset[Button] | None,
+        screenshot: bool,
     ) -> None:
         super().__init__()
         self.signals = _StepSignals()
@@ -42,27 +59,68 @@ class _StepTask(QRunnable):
         self._observation = observation
         self._n = n
         self._generation = generation
+        self._pressed = pressed
+        self._screenshot = screenshot
 
     def run(self) -> None:
-        n = self._n
         try:
-            self._connection.call(lambda a: a.advance_frames(n))
-            self._observation.advance(n)  # type: ignore[attr-defined]
+            frame = _step(
+                self._connection,
+                self._observation,
+                self._n,
+                pressed=self._pressed,
+                screenshot=self._screenshot,
+            )
         except Exception as exc:
             self.signals.done.emit(self._generation, exc)
         else:
-            self.signals.done.emit(self._generation, n)
+            self.signals.done.emit(self._generation, (self._n, frame))
+
+
+def _step(
+    connection: ConnectionService,
+    observation: ObservationService,
+    n: int,
+    *,
+    pressed: frozenset[Button] | None,
+    screenshot: bool,
+) -> object:
+    """Advance ``n`` frames in one request and feed the observation service.
+
+    Returns the screenshot (a ``Frame``) when one was asked for, else None.
+    """
+    reads: Reads = observation.snapshot_reads()
+    result = connection.call(
+        lambda a: a.step(n, pressed=pressed, reads=reads, screenshot=screenshot)
+    )
+    observation.advance(n, snapshot=result.reads if reads else None)
+    return result.frame
 
 
 class PlayClock(QObject):
     state_changed = Signal(bool)  # running?
+    frame_captured = Signal(object)  # the Frame a step brought back (T-823)
 
-    def __init__(self, context: AppContext, fps: int = DEFAULT_FPS, parent: QObject | None = None):
+    def __init__(
+        self,
+        context: AppContext,
+        fps: int = DEFAULT_FPS,
+        parent: QObject | None = None,
+        *,
+        screenshot_every: int = 1,
+    ):
         super().__init__(parent)
         if fps <= 0:
             raise ValueError("fps must be positive")
+        if screenshot_every <= 0:
+            raise ValueError("screenshot_every must be positive")
         self._connection: ConnectionService = context.connection
         self._observation = context.observation
+        self._capabilities = Capabilities()
+        self._inputs: InputsProvider | None = None
+        self._screenshot_every = screenshot_every
+        self._pulses = 0
+        self._frames_captured = 0
         self._timer = QTimer(self)
         self._timer.setInterval(max(1, 1000 // fps))
         self._timer.timeout.connect(self.pulse)
@@ -124,6 +182,24 @@ class PlayClock(QObject):
         """Timer pulses that found the previous step still running."""
         return self._skipped
 
+    @property
+    def screenshot_every(self) -> int:
+        """A screenshot rides along on every n-th pulse (the first included)."""
+        return self._screenshot_every
+
+    @property
+    def frames_captured(self) -> int:
+        """Screenshots delivered through :attr:`frame_captured` since connect."""
+        return self._frames_captured
+
+    def set_inputs(self, provider: InputsProvider | None) -> None:
+        """Name who knows the held buttons (the pad); each step carries them.
+
+        The provider is called on the GUI thread as a step starts; None from
+        it, or no provider, sends a step without buttons.
+        """
+        self._inputs = provider
+
     def play(self) -> None:
         self._wanted = True
         self._apply()
@@ -151,7 +227,18 @@ class PlayClock(QObject):
             self._skipped += 1
             return False
         self._in_flight = True
-        task = _StepTask(self._connection, self._observation, 1, self._generation)
+        screenshot = self._capabilities.screen_capture and (
+            self._pulses % self._screenshot_every == 0
+        )
+        self._pulses += 1
+        task = _StepTask(
+            self._connection,
+            self._observation,
+            1,
+            self._generation,
+            pressed=self._pressed(),
+            screenshot=screenshot,
+        )
         task.signals.done.connect(self._on_step_done)
         self._pool.start(task)
         return True
@@ -171,8 +258,12 @@ class PlayClock(QObject):
             self._errors += 1
             log.warning("Frame step failed: %s", result)
             return
-        if isinstance(result, int):
-            self._frames += result
+        if isinstance(result, tuple):
+            frames, frame = result
+            self._frames += frames
+            if frame is not None:
+                self._frames_captured += 1
+                self.frame_captured.emit(frame)
 
     def tick(self, n: int = 1) -> bool:
         """Advance ``n`` frames now, on this thread. Returns True if frames were advanced.
@@ -184,7 +275,7 @@ class PlayClock(QObject):
             self._stop()
             return False
         try:
-            self._connection.call(lambda a: a.advance_frames(n))
+            _step(self._connection, self._observation, n, pressed=self._pressed(), screenshot=False)
         except EmulatorDisconnectedError:
             self._stop()
             return False
@@ -192,7 +283,6 @@ class PlayClock(QObject):
             self._errors += 1
             return False
         self._frames += n
-        self._observation.advance(n)
         return True
 
     # ------------------------------------------------------------ internal
@@ -211,9 +301,18 @@ class PlayClock(QObject):
             self._timer.stop()
             self.state_changed.emit(False)
 
+    def _pressed(self) -> frozenset[Button] | None:
+        """The pad's held set for this step, or None when there is nothing to send."""
+        if self._inputs is None or not self._capabilities.input:
+            return None
+        return self._inputs()
+
     def _on_connected(self, event: EmulatorConnected) -> None:
         self._available = event.capabilities.frame_advance
+        self._capabilities = event.capabilities
         self._frames = 0
+        self._pulses = 0
+        self._frames_captured = 0
         self._apply()
 
     def _on_disconnected(self, event: EmulatorDisconnected) -> None:

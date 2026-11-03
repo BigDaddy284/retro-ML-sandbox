@@ -6,6 +6,10 @@ worker thread, because a real emulator answers over a socket in tens of
 milliseconds and the GUI thread must never wait for it (T-817); the frame
 comes back to the GUI thread by signal. The pump is driven by service
 events, so the panel never has to know how a connection was made.
+
+While the play clock runs it brings a screenshot back with every k-th frame
+step (T-823), so the pump stays stopped then and only serves a paused game,
+training, and emulators that cannot step frames.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from retro_ai_lab.ui.frame_view import FrameView
 from retro_ai_lab.ui.play_clock import PlayClock
 
 DEFAULT_FPS = 30
+CLOCK_FPS = 30  # the play clock's frame rate; screenshots ride along at DEFAULT_FPS
 NOT_CONNECTED = "Not connected. Connect to a game to see it here."
 NO_SCREEN = "This emulator can't show its screen, but the AI can still play."
 
@@ -171,7 +176,13 @@ class FramePump(QObject):
 
 
 class GamePanel(QWidget):
-    def __init__(self, context: AppContext, parent: QWidget | None = None, fps: int = DEFAULT_FPS):
+    def __init__(
+        self,
+        context: AppContext,
+        parent: QWidget | None = None,
+        fps: int = DEFAULT_FPS,
+        clock_fps: int = CLOCK_FPS,
+    ):
         super().__init__(parent)
         self.setObjectName("game_panel")
         self._context = context
@@ -180,13 +191,17 @@ class GamePanel(QWidget):
         self._status = QLabel(NOT_CONNECTED, self)
         self._status.setObjectName("game_status")
         self._status.setWordWrap(True)
-        self._clock = PlayClock(context, fps=fps, parent=self)
+        self._clock = PlayClock(
+            context, fps=clock_fps, parent=self, screenshot_every=max(1, clock_fps // fps)
+        )
         self._play_button = QPushButton("Pause", self)
         self._play_button.setObjectName("play_button")
         self._play_button.setEnabled(False)
         self._play_button.clicked.connect(self._on_play_clicked)
         self._clock.state_changed.connect(self._on_clock_state)
         self._pad = ControllerPad(context, self)
+        self._clock.set_inputs(lambda: self._pad.held)
+        self._clock.frame_captured.connect(self._on_clock_frame)
 
         controls = QHBoxLayout()
         controls.addWidget(self._play_button)
@@ -250,6 +265,17 @@ class GamePanel(QWidget):
 
     def _on_clock_state(self, running: bool) -> None:
         self._refresh_play_button()
+        # One request per frame: the clock's steps carry the screenshots while
+        # it runs, and the pump takes over again when the game is paused.
+        if running:
+            self._pump.stop()
+        elif self._can_show_screen():
+            self._pump.start()
+            self._pump.tick()
+
+    def _can_show_screen(self) -> bool:
+        session = self._context.connection.session
+        return session is not None and session.capabilities.screen_capture
 
     def _refresh_play_button(self) -> None:
         self._play_button.setEnabled(self._clock.available and not self._ai_had_controls)
@@ -277,8 +303,9 @@ class GamePanel(QWidget):
             self.set_status(f"Connected to {event.game_info.title}. {NO_SCREEN}")
             return
         self.set_status(f"Watching {event.game_info.title}.")
-        self._pump.start()
-        self._pump.tick()  # show something straight away
+        if not self._clock.running:
+            self._pump.start()
+            self._pump.tick()  # show something straight away
 
     def _on_disconnected(self, event: EmulatorDisconnected) -> None:
         self._ai_had_controls = False
@@ -290,6 +317,11 @@ class GamePanel(QWidget):
             self.set_status(NOT_CONNECTED)
         else:
             self.set_status(f"Lost the game: {event.reason} {NOT_CONNECTED}")
+
+    def _on_clock_frame(self, frame: Frame) -> None:
+        """A screenshot that rode along on a frame step (T-823)."""
+        self._context.observation.observe_frame(frame)
+        self._on_frame(frame)
 
     def _on_frame(self, frame: Frame) -> None:
         self._view.set_frame(frame)
@@ -306,4 +338,4 @@ def _release(pump: FramePump, unsubscribe: tuple[Callable[[], None], ...]) -> No
         off()
 
 
-__all__ = ["DEFAULT_FPS", "NOT_CONNECTED", "NO_SCREEN", "FramePump", "GamePanel"]
+__all__ = ["CLOCK_FPS", "DEFAULT_FPS", "NOT_CONNECTED", "NO_SCREEN", "FramePump", "GamePanel"]
