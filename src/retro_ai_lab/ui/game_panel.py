@@ -10,12 +10,14 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QTimer
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError, Frame
 from retro_ai_lab.services import ConnectionService, EmulatorConnected, EmulatorDisconnected
 from retro_ai_lab.ui.context import AppContext
+from retro_ai_lab.ui.controller_pad import ControllerPad
 from retro_ai_lab.ui.frame_view import FrameView
+from retro_ai_lab.ui.play_clock import PlayClock
 
 DEFAULT_FPS = 30
 NOT_CONNECTED = "Not connected. Connect to a game to see it here."
@@ -101,9 +103,22 @@ class GamePanel(QWidget):
         self._status = QLabel(NOT_CONNECTED, self)
         self._status.setObjectName("game_status")
         self._status.setWordWrap(True)
+        self._clock = PlayClock(context, fps=fps, parent=self)
+        self._play_button = QPushButton("Pause", self)
+        self._play_button.setObjectName("play_button")
+        self._play_button.setEnabled(False)
+        self._play_button.clicked.connect(self._on_play_clicked)
+        self._clock.state_changed.connect(self._on_clock_state)
+        self._pad = ControllerPad(context, self)
+
+        controls = QHBoxLayout()
+        controls.addWidget(self._play_button)
+        controls.addWidget(self._pad, 1)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._view, 1)
+        layout.addLayout(controls)
         layout.addWidget(self._status)
 
         self._pump = FramePump(context.connection, fps=fps, parent=self)
@@ -128,6 +143,18 @@ class GamePanel(QWidget):
         return self._pump
 
     @property
+    def clock(self) -> PlayClock:
+        return self._clock
+
+    @property
+    def pad(self) -> ControllerPad:
+        return self._pad
+
+    @property
+    def play_button(self) -> QPushButton:
+        return self._play_button
+
+    @property
     def status_text(self) -> str:
         return self._status.text()
 
@@ -136,7 +163,19 @@ class GamePanel(QWidget):
 
     # ------------------------------------------------------------ events
 
+    def _on_play_clicked(self) -> None:
+        self._clock.toggle()
+        self._refresh_play_button()
+
+    def _on_clock_state(self, running: bool) -> None:
+        self._refresh_play_button()
+
+    def _refresh_play_button(self) -> None:
+        self._play_button.setEnabled(self._clock.available)
+        self._play_button.setText("Pause" if self._clock.playing else "Play")
+
     def _on_connected(self, event: EmulatorConnected) -> None:
+        self._refresh_play_button()
         if not event.capabilities.screen_capture:
             self._view.clear()
             self._view.set_placeholder(NO_SCREEN)
@@ -147,6 +186,7 @@ class GamePanel(QWidget):
         self._pump.tick()  # show something straight away
 
     def _on_disconnected(self, event: EmulatorDisconnected) -> None:
+        self._refresh_play_button()
         self._pump.stop()
         self._view.clear()
         self._view.set_placeholder(NOT_CONNECTED)

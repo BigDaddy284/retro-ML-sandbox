@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QSplitter
 from pytestqt.qtbot import QtBot
 
 from retro_ai_lab import __version__
-from retro_ai_lab.ui.app import APP_NAME, create_app, run_app
+from retro_ai_lab.ui.app import APP_NAME, create_app
 from retro_ai_lab.ui.main_window import WINDOW_TITLE, MainWindow
 from retro_ai_lab.ui.panels import PANELS, Panel, PanelSpec
 
@@ -129,30 +133,51 @@ def test_create_app_is_a_singleton_and_sets_metadata(qapp: QApplication) -> None
     assert qapp.applicationVersion() == __version__
 
 
-def test_run_app_shows_window_and_exits_zero(qapp: QApplication) -> None:
-    seen: dict[str, object] = {}
+def _run_in_fresh_process(code: str) -> subprocess.CompletedProcess[str]:
+    """Run ``code`` in a fresh interpreter.
 
-    def hook(app: QApplication, window: MainWindow) -> None:
-        seen["visible"] = window.isVisible()
-        seen["title"] = window.windowTitle()
-        seen["name"] = app.applicationName()
-        window.close()
-        app.quit()
+    ``QApplication.exec()`` must not run inside the test process: once it has
+    returned, Qt refuses to run further event loops on that thread, which
+    silently breaks every timer-driven test that follows.
+    """
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
 
-    assert run_app(before_exec=hook) == 0
-    assert seen == {"visible": True, "title": WINDOW_TITLE, "name": APP_NAME}
+
+def test_run_app_shows_window_and_exits_zero() -> None:
+    code = """
+from retro_ai_lab.ui.app import APP_NAME, run_app
+from retro_ai_lab.ui.main_window import WINDOW_TITLE
+
+def hook(app, window):
+    assert window.isVisible()
+    assert window.windowTitle() == WINDOW_TITLE
+    assert app.applicationName() == APP_NAME
+    window.close()
+    app.quit()
+
+raise SystemExit(run_app(before_exec=hook))
+"""
+    result = _run_in_fresh_process(code)
+    assert result.returncode == 0, result.stderr
 
 
-def test_run_app_exit_after_ms(qapp: QApplication) -> None:
-    assert run_app(exit_after_ms=10) == 0
+def test_run_app_exit_after_ms() -> None:
+    result = _run_in_fresh_process(
+        "from retro_ai_lab.ui.app import run_app; raise SystemExit(run_app(exit_after_ms=10))"
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_real_entry_point_launches_headless_and_exits_zero() -> None:
     """The launch smoke test: the real CLI, Qt and window in a fresh process."""
-    import os
-    import subprocess
-    import sys
-
     env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
     result = subprocess.run(
         [sys.executable, "-m", "retro_ai_lab", "--exit-after-ms", "200"],

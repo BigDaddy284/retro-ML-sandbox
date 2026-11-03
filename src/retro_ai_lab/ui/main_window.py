@@ -25,6 +25,8 @@ class MainWindow(QMainWindow):
         self._panels: dict[str, Panel] = {spec.key: Panel(spec) for spec in PANELS}
         self._game_panel = GamePanel(self._context)
         self._panels["game"].set_body(self._game_panel)
+        # Keys pressed anywhere in the window reach the controller pad.
+        self.installEventFilter(self._game_panel.pad)
 
         toolbar = QToolBar("Connection", self)
         toolbar.setObjectName("connection_toolbar")

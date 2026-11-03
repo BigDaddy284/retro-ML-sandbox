@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-010 (Ready)
-- **Last approved checkpoint:** `main` after T-009
+- **Current task:** T-011 (Ready)
+- **Last approved checkpoint:** `main` after T-010
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -23,7 +23,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-007 | App shell: main window launches with empty panels | 1 | Done | 15/15 | see PR #8 |
 | T-008 | Game window panel shows live frames | 1 | Done | 20/20 | see PR #9 |
 | T-009 | Connect / disconnect UI with capability display | 1 | Done | 17/17 | see PR #10 |
-| T-010 | Manual controller input from UI to adapter | 1 | Ready | – | – |
+| T-010 | Manual controller input from UI to adapter | 1 | Done | 22/22 | see PR #11 |
 | T-011 | Graceful handling of emulator disconnection | 1 | Ready | – | – |
 | T-012 | Windows packaging smoke test (launchable build) | 1 | Ready | – | – |
 | T-110 | Spike: confirm BizHawk Lua ↔ socket protocol | 1 | Blocked on ADR-005 | – | – |
@@ -201,7 +201,22 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 17 / 17 passed / 0 failed / 0 excluded (340 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** `ConnectionService` is not thread-safe by design; the only cross-thread call is `connect()` inside the worker, during which the service is in CONNECTING and refuses other work. Disconnect stays on the GUI thread (fast for every adapter we plan).
 
-### T-010 … T-012
+### T-010 – Manual controller input from UI to adapter
+- **Status:** Done
+- **Phase:** 1
+- **Objective:** A child can play the connected game with the keyboard or an on-screen pad, and pause/resume time (Manual Mode foundation, DESIGN.md §8).
+- **Scope:** `ui.controller_pad.ControllerPad` (built from the emulator's buttons, keyboard map, `input_changed` signal), `ui.play_clock.PlayClock` (advances one frame per tick while playing; Play/Pause), both hosted in `GamePanel`; `MainWindow` forwards key events to the pad. **Out of scope:** input recording (T-204), rebinding keys.
+- **Acceptance criteria:**
+  1. The pad shows one button per emulator button and sends the held set on every change; releasing all sends an empty set.
+  2. Keyboard mapping works, auto-repeat is ignored, unmapped keys are ignored, custom maps are supported.
+  3. Emulators without `input` get a disabled pad with a message; disconnect releases everything.
+  4. The clock runs on connect when `frame_advance` is available, can be paused and resumed, keeps the child's choice across reconnects, and stops on disconnect or a dropped link.
+  5. Pressing Up in the main window makes the Toy Racer car accelerate and move; pausing freezes time.
+- **Test plan:** pad empty state; built from emulator; press/release/release_all and signal sequence; unknown button; mouse on on-screen buttons; keyboard mapping incl. unmapped key; auto-repeat; custom keymap; no-input emulator; disconnect releases; dropped link while sending; transient send error counted. Clock: idle; runs and advances; pause/play/toggle; choice survives reconnect; `tick(n)`; no frame-advance emulator; dropped link; transient error; bad fps. End-to-end keyboard play in the main window.
+- **Results:** 22 / 22 passed / 0 failed / 0 excluded (362 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Found a test-infrastructure bug: once `QApplication.exec()` has returned inside the pytest process, Qt refuses further event loops on that thread and every timer-driven test afterwards hangs. The two in-process `run_app` tests now run in a fresh interpreter. Time is modelled as "advance when we say", which matches how the BizHawk Lua bridge will work.
+
+### T-011 – T-012
 Details will be written into this file when each becomes the next task, following the template.
 
 ### T-110 – Spike: confirm BizHawk Lua ↔ socket protocol
@@ -224,5 +239,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-007 completed (PR #8).
 - T-008 completed (PR #9).
 - T-009 completed (PR #10).
-- Next: T-010.
+- T-010 completed (PR #11).
+- Next: T-011.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
