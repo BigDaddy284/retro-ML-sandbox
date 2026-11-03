@@ -199,3 +199,45 @@ def test_record_input_tags_the_current_frame_and_publishes(
     connection.disconnect()
     connection.connect("fake")
     assert len(observer.inputs) == 0
+
+
+# ------------------------------------------------- T-823 prefetched snapshots
+
+
+def test_snapshot_reads_name_every_region(
+    observer: ObservationService, connection: ConnectionService
+) -> None:
+    assert observer.snapshot_reads() == ()  # not connected
+    connection.connect("fake")
+    assert observer.snapshot_reads() == (("ram", 0, len(fake(connection).game.ram)),)
+    connection.disconnect()
+    assert observer.snapshot_reads() == ()
+    connection.connect("fake", capabilities=Capabilities(frame_advance=True))
+    assert observer.snapshot_reads() == ()  # no memory to read
+
+
+def test_advance_with_prefetched_bytes_reads_nothing(
+    observer: ObservationService, connection: ConnectionService, events: list[MemoryObserved]
+) -> None:
+    connection.connect("fake", seed=1)
+    adapter = fake(connection)
+    reads = observer.snapshot_reads()
+    adapter.set_input([UP])
+    result = adapter.step(2, reads=reads)
+    original = adapter._do_read_many
+    adapter._do_read_many = lambda r: (_ for _ in ()).throw(AssertionError("read"))  # type: ignore[method-assign]
+    event = observer.advance(2, snapshot=result.reads)
+    adapter._do_read_many = original  # type: ignore[method-assign]
+    assert event is not None and event.snapshot.frame == 2
+    assert event.snapshot.get("ram") == adapter.game.ram
+    assert observer.latest == event.snapshot and events == [event]
+    assert len(observer.ring) == 1
+
+
+def test_prefetched_bytes_with_the_wrong_shape_are_rejected(
+    observer: ObservationService, connection: ConnectionService
+) -> None:
+    connection.connect("fake")
+    with pytest.raises(ConfigurationError, match="planned"):
+        observer.advance(1, snapshot=[b"", b""])
+    assert observer.latest is None and observer.errors == 0

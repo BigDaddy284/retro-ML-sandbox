@@ -39,6 +39,7 @@ def test_starts_disconnected(panel: GamePanel) -> None:
 def test_connect_shows_first_frame_and_starts_pump(
     qtbot: QtBot, panel: GamePanel, context: AppContext
 ) -> None:
+    panel.clock.pause()  # paused: the pump serves the screen
     context.connection.connect("fake", seed=2)
     assert panel.pump.running
     assert panel.pump.interval_ms == 1000 // 60
@@ -228,7 +229,7 @@ def test_main_window_hosts_the_game_panel(qtbot: QtBot, context: AppContext) -> 
     assert w.game_panel.parent() is w.panel("game").content
     context.connection.connect("fake")
     qtbot.waitUntil(lambda: w.game_panel.view.frame is not None)
-    assert w.game_panel.pump.running
+    assert w.game_panel.clock.running and not w.game_panel.pump.running  # T-823
     w.close()
 
 
@@ -259,3 +260,68 @@ def test_pump_feeds_the_observation_service(qtbot: QtBot, context: AppContext) -
     qtbot.waitUntil(lambda: context.observation.frames_seen == seen + 1)
     assert context.observation.screen.transitions == seen
     assert context.observation.screen.observed == seen + 1
+
+
+# ------------------------------------------- T-823 the clock carries the picture
+
+
+def test_clock_carries_the_screen_while_playing_and_the_pump_rests(
+    qtbot: QtBot, panel: GamePanel, context: AppContext
+) -> None:
+    context.connection.connect("fake", seed=2)
+    assert panel.clock.running and not panel.pump.running
+    qtbot.waitUntil(lambda: panel.clock.frames_captured >= 3)
+    assert panel.pump.captured == 0  # every picture came with a step
+    assert panel.view.frame is not None and panel.status_text.startswith("Watching Toy Racer.")
+    qtbot.waitUntil(lambda: context.observation.frames_seen >= 3)  # and reached the tracker
+    panel.clock.pause()  # paused: the pump takes over
+    assert panel.pump.running
+    qtbot.waitUntil(lambda: panel.pump.captured >= 1)
+    panel.clock.play()
+    assert not panel.pump.running
+    context.connection.disconnect()
+    assert not panel.clock.running and not panel.pump.running
+
+
+def test_screenshot_rate_follows_the_clock_to_pump_ratio(qtbot: QtBot, context: AppContext) -> None:
+    panel = GamePanel(context, fps=25, clock_fps=100)
+    qtbot.addWidget(panel)
+    assert panel.clock.screenshot_every == 4 and panel.clock.interval_ms == 10
+    panel.clock.pause()
+    context.connection.connect("fake")
+    panel.pump.stop()
+    qtbot.waitUntil(lambda: not panel.pump.in_flight)
+    for _ in range(8):
+        assert panel.clock.pulse()
+        qtbot.waitUntil(lambda: not panel.clock.in_flight)
+    assert panel.clock.frames == 8 and panel.clock.frames_captured == 2
+    assert panel.view.frame is not None and panel.view.frame.number == 5  # pulses 1 and 5
+
+
+def test_pad_buttons_ride_along_on_the_clock_step(
+    qtbot: QtBot, panel: GamePanel, context: AppContext
+) -> None:
+    context.connection.connect("fake")
+    panel.clock.pause()
+    adapter = context.connection.adapter
+    assert isinstance(adapter, FakeEmulatorAdapter)
+    qtbot.waitUntil(lambda: not panel.clock.in_flight)
+    panel.pad.press("up")
+    qtbot.waitUntil(lambda: not panel.pad.sending)
+    adapter.set_input([])  # as if the pad's own send had been lost
+    assert panel.clock.tick()
+    assert adapter.held == panel.pad.held and len(adapter.held) == 1
+
+
+def test_emulator_without_a_screen_gets_plain_steps(
+    qtbot: QtBot, panel: GamePanel, context: AppContext
+) -> None:
+    context.connection.connect(
+        "fake", capabilities=Capabilities(frame_advance=True, memory_read=True, input=True)
+    )
+    assert panel.clock.running and not panel.pump.running
+    qtbot.waitUntil(lambda: panel.clock.frames >= 3)
+    assert panel.clock.frames_captured == 0 and panel.clock.errors == 0
+    assert panel.view.placeholder == NO_SCREEN
+    panel.clock.pause()
+    assert not panel.pump.running  # nothing to show, so the pump stays off

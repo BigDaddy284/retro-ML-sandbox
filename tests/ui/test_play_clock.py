@@ -301,3 +301,114 @@ def test_context_owns_a_discovery_service(context: AppContext) -> None:
     """T-306: the app context wires discovery to the observation service."""
     context.connection.connect("fake")
     assert context.discovery.enabled and context.discovery.knowledge is not None
+
+
+# -------------------------------------------- T-823 one request per frame
+
+
+def test_pulse_is_one_bundled_request_on_a_socket_backend(qtbot: QtBot) -> None:
+    from retro_ai_lab.emulator.bizhawk.simulator import BizHawkSimulator
+
+    with BizHawkSimulator() as sim:
+        context = AppContext()
+        clock = PlayClock(context, fps=100, screenshot_every=2)
+        clock.pause()
+        context.connection.connect("bizhawk", port=sim.port, call_timeout_s=2.0, timeout_s=2.0)
+        held = frozenset({b for b in context.connection.session.buttons if b.name == "up"})  # type: ignore[union-attr]
+        clock.set_inputs(lambda: held)
+        frames: list[object] = []
+        clock.frame_captured.connect(frames.append)
+        before = len(sim.requests)
+        assert clock.pulse()
+        qtbot.waitUntil(lambda: clock.frames == 1)
+        assert len(sim.requests) == before + 1
+        request = sim.requests[-1]
+        assert request["cmd"] == "step" and request["frames"] == 1
+        assert request["buttons"]["Up"] is True and not any(
+            held for label, held in request["buttons"].items() if label != "Up"
+        )
+        assert [r["domain"] for r in request["reads"]] == ["RAM"]  # the emulator's name
+        assert request["screenshot"] is True and len(frames) == 1
+        obs = context.observation
+        assert obs.latest is not None and obs.latest.frame == 1
+        assert obs.latest.get("ram") == sim.game.ram
+        assert clock.pulse()  # the next pulse: no screenshot, still one request
+        qtbot.waitUntil(lambda: clock.frames == 2)
+        assert len(sim.requests) == before + 2 and "screenshot" not in sim.requests[-1]
+        assert len(frames) == 1 and clock.frames_captured == 1
+        assert sim.game.state.speed == 2  # "Up" was held during both frames
+        context.connection.disconnect()
+
+
+def test_step_without_a_pad_sends_no_buttons(qtbot: QtBot) -> None:
+    from retro_ai_lab.emulator.bizhawk.simulator import BizHawkSimulator
+
+    with BizHawkSimulator() as sim:
+        context = AppContext()
+        clock = PlayClock(context, fps=100)
+        clock.pause()
+        context.connection.connect("bizhawk", port=sim.port, call_timeout_s=2.0, timeout_s=2.0)
+        clock.set_inputs(lambda: None)
+        assert clock.tick()
+        assert sim.requests[-1]["cmd"] == "step" and "buttons" not in sim.requests[-1]
+        clock.set_inputs(None)
+        assert clock.tick()
+        assert "buttons" not in sim.requests[-1]
+        context.connection.disconnect()
+
+
+def test_capabilities_decide_what_rides_along(
+    qtbot: QtBot, clock: PlayClock, context: AppContext
+) -> None:
+    context.connection.connect("fake", capabilities=Capabilities(frame_advance=True))
+    clock.pause()
+    clock.set_inputs(lambda: frozenset())
+    frames: list[object] = []
+    clock.frame_captured.connect(frames.append)
+    assert clock.tick(2)
+    assert clock.pulse()
+    qtbot.waitUntil(lambda: clock.frames == 3)
+    assert clock.errors == 0 and frames == [] and clock.frames_captured == 0
+    assert context.observation.latest is None  # no memory to read
+    assert game(context).game.state.frame == 3
+
+
+def test_screenshots_come_on_every_kth_pulse(qtbot: QtBot, context: AppContext) -> None:
+    clock = PlayClock(context, fps=100, screenshot_every=3)
+    clock.pause()
+    context.connection.connect("fake")
+    frames: list[object] = []
+    clock.frame_captured.connect(frames.append)
+    for _ in range(7):
+        assert clock.pulse()
+        qtbot.waitUntil(lambda: not clock.in_flight)
+    assert clock.frames == 7 and [f.number for f in frames] == [1, 4, 7]  # type: ignore[attr-defined]
+    assert clock.frames_captured == 3
+    context.connection.disconnect()
+    context.connection.connect("fake")  # the count starts over on connect
+    assert clock.pulse()
+    qtbot.waitUntil(lambda: not clock.in_flight)
+    assert clock.frames_captured == 1 and clock.frames == 1
+
+
+def test_bad_screenshot_every(context: AppContext) -> None:
+    with pytest.raises(ValueError):
+        PlayClock(context, fps=10, screenshot_every=0)
+
+
+def test_tick_feeds_the_snapshot_from_the_same_step(clock: PlayClock, context: AppContext) -> None:
+    context.connection.connect("fake")
+    clock.pause()
+    adapter = game(context)
+    reads = {"n": 0}
+    original = adapter._do_read_many
+
+    def counting(reads_: object) -> list[bytes]:
+        reads["n"] += 1
+        return original(reads_)  # type: ignore[arg-type]
+
+    adapter._do_read_many = counting  # type: ignore[method-assign]
+    assert clock.tick(3)
+    obs = context.observation
+    assert obs.latest is not None and obs.latest.frame == 3 and reads["n"] == 1
+    assert obs.latest.get("ram") == adapter.game.ram

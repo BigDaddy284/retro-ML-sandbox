@@ -8,10 +8,10 @@ without touching the emulator themselves.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError, Frame
+from retro_ai_lab.core import ConfigurationError, EmulatorDisconnectedError, EmulatorError, Frame
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.observation.diff import ChangeTracker, SnapshotDiff
 from retro_ai_lab.observation.inputs import InputEvent, InputLog
@@ -106,19 +106,41 @@ class ObservationService:
 
     # ------------------------------------------------------------ driving
 
-    def advance(self, frames: int = 1) -> MemoryObserved | None:
-        """Record that ``frames`` frames passed, then snapshot if enabled."""
+    def snapshot_reads(self) -> tuple[tuple[str, int, int], ...]:
+        """The memory reads one snapshot needs, to bundle into a ``step`` (T-823).
+
+        Empty when observation is off or the plan cannot be made, so the
+        caller sends a plain step and :meth:`advance` does the usual read.
+        """
+        if not self._enabled or self._capture is None or not self._connection.is_connected:
+            return ()
+        try:
+            return self._capture.reads()
+        except (EmulatorError, ConfigurationError):
+            return ()
+
+    def advance(
+        self, frames: int = 1, *, snapshot: Sequence[bytes] | None = None
+    ) -> MemoryObserved | None:
+        """Record that ``frames`` frames passed, then snapshot if enabled.
+
+        ``snapshot`` holds the bytes a bundled ``step`` already fetched, in
+        :meth:`snapshot_reads` order; without it the service reads them now.
+        """
         if frames < 0:
             raise ValueError("frames must be >= 0")
         self._frame += frames
-        return self.observe()
+        return self.observe(snapshot=snapshot)
 
-    def observe(self) -> MemoryObserved | None:
+    def observe(self, *, snapshot: Sequence[bytes] | None = None) -> MemoryObserved | None:
         """Take a snapshot now. Returns None if observation is off or failed."""
         if not self._enabled or self._capture is None or not self._connection.is_connected:
             return None
         try:
-            snapshot = self._capture.capture(self._frame)
+            if snapshot is not None:
+                captured = self._capture.from_reads(self._frame, snapshot)
+            else:
+                captured = self._capture.capture(self._frame)
         except EmulatorDisconnectedError:
             # The connection service has already announced the loss.
             return None
@@ -126,9 +148,9 @@ class ObservationService:
             # A glitchy read is counted but must not stop the game.
             self._errors += 1
             return None
-        self._ring.append(snapshot)
-        diff = self._tracker.observe(snapshot)
-        event = MemoryObserved(snapshot, diff)
+        self._ring.append(captured)
+        diff = self._tracker.observe(captured)
+        event = MemoryObserved(captured, diff)
         self._bus.publish(event)
         return event
 
