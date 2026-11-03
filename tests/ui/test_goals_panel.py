@@ -9,8 +9,15 @@ from pytestqt.qtbot import QtBot
 
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
 from retro_ai_lab.services import DiscoveryUpdated
+from retro_ai_lab.training import EpisodeRecord, EpisodeResult, LearningCurve, Mode
 from retro_ai_lab.ui.context import AppContext
-from retro_ai_lab.ui.goals_panel import BY_HAND, IDLE_TEXT, GoalsPanel
+from retro_ai_lab.ui.goals_panel import (
+    BY_HAND,
+    IDLE_TEXT,
+    NO_TRIES,
+    GoalsPanel,
+    training_stats_text,
+)
 from retro_ai_lab.ui.main_window import MainWindow
 from retro_ai_lab.understanding import EventKind, Evidence, GameEvent, Knowledge, VariableKind
 
@@ -175,6 +182,44 @@ def test_disconnect_keeps_rows_but_disables(panel: GoalsPanel, context: AppConte
     assert panel.objective_ids() != () and panel.summary_text == IDLE_TEXT
     for name in ("add_button", "remove_button", "done_button", "reset_button", "goal_title"):
         assert not widget(panel, name).isEnabled(), name  # type: ignore[attr-defined]
+
+
+# ------------------------------------------------------- training stats (T-603)
+
+
+def go(n: int, reward: float, objectives: int = 0) -> EpisodeRecord:
+    return EpisodeRecord(
+        n, Mode.GUIDED, EpisodeResult(10, 40, reward, "max_steps", 2, objectives), n * 40
+    )
+
+
+def test_training_stats_text_covers_every_case() -> None:
+    assert training_stats_text(LearningCurve([])) == NO_TRIES
+    assert training_stats_text(LearningCurve([go(1, 2.0)], window=2)) == (
+        "Tries: 1. No goal reached yet in 1 try. Trend: too early to say."
+    )
+    some = LearningCurve([go(1, 1.0), go(2, 1.0, 1), go(3, 5.0, 1), go(4, 5.0)], window=2)
+    assert training_stats_text(some) == (
+        "Tries: 4. Reached a goal in 2 of them (50%). Trend: getting better."
+    )
+    down = LearningCurve([go(1, 5.0), go(2, 5.0), go(3, 1.0), go(4, 1.0)], window=2)
+    assert training_stats_text(down).endswith("Trend: slipping.")
+    flat = LearningCurve([go(n, 3.0) for n in range(1, 5)], window=2)
+    assert training_stats_text(flat).endswith("Trend: holding steady.")
+
+
+def test_panel_counts_training_tries(panel: GoalsPanel, context: AppContext) -> None:
+    assert panel.stats_text == ""
+    context.connection.connect("fake", seed=3)
+    teach(context)
+    assert panel.stats_text == NO_TRIES
+    context.training.train(2)
+    assert panel.stats_text.startswith("Tries: 2.")
+    assert panel.stats_text.endswith("Trend: too early to say.")
+    context.connection.disconnect()
+    assert panel.stats_text == ""
+    context.connection.connect("fake", seed=3)
+    assert panel.stats_text.startswith("Tries: 2.")  # loaded back with the brain
 
 
 def test_main_window_hosts_the_panel(qtbot: QtBot, context: AppContext) -> None:
