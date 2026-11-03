@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Fixed: the automatic button experiments no longer run in the middle of a go; each one took a save state and ran a trial per button over the AI's link, freezing play for seconds every ten seconds on the real emulator. A due experiment now runs between goes, and not at all while the child plays in manual mode (T-839).
 - Fixed: a "reset" (everything back to the start) now needs one of the values going back to its first value to be at least fairly sure; on the real Super Mario Bros. two shaky stack bytes going home together ended every go after 3 steps (T-838).
 - Added: the six panels are dock widgets that can be dragged to another edge, tabbed together, floated as their own windows, resized, hidden and shown again from the toolbar's Panels menu, with Reset layout; the arrangement is remembered between runs (T-837).
 - Changed: "Practise fast" now asks the emulator for its top speed (64x on EmuHawk) while the AI trains and puts 1x back on pause, stop or a return to "Watch it play"; the Game panel shows 2 pictures a second meanwhile so the link belongs to the training steps; the bridge script restores 100% when the app leaves (T-836).

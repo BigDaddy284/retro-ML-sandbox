@@ -334,6 +334,51 @@ def test_an_emulator_without_speed_control_is_left_alone(lab: Lab) -> None:
     t.stop()
 
 
+def test_training_holds_the_button_experiments_back(lab: Lab) -> None:
+    """T-839: no automatic experiments over the link while a go is running."""
+    lab.connect()
+    t = lab.training
+    assert lab.discovery.experiments_allowed
+    t.start()
+    assert not lab.discovery.experiments_allowed
+    t.pause()
+    assert not lab.discovery.experiments_allowed  # the game is still the AI's
+    t.resume()
+    t.stop()
+    assert lab.discovery.experiments_allowed
+    t.start(Mode.MANUAL)  # the child drives the same link
+    assert not lab.discovery.experiments_allowed
+    t.stop()
+    assert lab.discovery.experiments_allowed
+
+
+def test_due_experiments_run_between_goes_not_mid_go(tmp_path: Path) -> None:
+    """T-839: a due experiment runs as the next go begins, never inside a go."""
+    bus = EventBus(on_error=lambda exc, event, handler: (_ for _ in ()).throw(exc))
+    connection = ConnectionService(default_registry(), bus)
+    observation = ObservationService(connection, bus)
+    discovery = DiscoveryService(connection, observation, bus, experiment_every=30)
+    training = TrainingService(
+        connection, observation, discovery, bus, frames_per_step=4, max_steps=8, seed=1
+    )
+    lab = Lab(bus, connection, observation, discovery, None, None, training, [], [])  # type: ignore[arg-type]
+    lab.connect()
+    training.start()
+    seen = 0
+    ran_at: list[int] = []
+    for _ in range(200):
+        training.step()
+        if discovery.experiments > seen:
+            seen = discovery.experiments
+            episode = training.episode
+            assert episode is not None
+            ran_at.append(episode.steps)
+    training.stop()
+    assert seen >= 3, "experiments still happen while training"
+    assert ran_at and all(steps == 1 for steps in ran_at), ran_at  # the first step of a go
+    assert not discovery.experiment_due or not discovery.experiments_allowed
+
+
 def test_checkpoint_can_be_switched_off(lab: Lab) -> None:
     t = TrainingService(
         lab.connection, lab.observation, lab.discovery, lab.bus, max_steps=5, checkpoint=False

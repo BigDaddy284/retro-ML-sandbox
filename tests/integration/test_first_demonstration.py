@@ -70,7 +70,7 @@ class Played:
 
     rewards: list[float] = field(default_factory=list)
     steps: list[int] = field(default_factory=list)
-    scores: list[int] = field(default_factory=list)  # points at the end of the go
+    scores: list[int] = field(default_factory=list)  # most points held in the go
     speeds: list[float] = field(default_factory=list)  # mean speed over the go
 
     def recent(self, last: int = WINDOW) -> tuple[float, float, float, float]:
@@ -91,13 +91,15 @@ def train(ctx: AppContext, goes: int) -> Played:
     while t.episodes < goes:
         n = t.episodes
         speeds: list[int] = []
+        best = 0
         while t.episodes == n:
             t.step()
             speeds.append(adapter.game.state.speed)
+            best = max(best, adapter.game.state.score)
         result = t.history[-1].result
         played.rewards.append(result.reward)
         played.steps.append(result.steps)
-        played.scores.append(adapter.game.state.score)
+        played.scores.append(best)
         played.speeds.append(statistics.fmean(speeds))
     t.stop()
     return played

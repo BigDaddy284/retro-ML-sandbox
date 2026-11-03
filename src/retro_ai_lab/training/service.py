@@ -498,6 +498,7 @@ class TrainingService:
         if not self._enabled:  # the link dropped while the checkpoint was being taken
             raise ConfigurationError("The game went away just as training was starting.")
         self._status = Status.RUNNING
+        self._discovery.set_experiments_allowed(False)  # not over the game's link (T-839)
         self._apply_speed()
         self._announce("start")
 
@@ -520,6 +521,7 @@ class TrainingService:
             raise ConfigurationError("Nothing is running to stop.")
         self._close_episode("stopped")
         self._status = Status.IDLE
+        self._discovery.set_experiments_allowed(True)
         self._apply_speed()
         self._announce("stop")
 
@@ -844,6 +846,10 @@ class TrainingService:
             )
         self._busy = True
         try:
+            # Between goes is the moment for a due button experiment (T-839): the
+            # game is about to go back to the checkpoint anyway, and no go is mid-step.
+            if self._mode.ai_plays and self._harness is not None:
+                self._discovery.run_due_experiment()
             self._runner.begin(restore=self._mode.ai_plays)
         except EmulatorError:
             return None
