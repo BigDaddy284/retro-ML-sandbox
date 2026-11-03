@@ -9,6 +9,8 @@ and state commands are added task by task (T-112 to T-116).
 
 from __future__ import annotations
 
+import base64
+import binascii
 from collections.abc import Sequence
 from typing import Any
 
@@ -17,12 +19,15 @@ from retro_ai_lab.core import (
     Capabilities,
     ConfigurationError,
     EmulatorDisconnectedError,
+    EmulatorError,
+    Frame,
     GameInfo,
     MemoryRegion,
     ProtocolError,
 )
 from retro_ai_lab.emulator.base import EmulatorAdapter
 from retro_ai_lab.emulator.bizhawk.description import Description
+from retro_ai_lab.emulator.bizhawk.image import decode_image
 from retro_ai_lab.emulator.bizhawk.protocol import (
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -143,7 +148,24 @@ class BizHawkAdapter(EmulatorAdapter):
     def _do_memory_regions(self) -> Sequence[MemoryRegion]:
         return self.description.regions
 
+    def _do_capture_frame(self) -> Frame:
+        answer = self._call("screenshot")
+        return self._frame_from(answer)
+
     # ------------------------------------------------------------ helpers
+
+    def _frame_from(self, answer: dict[str, Any]) -> Frame:
+        image = answer.get("image")
+        if image is None:
+            raise EmulatorError("The emulator did not take a screenshot.")
+        if not isinstance(image, str):
+            raise ProtocolError("The emulator's screenshot was not base64 text.")
+        try:
+            data = base64.b64decode(image, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ProtocolError("The emulator's screenshot was not valid base64.") from exc
+        number = answer.get("frame")
+        return decode_image(data, number=number if isinstance(number, int) else 0)
 
     def _call(self, cmd: str, **fields: Any) -> dict[str, Any]:
         link = self._link

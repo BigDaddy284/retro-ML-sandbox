@@ -130,7 +130,7 @@ Binary data (memory bytes, screenshots) is base64. `frame` is `emu.framecount()`
 | `read` | `reads: [{domain, addr, len}]` | `reads: [base64…]` | `memory.read_bytes_as_array(addr, len, domain)` | 1-indexed table order |
 | `input` | `buttons: {name: bool}` | – | held set; `joypad.set(table, 1)` applied before every frame until changed | `joypad.set` must be repeated each frame |
 | `step` | `frames` (≥1), optional `buttons`, `reads`, `screenshot` | `reads`, `image` (base64 PNG or null) | sets input, `emu.frameadvance()` × frames, then reads and screenshot | frame advance while paused (see 5.3) |
-| `screenshot` | – | `image` (base64 of the file `client.screenshot(path)` wrote) | `client.screenshot(path)`; file read back and deleted | format written (PNG expected), cost |
+| `screenshot` | – | `image` (base64 of the file `client.screenshot(path)` wrote) | `client.screenshot(path)` into the temp folder; file read back and deleted; the adapter decodes it with QtGui's `QImage` into an RGB `Frame` | format written (PNG expected), cost |
 | `speed` | `percent` | – | `client.speedmode(percent)` | accepted range |
 | `save` / `load` | `slot` (safe name) | `load` returns `loaded: bool` | `savestate.save(path)` / `savestate.load(path)` under the script's temp dir | path handling |
 | `mode` | `free_run: bool` | – | see 5.3 | which mode works |

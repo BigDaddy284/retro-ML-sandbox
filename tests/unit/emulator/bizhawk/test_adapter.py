@@ -47,9 +47,9 @@ def test_handshake_disconnect_and_idempotence() -> None:
         info = adapter.game_info()
         assert info.system == SYSTEM and info.title == ROM_NAME
         assert info.rom_hash == "toyracer-0"
-        # the simulator only has the handshake commands so far: nothing is claimed
-        assert adapter.capabilities() == Capabilities()
-        assert adapter.description.commands == {"hello", "ping", "mode", "bye"}
+        # capabilities follow the simulator's commands: only screenshots so far
+        assert adapter.capabilities() == Capabilities(screen_capture=True)
+        assert adapter.description.commands == {"hello", "ping", "mode", "bye", "screenshot"}
         assert adapter.buttons() == tuple(Button(b.name, b.label) for b in BUTTONS)
         assert adapter.description.button_names["start"] == "Start"
         assert adapter.description.regions == (MemoryRegion("ram", 32, description="RAM"),)
@@ -122,6 +122,33 @@ def test_dropped_link_is_noticed_on_the_next_call() -> None:
         with pytest.raises(EmulatorDisconnectedError):
             adapter.ping()
         assert not adapter.is_connected
+
+
+def test_capture_frame_through_the_simulator() -> None:
+    with BizHawkSimulator() as sim:
+        adapter = BizHawkAdapter(port=sim.port)
+        adapter.connect(timeout_s=1.0)
+        assert adapter.capabilities().screen_capture
+        assert "screenshot" in adapter.description.commands
+        expected = sim.game.render()
+        frame = adapter.capture_frame()
+        assert (frame.width, frame.height, frame.channels) == (expected.width, expected.height, 3)
+        assert frame.pixels == bytes(v for v in expected.pixels for _ in range(3))
+        assert frame.number == sim.game.state.frame
+        adapter.disconnect()
+    with BizHawkSimulator(screenshot=None) as sim:
+        adapter = BizHawkAdapter(port=sim.port)
+        adapter.connect(timeout_s=1.0)
+        with pytest.raises(EmulatorError, match="did not take a screenshot"):
+            adapter.capture_frame()
+        assert adapter.is_connected  # a refused screenshot is not a lost link
+        adapter.disconnect()
+    with BizHawkSimulator(screenshot="garbage") as sim:
+        adapter = BizHawkAdapter(port=sim.port)
+        adapter.connect(timeout_s=1.0)
+        with pytest.raises(ProtocolError, match="not valid base64"):
+            adapter.capture_frame()
+        adapter.disconnect()
 
 
 def test_options_are_validated_and_script_ships() -> None:

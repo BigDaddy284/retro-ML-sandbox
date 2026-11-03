@@ -18,6 +18,7 @@ from collections.abc import Callable
 from typing import Any
 
 from retro_ai_lab.core import ConfigurationError
+from retro_ai_lab.emulator.bizhawk.image import encode_png
 from retro_ai_lab.emulator.bizhawk.protocol import DEFAULT_HOST, PROTOCOL_VERSION
 from retro_ai_lab.emulator.fake.toy_racer import BUTTONS, RAM_SIZE, ToyRacer
 
@@ -45,6 +46,7 @@ class BizHawkSimulator:
         garbage: bool = False,
         drop_after: int | None = None,
         no_game: bool = False,
+        screenshot: str | None = "png",
     ) -> None:
         if drop_after is not None and drop_after < 0:
             raise ConfigurationError("drop_after must be >= 0 or None.")
@@ -56,6 +58,9 @@ class BizHawkSimulator:
         self._garbage = garbage
         self._drop_after = drop_after
         self._no_game = no_game
+        if screenshot not in (None, "png", "garbage"):
+            raise ConfigurationError("screenshot must be 'png', 'garbage' or None.")
+        self._screenshot = screenshot
         self._server: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -231,6 +236,7 @@ class BizHawkSimulator:
             "ping": lambda _r: {},
             "bye": self._bye,
             "mode": self._mode,
+            "screenshot": self._screenshot_cmd,
         }
 
     def _hello(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -252,6 +258,13 @@ class BizHawkSimulator:
             self._paused = False
         self._closing = True
         return {}
+
+    def _screenshot_cmd(self, request: dict[str, Any]) -> dict[str, Any]:
+        if self._screenshot is None:
+            return {"image": None}
+        if self._screenshot == "garbage":
+            return {"image": "not base64 at all!"}
+        return {"image": b64(encode_png(self._game.render()))}
 
     def _mode(self, request: dict[str, Any]) -> dict[str, Any]:
         free_run = request.get("free_run")

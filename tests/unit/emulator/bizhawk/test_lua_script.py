@@ -5,13 +5,14 @@ from __future__ import annotations
 import base64
 import json
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from retro_ai_lab.core import EmulatorDisconnectedError
+from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError
 from retro_ai_lab.emulator.bizhawk import PROTOCOL_VERSION, BizHawkAdapter
 from tests.unit.emulator.bizhawk.lua_host import (
     BIZHAWK_VERSION,
@@ -49,7 +50,7 @@ def test_handshake_hold_mode_and_reconnect() -> None:
             {"name": "System Bus", "size": 65536},
         ]
         assert hello["buttons"] == sorted(["Up", "Down", "Left", "Right", "A", "B", "Start"])
-        assert hello["commands"] == ["bye", "hello", "mode", "ping"]  # the X Axis is no button
+        assert hello["commands"] == ["bye", "hello", "mode", "ping", "screenshot"]
         assert isinstance(hello["frame"], int)
         assert [b.name for b in adapter.buttons()] == [
             "a",
@@ -127,6 +128,31 @@ def test_script_survives_bad_requests_and_a_vanished_app() -> None:
         with pytest.raises(EmulatorDisconnectedError):
             adapter.ping()
         adapter.connect(timeout_s=5.0)
+        adapter.disconnect()
+        assert host.error is None
+
+
+def test_screenshot_through_the_real_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setenv("TMP", str(tmp_path))
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    with LuaScriptHost() as host:
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
+        adapter.connect(timeout_s=5.0)
+        assert adapter.capabilities().screen_capture
+        expected = host.game.render()
+        frame = adapter.capture_frame()
+        assert (frame.width, frame.height, frame.channels) == (expected.width, expected.height, 3)
+        assert frame.pixels == bytes(v for v in expected.pixels for _ in range(3))
+        assert frame.number == host.game.state.frame
+        assert host.screenshots == [str(tmp_path / "retro_ai_lab_frame.png").encode()]
+        assert list(tmp_path.iterdir()) == []  # the script tidies up after itself
+        host.write_screenshots = False
+        with pytest.raises(EmulatorError, match="did not write a screenshot"):
+            adapter.capture_frame()
+        assert adapter.is_connected
         adapter.disconnect()
         assert host.error is None
 
