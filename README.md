@@ -92,3 +92,31 @@ Python 3.11+, PySide6 (Qt) desktop UI, NumPy for screen and memory analysis, PyT
 ## Legal
 
 Retro AI Lab ships no ROMs and never modifies ROM files. Use games you legally own.
+
+## Credits
+
+Retro AI Lab is built on other people's work. Everything taken from another source is listed here; keep this list current when something new is added.
+
+**Shipped inside the app**
+
+| What | Where it came from | Licence |
+|---|---|---|
+| LuaSocket DLLs (`emulator/bizhawk/luasocket/x64/socket-windows-5-4.dll`, `-5-1.dll`) | Prebuilt binaries from the [Archipelago](https://github.com/ArchipelagoMW/Archipelago) multiworld project (`data/lua/x64/`), unmodified copies of [LuaSocket](https://github.com/lunarmodules/luasocket) by Diego Nehab | MIT (both); full text in `emulator/bizhawk/luasocket/LICENSE` |
+| `emulator/bizhawk/socket.lua` loader | Written for Retro AI Lab, modelled on Archipelago's `data/lua/socket.lua` (how the DLL is found and `bind`/`connect` are added) | MIT (Archipelago); our file is part of this project |
+| BizHawk bridge design (Lua script as a TCP server, newline-delimited JSON) | Approach borrowed from Archipelago's `connector_bizhawk_generic.lua`; no code copied | n/a |
+
+**Libraries used (installed with the app)**
+
+| Library | Used for | Licence |
+|---|---|---|
+| [PySide6 / Qt](https://www.qt.io/qt-for-python) | Desktop UI | LGPL v3 |
+| [NumPy](https://numpy.org) | Screen and memory analysis | BSD 3-Clause |
+| [PyInstaller](https://pyinstaller.org) | Windows build | GPL v2 with bootloader exception (output is not covered) |
+
+**Development tools (not shipped)**
+
+pytest, pytest-qt, pytest-cov, Hypothesis, Ruff, mypy, and [lupa](https://github.com/scoder/lupa) (runs the Lua bridge scripts in tests). All MIT, Apache 2.0 or MPL 2.0.
+
+**Emulators the app talks to (not shipped)**
+
+[BizHawk](https://tasvideos.org/BizHawk) (MIT) and [mGBA](https://mgba.io) (MPL 2.0). The Lua API reference at tasvideos.org/BizHawk/LuaFunctions was the source for the EmuHawk calls in the bridge script.

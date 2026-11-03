@@ -1,7 +1,9 @@
 # Playing on a real console: BizHawk (EmuHawk)
 
 Retro AI Lab talks to BizHawk's EmuHawk through a small Lua script that ships
-with the app. EmuHawk runs the game; the script listens on a local port; the app
+with the app, together with `socket.lua` and a `luasocket` folder (EmuHawk's
+Lua has no network library of its own, so the script brings one; keep the
+three together). EmuHawk runs the game; the script listens on a local port; the app
 connects, reads memory, takes screenshots, presses buttons, steps frames and
 saves states through it. Nothing is installed into BizHawk and nothing leaves
 the machine (the script only accepts connections from 127.0.0.1).
@@ -31,7 +33,10 @@ No Lua knowledge is needed: the script is written, you only open it.
    next to `RetroAILab.exe`).
    The script appears in the list with a green tick and the console prints
    `Retro AI Lab is waiting for the app on port 43110.` Leave the window open.
-   (A red X means the script hit an error; the text in the console says what.)
+   (A red X means the script hit an error; the text in the console says what.
+   `module 'socket' not found` means `socket.lua` and the `luasocket` folder
+   are not next to the script; `could not load LuaSocket` names the DLL it
+   tried, which must match a 64-bit EmuHawk.)
 3. In Retro AI Lab pick **BizHawk (EmuHawk)** in the console box and press
    **Connect**. The game pauses (the script holds it so the AI can step one
    frame at a time) and the status line shows the game's name.

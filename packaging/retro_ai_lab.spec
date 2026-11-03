@@ -18,6 +18,9 @@ a = Analysis(
     datas=[
         # The BizHawk bridge script ships next to the adapter package.
         ("../src/retro_ai_lab/emulator/bizhawk/retro_ai_lab.lua", "retro_ai_lab/emulator/bizhawk"),
+        # EmuHawk has no socket library: the loader and the luasocket folder go with the script.
+        ("../src/retro_ai_lab/emulator/bizhawk/socket.lua", "retro_ai_lab/emulator/bizhawk"),
+        ("../src/retro_ai_lab/emulator/bizhawk/luasocket", "retro_ai_lab/emulator/bizhawk/luasocket"),
         ("../src/retro_ai_lab/emulator/mgba/retro_ai_lab.lua", "retro_ai_lab/emulator/mgba"),
     ],
     hiddenimports=hidden,
