@@ -363,3 +363,35 @@ def test_the_knowledge_can_be_read_while_another_thread_rewrites_it() -> None:
         t.join(timeout=10)
         sys.setswitchinterval(interval)
     assert not t.is_alive() and failures == []
+
+
+def test_believed_keeps_the_best_few_of_each_kind() -> None:
+    """T-850: the AI acts on its strongest 16 guesses of a kind, confirmed ones first."""
+    from retro_ai_lab.understanding.knowledge import BELIEVED_PER_KIND
+
+    assert BELIEVED_PER_KIND == 16
+    k = Knowledge("g")
+    weak = [Evidence("t", "", 1.0)]
+    for i in range(40):
+        k.propose("ram", i, kind=VariableKind.FLAG, evidence=weak)
+    strong = k.propose("ram", 50, kind=VariableKind.FLAG, evidence=[Evidence("t", "", 2.0)])
+    sure = k.propose("ram", 60, kind=VariableKind.FLAG, evidence=[Evidence("t", "", 3.0)])
+    confirmed = k.propose("ram", 70, kind=VariableKind.FLAG, evidence=weak)
+    k.confirm(confirmed.id)
+    lives = k.propose("ram", 80, kind=VariableKind.LIVES, evidence=weak)
+    rejected = k.propose("ram", 90, kind=VariableKind.LIVES, evidence=weak)
+    k.reject(rejected.id)
+    elsewhere = k.propose("vram", 0, kind=VariableKind.LIVES, evidence=[Evidence("t", "", 3.0)])
+    chosen = k.believed()
+    flags = [v for v in chosen if v.kind is VariableKind.FLAG]
+    assert len(flags) == 16
+    assert {confirmed.id, sure.id, strong.id} <= {v.id for v in flags}
+    assert [v.offset for v in flags if v.offset < 40] == list(range(13))  # then by address
+    assert [v.id for v in chosen if v.kind is VariableKind.LIVES] == [lives.id, elsewhere.id]
+    assert [v.id for v in chosen] == sorted((v.id for v in chosen), key=lambda i: int(i[1:]))
+    # Only the regions the emulator shares compete for the seats.
+    assert elsewhere.id not in {v.id for v in k.believed(regions=("ram",))}
+    assert len(k.believed(per_kind=2)) == 4
+    assert k.believed(Confidence.MEDIUM) == (sure, k.get(confirmed.id), elsewhere)
+    with pytest.raises(ConfigurationError):
+        k.believed(per_kind=0)

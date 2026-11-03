@@ -122,3 +122,16 @@ def test_toy_racer_states_stay_small_but_tell_lanes_apart() -> None:
     assert 4 <= len(seen) < 200
     assert lanes == {0, 1, 2}
     assert "Lane=" in next(iter(seen)).describe(k)
+
+
+def test_encoder_uses_the_best_few_of_a_kind() -> None:
+    """T-850: the state is built from at most 16 of a kind, so it stays learnable."""
+    k = Knowledge("g")
+    for i in range(30):
+        k.propose(RAM, i, kind=VariableKind.FLAG, evidence=MAYBE)
+    best = k.propose(RAM, 31, kind=VariableKind.FLAG, evidence=SURE)
+    lives = k.propose(RAM, 30, kind=VariableKind.LIVES, evidence=MAYBE)
+    enc = StateEncoder(k)
+    ids = [v.id for v in enc.variables]
+    assert len(ids) == 17 and best.id in ids and lives.id in ids
+    assert [v.offset for v in enc.variables] == sorted(v.offset for v in enc.variables)

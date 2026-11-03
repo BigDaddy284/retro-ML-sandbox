@@ -329,3 +329,16 @@ def test_values_that_never_moved_do_not_count_against_a_reset() -> None:
     assert any(e.kind is EventKind.RESET for e in d.observe(snap(2, 0, 3, 9)))
     d.reset()
     assert d.moved == 0
+
+
+def test_only_the_best_few_of_a_kind_are_watched() -> None:
+    """T-850: 40 LOW flags: the 16 strongest are watched, the rest wait for evidence."""
+    k = Knowledge("g")
+    for i in range(40):
+        k.propose(RAM, i, kind=VariableKind.FLAG, evidence=[Evidence("t", "", 1.0)])
+    d = EventDetector(k)
+    d.observe(snap(0, *([0] * 40)))
+    assert len(d.watching) == 16
+    k.support("v40", Evidence("t", "", 2.0))  # the last one earns a seat
+    d.observe(snap(1, *([0] * 40)))
+    assert "v40" in d.watching and "v16" not in d.watching and len(d.watching) == 16

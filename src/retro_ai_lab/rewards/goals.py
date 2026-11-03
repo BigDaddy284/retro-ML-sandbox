@@ -393,11 +393,7 @@ def merge_suggestions(
     its mind, so any "completion" it saw was a misreading); its wording follows
     the variable's name.
     """
-    progress = [
-        v
-        for v in knowledge
-        if v.kind is VariableKind.PROGRESS and not v.rejected and v.confidence >= at_least
-    ]
+    progress = [v for v in knowledge.believed(at_least) if v.kind is VariableKind.PROGRESS]
     keys = {Trigger(EventKind.PROGRESS, v.id).key: v for v in progress}
     for o in list(goal):
         if not o.suggested or o.trigger is None or o.trigger.kind is not EventKind.PROGRESS:

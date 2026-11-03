@@ -149,13 +149,15 @@ class EventDetector:
         if key != self._tracked_for:
             self._tracked_list = [
                 v
-                for v in self._knowledge
-                if not v.rejected
-                and v.region in regions
-                and self._at_least <= v.confidence
-                and v.kind in TRACKED_KINDS
+                for v in self._knowledge.believed(self._at_least, regions=regions)
+                if v.kind in TRACKED_KINDS
             ]
             self._tracked_for = key
+            # A value that lost its seat (T-850) or its belief is no longer watched.
+            keep = {v.id for v in self._tracked_list}
+            for var_id in [i for i in self._watches if i not in keep]:
+                if self._watches.pop(var_id).moved:
+                    self._moved -= 1
         return self._tracked_list
 
     def observe(self, snapshot: MemorySnapshot) -> tuple[GameEvent, ...]:

@@ -156,11 +156,8 @@ class LongLook:
         if found is None:
             found = [
                 v
-                for v in self._knowledge
-                if not v.rejected
-                and v.region in regions
-                and self._at_least <= v.confidence
-                and v.kind in kinds
+                for v in self._knowledge.believed(self._at_least, regions=regions)
+                if v.kind in kinds
             ]
             self._believed_lists[kinds] = found
         return found

@@ -101,10 +101,8 @@ class StateEncoder:
             sorted(
                 (
                     v
-                    for v in self._knowledge
-                    if not v.rejected
-                    and v.confidence >= self._at_least
-                    and v.kind not in IGNORED_KINDS
+                    for v in self._knowledge.believed(self._at_least)
+                    if v.kind not in IGNORED_KINDS
                 ),
                 key=lambda v: (v.region, v.offset),
             )

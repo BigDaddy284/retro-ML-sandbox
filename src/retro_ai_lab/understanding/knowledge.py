@@ -21,6 +21,7 @@ from typing import Any
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.observation.memory import MemorySnapshot
 
+BELIEVED_PER_KIND = 16  # the most guesses of one kind the AI acts on at once (T-850)
 SCHEMA_VERSION = 2  # 2: relationships added (older files load fine)
 
 
@@ -397,6 +398,57 @@ class Knowledge:
                 v for v in self._variables.values() if not v.rejected and at_least <= v.confidence
             )
 
+    def believed(
+        self,
+        at_least: Confidence = Confidence.LOW,
+        *,
+        regions: Iterable[str] | None = None,
+        per_kind: int = BELIEVED_PER_KIND,
+    ) -> tuple[Variable, ...]:
+        """The guesses the AI acts on: the strongest few of each kind (T-850).
+
+        A game has one lives counter, a score, a handful of progress values and a
+        few flags. On the user's Super Mario Bros. the knowledge held 1,600 guesses,
+        nearly all wrong, and watching, rewarding, pairing and learning from all of
+        them cost most of every step and left the agent never seeing the same state
+        twice. Every guess stays in the knowledge; this is the subset that the
+        detector, the long look, the rewards, the goals and the state read.
+        Seats go to confirmed variables first, then by confidence, then by evidence
+        weight, then by address; with ``regions`` only variables in those regions
+        compete (memory the emulator no longer shares must not take a seat). The
+        result keeps the knowledge's own order.
+        """
+        if per_kind < 1:
+            raise ConfigurationError("per_kind must be at least 1.")
+        wanted = None if regions is None else frozenset(regions)
+        with self._lock:
+            candidates = [
+                (i, v)
+                for i, v in enumerate(self._variables.values())
+                if not v.rejected
+                and at_least <= v.confidence
+                and (wanted is None or v.region in wanted)
+            ]
+        candidates.sort(
+            key=lambda item: (
+                not item[1].confirmed,
+                -item[1].confidence.value,
+                -sum(e.weight for e in item[1].evidence),
+                item[1].region,
+                item[1].offset,
+            )
+        )
+        seats: dict[VariableKind, int] = {}
+        chosen: list[tuple[int, Variable]] = []
+        for item in candidates:
+            kind = item[1].kind
+            taken = seats.get(kind, 0)
+            if taken < per_kind:
+                seats[kind] = taken + 1
+                chosen.append(item)
+        chosen.sort()
+        return tuple(v for _, v in chosen)
+
     def needs_help(self) -> tuple[Variable, ...]:
         """Beliefs that are worth asking a person about (DESIGN.md §3.4)."""
         with self._lock:
@@ -590,6 +642,7 @@ class Knowledge:
 
 
 __all__ = [
+    "BELIEVED_PER_KIND",
     "SCHEMA_VERSION",
     "THRESHOLDS",
     "Confidence",
