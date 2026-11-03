@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-112: The BizHawk adapter describes the connected emulator from the bridge's `hello`: game info, buttons and memory regions with EmuHawk's names kept as labels, and capabilities derived from the commands the script says it has (so nothing is claimed before it works); connecting with no game loaded is refused with a plain instruction.
 - T-111: The BizHawk adapter's first slice: connect to the bridge, `hello` handshake with a protocol-version check, clean `bye`, dropped-link detection; the shipped `retro_ai_lab.lua` bridge script (LuaSocket server, inline JSON and base64, hold and free-run modes); a Python `BizHawkSimulator`; and a test harness that runs the real script under `lupa`. The adapter is not in the emulator list yet (T-117).
 - T-110: BizHawk bridge protocol fixed and documented (`ARCHITECTURE.md` §5): a shipped Lua script listening on a local socket, newline-delimited JSON, a bundled `step` command, hold and free-run modes, and the checklist of what the real emulator must confirm (ADR-005 Accepted).
 - T-709: A longer look at progress-like values: a flag that reaches a third value counts, a value that steps up at the same few places of a position is a checkpoint, and one that steps up each time another starts over counts its rounds (laps); input linking no longer mistakes such values for positions.

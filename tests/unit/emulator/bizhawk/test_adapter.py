@@ -7,11 +7,14 @@ import time
 import pytest
 
 from retro_ai_lab.core import (
+    Button,
     Capabilities,
     ConfigurationError,
     EmulatorDisconnectedError,
     EmulatorError,
+    MemoryRegion,
     ProtocolError,
+    UnsupportedCapabilityError,
 )
 from retro_ai_lab.emulator.bizhawk import (
     PROTOCOL_VERSION,
@@ -20,6 +23,7 @@ from retro_ai_lab.emulator.bizhawk import (
     BizHawkSimulator,
 )
 from retro_ai_lab.emulator.bizhawk.simulator import ROM_NAME, SYSTEM
+from retro_ai_lab.emulator.fake.toy_racer import BUTTONS
 
 
 def wait_until(check: object, *, timeout_s: float = 5.0) -> None:
@@ -43,8 +47,14 @@ def test_handshake_disconnect_and_idempotence() -> None:
         info = adapter.game_info()
         assert info.system == SYSTEM and info.title == ROM_NAME
         assert info.rom_hash == "toyracer-0"
+        # the simulator only has the handshake commands so far: nothing is claimed
         assert adapter.capabilities() == Capabilities()
-        assert adapter.buttons() == ()
+        assert adapter.description.commands == {"hello", "ping", "mode", "bye"}
+        assert adapter.buttons() == tuple(Button(b.name, b.label) for b in BUTTONS)
+        assert adapter.description.button_names["start"] == "Start"
+        assert adapter.description.regions == (MemoryRegion("ram", 32, description="RAM"),)
+        with pytest.raises(UnsupportedCapabilityError):  # claimed only once 'read' exists
+            adapter.memory_regions()
         adapter.connect(timeout_s=2.0)  # no-op
         assert sim.connections == 1
         adapter.ping()
@@ -76,6 +86,13 @@ def test_no_bridge_and_silent_bridge() -> None:
             adapter.connect(timeout_s=0.3)
         assert not adapter.is_connected and adapter.hello == {}
         wait_until(lambda: sim.connections == 1)
+    with BizHawkSimulator(no_game=True) as sim:
+        adapter = BizHawkAdapter(port=sim.port)
+        with pytest.raises(ProtocolError, match="Load a game in EmuHawk first"):
+            adapter.connect(timeout_s=1.0)
+        assert not adapter.is_connected
+        with pytest.raises(EmulatorDisconnectedError):
+            adapter.description  # noqa: B018 - the property is the check
 
 
 def test_wrong_version_and_garbage_are_protocol_errors() -> None:

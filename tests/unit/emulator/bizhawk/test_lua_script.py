@@ -49,7 +49,17 @@ def test_handshake_hold_mode_and_reconnect() -> None:
             {"name": "System Bus", "size": 65536},
         ]
         assert hello["buttons"] == sorted(["Up", "Down", "Left", "Right", "A", "B", "Start"])
+        assert hello["commands"] == ["bye", "hello", "mode", "ping"]  # the X Axis is no button
         assert isinstance(hello["frame"], int)
+        assert [b.name for b in adapter.buttons()] == [
+            "a",
+            "b",
+            "down",
+            "left",
+            "right",
+            "start",
+            "up",
+        ]
         info = adapter.game_info()
         assert (info.system, info.title, info.rom_hash) == (
             "NES",

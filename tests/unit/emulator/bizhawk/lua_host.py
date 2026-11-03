@@ -346,7 +346,9 @@ class LuaScriptHost:
     def _joypad_get(self, controller: int | None) -> Any:
         self._record("joypad_get")
         if controller == 1:
-            return self._runtime.table_from(dict.fromkeys(PAD_BUTTONS, False))
+            pad: dict[bytes, Any] = dict.fromkeys(PAD_BUTTONS, False)
+            pad[b"X Axis"] = 0  # an analog stick is not a button
+            return self._runtime.table_from(pad)
         return self._runtime.table_from({b"P1 " + name: False for name in PAD_BUTTONS})
 
     def _joypad_set(self, buttons: Any, controller: int | None) -> None:
