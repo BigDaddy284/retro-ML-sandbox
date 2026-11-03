@@ -2,7 +2,7 @@
 
 An emulator-based machine learning sandbox that lets children train an AI to play retro video games by choosing goals and adjusting rewards, with no code and no hexadecimal.
 
-> Status: **pre-alpha, planning complete, implementation not started.** See [`TASK_TRACKER.md`](TASK_TRACKER.md).
+> Status: **alpha.** Phases 1–8 of [`DESIGN.md`](DESIGN.md) are implemented and tested on the built-in practice console (Toy Racer); the BizHawk and mGBA bridges are tested against simulators and wait for a run on a real emulator (see `docs/`). Task-by-task detail is in [`TASK_TRACKER.md`](TASK_TRACKER.md).
 
 ## Documents
 

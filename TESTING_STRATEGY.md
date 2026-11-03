@@ -24,11 +24,11 @@ Pure logic with no I/O: reward calculation, objective graphs, confidence scoring
 ### 2.2 Integration tests (`tests/integration/`)
 Components wired together through their real interfaces: adapter ↔ observation pipeline, rewards ↔ learning loop, storage ↔ SQLite on a temp file. Use the **Fake Emulator** (below) instead of a real emulator.
 
-### 2.3 Emulator protocol tests (`tests/emulator/`)
-Exercise each adapter's wire protocol against a scripted fake peer (a local socket server that replays recorded or hand-written emulator messages). Cover: connect, handshake, capability report, frame capture, input send, memory read, save state, timeouts, malformed messages, mid-session disconnect, reconnect.
+### 2.3 Emulator bridge tests (`tests/unit/emulator/bizhawk/`, `tests/unit/emulator/mgba/`)
+Two layers, both over real TCP on 127.0.0.1. (a) The shipped Lua scripts run inside `lupa` (Lua 5.4 in-process) against stubs of the emulator's globals that play the Toy Racer (`lua_host.py` in each folder), so the script itself is what is tested: handshake, reads, input, step timing, screenshots, save states, bad requests, a vanished app. (b) `BizHawkSimulator`, a Python peer speaking the same protocol with switchable faults (garbage, silence, drops, short reads), covers the adapters and the services above them. The `AdapterContract` in `src/retro_ai_lab/testing/` is run against every adapter.
 
 ### 2.4 Real-emulator tests (`tests/real_emulator/`, marker `real_emulator`)
-Run against an installed BizHawk / VBA-M on Windows with a user-supplied ROM. These cannot run in CI (no emulator, no ROMs). They are collected only when `RETRO_AI_LAB_EMULATOR_PATH` and `RETRO_AI_LAB_TEST_ROM` are set. When a task's acceptance criteria depend on real-emulator behaviour, the task's results must record either a passing real run or an explicit exclusion plus a manual verification checklist for the user.
+Run against an installed BizHawk or mGBA on the user's PC with a user-supplied ROM. These cannot run in CI (no emulator, no ROMs) and are skipped unless configured: `test_bizhawk.py` needs `RETRO_AI_LAB_EMULATOR_PATH` and `RETRO_AI_LAB_TEST_ROM`; `test_mgba.py` needs `RETRO_AI_LAB_MGBA_PATH` and `RETRO_AI_LAB_TEST_ROM` (a module names its variables on the marker). The guides are `docs/BIZHAWK.md` and `docs/MGBA.md`. When a task's acceptance criteria depend on real-emulator behaviour, the task's results must record either a passing real run or an explicit exclusion plus a manual verification checklist for the user.
 
 ### 2.5 UI tests (`tests/ui/`)
 `pytest-qt` drives widgets offscreen: panels render, controls change view-model state, long operations don't block the UI thread, error states display a child-friendly message.
@@ -42,8 +42,9 @@ For anything not automatable (look and feel, real-emulator behaviour on the user
 ## 3. Test doubles
 
 - **Fake Emulator adapter** – an in-process implementation of the emulator adapter interface backed by a small deterministic **synthetic game** (a toy racing / grid game with real "memory" bytes for position, speed, lap, lives, score). It lets every layer above the adapter be tested end to end, including the Game Understanding Engine discovering those variables without being told where they are.
-- **Scripted protocol peer** – replays message sequences for adapter protocol tests, including faults.
-- Fakes live in `src/retro_ai_lab/testing/` so they are importable by tests and by the demo mode, and have their own tests.
+- **BizHawkSimulator** – a Python peer speaking the bridge protocol with switchable faults, used by the adapter and service tests (`src/retro_ai_lab/emulator/bizhawk/simulator.py`).
+- **Lua script hosts** – `lupa` runtimes with stubbed emulator globals that run the real bridge scripts (`tests/unit/emulator/*/lua_host.py`).
+- The Fake Emulator ships in `src/retro_ai_lab/emulator/fake/` because it is also the app's practice console; `src/retro_ai_lab/testing/` holds the adapter contract tests.
 
 ## 4. Coverage of each task's test plan
 
