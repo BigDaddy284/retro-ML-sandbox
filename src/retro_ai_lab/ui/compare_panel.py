@@ -21,6 +21,8 @@ from retro_ai_lab.comparison import (
     MEASURES,
     AiComparison,
     BehaviourDifference,
+    Challenge,
+    CompetitionFinished,
     SavedAi,
     SavedAiChanged,
     Scorecard,
@@ -29,7 +31,7 @@ from retro_ai_lab.comparison import (
 )
 from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.services import EmulatorConnected, EmulatorDisconnected
-from retro_ai_lab.training import LearningCurve, TrainingStateChanged
+from retro_ai_lab.training import LearningCurve, Status, TrainingStateChanged
 from retro_ai_lab.training.records import EpisodeRecord
 from retro_ai_lab.ui.comparison_graph import ComparisonGraph
 from retro_ai_lab.ui.context import AppContext
@@ -96,6 +98,13 @@ class ComparePanel(QWidget):
         self._import = QPushButton("Load a shared AI…", self)
         self._import.setObjectName("import_ai_button")
         self._import.clicked.connect(self._on_import_clicked)
+        self._race = QPushButton("Race them!", self)
+        self._race.setObjectName("race_button")
+        self._race.setToolTip(Challenge().describe())
+        self._race.clicked.connect(self.race)
+        self._scoreboard = QLabel("", self)
+        self._scoreboard.setObjectName("scoreboard_text")
+        self._scoreboard.setWordWrap(True)
 
         self._text = QLabel(IDLE_TEXT, self)
         self._text.setObjectName("comparison_text")
@@ -112,6 +121,7 @@ class ComparePanel(QWidget):
         buttons.addWidget(self._load)
         buttons.addWidget(self._delete)
         buttons.addWidget(self._share)
+        buttons.addWidget(self._race)
         buttons.addStretch(1)
         buttons.addWidget(self._import)
         layout = QVBoxLayout(self)
@@ -120,12 +130,14 @@ class ComparePanel(QWidget):
         layout.addWidget(self._table, 2)
         layout.addLayout(buttons)
         layout.addWidget(self._text)
+        layout.addWidget(self._scoreboard)
         layout.addWidget(self._graph, 1)
         layout.addWidget(self._note)
 
         bridge = context.bridge
         unsubscribe = (
             bridge.subscribe(SavedAiChanged, self._on_changed),
+            bridge.subscribe(CompetitionFinished, self._on_competition),
             bridge.subscribe(EmulatorConnected, self._on_connection),
             bridge.subscribe(EmulatorDisconnected, self._on_connection),
             bridge.subscribe(TrainingStateChanged, lambda _e: self._update_buttons()),
@@ -149,6 +161,25 @@ class ComparePanel(QWidget):
     @property
     def comparison_text(self) -> str:
         return self._text.text()
+
+    @property
+    def scoreboard_text(self) -> str:
+        return self._scoreboard.text()
+
+    def race(self, challenge: Challenge | None = None) -> bool:
+        """Race every saved AI of this game under ``challenge`` (the default: 3 goes)."""
+        names = self.saved_names()
+        self._note.setText("Racing…")
+        try:
+            board = self._context.saved_ais.compete(names, challenge)
+        except (ConfigurationError, UnsupportedCapabilityError) as exc:
+            self._note.setText(str(exc))
+            return False
+        winner = board.winner()
+        self._note.setText(
+            f"{winner.name} won the race." if winner is not None else "The race was a tie."
+        )
+        return True
 
     @property
     def graph(self) -> ComparisonGraph:
@@ -303,6 +334,8 @@ class ComparePanel(QWidget):
         self._delete.setEnabled(enabled and chosen)
         self._share.setEnabled(enabled and chosen)
         self._import.setEnabled(enabled)
+        idle = self._context.training.status is Status.IDLE
+        self._race.setEnabled(enabled and idle and len(self._saved) >= 2)
 
     def _on_save_clicked(self) -> None:
         self.save_now()
@@ -330,7 +363,11 @@ class ComparePanel(QWidget):
 
     def _on_connection(self, event: object) -> None:
         self._note.setText("")
+        self._scoreboard.setText("")
         self.refresh()
+
+    def _on_competition(self, event: CompetitionFinished) -> None:
+        self._scoreboard.setText(event.scoreboard.describe())
 
 
 def _curve_of(saved: SavedAi) -> LearningCurve:

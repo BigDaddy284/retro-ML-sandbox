@@ -12,14 +12,16 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from retro_ai_lab.core import ConfigurationError, EmulatorError
+from retro_ai_lab.core import ConfigurationError, EmulatorError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.learning.actions import ActionSpace
 from retro_ai_lab.learning.demonstrations import CHILD, Demonstrations
+from retro_ai_lab.learning.greedy import GreedyPlayer
 from retro_ai_lab.learning.learner import (
     AUTO,
     Q_TABLE,
@@ -239,6 +241,15 @@ class TrainingService:
     @property
     def frames_per_step(self) -> int:
         return self._frames_per_step
+
+    @property
+    def max_steps(self) -> int:
+        return self._max_steps
+
+    @property
+    def harness(self) -> ExperimentHarness | None:
+        """The checkpoint harness for the connected game (None without save states)."""
+        return self._harness
 
     @property
     def store(self) -> BrainStore | None:
@@ -503,6 +514,64 @@ class TrainingService:
             if time.monotonic() >= deadline:
                 break
         return taken
+
+    def compete(
+        self,
+        entrants: Sequence[tuple[str, Learner]],
+        *,
+        goes: int,
+        max_steps: int | None = None,
+        frames_per_step: int | None = None,
+    ) -> dict[str, tuple[EpisodeResult, ...]]:
+        """Race ``entrants`` from where the game is now, learning nothing.
+
+        Every entrant plays its best known move for ``goes`` goes from the same
+        save state; goal progress is reset before each go so each AI meets the
+        same goal; the game is put back at the end. Nothing here touches the
+        AI being trained or its brain.
+        """
+        if goes < 1:
+            raise ConfigurationError("goes must be at least 1.")
+        if self._status is not Status.IDLE:
+            raise ConfigurationError("Stop training before a race.")
+        if not self._enabled or self._encoder is None:
+            raise ConfigurationError("Connect a game the AI can learn before a race.")
+        harness = self._harness
+        if harness is None or not harness.available():
+            raise UnsupportedCapabilityError(
+                "save_states", "This console can't race: it has no save states."
+            )
+        names = [name for name, _ in entrants]
+        if len(set(names)) != len(names):
+            raise ConfigurationError("Each entrant needs its own name.")
+        harness.checkpoint()
+        results: dict[str, tuple[EpisodeResult, ...]] = {}
+        self._busy = True
+        try:
+            for name, learner in entrants:
+                player = GreedyPlayer(learner)
+                outcomes = []
+                for _ in range(goes):
+                    if self._goals is not None and self._goals.enabled:
+                        self._goals.reset_progress()
+                    runner = EpisodeRunner(
+                        self._connection,
+                        self._observation,
+                        self._bus,
+                        player,
+                        self._encoder,
+                        frames_per_step=frames_per_step or self._frames_per_step,
+                        max_steps=max_steps or self._max_steps,
+                        harness=harness,
+                        unstick_after=self._unstick_after,
+                    )
+                    outcomes.append(runner.run_episode())
+                results[name] = tuple(outcomes)
+            harness.restore()
+        finally:
+            self._busy = False
+            self._runner = None
+        return results
 
     def train(self, episodes: int) -> tuple[EpisodeRecord, ...]:
         """Run whole goes with no GUI: start if needed, stop at the end."""

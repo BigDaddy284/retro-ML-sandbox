@@ -7,9 +7,12 @@ for their current state and hands a saved state back through their own
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from retro_ai_lab.comparison.compare import learner_of
+from retro_ai_lab.comparison.competition import Challenge, CompetitionFinished, Entry, Scoreboard
 from retro_ai_lab.comparison.saved_ai import SavedAi, check_name
 from retro_ai_lab.comparison.sharing import export_saved_ai, import_saved_ai
 from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
@@ -113,6 +116,25 @@ class SavedAiService:
             return False
         self._bus.publish(SavedAiChanged(game_id, name, "deleted"))
         return True
+
+    # ------------------------------------------------------------ racing
+
+    def compete(self, names: Sequence[str], challenge: Challenge | None = None) -> Scoreboard:
+        """Race the named saved AIs from where the game is now, under ``challenge``."""
+        game_id = self._require()
+        challenge = challenge or Challenge()
+        if len(names) < 2:
+            raise ConfigurationError("Pick at least two saved AIs to race.")
+        entrants = [(name, learner_of(self._load(game_id, name))) for name in names]
+        results = self._training.compete(
+            entrants,
+            goes=challenge.goes,
+            max_steps=challenge.max_steps,
+            frames_per_step=challenge.frames_per_step,
+        )
+        board = Scoreboard(challenge, [Entry(name, results[name]) for name in names])
+        self._bus.publish(CompetitionFinished(game_id, board))
+        return board
 
     # ------------------------------------------------------------ sharing
 
