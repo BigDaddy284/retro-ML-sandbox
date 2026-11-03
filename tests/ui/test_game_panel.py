@@ -325,3 +325,13 @@ def test_emulator_without_a_screen_gets_plain_steps(
     assert panel.view.placeholder == NO_SCREEN
     panel.clock.pause()
     assert not panel.pump.running  # nothing to show, so the pump stays off
+
+
+def test_the_game_runs_at_console_speed_with_pictures_at_half_that(
+    qtbot: QtBot, context: AppContext
+) -> None:
+    """T-826: 60 steps a second, a screenshot on every second one."""
+    panel = GamePanel(context)
+    qtbot.addWidget(panel)
+    assert panel.clock.interval_ms == 1000 // 60 and panel.pump.interval_ms == 1000 // 30
+    assert panel.clock.screenshot_every == 2

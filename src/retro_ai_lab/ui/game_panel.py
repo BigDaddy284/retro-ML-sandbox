@@ -29,7 +29,7 @@ from retro_ai_lab.ui.frame_view import FrameView
 from retro_ai_lab.ui.play_clock import PlayClock
 
 DEFAULT_FPS = 30
-CLOCK_FPS = 30  # the play clock's frame rate; screenshots ride along at DEFAULT_FPS
+CLOCK_FPS = 60  # the play clock's frame rate (console speed); pictures ride along at DEFAULT_FPS
 NOT_CONNECTED = "Not connected. Connect to a game to see it here."
 NO_SCREEN = "This emulator can't show its screen, but the AI can still play."
 
