@@ -93,6 +93,10 @@ class ByteStats:
     maximum: int = 0
     last: int | None = None
     distinct: set[int] = field(default_factory=set)
+    wraps: int = 0  # went down by more than 128 (255 -> 0 style roll-over)
+    carry_ins: int = 0  # changed in the same transition as the byte below wrapped
+    unit_steps: int = 0  # changed by exactly +1 (counting a wrap as +1)
+    max_step: int = 0  # largest upward step seen
 
     @property
     def change_rate(self) -> float:
@@ -110,6 +114,21 @@ class ByteStats:
     def constant(self) -> bool:
         return self.samples > 0 and self.changes == 0
 
+    @property
+    def resets(self) -> int:
+        """Drops that were not roll-overs (a value being set back, e.g. on restart)."""
+        return self.downs - self.wraps
+
+    @property
+    def monotonic_mod_wrap(self) -> bool:
+        """Only ever went up, apart from roll-overs (counter-like)."""
+        return self.changes > 0 and self.downs == self.wraps
+
+    @property
+    def mostly_up(self) -> bool:
+        """Goes up apart from roll-overs and the odd reset (score-like)."""
+        return self.ups > 0 and self.resets <= max(2.0, self.ups * 0.15)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "samples": self.samples,
@@ -120,6 +139,10 @@ class ByteStats:
             "maximum": self.maximum,
             "distinct": len(self.distinct),
             "change_rate": round(self.change_rate, 4),
+            "wraps": self.wraps,
+            "carry_ins": self.carry_ins,
+            "unit_steps": self.unit_steps,
+            "max_step": self.max_step,
         }
 
 
@@ -156,6 +179,7 @@ class ChangeTracker:
             return None
         diff = diff_snapshots(self._previous, snapshot)
         changed = {(c.region, c.offset) for c in diff.changes}
+        wrapped: set[tuple[str, int]] = set()
         for name, data in snapshot.regions.items():
             for offset, value in enumerate(data):
                 st = self._stats[(name, offset)]
@@ -163,10 +187,21 @@ class ChangeTracker:
                 if (name, offset) in changed:
                     st.changes += 1
                     assert st.last is not None
-                    if value > st.last:
+                    delta = value - st.last
+                    if delta > 0:
                         st.ups += 1
+                        st.max_step = max(st.max_step, delta)
+                        if delta == 1:
+                            st.unit_steps += 1
                     else:
                         st.downs += 1
+                        if delta < -128:
+                            st.wraps += 1
+                            wrapped.add((name, offset))
+                            if delta + 256 == 1:
+                                st.unit_steps += 1
+                    if (name, offset - 1) in wrapped:
+                        st.carry_ins += 1
                 st.last = value
                 st.minimum = min(st.minimum, value)
                 st.maximum = max(st.maximum, value)
