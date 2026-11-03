@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-201 (Ready); Phase 1 complete except real-emulator tasks T-110+
-- **Last approved checkpoint:** `main` after T-012
+- **Current task:** T-202 (Ready)
+- **Last approved checkpoint:** `main` after T-201
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -34,7 +34,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-115 | BizHawk adapter: memory reads | 1 | – | – | – |
 | T-116 | BizHawk adapter: frame advance, speed, save states | 1 | – | – | – |
 | T-117 | BizHawk adapter: disconnect handling and real-emulator verification | 1 | – | – | – |
-| T-201 | Memory snapshot capture and storage | 2 | – | – | – |
+| T-201 | Memory snapshot capture and storage | 2 | Done | 46/46 | see PR #14 |
 | T-202 | Memory change detection (frame-to-frame diff) | 2 | – | – | – |
 | T-203 | Screen observation: frame diff and change regions | 2 | – | – | – |
 | T-204 | Input recording (who pressed what, when) | 2 | – | – | – |
@@ -244,7 +244,21 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 5 / 5 passed / 0 failed / 0 excluded (383 in the full suite). Local Linux PyInstaller build: window run exit 0, version run exit 0, 198 MB folder. Lint, format and strict mypy clean.
 - **Completion report:** The Windows exe is windowed (no console), so `--version` output is not visible on Windows; the smoke test checks only the exit code there. Build size will be revisited when PyTorch is added (Phase 5), probably by shipping a CPU-only wheel.
 
-### Phase 2 tasks
+### T-201 – Memory snapshot capture and storage
+- **Status:** Done
+- **Phase:** 2
+- **Objective:** Capture the emulator's readable memory as immutable, comparable snapshots; keep the recent ones in memory and archive sessions durably in SQLite.
+- **Scope:** `observation.memory` (`MemorySnapshot`, `MemoryCapture`, `SnapshotRing`), `storage.snapshots.SnapshotArchive`. **Out of scope:** diffing (T-202), wiring into the UI loop (done with T-202 so the ring is fed by the play clock).
+- **Acceptance criteria:**
+  1. Snapshots validate inputs, are immutable, compare and hash by value, and round-trip through JSON.
+  2. Capture reads every region (or a chosen subset) exactly as the game holds it, tagged with the frame; unsupported memory or unknown regions are clear errors.
+  3. Ring keeps the newest N in order with `latest`/`previous`.
+  4. Archive stores sessions and snapshots in SQLite with exact binary integrity, survives reopen, continues sequence numbers, isolates sessions, rejects bad paths, and stores 1000 × 8 KiB snapshots in well under 10 s.
+- **Test plan:** snapshot basics, rejection matrix, bad ranges, immutability/equality/hash, input copy, property-based JSON round trip, bad serialised shapes; capture exact read, subset/unknown, no memory capability, not connected; ring order/capacity/previous/clear, bad capacity, non-snapshot; archive sessions lifecycle, append/count/iterate/latest/history, isolation, unknown session, reopen, awkward bytes, directory path, unwritable path, performance.
+- **Results:** 46 / 46 passed / 0 failed / 0 excluded (429 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** One row per region per snapshot so a single region's history can be read cheaply by the discovery engine. WAL journal mode for concurrent reads later.
+
+### Later Phase 2 tasks
 Details will be written into this file when each becomes the next task, following the template.
 
 ### T-110 – Spike: confirm BizHawk Lua ↔ socket protocol
@@ -270,5 +284,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-010 completed (PR #11).
 - T-011 completed (PR #12).
 - T-012 completed (PR #13). Phase 1 is complete on the fake emulator; T-110+ (BizHawk) wait on ADR-005 sign-off.
-- Next: T-201 (Phase 2).
+- T-201 completed (PR #14).
+- Next: T-202.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

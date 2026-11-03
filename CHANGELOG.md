@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-201: Memory snapshots (`MemorySnapshot`, `MemoryCapture`, `SnapshotRing`) and a SQLite `SnapshotArchive`.
 - T-012: PyInstaller spec, launch smoke-test script and a Windows package workflow that uploads a downloadable build.
 - T-011: Disconnection handling: link watchdog, resilient disconnect, one-click Reconnect, status-bar messages.
 - T-010: Manual play: on-screen controller pad built from the emulator's buttons, keyboard mapping, and a Play/Pause clock that advances frames.
