@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-603 – Progress panel training stats
+- **Current task:** T-604 – AI activity
 - **Last approved checkpoint:** `main` after T-409 (PRs #36–#42 merging in order as CI passes)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -69,7 +69,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | E-6 | Training Interface (live/background, modes, graphs, history) | 6 | Epic | – | – |
 | T-601 | Learning curve: per-go points, rolling average, best go, trend and success rate in plain words | 6 | Done | 7/7 | see PR #43 |
 | T-602 | Learning graph widget: points per go and the rolling average, drawn in the Learning panel | 6 | Done | 4/4 | see PR #44 |
-| T-603 | Progress panel: training attempts, success rate and trend beside the goal | 6 | Planned | – | – |
+| T-603 | Progress panel: training attempts, success rate and trend beside the goal | 6 | Done | 2/2 | see PR #45 |
 | T-604 | AI activity: current and previous actions, exploring vs best-known, current objective | 6 | Planned | – | – |
 | T-605 | Behaviour changes and suggested experiments: what the AI now does differently, what to try next | 6 | Planned | – | – |
 | T-606 | First working demonstration on the Fake Emulator: DESIGN.md §17 steps 1–10 as one scripted test, including rewards changing behaviour | 6 | Planned | – | – |
@@ -733,6 +733,18 @@ Live and background training and the guided and manual modes were delivered in P
 - **Results:** 4 / 4 passed / 0 failed / 0 excluded (746 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Drawn with QPainter rather than a plotting library, so the Windows build gains no dependency; the geometry is a pure function and the rendering test checks pixel colours at the computed dot positions.
 
+### T-603 – Progress panel training stats
+- **Status:** Done
+- **Phase:** 6
+- **Objective:** Fill in the Progress panel's missing lines from DESIGN.md §10: training attempts, success rate and performance trend, next to the goal and its steps.
+- **Scope:** `ui.goals_panel`: `training_stats_text(curve)` (pure: "No training tries yet." / "Tries: N. Reached a goal in S of them (P%). Trend: getting better / slipping / holding steady / too early to say.") and a `training_stats` label under the goal summary, refreshed on `EpisodeFinished`, `TrainingStateChanged` and connect / disconnect; `stats_text` property. **Out of scope:** per-step success rates (which steps are reached most often; a later refinement), graphs here (the Learning panel has the graph).
+- **Acceptance criteria:**
+  1. The helper formats every case (none, some successes, each trend) in plain words.
+  2. The label is empty while disconnected, says "No training tries yet." on connect, and counts goes as they finish, including goes loaded back from the saved brain.
+- **Test plan:** helper cases; panel after training; disconnect / reconnect.
+- **Results:** 2 / 2 passed / 0 failed / 0 excluded (748 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** A small task by design: the numbers come from T-601's curve, so the panel only formats them. Per-step success rates are noted as a later refinement.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -791,5 +803,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-505 completed (PR #40).
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
-- Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44).
+- Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

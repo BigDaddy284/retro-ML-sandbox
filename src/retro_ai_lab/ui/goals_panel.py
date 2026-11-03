@@ -34,6 +34,8 @@ from retro_ai_lab.services import (
     ObjectiveCompleted,
     ObjectiveSetback,
 )
+from retro_ai_lab.training import EpisodeFinished, LearningCurve, TrainingStateChanged
+from retro_ai_lab.training.curve import IMPROVING, SLIPPING, STEADY
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.discovery_panel import BADGES
 
@@ -41,6 +43,26 @@ IDLE_TEXT = "Connect to a game to set a goal for the AI."
 BY_HAND = "I'll tick it myself"
 NOTHING = "nothing"
 COLUMNS = ("Step", "Reward", "Detected by", "Status", "On")
+NO_TRIES = "No training tries yet."
+TRENDS = {
+    IMPROVING: "getting better",
+    SLIPPING: "slipping",
+    STEADY: "holding steady",
+}
+
+
+def training_stats_text(curve: LearningCurve) -> str:
+    """Attempts, success rate and trend in a child's words (DESIGN.md §10 Progress)."""
+    n = curve.attempts
+    if n == 0:
+        return NO_TRIES
+    tries = "try" if n == 1 else "tries"
+    text = f"Tries: {n}. "
+    if curve.successes:
+        text += f"Reached a goal in {curve.successes} of them ({curve.success_rate:.0%}). "
+    else:
+        text += f"No goal reached yet in {n} {tries}. "
+    return text + f"Trend: {TRENDS.get(curve.trend, 'too early to say')}."
 
 
 def status_text(goal: Goal, objective: Objective) -> str:
@@ -85,6 +107,9 @@ class GoalsPanel(QWidget):
         self._summary = QLabel(IDLE_TEXT, self)
         self._summary.setObjectName("goals_summary")
         self._summary.setWordWrap(True)
+        self._stats = QLabel("", self)
+        self._stats.setObjectName("training_stats")
+        self._stats.setWordWrap(True)
 
         self._tree = QTreeWidget(self)
         self._tree.setObjectName("goals_tree")
@@ -145,6 +170,7 @@ class GoalsPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._title)
         layout.addWidget(self._summary)
+        layout.addWidget(self._stats)
         layout.addWidget(self._tree, 1)
         layout.addLayout(edit_row)
         layout.addLayout(after_row)
@@ -158,6 +184,8 @@ class GoalsPanel(QWidget):
             bridge.subscribe(ObjectiveSetback, self._on_setback),
             bridge.subscribe(EmulatorConnected, self._on_connected),
             bridge.subscribe(EmulatorDisconnected, self._on_disconnected),
+            bridge.subscribe(EpisodeFinished, self._on_training),
+            bridge.subscribe(TrainingStateChanged, self._on_training),
         )
         unsubscribe = self._unsubscribe
         self.destroyed.connect(lambda *_: [u() for u in unsubscribe])
@@ -176,6 +204,10 @@ class GoalsPanel(QWidget):
     @property
     def title_text(self) -> str:
         return self._title.text()
+
+    @property
+    def stats_text(self) -> str:
+        return self._stats.text()
 
     @property
     def summary_text(self) -> str:
@@ -276,6 +308,7 @@ class GoalsPanel(QWidget):
         self._summary.setText(
             self._context.goals.summary() if enabled and goal is not None else IDLE_TEXT
         )
+        self._show_stats()
         for w in (self._tree, self._title, self._new_step, self._trigger, self._add, self._reset):
             w.setEnabled(enabled and goal is not None)
         keep = keep if keep is not None else self._selected
@@ -287,6 +320,13 @@ class GoalsPanel(QWidget):
         self._show_selection()
 
     # ----------------------------------------------------------- internals
+
+    def _show_stats(self) -> None:
+        training = self._context.training
+        self._stats.setText(training_stats_text(training.curve()) if training.enabled else "")
+
+    def _on_training(self, event: object) -> None:
+        self._show_stats()
 
     def _fill_options(self) -> None:
         self._options = {o.key: o.label for o in self._context.goals.trigger_options()}

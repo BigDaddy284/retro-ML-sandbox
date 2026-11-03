@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-603: The Progress panel counts training tries, how often a goal was reached, and the trend.
 - T-602: Learning graph in the Learning panel: a dot per go, the rolling average line, the best go ringed, and a caption in plain words.
 - T-601: Learning curve (points per go, rolling average, best and longest go, trend, success rate, described in plain words); goes record how many objectives they completed.
 - T-507: Learning panel (who plays, speed, Start / Pause / Stop, Start from scratch, what the AI is pressing and knows, recent goes); the play clock and pad yield to the AI while it plays.
