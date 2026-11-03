@@ -37,7 +37,7 @@ def frames(n: int) -> list[bytes]:
         if i % 17 == 16:
             scattered += 1  # steps at ever different places
         toggler = (i // 7) % 2
-        rows.append(bytes([flag, position, checkpoint, lap, scattered, toggler]))
+        rows.append(bytes([flag, position, checkpoint, lap, scattered, toggler, i % 4]))
     return rows
 
 
@@ -118,3 +118,17 @@ def test_skips_rejected_low_confidence_and_uncovered_variables() -> None:
         look.observe("not a snapshot")  # type: ignore[arg-type]
     look.reset()
     assert look.watching == () and look.observed == 0
+
+
+def test_the_long_look_picks_up_knowledge_changes() -> None:
+    k = knowledge()
+    rows = frames(200)
+    look = LongLook(k)
+    for i, row in enumerate(rows[:100]):
+        look.observe(MemorySnapshot(i, {RAM: row}))
+    late = k.propose(RAM, 6, kind=VariableKind.PROGRESS, name="Late", evidence=SURE)
+    k.reject(var(k, SCATTERED).id)
+    for i, row in enumerate(rows[100:], start=100):
+        look.observe(MemorySnapshot(i, {RAM: row}))
+    assert late.id in look.watching
+    assert look.observed == 200

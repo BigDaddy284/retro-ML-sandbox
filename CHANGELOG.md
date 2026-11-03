@@ -5,6 +5,10 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Changed: the Discovery and Rewards panels redraw their lists a few times a second at most while the AI trains, instead of on every step, and the Discovery list is rebuilt only when a value was added or changed; a change you make yourself still shows at once (T-843).
+- Added: when the game ignores the AI (a title-screen demo, a game-over screen) it works out for itself which button gets the game going, by pressing each one in turn and checking whether its own buttons matter afterwards; the answer is remembered with the game's knowledge and pressed whenever the game stops listening, and later goes start inside the game. Nothing is assumed per game: the old default of pressing Start when stuck is gone (T-844).
+- Changed: the suggested rewards and objectives are rebuilt only when a relationship the suggestions read actually changes, not on every step the finder reports one, and merging a goal with many objectives no longer slows down with their number (T-842).
+- Changed: with a lot of known values (1,600 on the user's Super Mario Bros.) the app did more work per step than the emulator; the detector and the long look now keep their list of watched values until the knowledge changes, and a value's confidence is worked out once instead of on every read (T-841).
 - Added: the log file now says how each go ended (reset, step limit, stopped, disconnected), with its steps, frames and points, and for a reset which values the detector saw going back to their start (T-840).
 - Fixed: the automatic button experiments no longer run in the middle of a go; each one took a save state and ran a trial per button over the AI's link, freezing play for seconds every ten seconds on the real emulator. A due experiment now runs between goes, and not at all while the child plays in manual mode (T-839).
 - Fixed: a "reset" (everything back to the start) now needs one of the values going back to its first value to be at least fairly sure; on the real Super Mario Bros. two shaky stack bytes going home together ended every go after 3 steps (T-838).

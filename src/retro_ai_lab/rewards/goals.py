@@ -271,12 +271,15 @@ class Goal:
 
     def is_ready(self, objective_id: str) -> bool:
         """Enabled, not done, and every dependency done."""
-        o = self.get(objective_id)
-        done = self.completed_ids()
+        return self._ready(self.get(objective_id), self.completed_ids())
+
+    @staticmethod
+    def _ready(o: Objective, done: frozenset[str]) -> bool:
         return o.enabled and not o.completed and all(d in done for d in o.depends_on)
 
     def ready(self) -> tuple[Objective, ...]:
-        return tuple(o for o in self._items.values() if self.is_ready(o.id))
+        done = self.completed_ids()
+        return tuple(o for o in self._items.values() if self._ready(o, done))
 
     def next(self) -> Objective | None:
         """The first objective the AI should be working on."""
@@ -313,6 +316,10 @@ class Goal:
         reward = 0.0
         completed: list[Objective] = []
         penalised: list[Objective] = []
+        # One completed set for the whole pass (T-842): with 800 suggested objectives,
+        # rebuilding it per objective made every event cost 11 ms. An objective
+        # completed by this very event counts for the ones after it, as before.
+        done = set(self.completed_ids())
         for oid in self.ids():
             o = self._items[oid]
             if not o.enabled or o.completed:
@@ -320,10 +327,15 @@ class Goal:
             if o.setback_trigger is not None and o.penalty < 0 and o.setback_trigger.matches(event):
                 reward += o.penalty
                 penalised.append(o)
-            if o.trigger is not None and self.is_ready(oid) and o.trigger.matches(event):
-                done = self.complete(oid, event.frame)
-                reward += done.reward
-                completed.append(done)
+            if (
+                o.trigger is not None
+                and o.trigger.matches(event)
+                and all(d in done for d in o.depends_on)
+            ):
+                finished = self.complete(oid, event.frame)
+                done.add(oid)
+                reward += finished.reward
+                completed.append(finished)
         return GoalOutcome(reward, tuple(completed), tuple(penalised))
 
     # ------------------------------------------------------------ persistence
@@ -404,13 +416,13 @@ def merge_suggestions(
         if rel.cause in order and rel.effect in order and order[rel.cause] > order[rel.effect]:
             order[rel.cause], order[rel.effect] = order[rel.effect], order[rel.cause]
     ordered = sorted(keys, key=lambda k: order[k])
-    existing = {o.trigger.key for o in goal if o.trigger is not None}
+    existing = {o.trigger.key: o.id for o in goal if o.trigger is not None}
     added: list[str] = []
     previous: str | None = None
     for key in ordered:
         var = keys[key]
         if key in existing:
-            previous = next(o.id for o in goal if o.trigger is not None and o.trigger.key == key)
+            previous = existing[key]
             continue
         oid = f"goal:{key}"
         deps = (previous,) if previous is not None and previous in goal else ()

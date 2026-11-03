@@ -22,7 +22,7 @@ from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.rewards.goals import DEFAULT_REWARD, Goal, Objective, merge_suggestions
 from retro_ai_lab.rewards.model import Trigger
-from retro_ai_lab.rewards.suggestions import RESET_KEY, RULES
+from retro_ai_lab.rewards.suggestions import RESET_KEY, RULES, RelationshipWatch
 from retro_ai_lab.services.connection import (
     ConnectionService,
     EmulatorConnected,
@@ -81,6 +81,7 @@ class GoalService:
         self._goal: Goal | None = None
         self._enabled = False
         self._saves = 0
+        self._watch = RelationshipWatch()
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
         bus.subscribe(DiscoveryUpdated, self._on_discovery)
@@ -243,6 +244,7 @@ class GoalService:
                 self._goal = Goal(game_id, title=title)  # a damaged file: start over
         else:
             self._goal = Goal(game_id, title=title)
+        self._watch.reset()
         self._bus.publish(GoalChanged("loaded"))
         self.refresh_suggestions()
 
@@ -254,13 +256,20 @@ class GoalService:
     def _on_discovery(self, update: DiscoveryUpdated) -> None:
         if not self._enabled or self._goal is None:
             return
-        if update.added or update.changed or update.relationships:
+        if update.added or update.changed or self._relationships_moved(update):
             self.refresh_suggestions()
         progressed = False
         for game_event in update.events:
             progressed = self._observe(game_event) or progressed
         if progressed:
             self._announce("progress")
+
+    def _relationships_moved(self, update: DiscoveryUpdated) -> bool:
+        """Only a change among the confident relationships is worth a rebuild (T-842)."""
+        knowledge = self._discovery.knowledge
+        if not update.relationships or knowledge is None:
+            return False
+        return self._watch.changed(knowledge)
 
     def _observe(self, game_event: GameEvent) -> bool:
         assert self._goal is not None

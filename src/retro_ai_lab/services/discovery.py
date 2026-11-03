@@ -197,7 +197,10 @@ class DiscoveryService:
             parts.append(f"{confident} fairly sure")
         if asks:
             parts.append(f"{asks} could use your help")
-        return ", ".join(parts) + "."
+        line = ", ".join(parts) + "."
+        if k.wake_button:
+            line += f" {k.wake_button.capitalize()} gets the game going."
+        return line
 
     # ------------------------------------------------------------ actions
 

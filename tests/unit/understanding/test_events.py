@@ -221,3 +221,46 @@ def test_toy_racer_story() -> None:
     flag_on = next(e for e in log if e.kind is EventKind.FLAG_ON)
     reset = next(e for e in log if e.kind is EventKind.RESET and e.frame > flag_on.frame)
     assert reset.frame > flag_on.frame, "the restart comes after the game over"
+
+
+# ------------------------------------------------------------ T-841
+
+
+class CountingSnapshot(MemorySnapshot):
+    """Counts how many values the detector reads out of it."""
+
+    reads = 0
+
+    def get(self, region: str, offset: int = 0, length: int | None = None) -> bytes:
+        CountingSnapshot.reads += 1
+        return super().get(region, offset, length)
+
+
+def test_stale_variables_cost_nothing_per_snapshot() -> None:
+    k = knowledge_for({0: VariableKind.PROGRESS, 1: VariableKind.SCORE})
+    for i in range(300):  # knowledge about memory this emulator no longer shares
+        k.propose("ciram_nametables", i, kind=VariableKind.SCORE, evidence=SURE)
+    d = EventDetector(k)
+    d.observe(CountingSnapshot(0, {RAM: bytes([0, 0])}))
+    CountingSnapshot.reads = 0
+    for frame in range(1, 11):
+        d.observe(CountingSnapshot(frame, {RAM: bytes([frame, 0])}))
+    assert CountingSnapshot.reads == 20  # two live variables, ten snapshots
+    assert d.watching == ("v1", "v2")
+
+
+def test_a_new_variable_is_watched_from_the_next_snapshot() -> None:
+    k = knowledge_for({0: VariableKind.PROGRESS})
+    d = EventDetector(k)
+    d.observe(snap(0, 0, 0))
+    k.propose(RAM, 1, kind=VariableKind.LIVES, evidence=SURE)
+    d.observe(snap(1, 0, 3))  # starts watching the new one
+    assert d.watching == ("v1", "v2")
+    assert [e.kind for e in d.observe(snap(2, 0, 2))] == [EventKind.SETBACK]
+    # A snapshot with another set of regions is looked at afresh too.
+    k.propose("wram", 0, kind=VariableKind.PROGRESS, evidence=SURE)
+    d.observe(MemorySnapshot(3, {RAM: bytes([0, 2]), "wram": bytes([1])}))
+    assert d.watching == ("v1", "v2", "v3")
+    assert [
+        e.kind for e in d.observe(MemorySnapshot(4, {RAM: bytes([0, 2]), "wram": bytes([2])}))
+    ] == [EventKind.PROGRESS]

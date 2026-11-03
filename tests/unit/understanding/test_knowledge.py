@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -13,6 +15,7 @@ from retro_ai_lab.understanding import (
     Encoding,
     Evidence,
     Knowledge,
+    Relationship,
     Variable,
     VariableKind,
     confidence_from_evidence,
@@ -258,3 +261,56 @@ def test_round_trip_preserves_everything(items: list[tuple[int, VariableKind, fl
     assert copy.to_dict() == k.to_dict()
     for v in k:
         assert copy.get(v.id).confidence is v.confidence
+
+
+# ------------------------------------------------------------ T-841
+
+
+def test_version_counts_every_change(knowledge: Knowledge) -> None:
+    assert knowledge.version == 0
+    v = knowledge.propose("ram", 0, kind=VariableKind.SCORE)
+    assert knowledge.version == 1
+    knowledge.get(v.id), knowledge.at("ram", 0), list(knowledge), knowledge.to_dict()
+    assert knowledge.version == 1  # reads leave it alone
+    knowledge.support(v.id, Evidence("monotonic", "up", 2.0))
+    knowledge.update(v.id, name="Score")
+    knowledge.confirm(v.id)
+    knowledge.correct(v.id, name="Points")  # an update and a confirm
+    knowledge.reject(v.id)
+    assert knowledge.version == 7
+    rel = Relationship("progress:v1", "score_gain:v1", 2, 2, 2, 5)
+    knowledge.set_relationship(rel)
+    knowledge.confirm_relationship(rel.id)
+    knowledge.reject_relationship(rel.id)
+    knowledge.remove_relationship(rel.id)
+    assert knowledge.version == 7  # relationships are rewritten every event: not counted
+    knowledge.remove(v.id)
+    assert knowledge.version == 8
+    loaded = Knowledge.from_dict(knowledge.to_dict())
+    assert isinstance(loaded.version, int)
+
+
+def test_confidence_follows_new_evidence(knowledge: Knowledge) -> None:
+    v = knowledge.propose("ram", 0, kind=VariableKind.SCORE)
+    assert v.confidence is Confidence.UNKNOWN
+    assert knowledge.support(v.id, Evidence("monotonic", "up", 2.0)).confidence is Confidence.LOW
+    assert knowledge.support(v.id, Evidence("x", "", 2.0)).confidence is Confidence.MEDIUM
+    assert knowledge.confirm(v.id).confidence is Confidence.CONFIRMED
+    assert knowledge.reject(v.id).confidence is Confidence.UNKNOWN
+    again = replace(knowledge.get(v.id), rejected=False)
+    assert again.confidence is Confidence.MEDIUM
+    assert "confidence" not in again.to_dict()
+    assert Variable.from_dict(again.to_dict()).confidence is Confidence.MEDIUM
+
+
+def test_wake_button_round_trips(knowledge: Knowledge) -> None:
+    assert knowledge.wake_button is None
+    assert Knowledge.from_dict(knowledge.to_dict()).wake_button is None
+    knowledge.wake_button = "start"
+    data = knowledge.to_dict()
+    assert data["wake_button"] == "start"
+    assert Knowledge.from_dict(data).wake_button == "start"
+    with pytest.raises(ConfigurationError):
+        Knowledge.from_dict({**data, "wake_button": 3})
+    with pytest.raises(ConfigurationError):
+        Knowledge.from_dict({**data, "wake_button": ""})

@@ -163,7 +163,7 @@ def test_game_over_is_unstuck_with_start_and_the_restart_ends_the_episode(lab: L
     game = lab.adapter().game
     while not game.state.game_over:  # drive into game over by hand
         game.step(["up"])
-    r = runner(lab, frames_per_step=4, max_steps=500, unstick_after=10)
+    r = runner(lab, frames_per_step=4, max_steps=500, unstick_after=10, unstick_buttons=("start",))
     result = r.run_episode()
     assert r.unsticks == 1 and result.ended_by == "reset"
     assert 10 < result.steps < 30
@@ -263,7 +263,8 @@ def test_short_training_run_learns_some_situations(lab: Lab) -> None:
     agent = r._agent
     assert agent.episodes == 8 and agent.updates == sum(x.steps for x in results) - r.unsticks
     assert len(agent.table) >= 3
-    assert all(x.ended_by in ("max_steps", "reset") for x in results)
+    # No wake button is known here, so a go on the game-over screen ends "stuck" (T-844).
+    assert all(x.ended_by in ("max_steps", "reset", "stuck") for x in results)
     assert agent.epsilon < 0.5
     # Reaching a checkpoint completes the suggested objective, and the go says so.
     assert sum(x.objectives for x in results) >= 1 and any(x.succeeded for x in results)
@@ -311,3 +312,51 @@ def test_a_training_step_is_one_request_on_a_socket_backend(lab: Lab) -> None:
         assert sim.requests[before]["cmd"] == "read"
         assert lab.observation.latest is not None and lab.observation.frame >= 15
         lab.connection.disconnect()
+
+
+# ------------------------------------------------------------ T-844
+
+
+def test_a_stuck_go_ends_when_no_wake_button_is_known(lab: Lab) -> None:
+    lab.connection.connect("fake", seed=3)
+    teach(lab)
+    lab.observation.observe()
+    game = lab.adapter().game
+    while not game.state.game_over:
+        game.step(["up"])
+    r = runner(lab, frames_per_step=4, max_steps=500, unstick_after=10)
+    assert r.unstick_buttons == ()
+    result = r.run_episode()
+    assert result.ended_by == "stuck" and r.unsticks == 0 and r.stuck_from_start
+    assert 10 <= result.steps <= 12
+    assert not any(e.buttons == {"start"} for e in lab.observation.inputs.by_source("ai"))
+    # Once the service has found the button, the runner presses it instead.
+    r.set_unstick_buttons(("start",))
+    assert r.unstick_buttons == ("start",)
+    while not game.state.game_over:
+        game.step(["up"])
+    result = r.run_episode()
+    assert result.ended_by == "reset" and r.unsticks == 1
+
+
+def test_goes_carry_a_fingerprint(lab: Lab) -> None:
+    lab.connection.connect("fake", seed=3)
+    teach(lab)
+    lab.observation.observe()
+    r = runner(lab, frames_per_step=4, max_steps=20)
+    assert r.fingerprint == () and not r.actions_varied
+    result = r.run_episode()
+    assert len(r.fingerprint) == result.steps == 20
+    assert r.actions_varied  # epsilon 0.5: more than one action in 20 steps
+    r.begin()
+    assert r.fingerprint == () and not r.actions_varied
+
+
+def test_a_go_stuck_part_way_is_not_stuck_from_the_start(lab: Lab) -> None:
+    lab.connection.connect("fake", seed=3)
+    teach(lab)
+    lab.observation.observe()
+    r = runner(lab, frames_per_step=4, max_steps=2000, unstick_after=10)
+    result = r.run_episode()  # drives until the lives run out, then sits on game over
+    assert result.ended_by == "stuck" and not r.stuck_from_start
+    assert result.steps > 20

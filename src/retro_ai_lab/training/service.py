@@ -67,8 +67,13 @@ from retro_ai_lab.training.insights import (
     suggest_experiments,
 )
 from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
+from retro_ai_lab.understanding.wakeup import find_wake_button
 
 CHECKPOINT_SLOT = "training"
+# Two goes this long with the same states although the AI pressed different buttons
+# mean the game is not listening (a title-screen demo); then it goes looking for the
+# button that gets the game going (T-844).
+IDENTICAL_GO_STEPS = 8
 log = logging.getLogger(__name__)
 
 FAST_SPEED = 64.0  # EmuHawk's client.speedmode tops out at 6400% (T-836)
@@ -166,6 +171,9 @@ class TrainingService:
         self._last_frame = 0
         self._busy = False
         self._spot_pinned = False
+        self._wake_button: str | None = None
+        self._needs_wake = False
+        self._last_go: tuple[tuple[str, ...], bool] | None = None
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
         bus.subscribe(MemoryObserved, self._on_memory)
@@ -264,6 +272,11 @@ class TrainingService:
     @property
     def store(self) -> BrainStore | None:
         return self._store
+
+    @property
+    def wake_button(self) -> str | None:
+        """The button the AI found gets this game going (T-844), if it has looked."""
+        return self._wake_button
 
     @property
     def spot_pinned(self) -> bool:
@@ -738,6 +751,9 @@ class TrainingService:
             if self._use_checkpoint and caps.save_states
             else None
         )
+        self._wake_button = knowledge.wake_button
+        self._needs_wake = False
+        self._last_go = None
 
     def _on_disconnected(self, event: EmulatorDisconnected) -> None:
         was_running = self._status is not Status.IDLE
@@ -842,6 +858,7 @@ class TrainingService:
                 max_steps=self._max_steps,
                 harness=self._harness,
                 unstick_after=self._unstick_after,
+                unstick_buttons=(self._wake_button,) if self._wake_button else (),
                 on_learned=self._on_learned,
             )
         self._busy = True
@@ -850,12 +867,47 @@ class TrainingService:
             # game is about to go back to the checkpoint anyway, and no go is mid-step.
             if self._mode.ai_plays and self._harness is not None:
                 self._discovery.run_due_experiment()
+            if self._needs_wake and self._mode.ai_plays:
+                self._wake_up()
             self._runner.begin(restore=self._mode.ai_plays)
         except EmulatorError:
             return None
         finally:
             self._busy = False
         return self._runner
+
+    def _wake_up(self) -> None:
+        """The game stopped listening: find the button that gets it going (T-844).
+
+        Runs from where the game is now (the screen that ignores the AI). When a
+        button works the game is left running after it and that spot becomes the
+        checkpoint, so the goes after this one start inside the game.
+        """
+        self._needs_wake = False
+        self._last_go = None
+        harness = self._harness
+        if harness is None or not harness.available():
+            log.info("The game is not listening to the AI, and this emulator can't try buttons.")
+            return
+        names = tuple(b.name for b in self._connection.call(lambda a: a.buttons()))
+        space = self._agent.space if self._agent is not None else None
+        playing = (
+            tuple(dict.fromkeys(n for i in range(len(space)) for n in space.buttons_for(i)))
+            if space is not None
+            else names
+        )
+        log.info("The game is not listening to the AI; trying each button to get it going.")
+        found = find_wake_button(self._connection, names, playing, first=self._wake_button)
+        if found is None:
+            return
+        self._wake_button = found
+        knowledge = self._discovery.knowledge
+        if knowledge is not None and knowledge.wake_button != found:
+            knowledge.wake_button = found
+            self._discovery.save()
+        if self._runner is not None:
+            self._runner.set_unstick_buttons((found,))
+        harness.checkpoint()
 
     def _prepare_checkpoint(self) -> None:
         """Every go in an AI mode restarts from where the child left the game."""
@@ -887,6 +939,7 @@ class TrainingService:
             f": {why}" if result.ended_by == "reset" and why else "",
         )
         self._history.append(record)
+        self._note_listening(result)
         if self._agent is not None:
             self._policies.append((self._episodes, policy_of(self._agent)))
         self._bus.publish(EpisodeFinished(record))
@@ -894,8 +947,32 @@ class TrainingService:
         if self._connection.is_connected:
             self.save()
 
+    def _note_listening(self, result: EpisodeResult) -> None:
+        """Did this go show the game ignoring the AI? Then the next go starts by waking it."""
+        runner = self._runner
+        if runner is None or not self._mode.ai_plays:
+            return
+        this = (runner.fingerprint, runner.actions_varied)
+        # A go stuck part-way (the lives ran out) just needs the checkpoint back, which
+        # the next go does anyway. One stuck from its first step, or two goes that ran
+        # identically, mean the place the goes start from is not listening.
+        if runner.stuck_from_start or (
+            self._last_go is not None and goes_look_identical(self._last_go, this)
+        ):
+            self._needs_wake = True
+        self._last_go = this
+
     def _announce(self, reason: str) -> None:
         self._bus.publish(TrainingStateChanged(self._status, self._mode, reason))
+
+
+def goes_look_identical(
+    earlier: tuple[tuple[str, ...], bool], later: tuple[tuple[str, ...], bool]
+) -> bool:
+    """Same states step for step, both long enough, both with the AI varying its buttons."""
+    states_a, varied_a = earlier
+    states_b, varied_b = later
+    return varied_a and varied_b and len(states_a) >= IDENTICAL_GO_STEPS and states_a == states_b
 
 
 def _stepped(frame: int, runner: EpisodeRunner, decision: Decision | None) -> TrainingStepped:
@@ -924,8 +1001,10 @@ def _goes(n: int) -> str:
 
 __all__ = [
     "CHECKPOINT_SLOT",
+    "IDENTICAL_GO_STEPS",
     "EpisodeFinished",
     "TrainingService",
     "TrainingStateChanged",
     "TrainingStepped",
+    "goes_look_identical",
 ]

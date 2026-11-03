@@ -62,6 +62,17 @@ class GameEvent:
         return self.after - self.before
 
 
+TRACKED_KINDS = frozenset(
+    {
+        VariableKind.PROGRESS,
+        VariableKind.SCORE,
+        VariableKind.LIVES,
+        VariableKind.HEALTH,
+        VariableKind.FLAG,
+    }
+)
+
+
 @dataclass(slots=True)
 class _Watch:
     variable: Variable
@@ -87,6 +98,12 @@ class EventDetector:
         self._gain_factor = gain_factor
         self._watches: dict[str, _Watch] = {}
         self._observed = 0
+        # The watch list, kept until the knowledge or the snapshot's regions change
+        # (T-841): rebuilding it from 1,600 variables on every snapshot cost more than
+        # the step itself, and a variable whose region the snapshot does not carry is
+        # left out here instead of failing to decode every time.
+        self._tracked_for: tuple[int, tuple[str, ...]] | None = None
+        self._tracked_list: list[Variable] = []
 
     @property
     def observed(self) -> int:
@@ -100,21 +117,19 @@ class EventDetector:
         self._watches.clear()
         self._observed = 0
 
-    def _tracked(self) -> list[Variable]:
-        return [
-            v
-            for v in self._knowledge
-            if not v.rejected
-            and self._at_least <= v.confidence
-            and v.kind
-            in (
-                VariableKind.PROGRESS,
-                VariableKind.SCORE,
-                VariableKind.LIVES,
-                VariableKind.HEALTH,
-                VariableKind.FLAG,
-            )
-        ]
+    def _tracked(self, regions: tuple[str, ...]) -> list[Variable]:
+        key = (self._knowledge.version, regions)
+        if key != self._tracked_for:
+            self._tracked_list = [
+                v
+                for v in self._knowledge
+                if not v.rejected
+                and v.region in regions
+                and self._at_least <= v.confidence
+                and v.kind in TRACKED_KINDS
+            ]
+            self._tracked_for = key
+        return self._tracked_list
 
     def observe(self, snapshot: MemorySnapshot) -> tuple[GameEvent, ...]:
         if not isinstance(snapshot, MemorySnapshot):
@@ -123,7 +138,7 @@ class EventDetector:
         events: list[GameEvent] = []
         returned_home: list[_Watch] = []
         dropped = False
-        for var in self._tracked():
+        for var in self._tracked(snapshot.region_names):
             try:
                 value = var.decode(snapshot)
             except ConfigurationError:

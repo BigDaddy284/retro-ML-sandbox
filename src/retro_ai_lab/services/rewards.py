@@ -18,7 +18,7 @@ from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.rewards.exploitation import ExploitDetector, ExploitWarning
 from retro_ai_lab.rewards.model import Behaviour, RewardProfile
 from retro_ai_lab.rewards.personalities import Personality, apply_personality
-from retro_ai_lab.rewards.suggestions import SuggestionReport, apply_suggestions
+from retro_ai_lab.rewards.suggestions import RelationshipWatch, SuggestionReport, apply_suggestions
 from retro_ai_lab.rewards.tally import RewardTally
 from retro_ai_lab.services.connection import (
     ConnectionService,
@@ -80,6 +80,7 @@ class RewardService:
         self._exploit_min_reward = exploit_min_reward
         self._detector: ExploitDetector | None = None
         self._warnings: list[ExploitSuspected] = []
+        self._watch = RelationshipWatch()
         self._current: ExploitSuspected | None = None
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
@@ -213,6 +214,7 @@ class RewardService:
         )
         self._warnings.clear()
         self._current = None
+        self._watch.reset()
         self._bus.publish(RewardProfileChanged((), self._profile.ids(), (), "loaded"))
         self.refresh_suggestions()
 
@@ -224,7 +226,7 @@ class RewardService:
     def _on_discovery(self, update: DiscoveryUpdated) -> None:
         if not self._enabled or self._profile is None:
             return
-        if update.added or update.changed or update.relationships:
+        if update.added or update.changed or self._relationships_moved(update):
             self.refresh_suggestions()
         for game_event in update.events:
             self._score(game_event)
@@ -232,6 +234,13 @@ class RewardService:
             self._watch_for_exploits(max(e.frame for e in update.events))
 
     # ------------------------------------------------------------ helpers
+
+    def _relationships_moved(self, update: DiscoveryUpdated) -> bool:
+        """Only a change among the confident relationships is worth a rebuild (T-842)."""
+        knowledge = self._discovery.knowledge
+        if not update.relationships or knowledge is None:
+            return False
+        return self._watch.changed(knowledge)
 
     def _score(self, game_event: GameEvent) -> None:
         assert self._profile is not None

@@ -29,8 +29,11 @@ from retro_ai_lab.understanding.events import EventKind
 
 DEFAULT_FRAMES_PER_STEP = 4
 DEFAULT_MAX_STEPS = 600
-DEFAULT_UNSTICK_AFTER = 25  # steps with nothing changing before Start is pressed
-DEFAULT_UNSTICK_BUTTONS: tuple[str, ...] = ("start",)
+DEFAULT_UNSTICK_AFTER = 25  # steps with nothing changing before the go counts as stuck
+# No button is assumed (T-844): the training service hands the runner the wake
+# button it found by experiment, and a stuck go with none known ends "stuck".
+DEFAULT_UNSTICK_BUTTONS: tuple[str, ...] = ()
+FINGERPRINT_STEPS = 64  # state keys a go remembers, for spotting two identical goes
 DEFAULT_SETTLE_FRAMES = 5  # the understanding engine's event window
 
 
@@ -106,7 +109,7 @@ class EpisodeResult:
     steps: int
     frames: int
     reward: float
-    ended_by: str  # "reset", "max_steps", "disconnected", "stopped", "mode change"
+    ended_by: str  # "reset", "max_steps", "stuck", "disconnected", "stopped", "mode change"
     states_seen: int
     objectives: int = 0  # objectives completed during the go
 
@@ -190,8 +193,37 @@ class EpisodeRunner:
         self._reward = 0.0
         self._states: set[str] = set()
         self._ended_by: str | None = None
+        self._fingerprint: list[str] = []
+        self._actions_seen: set[int] = set()
 
     # ------------------------------------------------------------ queries
+
+    @property
+    def fingerprint(self) -> tuple[str, ...]:
+        """The first state keys of this go, for spotting a game that ignores the AI."""
+        return tuple(self._fingerprint)
+
+    @property
+    def actions_varied(self) -> bool:
+        """True once the go has pressed more than one distinct action."""
+        return len(self._actions_seen) > 1
+
+    @property
+    def stuck_from_start(self) -> bool:
+        """True when the go ended "stuck" without the screen ever changing.
+
+        Then the place the go starts from is what ignores the AI (a game-over or
+        title screen), not something that happened during the go.
+        """
+        return self._ended_by == "stuck" and self._same_state >= self._steps
+
+    @property
+    def unstick_buttons(self) -> tuple[str, ...]:
+        return self._unstick_buttons
+
+    def set_unstick_buttons(self, buttons: tuple[str, ...]) -> None:
+        """The button(s) to press when a screen stops changing (found by experiment)."""
+        self._unstick_buttons = tuple(buttons)
 
     @property
     def running(self) -> bool:
@@ -263,6 +295,8 @@ class EpisodeRunner:
         self._states.clear()
         self._ended_by = None
         self._same_state = 0
+        self._fingerprint = []
+        self._actions_seen = set()
         self._buttons = {b.name: b for b in self._connection.call(lambda a: a.buttons())}
         self._restored = restore and self._harness is not None and self._harness.has_checkpoint
         if self._restored:
@@ -290,15 +324,16 @@ class EpisodeRunner:
             return False
         state = self._state
         # On a screen where nothing changes (game over, a menu) the learner's menu has
-        # no way out, so press the buttons it is normally kept away from, once.
-        stuck = (
-            self._unstick_after is not None
-            and self._same_state >= self._unstick_after
-            and any(n in self._buttons for n in self._unstick_buttons)
-        )
+        # no way out. Press the wake button the service found, if it has one; with
+        # none known the go ends "stuck" and the service goes looking for it (T-844).
+        stuck = self._unstick_after is not None and self._same_state >= self._unstick_after
         if stuck:
-            action = None
             names = frozenset(n for n in self._unstick_buttons if n in self._buttons)
+            if not names:
+                self._ended_by = "stuck"
+                self._signals.stop()
+                return False
+            action = None
             self._unsticks += 1
             self._same_state = 0
         else:
@@ -360,6 +395,10 @@ class EpisodeRunner:
                 self._on_learned(Transition(state, action, reward, next_state, done, source))
         self._reward += reward
         self._steps += 1
+        if action is not None:
+            self._actions_seen.add(action)
+        if len(self._fingerprint) < FINGERPRINT_STEPS:
+            self._fingerprint.append(next_state.key)
         self._same_state = self._same_state + 1 if next_state == state else 0
         self._state = next_state
         self._states.add(next_state.key)
