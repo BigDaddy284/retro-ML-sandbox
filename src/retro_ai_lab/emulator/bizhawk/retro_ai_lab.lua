@@ -605,6 +605,35 @@ end
 
 local MAX_STEP_FRAMES = 3600
 
+-- Run exactly `frames` frames with the held pad, then stop again in hold mode.
+--
+-- EmuHawk never wakes a script waiting in emu.frameadvance() while it is
+-- paused (MainForm.StepRunLoop_Core runs a frame only when unpaused or on
+-- the user's Frame Advance key), so hold mode unpauses first and pauses
+-- again after the last frame. The pad is latched into the controller at the
+-- top of each turn of EmuHawk's loop and the overrides are cleared before
+-- the frame runs, so a pad set from the paused loop must be followed by one
+-- emu.yield() before the first frame, and set again between frames.
+local function run_frames(frames)
+  if free_run then
+    for _ = 1, frames do
+      apply_held()
+      emu.frameadvance()
+    end
+    return
+  end
+  apply_held()
+  emu.yield()
+  unpause()
+  for i = 1, frames do
+    emu.frameadvance()
+    if i < frames then
+      apply_held()
+    end
+  end
+  pause()
+end
+
 -- Advance the game: hold the pad, run the frames, then report what was asked.
 function handlers.step(req)
   local frames = req.frames
@@ -620,10 +649,7 @@ function handlers.step(req)
   if req.screenshot ~= nil and type(req.screenshot) ~= "boolean" then
     error("'screenshot' must be true or false.", 0)
   end
-  for _ = 1, frames do
-    apply_held()
-    emu.frameadvance()
-  end
+  run_frames(frames)
   local body = {}
   if req.reads ~= nil then
     body.reads = serve_reads(req.reads)
