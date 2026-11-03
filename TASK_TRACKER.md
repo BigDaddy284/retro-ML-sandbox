@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-005 (Ready)
-- **Last approved checkpoint:** `main` after T-004
+- **Current task:** T-006 (Ready)
+- **Last approved checkpoint:** `main` after T-005
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -18,7 +18,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-002 | Core domain types and errors | 1 | Done | 73/73 | see PR #3 |
 | T-003 | Emulator adapter interface and capabilities model | 1 | Done | 72/72 | see PR #4 |
 | T-004 | Synthetic game (deterministic toy racer) | 1 | Done | 39/39 | see PR #5 |
-| T-005 | Fake emulator adapter over the synthetic game | 1 | Ready | – | – |
+| T-005 | Fake emulator adapter over the synthetic game | 1 | Done | 52/52 | see PR #6 |
 | T-006 | Adapter registry and connection service | 1 | Ready | – | – |
 | T-007 | App shell: main window launches with empty panels | 1 | Ready | – | – |
 | T-008 | Game window panel shows live frames | 1 | Ready | – | – |
@@ -127,8 +127,20 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Completion report:** RAM layout is 32 bytes with state at fixed addresses, 4 noise bytes, a free-running timer and a constant header, so later discovery tasks must separate signal from noise. Movement is simulated one unit per sub-step so obstacles and checkpoints cannot be skipped at speed.
 
 ### T-005 – Fake emulator adapter over the synthetic game
+- **Status:** Done
+- **Phase:** 1
 - **Objective:** `FakeEmulatorAdapter` implementing the full adapter contract, including save/load state and speed, with configurable capability flags and fault injection (timeouts, disconnects).
-- **Test plan:** full contract test suite (reused later for every real adapter); save/load state restores RAM exactly; disabled capabilities raise; injected disconnect surfaces as `EmulatorDisconnected`.
+- **Scope:** `retro_ai_lab.emulator.fake.adapter` and the reusable `retro_ai_lab.testing.AdapterContract` suite. **Out of scope:** registry/service (T-006).
+- **Acceptance criteria:**
+  1. Passes the full adapter contract suite with all capabilities enabled.
+  2. Inputs are held until changed; the game advances only on `advance_frames`.
+  3. Memory and frames match the underlying game exactly.
+  4. Save/load per slot restores RAM exactly; unknown slot is an error.
+  5. Reduced capability sets are honoured by the base-class gating.
+  6. Fault injection: refused connect, timed-out connect, link drop after N operations, `drop_link()`; all surface as the documented errors and leave the adapter disconnected.
+- **Test plan:** contract suite (identity, stable description, lifecycle, idempotency, reconnect, 11 ops require connection, 8 gated ops raise when disabled, memory reads/repeatability/bounds, frame capture, input accept/reject, frame advance, speed, save/load exactness, unknown slot) plus fake-specific tests (game info, RAM mirror, held input, parity with direct play, frame numbers, speed, per-slot states, disconnect releases input, reduced caps, each fault type, operation counting, bad fault settings).
+- **Results:** 52 / 52 passed / 0 failed / 0 excluded / 0 skipped (249 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** `AdapterContract` lives in `src/retro_ai_lab/testing/` so BizHawk and VBA-M adapters reuse it unchanged; it skips a capability test only when the adapter genuinely lacks that capability, which is recorded in the pytest summary.
 
 ### T-006 – Adapter registry and connection service
 - **Objective:** Discover available adapters, connect by name, expose session state and events to upper layers without Qt.
@@ -156,5 +168,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-002 completed (PR #3).
 - T-003 completed (PR #4).
 - T-004 completed (PR #5).
-- Next: T-005.
+- T-005 completed (PR #6).
+- Next: T-006.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
