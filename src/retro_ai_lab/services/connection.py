@@ -173,18 +173,22 @@ class ConnectionService:
         (the failure is logged and mentioned in the reason, never raised),
         because from the child's point of view the game is gone either way.
         """
-        if self._state is not ConnectionState.CONNECTED or self._adapter is None:
-            return ""
-        adapter = self._adapter
-        reason = "Disconnected."
-        try:
-            adapter.disconnect()
-        except EmulatorError as exc:
-            log.warning("Adapter %s failed while disconnecting: %s", adapter.name, exc)
-            reason = f"Disconnected, although the emulator complained: {_message(exc)}"
-        finally:
-            self._finish_disconnect(expected=True, reason=reason)
-        return reason
+        # Held throughout (T-820): a worker whose call fails while the adapter
+        # is closing must find the disconnect already recorded, not record an
+        # unexpected loss of its own.
+        with self._lock:
+            if self._state is not ConnectionState.CONNECTED or self._adapter is None:
+                return ""
+            adapter = self._adapter
+            reason = "Disconnected."
+            try:
+                adapter.disconnect()
+            except EmulatorError as exc:
+                log.warning("Adapter %s failed while disconnecting: %s", adapter.name, exc)
+                reason = f"Disconnected, although the emulator complained: {_message(exc)}"
+            finally:
+                self._finish_disconnect(expected=True, reason=reason)
+            return reason
 
     def check(self) -> bool:
         """Verify the live link is still up; report a silent drop exactly once.

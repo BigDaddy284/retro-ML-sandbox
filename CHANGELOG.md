@@ -5,6 +5,8 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Fixed: pressing Disconnect while the game was being stepped could be reported as a lost link (T-820).
+- The log records, every few seconds, how long the emulator took to answer each kind of request (T-819).
 - The play clock steps the game on a worker thread as well, and a link dropped by two workers at once is reported once (T-818).
 - Frame capture runs on a worker thread, so the window stays responsive with a real emulator connected; adapters serialise their operations across threads (T-817).
 - BizHawk: `socket.lua` and a `luasocket` folder (Archipelago's MIT LuaSocket DLLs) ship next to the bridge script, because EmuHawk has no socket library; README Credits section (T-816).

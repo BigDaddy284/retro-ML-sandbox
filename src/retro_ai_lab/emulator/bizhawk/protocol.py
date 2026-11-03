@@ -7,14 +7,22 @@ turned into :class:`~retro_ai_lab.core.ProtocolError` here, and anything the
 socket does wrong into :class:`~retro_ai_lab.core.EmulatorDisconnectedError`
 or :class:`~retro_ai_lab.core.EmulatorError`, so the adapter only deals in
 the app's own errors.
+
+:class:`Link` also times every call and writes a one-line summary to the
+log every few seconds (T-819), so a log from the user's PC says what each
+command costs.
 """
 
 from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import select
 import socket
+import time
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError, ProtocolError
@@ -129,13 +137,69 @@ class LineChannel:
         self._sock.close()
 
 
-class Link:
-    """Numbered request/response calls over a :class:`LineChannel`."""
+log = logging.getLogger(__name__)
 
-    def __init__(self, channel: LineChannel, *, timeout_s: float) -> None:
+REPORT_EVERY_S = 5.0
+
+
+@dataclass
+class CallStats:
+    """How many times one command ran in the current window, and how long it took."""
+
+    count: int = 0
+    total_s: float = 0.0
+    max_s: float = 0.0
+
+    def add(self, elapsed_s: float) -> None:
+        self.count += 1
+        self.total_s += elapsed_s
+        self.max_s = max(self.max_s, elapsed_s)
+
+    @property
+    def average_s(self) -> float:
+        return self.total_s / self.count if self.count else 0.0
+
+    def describe(self, name: str) -> str:
+        return (
+            f"{name} \u00d7{self.count} avg {self.average_s * 1000:.0f} ms "
+            f"max {self.max_s * 1000:.0f} ms"
+        )
+
+
+class Link:
+    """Numbered request/response calls over a :class:`LineChannel`.
+
+    Every call is timed. Once ``report_every_s`` of calls have gone by, the
+    next call writes a summary line to the log and starts a new window.
+    """
+
+    def __init__(
+        self,
+        channel: LineChannel,
+        *,
+        timeout_s: float,
+        report_every_s: float = REPORT_EVERY_S,
+        clock: Callable[[], float] = time.perf_counter,
+    ) -> None:
         self._channel = channel
         self._timeout_s = timeout_s
         self._next_id = 1
+        self._report_every_s = report_every_s
+        self._clock = clock
+        self._stats: dict[str, CallStats] = {}
+        self._window_started = clock()
+
+    @property
+    def stats(self) -> Mapping[str, CallStats]:
+        """Per-command timings for the current window."""
+        return dict(self._stats)
+
+    def summary(self) -> str:
+        """One line, slowest command (by total time) first."""
+        if not self._stats:
+            return "no calls"
+        ordered = sorted(self._stats.items(), key=lambda item: item[1].total_s, reverse=True)
+        return "; ".join(stats.describe(name) for name, stats in ordered)
 
     @property
     def is_open(self) -> bool:
@@ -151,13 +215,26 @@ class Link:
             raise EmulatorDisconnectedError()
         request_id = self._next_id
         self._next_id += 1
-        self._channel.send_line(encode_request(request_id, cmd, **fields))
-        line = self._channel.receive_line(self._timeout_s if timeout_s is None else timeout_s)
+        started = self._clock()
         try:
-            return decode_response(line, request_id)
-        except ProtocolError:
-            self._channel.close()
-            raise
+            self._channel.send_line(encode_request(request_id, cmd, **fields))
+            line = self._channel.receive_line(self._timeout_s if timeout_s is None else timeout_s)
+            try:
+                return decode_response(line, request_id)
+            except ProtocolError:
+                self._channel.close()
+                raise
+        finally:
+            self._record(cmd, self._clock() - started)
+
+    def _record(self, cmd: str, elapsed_s: float) -> None:
+        self._stats.setdefault(cmd, CallStats()).add(elapsed_s)
+        now = self._clock()
+        window = now - self._window_started
+        if self._report_every_s > 0 and window >= self._report_every_s:
+            log.info("Emulator link, last %.0f s: %s", window, self.summary())
+            self._stats = {}
+            self._window_started = now
 
     def peer_closed(self) -> bool:
         return self._channel.peer_closed()
