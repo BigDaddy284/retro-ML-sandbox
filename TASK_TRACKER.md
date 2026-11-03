@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-403 – AI personalities
+- **Current task:** T-404 – Reward service (persistence and live tally)
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -51,7 +51,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | E-4 | Reward System (controls, categories, personalities, goals, objectives) | 4 | Epic | – | – |
 | T-401 | Reward model: behaviours with category, trigger, +/- controls, suggested value, enable toggle, JSON round-trip | 4 | Done | 18/18 | see PR #27 |
 | T-402 | Reward suggestions: derive behaviours and suggested values from the game knowledge | 4 | Done | 7/7 | see PR #28 |
-| T-403 | AI personalities: Explorer, Collector, Completionist, Speedrunner, Battler, Survivor, Balanced presets | 4 | Planned | – | – |
+| T-403 | AI personalities: Explorer, Collector, Completionist, Speedrunner, Battler, Survivor, Balanced presets | 4 | Done | 6/6 | see PR #29 |
 | T-404 | Reward service: per-game profile persistence, live reward tally from events | 4 | Planned | – | – |
 | T-405 | Reward exploitation detection with plain-words explanation | 4 | Planned | – | – |
 | T-406 | Rewards panel: categories that expand, +/- buttons, value, toggle, suggested, personality picker | 4 | Planned | – | – |
@@ -477,6 +477,20 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 7 / 7 passed / 0 failed / 0 excluded (629 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Added `RewardProfile.update` for descriptive fields (name, category, notes) so suggestions can refresh wording without going through the child's controls. Game over is spotted from data (a flag followed by a reset) rather than from the variable's name.
 
+### T-403 – AI personalities
+- **Status:** Done
+- **Phase:** 4
+- **Objective:** Offer the seven starting configurations of DESIGN.md §5.3 (Explorer, Collector, Completionist, Speedrunner, Battler, Survivor, Balanced Player) as reward configurations, not separate AIs, with every setting still changeable by the child.
+- **Scope:** `RewardProfile.weights` (one multiplier per category, default 1.0, saved with the profile): the current value of a behaviour nobody has touched is its suggested value times its category weight, so suggestions and resets keep the personality in effect. `rewards.personalities`: `Personality(id, name, description, weights)`, the seven presets with child-friendly descriptions, `personality(id)`, `apply_personality(profile, personality)` (sets the name and weights, rescales untouched values, keeps values a person set and the enabled flags). **Out of scope:** picking a personality in the UI (T-406).
+- **Acceptance criteria:**
+  1. Seven presets with unique ids, names and descriptions; every weight positive; Balanced is all 1.0; unknown ids rejected.
+  2. Applying a personality sets the profile's personality, rescales untouched values (clamped), keeps a person's values and every enabled flag; applying Balanced restores the suggested values.
+  3. `suggest` and `reset_to_suggested` honour the weights; bad weights rejected; weights round-trip through JSON and default to 1.0 for older files.
+  4. On the toy racer, a Survivor loses more for a crash than an Explorer, and a Speedrunner gains more for a checkpoint than a Collector.
+- **Test plan:** preset table; lookup; apply rescale/keep/clamp; Balanced restore; suggest/reset with weights; validation; JSON; toy racer comparison.
+- **Results:** 6 / 6 passed / 0 failed / 0 excluded (635 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** The toy racer test caught that a newly suggested behaviour ignored the profile's weights; `apply_suggestions` now resets each new behaviour to its weighted value.
+
 ### Later Phase 4 tasks
 T-402 to T-408 as listed in the summary table; each gets its own section when started.
 
@@ -521,4 +535,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-308 completed (PR #26). Phase 3 complete on the fake emulator.
 - Phase 4 broken into T-401..T-408. T-401 completed (PR #27).
 - T-402 completed (PR #28).
+- T-403 completed (PR #29).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

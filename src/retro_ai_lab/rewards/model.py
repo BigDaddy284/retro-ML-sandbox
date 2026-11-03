@@ -18,7 +18,7 @@ child's choice is never silently overwritten.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
@@ -183,11 +183,13 @@ class RewardProfile:
     game_id: str
     personality: str = "custom"
     _items: dict[str, Behaviour] = field(default_factory=dict, init=False, repr=False)
+    _weights: dict[Category, float] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not self.game_id or not isinstance(self.game_id, str):
             raise ConfigurationError("RewardProfile needs a game id.")
         self.personality = self._check_personality(self.personality)
+        self._weights = self.check_weights({})
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name == "personality":
@@ -244,6 +246,36 @@ class RewardProfile:
     def enabled_count(self) -> int:
         return sum(1 for b in self._items.values() if b.enabled)
 
+    # ------------------------------------------------------------ weights
+
+    @property
+    def weights(self) -> dict[Category, float]:
+        """Multiplier per category (a personality); untouched values follow them."""
+        return dict(self._weights)
+
+    @staticmethod
+    def check_weights(weights: Mapping[Category, float]) -> dict[Category, float]:
+        out = {c: 1.0 for c in Category}
+        for category, weight in weights.items():
+            if not isinstance(category, Category):
+                raise ConfigurationError("Weights must be keyed by Category.")
+            number = _check_number(weight, f"{category.label} weight")
+            if number <= 0:
+                raise ConfigurationError(f"{category.label} weight must be positive.")
+            out[category] = number
+        return out
+
+    def set_weights(self, weights: Mapping[Category, float]) -> None:
+        """Replace the weights (missing categories go back to 1.0) and rescale untouched values."""
+        self._weights = self.check_weights(weights)
+        for bid, b in list(self._items.items()):
+            if not b.custom:
+                self._items[bid] = b.replace(value=self._weighted(b))
+
+    def _weighted(self, behaviour: Behaviour, suggested: float | None = None) -> float:
+        base = behaviour.suggested if suggested is None else suggested
+        return clamp(base * self._weights[behaviour.category])
+
     # ------------------------------------------------------------ controls
 
     def _update(self, behaviour_id: str, **changes: Any) -> Behaviour:
@@ -288,7 +320,7 @@ class RewardProfile:
         current = self.get(behaviour_id)
         if current.custom:
             return self._update(behaviour_id, suggested=number)
-        return self._update(behaviour_id, suggested=number, value=number)
+        return self._update(behaviour_id, suggested=number, value=self._weighted(current, number))
 
     def reset_to_suggested(self, behaviour_id: str | None = None) -> Behaviour | None:
         """Put one behaviour (or all of them) back on its suggested value."""
@@ -297,7 +329,7 @@ class RewardProfile:
                 self.reset_to_suggested(bid)
             return None
         current = self.get(behaviour_id)
-        return self._update(behaviour_id, value=current.suggested, custom=False)
+        return self._update(behaviour_id, value=self._weighted(current), custom=False)
 
     # ------------------------------------------------------------ rewards
 
@@ -318,6 +350,7 @@ class RewardProfile:
             "schema": SCHEMA_VERSION,
             "game_id": self.game_id,
             "personality": self.personality,
+            "weights": {c.value: w for c, w in self._weights.items()},
             "behaviours": [b.to_dict() for b in self._items.values()],
         }
 
@@ -330,9 +363,12 @@ class RewardProfile:
                     f"This rewards file is from a newer version (schema {schema})."
                 )
             profile = cls(data["game_id"], personality=data.get("personality", "custom"))
+            profile._weights = cls.check_weights(
+                {Category(k): v for k, v in data.get("weights", {}).items()}
+            )
             for item in data.get("behaviours", []):
                 profile.add(Behaviour.from_dict(item))
-        except (KeyError, TypeError, AttributeError) as exc:
+        except (KeyError, TypeError, AttributeError, ValueError) as exc:
             raise ConfigurationError(f"Bad rewards data: {exc}") from exc
         return profile
 

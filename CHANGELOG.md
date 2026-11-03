@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-403: Seven AI personalities (Explorer, Collector, Completionist, Speedrunner, Battler, Survivor, Balanced Player) as per-category reward weights on the profile; untouched values follow them.
 - T-402: Suggested behaviours and reward values derived from the game knowledge (kind, confidence and what leads to progress), applied to a profile without overriding a person's choices.
 - T-401: Reward model: behaviours filed under the eight categories with a trigger, +/- controls, current and suggested values, enable toggle and JSON round-trip; packages now import cleanly in any order.
 - T-308: Knowledge is saved per game in the user's app data folder, restored on reconnect, and can be shared and loaded from the panel.
