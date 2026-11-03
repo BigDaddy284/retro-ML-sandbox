@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-409 – Goals panel
+- **Current task:** Phase 5 planning (next: E-5 tasks)
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -57,7 +57,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-406 | Rewards panel: categories that expand, +/- buttons, value, toggle, suggested, personality picker | 4 | Done | 7/7 | see PR #32 |
 | T-407 | Goals and objectives model: overall goal, objectives with detection, dependencies, completion | 4 | Done | 9/9 | see PR #33 |
 | T-408 | Goal service: per-game goal persistence, completion tracking from events, suggested objectives | 4 | Done | 6/6 | see PR #34 |
-| T-409 | Goals panel: edit the objective structure, see completion and confidence | 4 | Planned | – | – |
+| T-409 | Goals panel: edit the objective structure, see completion and confidence | 4 | Done | 6/6 | see PR #35 |
 | E-5 | Basic Learning (tabular Q-learning, save/load) | 5 | Epic | – | – |
 | E-6 | Training Interface (live/background, modes, graphs, history) | 6 | Epic | – | – |
 | E-7 | Advanced Learning (DQN, hierarchical RL, demonstrations) | 7 | Epic | – | – |
@@ -567,6 +567,21 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 6 / 6 passed / 0 failed / 0 excluded (680 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Objective rewards travel as `ObjectiveCompleted` / `ObjectiveSetback` rather than being folded into the behaviour tally, so the learner (Phase 5) can weigh finishing a step of the goal separately from everyday points, and the rewards panel's total stays what it says it is.
 
+### T-409 – Goals panel
+- **Status:** Done
+- **Phase:** 4
+- **Objective:** Let a child see and shape the goal (DESIGN.md §4, §10 "Progress: overall objective completion, individual achievements"): name the goal, see each step with how it is detected, how sure the AI is, whether it is done, ready, waiting or off; add steps (detected by something the AI knows, or ticked by hand), remove and reorder them, say what a step must come after, tick steps off, switch them on or off, and start again.
+- **Scope:** `ui.goals_panel.GoalsPanel(context)` in the main window's "Progress" slot: `goal_title` (edit, Enter to rename), `goals_summary`, `goals_tree` ("Step | Reward | Detected by | Status | On"; the On tick switches a step on or off), `new_step_edit` + `trigger_combo` (the service's trigger options plus "I'll tick it myself") + `add_button`, `remove_button`, `up_button` / `down_button`, `done_button` ("Done it!" / "Not done"), `after_combo` ("Must come after: nothing / <step>"), `reset_button` ("Start again"), `goals_note`. Driven by `GoalChanged`, `ObjectiveCompleted`, `ObjectiveSetback` and connect/disconnect through the GUI bridge; every change goes through `GoalService`. Testable API as in the rewards panel. **Out of scope:** training attempts, success rate and trends (Phase 6; they will share the Progress slot).
+- **Acceptance criteria:**
+  1. Idle: no rows, controls off; after disconnect rows stay readable, controls off.
+  2. Steps appear in order with reward, detection in plain words with the confidence badge, status (Done / Ready / Waiting for … / Off) and tick; selection kept across updates.
+  3. Add (with a known detection or by hand), remove, move up/down, Done it!/Not done, Must come after (a cycle is refused with a plain note), On tick and Start again all go through the service and are saved.
+  4. Renaming the goal works from the box; the summary follows; an event that completes a step shows a note.
+  5. The main window hosts the panel in the Progress slot.
+- **Test plan:** idle; rows/status/badges; add both kinds; remove/move; done toggle; after + cycle; tick; reset; title; completion note; disconnect; main window.
+- **Results:** 6 / 6 passed / 0 failed / 0 excluded (686 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** `Goal` defines `__len__`, so an empty goal is falsy; the panel tested `goal is not None` after a test showed the idle text on a fresh goal. A refresh that arrives while Qt is inside a row's tick signal is deferred by one tick (the same Windows use-after-free T-406 hit). Phase 4 (Reward System) is complete on the fake emulator: behaviours with simple controls, categories, personalities, suggestions, farming warnings, and an editable goal with steps.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -617,4 +632,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-406 completed (PR #32).
 - T-407 completed (PR #33).
 - T-408 completed (PR #34).
+- T-409 completed (PR #35). Phase 4 complete on the fake emulator.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
