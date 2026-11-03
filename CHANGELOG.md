@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-804: A sixth panel, "Compare AIs": name and save the current AI, see every saved AI for the game in one table with the leader of each measure starred, read the comparison in plain words, watch the saved AIs' learning curves on one graph, and load or delete a saved AI.
 - T-803: Comparison of saved AIs: scorecards (points a go, best go, goals reached, winning goes, steps a go, goes), a leader per measure, the situations where two AIs would press different buttons, and the whole comparison in a child's words.
 - T-802: Saved AI service: while a game is connected the current rewards, goal and brain can be saved under a name, a saved AI loaded back into all three services, or deleted; the app context owns it.
 - T-801: Saved AIs: a named snapshot of an AI's rewards, goal and brain for a game, stored as one JSON file per saved AI (the record the rest of Phase 8 loads, compares and shares).

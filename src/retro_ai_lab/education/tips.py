@@ -90,6 +90,21 @@ _PANEL_TIPS: tuple[Tip, ...] = (
         "now with the policy a window ago. The brain is saved per game.",
         ("reinforcement_learning", "training", "exploration"),
     ),
+    Tip(
+        "panel.compare",
+        "Compare AIs",
+        "Give your AI a name and save it. Then change the rewards, train again and "
+        "save that one too. The table shows which AI scored more, reached more goals "
+        "or needed fewer steps, and the words underneath say where they would press "
+        "different buttons. Load a saved AI to carry on with it.",
+        "A saved AI is the reward profile, the goal and the brain together. The table "
+        "reads each saved brain's episode history: average and best reward, goal steps "
+        "completed, episodes that reached a goal, steps per episode. Behaviour "
+        "differences compare the two greedy policies over the states both know. "
+        "Loading replaces the live profile, goal and brain; it does not save the "
+        "current one first, so name and save it if you want it back.",
+        ("rewards", "training", "reward_exploitation"),
+    ),
 )
 
 _TOPIC_TIPS: tuple[Tip, ...] = (

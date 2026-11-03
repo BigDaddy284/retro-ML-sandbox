@@ -28,17 +28,25 @@ def test_window_opens_with_title_and_closes(qtbot: QtBot) -> None:
     assert not w.isVisible()
 
 
-def test_all_five_panels_present_with_child_friendly_titles(qtbot: QtBot) -> None:
+def test_all_six_panels_present_with_child_friendly_titles(qtbot: QtBot) -> None:
     w = MainWindow()
     qtbot.addWidget(w)
     w.show()
-    assert [p.key for p in w.panels] == ["game", "activity", "rewards", "progress", "learning"]
+    assert [p.key for p in w.panels] == [
+        "game",
+        "activity",
+        "rewards",
+        "progress",
+        "learning",
+        "compare",
+    ]
     assert [p.title for p in w.panels] == [
         "Game",
         "What the AI is doing",
         "Rewards",
         "Progress",
         "Learning",
+        "Compare AIs",
     ]
     for p in w.panels:
         assert p.isVisible()
@@ -51,7 +59,7 @@ def test_all_five_panels_present_with_child_friendly_titles(qtbot: QtBot) -> Non
 
 
 def test_panel_specs_are_unique_and_plain() -> None:
-    assert len({p.key for p in PANELS}) == len(PANELS) == 5
+    assert len({p.key for p in PANELS}) == len(PANELS) == 6
     for spec in PANELS:
         assert spec.key.isidentifier() and spec.key.islower()
         assert spec.title.strip() and spec.blurb.endswith(".")

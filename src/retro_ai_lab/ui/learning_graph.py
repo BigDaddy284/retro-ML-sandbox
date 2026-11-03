@@ -39,17 +39,36 @@ class PlotLayout:
         return not self.dots
 
 
+def value_range(curve: LearningCurve) -> tuple[float, float] | None:
+    """The lowest and highest value the curve draws (dots and average), or None."""
+    points = curve.points
+    if not points:
+        return None
+    values = [p.reward for p in points] + [p.average for p in points]
+    return min(values), max(values)
+
+
 def plot_points(
-    curve: LearningCurve, width: float, height: float, margin: float = MARGIN
+    curve: LearningCurve,
+    width: float,
+    height: float,
+    margin: float = MARGIN,
+    *,
+    bounds: tuple[float, float] | None = None,
 ) -> PlotLayout:
-    """Map the curve onto a ``width`` x ``height`` box, keeping ``margin`` clear."""
+    """Map the curve onto a ``width`` x ``height`` box, keeping ``margin`` clear.
+
+    ``bounds`` fixes the value range (so several curves share one scale);
+    without it the curve's own range is used.
+    """
     points = curve.points
     if not points:
         return PlotLayout((), (), None, None)
     inner_w = max(1.0, width - 2 * margin)
     inner_h = max(1.0, height - 2 * margin)
-    values = [p.reward for p in points] + [p.average for p in points]
-    low, high = min(values), max(values)
+    own = value_range(curve)
+    assert own is not None
+    low, high = bounds if bounds is not None else own
     if high == low:
         high, low = high + 1.0, low - 1.0  # a flat curve sits in the middle
     span = high - low
@@ -137,4 +156,4 @@ class LearningGraph(QWidget):
         painter.end()
 
 
-__all__ = ["EMPTY_CAPTION", "LEGEND", "LearningGraph", "PlotLayout", "plot_points"]
+__all__ = ["EMPTY_CAPTION", "LEGEND", "LearningGraph", "PlotLayout", "plot_points", "value_range"]

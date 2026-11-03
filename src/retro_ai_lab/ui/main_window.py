@@ -1,4 +1,4 @@
-"""The main window: all five panels visible together (DESIGN.md §10)."""
+"""The main window: all six panels visible together (DESIGN.md §10, §11)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QMainWindow, QSplitter, QStatusBar, QToolBar, QWid
 from retro_ai_lab import __version__
 from retro_ai_lab.education import PANEL_TIP
 from retro_ai_lab.services import ConnectionFailed, EmulatorConnected, EmulatorDisconnected
+from retro_ai_lab.ui.compare_panel import ComparePanel
 from retro_ai_lab.ui.connect_bar import ConnectBar
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.discovery_panel import DiscoveryPanel
@@ -44,6 +45,8 @@ class MainWindow(QMainWindow):
         self._panels["progress"].set_body(self._goals_panel)
         self._learning_panel = LearningPanel(self._context)
         self._panels["learning"].set_body(self._learning_panel)
+        self._compare_panel = ComparePanel(self._context)
+        self._panels["compare"].set_body(self._compare_panel)
         # Keys pressed anywhere in the window reach the controller pad.
         self.installEventFilter(self._game_panel.pad)
 
@@ -54,7 +57,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self._connect_bar)
         self.addToolBar(toolbar)
 
-        # Layout: [ Game | Activity / Rewards ] over [ Progress | Learning ]
+        # Layout: [ Game | Activity / Rewards ] over [ Progress | Learning | Compare ]
         top = QSplitter(Qt.Orientation.Horizontal)
         top.setObjectName("top_splitter")
         top.addWidget(self._panels["game"])
@@ -70,6 +73,7 @@ class MainWindow(QMainWindow):
         bottom.setObjectName("bottom_splitter")
         bottom.addWidget(self._panels["progress"])
         bottom.addWidget(self._panels["learning"])
+        bottom.addWidget(self._panels["compare"])
 
         root = QSplitter(Qt.Orientation.Vertical)
         root.setObjectName("root_splitter")
@@ -112,6 +116,10 @@ class MainWindow(QMainWindow):
     @property
     def learning_panel(self) -> LearningPanel:
         return self._learning_panel
+
+    @property
+    def compare_panel(self) -> ComparePanel:
+        return self._compare_panel
 
     @property
     def rewards_panel(self) -> RewardsPanel:
