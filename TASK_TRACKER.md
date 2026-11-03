@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** none – T-115 done; next: T-116 (BizHawk adapter: frame advance, speed, save states)
+- **Current task:** T-117 – BizHawk adapter: register in the app and verify on a real EmuHawk
 - **Last approved checkpoint:** `main` after T-709 (PR #58)
 - **Open blockers:** none for development. ADR-005 (BizHawk bridge) is now Accepted with its real-emulator verification left to T-117 on the user's Windows PC. ADR-006 (first demo game) is still *Proposed*: the user picks the game. ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -32,7 +32,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-113 | BizHawk adapter: frame capture | 1 | Done | 5/5 | see PR #62 |
 | T-114 | BizHawk adapter: controller input | 1 | Done | 2/2 | see PR #63 |
 | T-115 | BizHawk adapter: memory reads | 1 | Done | 2/2 | see PR #64 |
-| T-116 | BizHawk adapter: frame advance, speed, save states | 1 | Ready | – | – |
+| T-116 | BizHawk adapter: frame advance, speed, save states | 1 | Done | 5/5 | see PR #65 |
 | T-117 | BizHawk adapter: disconnect handling and real-emulator verification | 1 | – | – | – |
 | T-201 | Memory snapshot capture and storage | 2 | Done | 46/46 | see PR #14 |
 | T-202 | Memory change detection (frame-to-frame diff) | 2 | Done | 26/26 | see PR #15 |
@@ -1053,6 +1053,21 @@ DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical l
 - **Commit:** see PR. **PR:** #64.
 - **Completion report:** The memory observer reads every region whole on every capture, which is fine for a console's work RAM and hopeless for a 16 MB bus, so the adapter offers only domains up to `max_region_bytes` (256 KiB by default) and reports `memory_read` false if none survive; the handshake's full list stays visible in `description.regions`. The script converts `read_bytes_as_array`'s table to a string 4096 entries at a time because `table.unpack` of a 64 K table overflows the C stack. Reads are a list on the wire already, so `step` (T-116) can bundle them. The honest open question is throughput: a Lua table of 128 K numbers plus base64 per frame on a real EmuHawk is a T-117 measurement, and if it is too slow the observer will need to read only the regions it has learned to care about.
 
+### T-116 – BizHawk adapter: frame advance, speed, save states
+- **Status:** Done
+- **Phase:** 1 (BizHawk)
+- **Objective:** The last three operations of the adapter contract on BizHawk: `advance_frames`, `set_speed`, `save_state`/`load_state`, so the episode runner and the experiment service can drive a real game.
+- **Scope:** Script: `step` (`frames` 1..3600; optional `buttons`, `reads`, `screenshot`, so one training step can be one round trip; applies the held pad before each `emu.frameadvance()`), `speed` (`percent` above zero → `client.speedmode`), `save`/`load` (`slot` of letters, digits and underscores → `savestate.save`/`savestate.load` of `<temp>/retro_ai_lab_<slot>.State`, OSD suppressed; `load` answers `loaded: false` when there is no such file). Adapter: `_do_advance_frames` sends `step`; `_do_set_speed` sends the multiplier as a whole percent (at least 1); `_do_save_state`/`_do_load_state`, the latter raising `ConfigurationError("No save state in slot …")` like the fake adapter; `set_free_run(bool)` sends `mode` and flips `frame_advance` off and on. Simulator: the same four commands over the Toy Racer (states kept in memory). **Out of scope:** using `step`'s bundling from the training loop (an optimisation for after T-117's measurements), the real-emulator check that a paused EmuHawk advances on Lua `frameadvance` (T-117).
+- **Acceptance criteria:**
+  1. Against the simulator every capability is on; `advance_frames(3)` moves the Toy Racer three frames with the held pad applied; `set_speed(1.5)` arrives as 150 percent; `save_state`/`load_state` restore the RAM; loading a slot never saved raises `ConfigurationError("No save state in slot …")`; the base class refuses zero frames, a non-positive speed and a bad slot name before sending; `set_free_run(True)` makes `frame_advance` false and the simulator free-running, `set_free_run(False)` the reverse.
+  2. Through the real script under `lupa`: in hold mode `advance_frames(5)` moves exactly five frames and the emulator stays paused; a `step` with `buttons`, `reads` and `screenshot` returns the memory and the screen after the frames; `speed` reaches `client.speedmode`; `save`/`load` round-trip through `savestate.save`/`load` with the slot in the file name; refusals (zero, too many or non-integer frames; bad slot) have messages.
+  3. The episode runner drives a whole go on the BizHawk adapter over the simulator (step, observe, learn), proving the upper layers are unchanged.
+- **Expected changes:** `adapter.py`, `simulator.py`, `retro_ai_lab.lua`, `tests/unit/emulator/bizhawk/{test_adapter,test_lua_script}.py`.
+- **Test plan:** unit – adapter against the simulator (all four operations, refusals, free-run switch); script under lupa (exact frame counts, bundled step, speed, states, refusals); episode runner over the adapter. Regression – full suite.
+- **Results:** 5 new tests (3 adapter/simulator incl. the episode runner, 2 script under lupa), 2 existing expectations widened; full suite 884/884 on Python 3.13 and 3.11; ruff and mypy strict clean.
+- **Commit:** see PR #65. **PR:** #65.
+- **Completion report:** With `step`, `speed`, `save` and `load` in the script the BizHawk adapter now offers every capability, and the episode runner ran a whole go over it (via the simulator) without any change above the emulator layer. `step` applies the held pad before each `emu.frameadvance()` and may bundle `buttons`, `reads` and `screenshot`, so a training step can be one round trip once T-117 measures the real cost; the adapter still uses separate calls, which keeps the observers untouched. Save states live in the temp folder as `retro_ai_lab_<slot>.State` with the slot name restricted to `[A-Za-z0-9_]`, so no request can write outside it. `set_free_run(bool)` on the adapter sends `mode` and drops `frame_advance` while the game runs on its own, which is the fallback if T-117 finds that `emu.frameadvance()` cannot move a paused EmuHawk (ARCHITECTURE.md §5.3). The honest unknowns remain for the real machine: whether frame advance works while `client.pause()` holds the emulator, and what `client.speedmode` accepts.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -1124,5 +1139,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
 - Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56). T-708 completed (PR #57). T-709 completed (PR #58): Phase 7 complete.
-- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame. T-115 completed (PR #64): memory reads with a region size cap.
+- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame. T-115 completed (PR #64): memory reads with a region size cap. T-116 completed (PR #65): step, speed and save states; every capability on; the episode runner drives the adapter.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
