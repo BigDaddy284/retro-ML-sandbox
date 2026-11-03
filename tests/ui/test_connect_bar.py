@@ -219,6 +219,7 @@ def test_bizhawk_is_offered_and_a_missing_emulahawk_is_explained(qtbot: QtBot) -
     assert [b._picker.itemText(i) for i in range(b._picker.count())] == [
         "Practice console (Toy Racer)",
         "BizHawk (EmuHawk)",
+        "mGBA",
     ]
     b.select_adapter("bizhawk")
     with socket.socket() as probe:  # a port nobody is listening on

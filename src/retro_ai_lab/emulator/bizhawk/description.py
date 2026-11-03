@@ -46,7 +46,7 @@ class Description:
     system: str
     title: str
     rom_hash: str | None
-    bizhawk: str
+    bizhawk: str  # the emulator's name and version text (``emulator`` or ``bizhawk`` in hello)
     buttons: tuple[Button, ...]
     regions: tuple[MemoryRegion, ...]
     commands: frozenset[str]
@@ -58,9 +58,9 @@ class Description:
         system = _text(hello, "system")
         title = _text(hello, "rom")
         if system.upper() == NO_GAME or not title:
-            raise ProtocolError("Load a game in EmuHawk first, then connect.")
+            raise ProtocolError("Load a game in the emulator first, then connect.")
         rom_hash = _text(hello, "hash") or None
-        bizhawk = _text(hello, "bizhawk") or "unknown"
+        bizhawk = _text(hello, "emulator") or _text(hello, "bizhawk") or "unknown"
         commands = frozenset(_strings(hello, "commands"))
 
         button_names: dict[str, str] = {}

@@ -27,11 +27,12 @@ pytest                  # runs the test suite (headless Qt)
 
 On Linux, Qt needs `libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0 libdbus-1-3 libfontconfig1`; see `.github/workflows/ci.yml`.
 
-## Playing on BizHawk
+## Playing on BizHawk or mGBA
 
-The app connects to BizHawk's EmuHawk through a shipped Lua script. See
-[docs/BIZHAWK.md](docs/BIZHAWK.md) for setup and for the opt-in real-emulator
-test that verifies the bridge on your machine.
+The app connects to BizHawk's EmuHawk, and to mGBA, through shipped Lua
+scripts. See [docs/BIZHAWK.md](docs/BIZHAWK.md) and [docs/MGBA.md](docs/MGBA.md)
+for setup and for the opt-in real-emulator tests that verify each bridge on
+your machine.
 
 ## Windows build
 

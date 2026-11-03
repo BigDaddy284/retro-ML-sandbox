@@ -166,7 +166,20 @@ class Link:
         self._channel.close()
 
 
-def open_link(host: str, port: int, *, timeout_s: float) -> Link:
+BIZHAWK_HINT = (
+    "Open retro_ai_lab.lua in EmuHawk's Lua Console (Tools > Lua Console > Open Script) "
+    "and try again."
+)
+
+
+def open_link(
+    host: str,
+    port: int,
+    *,
+    timeout_s: float,
+    emulator: str = "BizHawk",
+    hint: str = BIZHAWK_HINT,
+) -> Link:
     """Connect to the bridge; failures become child-readable errors."""
     # A refused connection surfaces as ConnectionRefusedError on Linux but as a
     # timeout on Windows (which keeps retrying until the deadline), so every
@@ -174,15 +187,13 @@ def open_link(host: str, port: int, *, timeout_s: float) -> Link:
     try:
         sock = socket.create_connection((host, port), timeout=timeout_s)
     except OSError as exc:
-        raise EmulatorError(
-            f"Couldn't find BizHawk on port {port}. Open retro_ai_lab.lua in EmuHawk's "
-            "Lua Console (Tools > Lua Console > Open Script) and try again."
-        ) from exc
+        raise EmulatorError(f"Couldn't find {emulator} on port {port}. {hint}") from exc
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     return Link(LineChannel(sock), timeout_s=timeout_s)
 
 
 __all__ = [
+    "BIZHAWK_HINT",
     "DEFAULT_HOST",
     "DEFAULT_PORT",
     "MAX_LINE",

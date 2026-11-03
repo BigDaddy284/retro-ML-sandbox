@@ -18,6 +18,7 @@ a = Analysis(
     datas=[
         # The BizHawk bridge script ships next to the adapter package.
         ("../src/retro_ai_lab/emulator/bizhawk/retro_ai_lab.lua", "retro_ai_lab/emulator/bizhawk"),
+        ("../src/retro_ai_lab/emulator/mgba/retro_ai_lab.lua", "retro_ai_lab/emulator/mgba"),
     ],
     hiddenimports=hidden,
     hookspath=[],

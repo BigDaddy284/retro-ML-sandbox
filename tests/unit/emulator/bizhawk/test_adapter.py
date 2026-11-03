@@ -104,7 +104,7 @@ def test_no_bridge_and_silent_bridge() -> None:
         wait_until(lambda: sim.connections == 1)
     with BizHawkSimulator(no_game=True) as sim:
         adapter = BizHawkAdapter(port=sim.port)
-        with pytest.raises(ProtocolError, match="Load a game in EmuHawk first"):
+        with pytest.raises(ProtocolError, match="Load a game in the emulator first"):
             adapter.connect(timeout_s=1.0)
         assert not adapter.is_connected
         with pytest.raises(EmulatorDisconnectedError):

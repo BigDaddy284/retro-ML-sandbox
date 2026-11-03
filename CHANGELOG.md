@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-811: **mGBA** in the console box: the `mgba` adapter over the T-810 script (free run, no speed control), docs/MGBA.md setup and verification guide, opt-in real-emulator test (`RETRO_AI_LAB_MGBA_PATH`). The mGBA script ships in the Windows build.
 - T-810: a bridge script for mGBA (0.10+) speaking the same protocol as the BizHawk one (free-run only: mGBA scripts can't pause), tested in CI under lupa over real TCP; the `mgba` adapter follows in T-811.
 - T-809: a Research window off the toolbar for grown-ups and researchers: edit the learning settings, see what the AI thinks every move is worth in the situation now, and save or clear the step log (CSV). The app keeps the step log whether or not the window is open.
 - T-808: ARCHITECTURE §6 and ADR-010: VBA-M feasibility spike for the second emulator adapter (docs only); mGBA proposed as the second adapter, VBA-M revisited when a release ships its Lua engine.
