@@ -368,8 +368,16 @@ local function domains()
   for _, name in ipairs(list) do
     local ok, size = pcall(memory.getmemorydomainsize, name)
     if ok and type(size) == "number" and size > 0 then
-      out[#out + 1] = { name = name, size = size }
-      domain_sizes[name] = size
+      -- A domain the core lists but cannot peek (a .NET exception on the
+      -- first byte) is left out, so the app never asks for it (T-832).
+      local readable, err = pcall(memory.read_bytes_as_array, 0, 1, name)
+      if readable then
+        out[#out + 1] = { name = name, size = size }
+        domain_sizes[name] = size
+      else
+        print("Retro AI Lab: not offering memory domain '" .. name
+          .. "' because the emulator cannot read it: " .. tostring(err))
+      end
     end
   end
   return out
@@ -391,7 +399,11 @@ local function read_bytes(domain, addr, len)
   if len == 0 then
     return ""
   end
-  local values = memory.read_bytes_as_array(addr, len, domain)
+  local ok, values = pcall(memory.read_bytes_as_array, addr, len, domain)
+  if not ok then
+    error("The emulator could not read " .. len .. " bytes at " .. addr .. " of '"
+      .. domain .. "': " .. tostring(values), 0)
+  end
   local parts = {}
   local step = 4096  -- table.unpack is limited by the C stack
   for i = 1, len, step do
