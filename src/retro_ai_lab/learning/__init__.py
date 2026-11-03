@@ -11,6 +11,7 @@ from retro_ai_lab.learning.learner import (
     register_learner,
 )
 from retro_ai_lab.learning.qlearning import QLearningAgent, QTable, Settings
+from retro_ai_lab.learning.replay import ReplayBuffer, Transition
 from retro_ai_lab.learning.state import State, StateEncoder, bucket
 
 __all__ = [
@@ -21,9 +22,11 @@ __all__ = [
     "Learner",
     "QLearningAgent",
     "QTable",
+    "ReplayBuffer",
     "Settings",
     "State",
     "StateEncoder",
+    "Transition",
     "algorithms",
     "bucket",
     "learner_from_dict",

@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-702 – Experience replay (Phase 7)
+- **Current task:** T-703 – Feature vectors (Phase 7)
 - **Last approved checkpoint:** `main` after T-507 (PRs #43–#49 merging in order as CI passes; T-701 stacked on them)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only the BizHawk work (T-110 onward). ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -76,8 +76,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-607 | Educational tips: "What's this?" explanations in simple and advanced words for every panel | 6 | Done | 6/6 | see PR #49 |
 | E-7 | Advanced Learning (DQN, hierarchical RL, demonstrations) | 7 | Epic | – | – |
 | T-701 | Learner interface: any learning algorithm behind one contract; brains record which algorithm they hold | 7 | Done | 5/5 | see PR #50 |
-| T-702 | Experience replay: a bounded memory of past steps the AI can learn from again | 7 | In progress | – | – |
-| T-703 | Feature vectors: a situation as numbers a neural network can read | 7 | Ready | – | – |
+| T-702 | Experience replay: a bounded memory of past steps the AI can learn from again | 7 | Done | 5/5 | see PR #51 |
+| T-703 | Feature vectors: a situation as numbers a neural network can read | 7 | In progress | – | – |
 | T-704 | Small neural network in NumPy (layers, Adam, gradient check; no new dependency) | 7 | Ready | – | – |
 | T-705 | DQN learner: network, target network and replay; learns a synthetic task; saves and reloads | 7 | Ready | – | – |
 | T-706 | Automatic algorithm choice (table while the game is small, network when it grows) and a "How the AI learns" control | 7 | Ready | – | – |
@@ -831,6 +831,23 @@ DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical l
 - **Commit:** see PR. **PR:** #50.
 - **Completion report:** The registry holds learner classes by `algorithm` name; `learner_from_dict` reads the name from the saved data and defaults to `q_table`, so every brain saved so far still loads unchanged. `Decision` moved to `learning.learner` (still importable from `learning`). Insights now ask the learner for its `policy()` instead of walking a Q-table, proven with a stub learner that has no table. The service validates the algorithm name in its constructor and builds new brains (connect, forget) through the registry. ADR-009 records that Phase 7 networks are NumPy behind this interface. Known limitation: only `q_table` is registered until T-705.
 
+### T-702 – Experience replay
+- **Status:** Done
+- **Phase:** 7
+- **Objective:** Give learners a bounded memory of past steps they can learn from again, in random order (DESIGN.md §6.1 "experience replay"), ready for the DQN (T-705) and for remembering the child's play (T-707).
+- **Scope:** `learning.replay`: `Transition(state, action, reward, next_state, done, source="ai")` (frozen; reward must be finite, action non-negative) and `ReplayBuffer(capacity, seed=None)` with `append`, `extend`, `__len__`, `__iter__`, `capacity`, `added` (everything ever stored), `latest(n)`, `sample(n)` (distinct transitions, seeded), `clear()`, and a JSON round trip (`to_dict` / `from_dict`) that keeps order, counts and the random state. **Out of scope:** prioritised replay, using the buffer in a learner (T-705), recording the child's play (T-707).
+- **Acceptance criteria:**
+  1. The buffer keeps at most `capacity` transitions, dropping the oldest first, and `added` counts every one ever stored.
+  2. `sample(n)` returns `n` distinct transitions from the buffer and is reproducible for a seed; asking for more than it holds, for fewer than one, or from an empty buffer raises `ConfigurationError`.
+  3. Invalid construction (capacity below one, a non-finite reward, a negative action) raises `ConfigurationError`; transitions are immutable.
+  4. A buffer round-trips through JSON with its order, capacity, `added` and random state, so the next `sample` after a reload matches; saved data holding more than `capacity` keeps the newest; bad data is refused.
+  5. For any sequence of appends the buffer holds exactly the last `min(n, capacity)` of them (property test).
+- **Expected changes:** `learning/replay.py` (new), `learning/__init__.py`, `tests/unit/learning/test_replay.py` (new).
+- **Test plan:** unit – append / eviction / `added` / `latest`; sampling size, distinctness, seeding and the three errors; validation and immutability; JSON round trip incl. oversize data and bad data; hypothesis property over random append sequences. Regression – full suite.
+- **Results:** 5 / 5 passed / 0 failed / 0 excluded (777 in the full suite, on Python 3.13 and 3.11). Lint, format and strict mypy clean.
+- **Commit:** see PR. **PR:** #51.
+- **Completion report:** `Transition` and `ReplayBuffer` as planned; transitions carry a `source` ("ai" or "child") so T-707 can keep the child's play apart from the AI's. The buffer is a `deque(maxlen)` with its own seeded `Random`, so sampling after a reload continues the same sequence. Nothing uses it yet; T-705 wires it into the DQN.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -890,5 +907,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
-- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50).
+- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
