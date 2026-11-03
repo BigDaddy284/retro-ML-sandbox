@@ -1,0 +1,271 @@
+"""One episode of play-and-learn (DESIGN.md Phase 5).
+
+Each step the agent looks at the game (a :class:`State` from the believed
+variables), picks an action, presses it as the AI, lets a few frames pass,
+and learns from the points the reward and goal services announced in the
+meantime. An episode ends when the game starts over (a reset event), after
+``max_steps``, or if the emulator link drops. With save states, every
+episode can start from the same checkpoint (DESIGN.md §9).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from retro_ai_lab.core import Button, ConfigurationError, EmulatorError
+from retro_ai_lab.core.events import EventBus
+from retro_ai_lab.learning.qlearning import QLearningAgent
+from retro_ai_lab.learning.state import State, StateEncoder
+from retro_ai_lab.services.connection import ConnectionService
+from retro_ai_lab.services.discovery import DiscoveryUpdated
+from retro_ai_lab.services.experiments import ExperimentHarness
+from retro_ai_lab.services.goals import ObjectiveCompleted, ObjectiveSetback
+from retro_ai_lab.services.observer import ObservationService
+from retro_ai_lab.services.rewards import RewardEarned
+from retro_ai_lab.understanding.events import EventKind
+
+DEFAULT_FRAMES_PER_STEP = 4
+DEFAULT_MAX_STEPS = 600
+DEFAULT_UNSTICK_AFTER = 25  # steps with nothing changing before Start is pressed
+DEFAULT_UNSTICK_BUTTONS: tuple[str, ...] = ("start",)
+
+
+class EpisodeSignals:
+    """Adds up the points announced on the bus and notices game restarts."""
+
+    def __init__(self, bus: EventBus) -> None:
+        self._reward = 0.0
+        self._resets = 0
+        self._listening = False
+        bus.subscribe(RewardEarned, self._on_reward)
+        bus.subscribe(ObjectiveCompleted, self._on_completed)
+        bus.subscribe(ObjectiveSetback, self._on_setback)
+        bus.subscribe(DiscoveryUpdated, self._on_discovery)
+
+    @property
+    def listening(self) -> bool:
+        return self._listening
+
+    def start(self) -> None:
+        self._reward = 0.0
+        self._resets = 0
+        self._listening = True
+
+    def stop(self) -> None:
+        self._listening = False
+
+    def take(self) -> tuple[float, int]:
+        """(reward, resets) since the last take; clears both."""
+        out = (self._reward, self._resets)
+        self._reward = 0.0
+        self._resets = 0
+        return out
+
+    def _on_reward(self, event: RewardEarned) -> None:
+        if self._listening:
+            self._reward += event.amount
+
+    def _on_completed(self, event: ObjectiveCompleted) -> None:
+        if self._listening:
+            self._reward += event.reward
+
+    def _on_setback(self, event: ObjectiveSetback) -> None:
+        if self._listening:
+            self._reward += event.penalty
+
+    def _on_discovery(self, update: DiscoveryUpdated) -> None:
+        if self._listening:
+            self._resets += sum(1 for e in update.events if e.kind is EventKind.RESET)
+
+
+@dataclass(frozen=True, slots=True)
+class EpisodeResult:
+    steps: int
+    frames: int
+    reward: float
+    ended_by: str  # "reset", "max_steps", "disconnected", "stopped"
+    states_seen: int
+
+
+class EpisodeRunner:
+    def __init__(
+        self,
+        connection: ConnectionService,
+        observation: ObservationService,
+        bus: EventBus,
+        agent: QLearningAgent,
+        encoder: StateEncoder,
+        *,
+        frames_per_step: int = DEFAULT_FRAMES_PER_STEP,
+        max_steps: int = DEFAULT_MAX_STEPS,
+        harness: ExperimentHarness | None = None,
+        unstick_after: int | None = DEFAULT_UNSTICK_AFTER,
+        unstick_buttons: tuple[str, ...] = DEFAULT_UNSTICK_BUTTONS,
+    ) -> None:
+        if frames_per_step < 1:
+            raise ConfigurationError("frames_per_step must be at least 1.")
+        if max_steps < 1:
+            raise ConfigurationError("max_steps must be at least 1.")
+        if unstick_after is not None and unstick_after < 1:
+            raise ConfigurationError("unstick_after must be at least 1 (or None).")
+        self._connection = connection
+        self._observation = observation
+        self._agent = agent
+        self._encoder = encoder
+        self._frames_per_step = frames_per_step
+        self._max_steps = max_steps
+        self._harness = harness
+        self._unstick_after = unstick_after
+        self._unstick_buttons = unstick_buttons
+        self._unsticks = 0
+        self._same_state = 0
+        self._signals = EpisodeSignals(bus)
+        self._buttons: dict[str, Button] = {}
+        self._state: State | None = None
+        self._steps = 0
+        self._frames = 0
+        self._reward = 0.0
+        self._states: set[str] = set()
+        self._ended_by: str | None = None
+
+    # ------------------------------------------------------------ queries
+
+    @property
+    def running(self) -> bool:
+        return self._state is not None and self._ended_by is None
+
+    @property
+    def steps(self) -> int:
+        return self._steps
+
+    @property
+    def reward(self) -> float:
+        return self._reward
+
+    @property
+    def state(self) -> State | None:
+        return self._state
+
+    @property
+    def signals(self) -> EpisodeSignals:
+        return self._signals
+
+    @property
+    def unsticks(self) -> int:
+        """Times Start was pressed because nothing was changing (a game-over screen)."""
+        return self._unsticks
+
+    # ------------------------------------------------------------ driving
+
+    def begin(self) -> State:
+        """Start an episode: restore the checkpoint if there is one, read the first state."""
+        if self.running:
+            raise ConfigurationError("An episode is already running.")
+        self._steps = 0
+        self._frames = 0
+        self._reward = 0.0
+        self._states.clear()
+        self._ended_by = None
+        self._same_state = 0
+        self._buttons = {b.name: b for b in self._connection.call(lambda a: a.buttons())}
+        if self._harness is not None and self._harness.has_checkpoint:
+            self._harness.restore()
+        self._encoder.refresh()
+        self._signals.start()
+        latest = self._observation.observe()
+        snapshot = latest.snapshot if latest is not None else self._observation.latest
+        if snapshot is None:
+            raise ConfigurationError(
+                "Can't see the game's memory, so there is nothing to learn from."
+            )
+        self._state = self._encoder.encode(snapshot)
+        self._states.add(self._state.key)
+        return self._state
+
+    def step(self) -> bool:
+        """One act-advance-learn step. Returns False once the episode is over."""
+        if self._state is None:
+            raise ConfigurationError("Call begin() before step().")
+        if self._ended_by is not None:
+            return False
+        state = self._state
+        # On a screen where nothing changes (game over, a menu) the learner's menu has
+        # no way out, so press the buttons it is normally kept away from, once.
+        stuck = (
+            self._unstick_after is not None
+            and self._same_state >= self._unstick_after
+            and any(n in self._buttons for n in self._unstick_buttons)
+        )
+        if stuck:
+            action = None
+            names = frozenset(n for n in self._unstick_buttons if n in self._buttons)
+            self._unsticks += 1
+            self._same_state = 0
+        else:
+            action = self._agent.choose(state)
+            names = self._agent.space.buttons_for(action)
+        held = [self._buttons[n] for n in names]
+        try:
+            self._connection.call(lambda a: a.set_input(held))
+            self._observation.record_input(names, "ai")
+            self._connection.call(lambda a: a.advance_frames(self._frames_per_step))
+            self._observation.advance(self._frames_per_step)
+        except EmulatorError:
+            self._ended_by = "disconnected"
+            self._signals.stop()
+            return False
+        self._frames += self._frames_per_step
+        reward, resets = self._signals.take()
+        snapshot = self._observation.latest
+        next_state = self._encoder.encode(snapshot) if snapshot is not None else state
+        done = resets > 0
+        if action is not None:
+            self._agent.learn(state, action, reward, next_state, done)
+        self._reward += reward
+        self._steps += 1
+        self._same_state = self._same_state + 1 if next_state == state else 0
+        self._state = next_state
+        self._states.add(next_state.key)
+        if done:
+            self._ended_by = "reset"
+        elif self._steps >= self._max_steps:
+            self._ended_by = "max_steps"
+        if self._ended_by is not None:
+            self._signals.stop()
+            return False
+        return True
+
+    def finish(self, *, ended_by: str | None = None) -> EpisodeResult:
+        """Release the buttons, count the episode, and report."""
+        if self._state is None:
+            raise ConfigurationError("No episode to finish.")
+        if self._ended_by is None:
+            self._ended_by = ended_by or "stopped"
+        self._signals.stop()
+        if self._connection.is_connected:
+            try:
+                self._connection.call(lambda a: a.set_input([]))
+                self._observation.record_input([], "ai")
+            except EmulatorError:
+                pass  # the connection service reports link loss
+        self._agent.end_episode()
+        result = EpisodeResult(
+            self._steps, self._frames, self._reward, self._ended_by, len(self._states)
+        )
+        self._state = None
+        return result
+
+    def run_episode(self) -> EpisodeResult:
+        self.begin()
+        while self.step():
+            pass
+        return self.finish()
+
+
+__all__ = [
+    "DEFAULT_FRAMES_PER_STEP",
+    "DEFAULT_MAX_STEPS",
+    "EpisodeResult",
+    "EpisodeRunner",
+    "EpisodeSignals",
+]

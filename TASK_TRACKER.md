@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-504 – Episode runner
+- **Current task:** T-505 – Training service
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -62,7 +62,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-501 | State encoder: believed variables binned into a small discrete state | 5 | Done | 6/6 | see PR #36 |
 | T-502 | Action space from the emulator's buttons (singles and sensible combos) | 5 | Done | 5/5 | see PR #37 |
 | T-503 | Tabular Q-learning agent: choose, learn, explore less over time, JSON round-trip | 5 | Done | 5/5 | see PR #38 |
-| T-504 | Episode runner: act, advance, collect rewards from the services, learn, stop on reset; checkpoint restarts | 5 | Planned | – | – |
+| T-504 | Episode runner: act, advance, collect rewards from the services, learn, stop on reset; checkpoint restarts | 5 | Done | 7/7 | see PR #39 |
 | T-505 | Training service: independent / guided / manual modes, start / pause / stop, episode history, live or fast | 5 | Planned | – | – |
 | T-506 | Learning persistence: the AI's brain saved per game and restored on connect | 5 | Planned | – | – |
 | T-507 | Learning panel: mode picker, Start / Pause / Stop, Live / Fast, status and recent episodes | 5 | Planned | – | – |
@@ -631,6 +631,21 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 5 / 5 passed / 0 failed / 0 excluded (702 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** The random generator's state is saved with the brain so a reloaded agent makes exactly the choices it would have made; `stats()` speaks in "situations" and "goes" rather than states and episodes.
 
+### T-504 – Episode runner
+- **Status:** Done
+- **Phase:** 5
+- **Objective:** Close the loop (DESIGN.md Phase 5 "train through repeated gameplay, reward integration"): the agent looks at the game, presses buttons, the frames advance, the understanding engine raises events, the reward and goal services turn them into points, and the agent learns from them, one step at a time, episode after episode.
+- **Scope:** `training.episode`: `EpisodeSignals(bus)` collecting `RewardEarned`, `ObjectiveCompleted` and `ObjectiveSetback` amounts and counting reset events since the last `take()`; `EpisodeRunner(connection, observation, bus, agent, encoder, *, frames_per_step=4, max_steps=600, harness=None)` with `begin()` (optional checkpoint restore, DESIGN.md §9 "checkpoint training"; refreshes the encoder; first state), `step()` (choose, press as the AI, advance, collect reward, encode next state, learn; returns False when the episode is over: a reset in the game, `max_steps`, or the link dropped), `finish()` (release the buttons, count the episode) and `run_episode()` doing all three; `EpisodeResult(steps, frames, reward, ended_by, states_seen)`. Inputs are recorded with source "ai". When nothing has changed for `unstick_after` steps (a game-over screen or a menu, which the learner's menu can't leave because Start is kept out of it), the runner presses the unstick buttons (Start) once without learning from it. **Out of scope:** modes, pause/stop and history (T-505), saving the brain (T-506).
+- **Acceptance criteria:**
+  1. An episode on the toy racer with a taught knowledge runs the requested steps, presses only actions from the space (recorded as "ai"), advances `frames_per_step` frames per step, learns once per step, and ends by `max_steps`.
+  2. A game-over screen is left by pressing Start after `unstick_after` unchanged steps (not learned from, switchable off) and the restart ends the episode with `ended_by == "reset"`; a dropped link ends it with "disconnected" without raising; the buttons are released at the end.
+  3. With save states, `begin()` restores the checkpoint so every episode starts from the same place; without them it carries on from wherever the game is.
+  4. Rewards collected equal what the services announced (behaviour and objective rewards added together); nothing is collected while no episode is running.
+  5. Bad settings rejected; `step()` before `begin()` refused.
+- **Test plan:** signals; full episode counts; reset ending; disconnect ending; checkpoint vs no checkpoint; settings and misuse; a short training run on the toy racer that learns some situations.
+- **Results:** 7 / 7 passed / 0 failed / 0 excluded (709 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** The first test on a game-over screen showed the learner can never leave it (Start is kept out of its menu), so the runner now presses Start after a run of unchanged steps. Episode ends come from the engine's own reset event, so the runner never has to know what "game over" looks like in a given game.
+
 ### Later Phase 5 tasks
 T-502 to T-507 as listed in the summary table; each gets its own section when started.
 
@@ -688,4 +703,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - Phase 5 broken into T-501..T-507. T-501 completed (PR #36).
 - T-502 completed (PR #37).
 - T-503 completed (PR #38).
+- T-504 completed (PR #39).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
