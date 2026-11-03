@@ -13,7 +13,7 @@ DESIGN.md §3.5 and §3.6 drive the shape of this module:
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
@@ -140,6 +140,9 @@ class Variable:
     confirmed: bool = False  # set only by a person
     rejected: bool = False  # a person said "no, that's wrong"
     notes: str = ""
+    # Worked out once from the fields above (T-841): the detector, the long look and
+    # the suggestion rules read it for every variable on every snapshot.
+    confidence: Confidence = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not self.id or not isinstance(self.id, str):
@@ -150,18 +153,17 @@ class Variable:
             raise ConfigurationError("Variable offset must be a non-negative integer.")
         if self.confirmed and self.rejected:
             raise ConfigurationError("A variable can't be both confirmed and rejected.")
+        if self.rejected:
+            confidence = Confidence.UNKNOWN
+        elif self.confirmed:
+            confidence = Confidence.CONFIRMED
+        else:
+            confidence = confidence_from_evidence(e.weight for e in self.evidence)
+        object.__setattr__(self, "confidence", confidence)
 
     @property
     def width(self) -> int:
         return self.encoding.width
-
-    @property
-    def confidence(self) -> Confidence:
-        if self.rejected:
-            return Confidence.UNKNOWN
-        if self.confirmed:
-            return Confidence.CONFIRMED
-        return confidence_from_evidence(e.weight for e in self.evidence)
 
     @property
     def display_name(self) -> str:
@@ -329,8 +331,18 @@ class Knowledge:
         self.title = title
         self._variables: dict[str, Variable] = {}
         self._relationships: dict[str, Relationship] = {}
+        self._version = 0
 
     # ------------------------------------------------------------ access
+
+    @property
+    def version(self) -> int:
+        """Goes up on every change to the variables or relationships (T-841).
+
+        Anything that keeps a list derived from the knowledge (the event detector's
+        watch list, the long look's) rebuilds it only when this moves.
+        """
+        return self._version
 
     def __len__(self) -> int:
         return len(self._variables)
@@ -392,6 +404,7 @@ class Knowledge:
                 f"{variable.region}[{variable.offset}] is already {clash.id!r}; update it instead."
             )
         self._variables[variable.id] = variable
+        self._version += 1
         return variable
 
     def new_id(self) -> str:
@@ -422,6 +435,7 @@ class Knowledge:
             raise ConfigurationError("A variable's id can't change.")
         updated = replace(current, **changes)
         self._variables[var_id] = updated
+        self._version += 1
         return updated
 
     def support(self, var_id: str, *evidence: Evidence) -> Variable:
@@ -468,6 +482,7 @@ class Knowledge:
     def remove(self, var_id: str) -> None:
         self.get(var_id)
         del self._variables[var_id]
+        self._version += 1
 
     # ----------------------------------------------------- relationships
 
@@ -488,21 +503,25 @@ class Knowledge:
                 rel, confirmed=current.confirmed, rejected=current.rejected, notes=current.notes
             )
         self._relationships[rel.id] = rel
+        self._version += 1
         return rel
 
     def confirm_relationship(self, rel_id: str) -> Relationship:
         rel = replace(self.relationship(rel_id), confirmed=True, rejected=False)
         self._relationships[rel_id] = rel
+        self._version += 1
         return rel
 
     def reject_relationship(self, rel_id: str) -> Relationship:
         rel = replace(self.relationship(rel_id), rejected=True, confirmed=False)
         self._relationships[rel_id] = rel
+        self._version += 1
         return rel
 
     def remove_relationship(self, rel_id: str) -> None:
         self.relationship(rel_id)
         del self._relationships[rel_id]
+        self._version += 1
 
     def confident_relationships(
         self, at_least: Confidence = Confidence.LOW

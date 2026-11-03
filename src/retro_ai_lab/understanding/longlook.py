@@ -109,6 +109,10 @@ class LongLook:
         self._steppers: dict[str, _Stepper] = {}
         self._drivers: dict[str, _Driver] = {}
         self._observed = 0
+        # Believed lists per kind set, kept until the knowledge or the snapshot's
+        # regions change (T-841); see EventDetector._tracked.
+        self._believed_for: tuple[int, tuple[str, ...]] | None = None
+        self._believed_lists: dict[frozenset[VariableKind], list[Variable]] = {}
 
     @property
     def observed(self) -> int:
@@ -123,12 +127,23 @@ class LongLook:
         self._drivers.clear()
         self._observed = 0
 
-    def _believed(self, kinds: frozenset[VariableKind]) -> list[Variable]:
-        return [
-            v
-            for v in self._knowledge
-            if not v.rejected and self._at_least <= v.confidence and v.kind in kinds
-        ]
+    def _believed(self, kinds: frozenset[VariableKind], regions: tuple[str, ...]) -> list[Variable]:
+        key = (self._knowledge.version, regions)
+        if key != self._believed_for:
+            self._believed_lists.clear()
+            self._believed_for = key
+        found = self._believed_lists.get(kinds)
+        if found is None:
+            found = [
+                v
+                for v in self._knowledge
+                if not v.rejected
+                and v.region in regions
+                and self._at_least <= v.confidence
+                and v.kind in kinds
+            ]
+            self._believed_lists[kinds] = found
+        return found
 
     def observe(self, snapshot: MemorySnapshot) -> None:
         if not isinstance(snapshot, MemorySnapshot):
@@ -137,7 +152,7 @@ class LongLook:
         # Drivers first: a stepper wants to know where every driver is on this frame.
         now: dict[str, int] = {}
         started_over: set[str] = set()
-        for var in self._believed(DRIVER_KINDS):
+        for var in self._believed(DRIVER_KINDS, snapshot.region_names):
             try:
                 value = var.decode(snapshot)
             except ConfigurationError:
@@ -152,7 +167,7 @@ class LongLook:
             driver.last = value
             driver.low = min(driver.low, value)
             driver.high = max(driver.high, value)
-        for var in self._believed(STEPPER_KINDS):
+        for var in self._believed(STEPPER_KINDS, snapshot.region_names):
             try:
                 value = var.decode(snapshot)
             except ConfigurationError:
