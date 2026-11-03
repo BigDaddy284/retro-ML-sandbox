@@ -45,12 +45,15 @@ def test_frames_update_as_the_game_advances(
     qtbot: QtBot, panel: GamePanel, context: AppContext
 ) -> None:
     context.connection.connect("fake")
+    panel.clock.pause()  # drive time by hand so the expected frame is exact
     context.connection.call(lambda a: a.advance_frames(5))
     qtbot.waitUntil(lambda: panel.view.frame is not None and panel.view.frame.number == 5)
     assert panel.status_text.endswith("Frame 5.")
     adapter = context.connection.adapter
     assert isinstance(adapter, FakeEmulatorAdapter)
     assert panel.view.frame == adapter.game.render()
+    panel.clock.play()  # and with the clock running the frames keep coming
+    qtbot.waitUntil(lambda: panel.view.frame is not None and panel.view.frame.number > 20)
 
 
 def test_disconnect_stops_pump_and_clears(panel: GamePanel, context: AppContext) -> None:
