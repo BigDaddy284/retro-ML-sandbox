@@ -534,7 +534,7 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
   6. The main window hosts the panel.
 - **Test plan:** idle; rows and categories; selection kept across updates; plus/minus/suggested/tick; personality; total and warning; main window; disconnect.
 - **Results:** 7 / 7 passed / 0 failed / 0 excluded (665 in the full suite). Lint, format and strict mypy clean.
-- **Completion report:** After a disconnect the tree rows are disabled, so re-selecting the kept row no longer fires Qt's current-item signal; the panel now sets the control buttons' state itself at the end of every refresh.
+- **Completion report:** After a disconnect the tree rows are disabled, so re-selecting the kept row no longer fires Qt's current-item signal; the panel now sets the control buttons' state itself at the end of every refresh. Windows CI then caught a use-after-free: ticking a row rebuilt the tree while Qt was still inside that row's signal. A refresh that arrives during an item signal is now deferred by one event-loop tick.
 
 ### Later Phase 4 tasks
 T-402 to T-408 as listed in the summary table; each gets its own section when started.

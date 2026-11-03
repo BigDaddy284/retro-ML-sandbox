@@ -13,7 +13,7 @@ announced; the panel only draws what the service holds.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QModelIndex, Qt, Signal
+from PySide6.QtCore import QModelIndex, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -67,6 +67,8 @@ class RewardsPanel(QWidget):
         self._context = context
         self._selected: str | None = None
         self._items: dict[str, QTreeWidgetItem] = {}
+        self._in_item_signal = False
+        self._refresh_pending = False
 
         self._personality = QComboBox(self)
         self._personality.setObjectName("personality_combo")
@@ -301,10 +303,18 @@ class RewardsPanel(QWidget):
         if bid is None:
             return
         on = item.checkState(3) == Qt.CheckState.Checked
+        # Qt is still inside this item's signal: rebuilding the tree now would delete
+        # the item under its feet (a crash on Windows), so any refresh waits a tick.
+        self._in_item_signal = True
         try:
             self._context.rewards.set_enabled(str(bid), on)
         except (UnsupportedCapabilityError, ConfigurationError) as exc:
             self._note.setText(str(exc))
+        finally:
+            self._in_item_signal = False
+        if self._refresh_pending:
+            self._refresh_pending = False
+            QTimer.singleShot(0, self.refresh)
 
     def _on_personality_activated(self, index: int) -> None:
         pid = str(self._personality.itemData(index))
@@ -314,6 +324,9 @@ class RewardsPanel(QWidget):
         self.choose_personality(pid)
 
     def _on_profile_changed(self, event: RewardProfileChanged) -> None:
+        if self._in_item_signal:
+            self._refresh_pending = True
+            return
         self.refresh()
 
     def _on_earned(self, event: RewardEarned) -> None:

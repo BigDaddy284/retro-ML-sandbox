@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
 from retro_ai_lab.core import Capabilities
@@ -114,10 +116,11 @@ def test_plus_minus_suggested_and_tick(panel: RewardsPanel, context: AppContext)
     assert profile is not None and not profile.get(bid).enabled
     # The tick box itself drives the service too.
     item = panel._items[bid]
-    from PySide6.QtCore import Qt
-
     item.setCheckState(3, Qt.CheckState.Checked)
-    assert profile.get(bid).enabled and panel.row_text(bid)[3] == "on"
+    assert profile.get(bid).enabled  # the service heard it at once
+    QApplication.processEvents()  # the tree is rebuilt a tick later, never inside the signal
+    assert panel.row_text(bid)[3] == "on"
+    assert panel._items[bid] is not item  # rebuilt, and nothing exploded
     assert context.rewards.store is not None and context.rewards.store.exists("toyracer-2")
 
 
