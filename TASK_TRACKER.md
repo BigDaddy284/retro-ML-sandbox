@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** none – T-110 done; next: T-111 (BizHawk adapter: connect and handshake)
+- **Current task:** none – T-111 done; next: T-112 (BizHawk adapter: capabilities and game info)
 - **Last approved checkpoint:** `main` after T-709 (PR #58)
 - **Open blockers:** none for development. ADR-005 (BizHawk bridge) is now Accepted with its real-emulator verification left to T-117 on the user's Windows PC. ADR-006 (first demo game) is still *Proposed*: the user picks the game. ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -27,8 +27,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-011 | Graceful handling of emulator disconnection | 1 | Done | 16/16 | see PR #12 |
 | T-012 | Windows packaging smoke test (launchable build) | 1 | Done | 5/5 + CI build | see PR #13 |
 | T-110 | Spike: confirm BizHawk Lua ↔ socket protocol | 1 | Done | n/a (docs only) | see PR #59 |
-| T-111 | BizHawk adapter: connect and handshake | 1 | Ready | – | – |
-| T-112 | BizHawk adapter: capabilities and game info | 1 | – | – | – |
+| T-111 | BizHawk adapter: connect and handshake | 1 | Done | 21/21 | see PR #60 |
+| T-112 | BizHawk adapter: capabilities and game info | 1 | Ready | – | – |
 | T-113 | BizHawk adapter: frame capture | 1 | – | – | – |
 | T-114 | BizHawk adapter: controller input | 1 | – | – | – |
 | T-115 | BizHawk adapter: memory reads | 1 | – | – | – |
@@ -970,6 +970,24 @@ DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical l
 - **Commit:** see PR. **PR:** #58.
 - **Completion report:** The Toy Racer taught the rules their guards. (1) Input linking (T-303) had been turning the checkpoint into a "position" because the car moves while Up is held; it now leaves a value alone once the long look has evidence it counts. (2) Nearby driver values are one place (`PLACE_SLACK`), the places must cover under a quarter of the position's range, and each place must step the value to the same number nearly every time: a speed ramping up after a respawn at a checkpoint, or a lane changed by a periodic steering pattern, step at the same places but to different numbers, and are not checkpoints. (3) A value that has only ever shown two faces is left a flag whatever else it does: the game-over flag also switches on where the track starts over. With those, the Toy Racer's checkpoint and lap come out as progress with `same-places` and `counts-rounds` evidence through the discovery service. The first-demonstration test now switches off every suggested carrot for its "careful" AI (the AI understands checkpoints and laps now, so it suggests rewards and steps for them) and compares scores per step, since the point-lover now drives fast enough to crash well before the careful one stops.
 
+### T-111 – BizHawk adapter: connect and handshake
+- **Status:** Done
+- **Phase:** 1 (BizHawk)
+- **Objective:** The first slice of the real adapter: open the socket to the bridge script, do the `hello` handshake, detect a missing or wrong-version bridge, disconnect cleanly, and notice a dropped link. Ship the bridge script itself and the two test doubles that stand in for EmuHawk.
+- **Scope:** `emulator/bizhawk/protocol.py` (framing: `encode_request`, `decode_response`, `LineChannel` over a socket with a read buffer and timeouts, `Link` with request ids and error mapping); `emulator/bizhawk/adapter.py` (`BizHawkAdapter(host, port)`, name `bizhawk`: `_do_connect` opens TCP with the timeout, sends `hello` with the protocol version, checks the reply, keeps it as `hello`; `_do_disconnect` sends `bye` and closes; `ping()`; socket errors mark the adapter disconnected and raise `EmulatorDisconnectedError`; `_do_game_info` from the hello; capabilities none and no buttons until T-112); `emulator/bizhawk/retro_ai_lab.lua` (the shipped script: LuaSocket server, inline JSON and base64, request loop, `hello`/`ping`/`bye`/`mode`, hold mode pauses EmuHawk and yields, free-run advances; later commands arrive with their tasks); `emulator/bizhawk/simulator.py` (`BizHawkSimulator`: a Python TCP server speaking the protocol over the Toy Racer, with fault switches: no answer, wrong version, garbage, drop after N requests); `tests/unit/emulator/bizhawk/lua_host.py` (runs the real script under `lupa` as a coroutine with stubbed `emu`, `client`, `gameinfo`, `memory`, `joypad`, `savestate` and a LuaSocket stand-in over real sockets). `lupa` becomes a dev dependency; the script is package data. **Out of scope:** registering the adapter in the default registry (T-117, when it is complete), every other command.
+- **Acceptance criteria:**
+  1. `connect()` to a running bridge completes the handshake: `is_connected`, `hello` holds the script's answer, `game_info()` reflects `system` and `rom`; a second `connect()` is a no-op; `disconnect()` sends `bye`, closes, and is idempotent.
+  2. Nothing listening → `EmulatorError` telling the child to open the script in EmuHawk's Lua Console; a bridge that never answers → `EmulatorError` naming the timeout; both leave the adapter disconnected.
+  3. A bridge with another protocol version, a non-JSON answer, or a mismatched id → `ProtocolError`, adapter disconnected.
+  4. When the bridge closes the socket, the next `ping()` raises `EmulatorDisconnectedError` and `is_connected` is false.
+  5. The real Lua script, run under `lupa`, accepts the adapter: hello carries the stubbed system, ROM name, hash and version; hold mode pauses the emulator on hello and unpauses on bye; `mode free_run=true` unpauses; after a disconnect it accepts a new connection.
+  6. The script's JSON and base64 agree with Python's on round trips (property-based).
+- **Expected changes:** `src/retro_ai_lab/emulator/bizhawk/{__init__,protocol,adapter,simulator}.py`, `src/retro_ai_lab/emulator/bizhawk/retro_ai_lab.lua`, `pyproject.toml` (dev dependency `lupa`, package data), `tests/unit/emulator/bizhawk/{__init__,lua_host,test_protocol,test_adapter,test_lua_script}.py`, docs.
+- **Test plan:** unit – framing round trip and rejections, split packets; adapter against the simulator (handshake, no bridge, no answer, bad version, garbage, drop); adapter against the Lua script under `lupa` (handshake, pause/unpause, reconnect); Lua JSON/base64 vs Python with hypothesis. Regression – full suite.
+- **Results:** 21 / 21 passed / 0 failed / 0 excluded (6 protocol, 5 adapter-vs-simulator, 5 Lua-script-under-lupa incl. two property tests; 840 in the full suite, on Python 3.13 and 3.11). Lint, format and strict mypy clean.
+- **Commit:** see PR. **PR:** #60.
+- **Completion report:** The real script is tested, not a model of it: `lupa` loads `retro_ai_lab.lua` as a coroutine (EmuHawk resumes scripts the same way), the emulator globals are stubs playing the Toy Racer, and `require("socket")` returns a LuaSocket look-alike over real TCP, so the adapter's handshake, hold mode (pause on hello, no frames while talking, unpause on bye or a vanished app), free-run mode, bad requests and reconnects all run through the shipped file. Two lupa facts shaped the harness: Lua strings are bytes on an `encoding=None` runtime (keys included), and `obj:method()` on a Python object would pass `self` twice, so the stubs are Lua tables calling plain Python functions. Lua tables can't hold nil, so a JSON null inside a container vanishes on the script side; the protocol only uses null in a top-level response field (`image`), and the property test states that limitation. Hold mode's one real-emulator assumption (Lua `frameadvance` moves a paused EmuHawk) is unchanged from T-110 and waits for T-117.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -1041,5 +1059,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
 - Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56). T-708 completed (PR #57). T-709 completed (PR #58): Phase 7 complete.
-- T-110 completed (BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117.
+- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
