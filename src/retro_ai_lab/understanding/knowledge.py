@@ -20,7 +20,7 @@ from typing import Any
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.observation.memory import MemorySnapshot
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: relationships added (older files load fine)
 
 
 class Confidence(Enum):
@@ -229,6 +229,96 @@ def decode(raw: bytes, encoding: Encoding) -> int:
     return 1 if raw[0] else 0
 
 
+@dataclass(frozen=True, slots=True)
+class Relationship:
+    """``cause`` tends to be followed by ``effect`` within a few frames.
+
+    Keys are ``"<event kind>:<variable id or *>"`` strings so the model does
+    not depend on the event module. ``support`` counts the times the pair
+    was seen; ``cause_count`` / ``effect_count`` how often each side
+    happened at all, so the rates say how reliable the link is.
+    """
+
+    cause: str
+    effect: str
+    support: int
+    cause_count: int
+    effect_count: int
+    window: int
+    confirmed: bool = False
+    rejected: bool = False
+    notes: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.cause or not self.effect or self.cause == self.effect:
+            raise ConfigurationError("A relationship needs two different event keys.")
+        if min(self.support, self.cause_count, self.effect_count) < 0 or self.window < 0:
+            raise ConfigurationError("Relationship counts must not be negative.")
+        if self.support > min(self.cause_count, self.effect_count):
+            raise ConfigurationError("support can't exceed either side's count.")
+        if self.confirmed and self.rejected:
+            raise ConfigurationError("A relationship can't be both confirmed and rejected.")
+
+    @property
+    def id(self) -> str:
+        return f"{self.cause}->{self.effect}"
+
+    @property
+    def follow_rate(self) -> float:
+        """How often the cause was followed by the effect."""
+        return self.support / self.cause_count if self.cause_count else 0.0
+
+    @property
+    def precede_rate(self) -> float:
+        """How often the effect was preceded by the cause."""
+        return self.support / self.effect_count if self.effect_count else 0.0
+
+    @property
+    def confidence(self) -> Confidence:
+        if self.rejected:
+            return Confidence.UNKNOWN
+        if self.confirmed:
+            return Confidence.CONFIRMED
+        rate = min(self.follow_rate, self.precede_rate)
+        if self.support >= 10 and rate >= 0.9:
+            return Confidence.HIGH
+        if self.support >= 5 and rate >= 0.75:
+            return Confidence.MEDIUM
+        if self.support >= 2 and rate >= 0.6:
+            return Confidence.LOW
+        return Confidence.UNKNOWN
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "cause": self.cause,
+            "effect": self.effect,
+            "support": self.support,
+            "cause_count": self.cause_count,
+            "effect_count": self.effect_count,
+            "window": self.window,
+            "confirmed": self.confirmed,
+            "rejected": self.rejected,
+            "notes": self.notes,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Relationship:
+        try:
+            return cls(
+                cause=data["cause"],
+                effect=data["effect"],
+                support=int(data["support"]),
+                cause_count=int(data["cause_count"]),
+                effect_count=int(data["effect_count"]),
+                window=int(data.get("window", 0)),
+                confirmed=bool(data.get("confirmed", False)),
+                rejected=bool(data.get("rejected", False)),
+                notes=data.get("notes", ""),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ConfigurationError(f"Bad relationship: {exc}") from exc
+
+
 class Knowledge:
     """Everything learned about one game. Mutable; persisted as JSON."""
 
@@ -238,6 +328,7 @@ class Knowledge:
         self.game_id = game_id
         self.title = title
         self._variables: dict[str, Variable] = {}
+        self._relationships: dict[str, Relationship] = {}
 
     # ------------------------------------------------------------ access
 
@@ -378,6 +469,48 @@ class Knowledge:
         self.get(var_id)
         del self._variables[var_id]
 
+    # ----------------------------------------------------- relationships
+
+    def relationships(self) -> tuple[Relationship, ...]:
+        return tuple(self._relationships.values())
+
+    def relationship(self, rel_id: str) -> Relationship:
+        try:
+            return self._relationships[rel_id]
+        except KeyError:
+            raise ConfigurationError(f"No relationship {rel_id!r} in the knowledge.") from None
+
+    def set_relationship(self, rel: Relationship) -> Relationship:
+        """Add or replace the counts of a relationship, keeping a person's verdict."""
+        current = self._relationships.get(rel.id)
+        if current is not None and (current.confirmed or current.rejected):
+            rel = replace(
+                rel, confirmed=current.confirmed, rejected=current.rejected, notes=current.notes
+            )
+        self._relationships[rel.id] = rel
+        return rel
+
+    def confirm_relationship(self, rel_id: str) -> Relationship:
+        rel = replace(self.relationship(rel_id), confirmed=True, rejected=False)
+        self._relationships[rel_id] = rel
+        return rel
+
+    def reject_relationship(self, rel_id: str) -> Relationship:
+        rel = replace(self.relationship(rel_id), rejected=True, confirmed=False)
+        self._relationships[rel_id] = rel
+        return rel
+
+    def remove_relationship(self, rel_id: str) -> None:
+        self.relationship(rel_id)
+        del self._relationships[rel_id]
+
+    def confident_relationships(
+        self, at_least: Confidence = Confidence.LOW
+    ) -> tuple[Relationship, ...]:
+        return tuple(
+            r for r in self._relationships.values() if not r.rejected and at_least <= r.confidence
+        )
+
     # ------------------------------------------------------ serialisation
 
     def to_dict(self) -> dict[str, Any]:
@@ -386,6 +519,7 @@ class Knowledge:
             "game_id": self.game_id,
             "title": self.title,
             "variables": [v.to_dict() for v in self._variables.values()],
+            "relationships": [r.to_dict() for r in self._relationships.values()],
         }
 
     @classmethod
@@ -399,6 +533,8 @@ class Knowledge:
             k = cls(data["game_id"], title=data.get("title", ""))
             for item in data.get("variables", []):
                 k.add(Variable.from_dict(item))
+            for item in data.get("relationships", []):
+                k.set_relationship(Relationship.from_dict(item))
         except (KeyError, TypeError, AttributeError) as exc:
             raise ConfigurationError(f"Bad knowledge data: {exc}") from exc
         return k
@@ -411,6 +547,7 @@ __all__ = [
     "Encoding",
     "Evidence",
     "Knowledge",
+    "Relationship",
     "Variable",
     "VariableKind",
     "confidence_from_evidence",

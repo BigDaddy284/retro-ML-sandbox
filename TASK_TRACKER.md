@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-305 (Ready)
-- **Last approved checkpoint:** `main` after T-304
+- **Current task:** T-306 (Ready)
+- **Last approved checkpoint:** `main` after T-305
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -44,7 +44,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-302 | Variable candidate finder from change statistics (counters, bounded values, 16-bit pairs) | 3 | Done | 9/9 (+ diff) | see PR #20 |
 | T-303 | Input linking via experiments: which inputs move which bytes | 3 | Done | 7/7 | see PR #21 |
 | T-304 | Event detection: progression steps, resets, game over | 3 | Done | 8/8 | see PR #22 |
-| T-305 | Relationship discovery between events and variables | 3 | – | – | – |
+| T-305 | Relationship discovery between events and variables | 3 | Done | 7/7 | see PR #23 |
 | T-306 | Discovery runner: automatic observe-experiment-propose loop with progress events | 3 | – | – | – |
 | T-307 | "What the AI is doing" panel: discoveries with confidence badges, confirm / correct / reject | 3 | – | – | – |
 | T-308 | Knowledge persistence wiring: auto-save per game, export / import from the UI | 3 | – | – | – |
@@ -381,6 +381,20 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 8 / 8 passed / 0 failed / 0 excluded (570 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** One test originally expected a plain recovery on a frame where three values returned home together; the detector's reset rule was right and the test was corrected rather than the rule.
 
+### T-305 – Relationship discovery between events
+- **Status:** Done
+- **Phase:** 3
+- **Objective:** Notice that one event tends to follow another (checkpoint → score bonus, last life lost → game over, game over → restart) and keep those links as editable, persisted discoveries (DESIGN.md §3.3, §3.6).
+- **Scope:** `Relationship` record in the knowledge model (cause/effect event keys, support and side counts, follow/precede rates, derived confidence, user confirm/reject preserved across count refreshes, JSON schema 2 with backward-compatible load), `understanding.relationships.RelationshipFinder(knowledge, window=5)` counting pairs in the event stream (same-frame events link both ways; one effect confirms a cause once), `event_key` / `describe_key` helpers. **Out of scope:** multi-step chains and causal experiments (later), UI (T-307).
+- **Acceptance criteria:**
+  1. Rates and confidence derive from counts (Low ≥2 support at ≥60%, Medium ≥5 at ≥75%, High ≥10 at ≥90%); Confirmed only by a person; rejected reads Unknown; invalid counts rejected.
+  2. Knowledge stores, refreshes, confirms, rejects, removes and round-trips relationships; schema-1 files still load.
+  3. The finder pairs only inside the window, never pairs an event with itself, counts same-frame events both ways, never lets one effect confirm a cause twice, and refreshes rates when only side counts change.
+  4. On a 2400-frame toy racer drive: checkpoint progress ↔ score gain (support ≥3, follow rate ≥60%), lives setback → game over (precede rate 100%), game over → reset (precede rate 100%), with a readable description.
+- **Test plan:** relationship model and validation; knowledge relationship API and persistence; keys and descriptions; window rule; same-key and same-frame rules; rate refresh; toy racer relationships.
+- **Results:** 7 / 7 passed / 0 failed / 0 excluded (577 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Events raised on the same frame (score bonus and checkpoint step) arrive in memory-layout order, so a one-way count missed the checkpoint → bonus link; same-frame pairs now count both ways.
+
 ### Later Phase 3 tasks
 Details will be written into this file when each becomes the next task, following the template.
 
@@ -416,5 +430,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-302 completed (PR #20).
 - T-303 completed (PR #21).
 - T-304 completed (PR #22).
-- Next: T-305.
+- T-305 completed (PR #23).
+- Next: T-306.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
