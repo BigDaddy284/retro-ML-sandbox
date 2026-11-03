@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from retro_ai_lab.core import Capabilities, UnsupportedCapabilityError
@@ -18,6 +20,7 @@ from retro_ai_lab.services import (
 )
 from retro_ai_lab.services.discovery import game_id_for
 from retro_ai_lab.understanding import EventKind, VariableKind
+from retro_ai_lab.understanding.events import CYCLES
 
 BY_NAME = {b.name: b for b in BUTTONS}
 
@@ -344,3 +347,29 @@ def test_the_long_look_explains_checkpoints_and_laps(
     assert any(e.kind == SAME_PLACES for e in checkpoint.evidence)
     assert any(e.kind == COUNTS_ROUNDS for e in lap.evidence)
     assert any(checkpoint in u.changed or lap in u.changed for u in updates)
+
+
+def test_doubt_reset_adds_the_evidence_once_and_announces(
+    discovery: DiscoveryService,
+    connection: ConnectionService,
+    bus: EventBus,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """T-845: values that cycle back to their start stop counting as a restart."""
+    connection.connect("fake", seed=5)
+    k = discovery.knowledge
+    assert k is not None
+    a = k.propose("ram", LAYOUT.score, kind=VariableKind.SCORE, name="Score")
+    b = k.propose("ram", LAYOUT.lives, kind=VariableKind.LIVES, name="Lives")
+    seen: list[DiscoveryUpdated] = []
+    bus.subscribe(DiscoveryUpdated, seen.append)
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
+    changed = discovery.doubt_reset((a.id, b.id, "v999"))
+    assert [v.id for v in changed] == [a.id, b.id]
+    assert all(any(e.kind == CYCLES for e in k.get(v.id).evidence) for v in changed)
+    assert len(seen) == 1 and seen[0].changed == changed
+    assert "Score, Lives cycle back to their start" in caplog.text
+    assert discovery.doubt_reset((a.id,)) == () and len(seen) == 1  # only once
+    with pytest.raises(UnsupportedCapabilityError):
+        connection.disconnect()
+        discovery.doubt_reset((a.id,))

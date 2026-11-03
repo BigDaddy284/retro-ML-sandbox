@@ -22,6 +22,8 @@ so the UI can show what the AI is doing.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,12 +37,14 @@ from retro_ai_lab.services.connection import (
 from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.observer import MemoryObserved, ObservationService
 from retro_ai_lab.storage.knowledge import KnowledgeStore, export, load
-from retro_ai_lab.understanding.events import EventDetector, EventLog, GameEvent
-from retro_ai_lab.understanding.knowledge import Knowledge, Relationship, Variable
+from retro_ai_lab.understanding.events import CYCLES, EventDetector, EventLog, GameEvent
+from retro_ai_lab.understanding.knowledge import Evidence, Knowledge, Relationship, Variable
 from retro_ai_lab.understanding.linking import apply_input_links, find_input_links
 from retro_ai_lab.understanding.longlook import LongLook
 from retro_ai_lab.understanding.relationships import RelationshipFinder
 from retro_ai_lab.understanding.variables import find_candidates, propose_candidates
+
+log = logging.getLogger(__name__)
 
 DEFAULT_REVIEW_EVERY = 120
 DEFAULT_EXPERIMENT_EVERY = 600
@@ -183,6 +187,35 @@ class DiscoveryService:
             return False
         self.experiment()
         return True
+
+    def doubt_reset(self, variable_ids: Iterable[str]) -> tuple[Variable, ...]:
+        """These values went back to their start every few frames: not a restart (T-845).
+
+        Each gets ``cycles`` evidence (weight 0, so how sure the AI is of the value
+        itself does not change) and the detector leaves it out of the reset
+        judgement from then on. Returns the variables changed.
+        """
+        k = self._require()
+        changed: list[Variable] = []
+        for var_id in dict.fromkeys(variable_ids):
+            if var_id not in k or any(e.kind == CYCLES for e in k.get(var_id).evidence):
+                continue
+            changed.append(
+                k.support(
+                    var_id,
+                    Evidence(
+                        CYCLES,
+                        "Goes back to its first value every few frames; that is not the "
+                        "game starting over.",
+                        0.0,
+                    ),
+                )
+            )
+        if changed:
+            names = ", ".join(v.display_name for v in changed)
+            log.info("%s cycle back to their start; no longer reading that as a restart.", names)
+            self._announce(DiscoveryUpdated((), tuple(changed), (), ()))
+        return tuple(changed)
 
     def summary(self) -> str:
         """One line for the status bar / panel header."""

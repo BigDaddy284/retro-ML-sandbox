@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Fixed: values that go back to their starting value every few frames (an animation counter on Super Mario Bros.' title screen that the AI had taken for a score) ended every go at once as a "restart"; after three such goes in a row the AI notes that those values cycle, says so in the log and the evidence, and stops reading their return as the game starting over (T-845).
 - Changed: the Discovery and Rewards panels redraw their lists a few times a second at most while the AI trains, instead of on every step, and the Discovery list is rebuilt only when a value was added or changed; a change you make yourself still shows at once (T-843).
 - Added: when the game ignores the AI (a title-screen demo, a game-over screen) it works out for itself which button gets the game going, by pressing each one in turn and checking whether its own buttons matter afterwards; the answer is remembered with the game's knowledge and pressed whenever the game stops listening, and later goes start inside the game. Nothing is assumed per game: the old default of pressing Start when stuck is gone (T-844).
 - Changed: the suggested rewards and objectives are rebuilt only when a relationship the suggestions read actually changes, not on every step the finder reports one, and merging a goal with many objectives no longer slows down with their number (T-842).

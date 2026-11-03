@@ -19,6 +19,7 @@ from retro_ai_lab.understanding import (
     Knowledge,
     VariableKind,
 )
+from retro_ai_lab.understanding.events import CYCLES
 
 RAM = "ram"
 SURE = [Evidence("test", "", 3.0)]  # Medium
@@ -264,3 +265,34 @@ def test_a_new_variable_is_watched_from_the_next_snapshot() -> None:
     assert [
         e.kind for e in d.observe(MemorySnapshot(4, {RAM: bytes([0, 2]), "wram": bytes([2])}))
     ] == [EventKind.PROGRESS]
+
+
+# ------------------------------------------------------------ T-845
+
+
+def test_reset_events_name_the_values_they_blame() -> None:
+    k = knowledge_for({0: VariableKind.PROGRESS, 1: VariableKind.LIVES})
+    d = EventDetector(k)
+    d.observe(snap(0, 0, 3))
+    d.observe(snap(1, 2, 1))
+    reset = d.observe(snap(2, 0, 3))[-1]
+    assert reset.kind is EventKind.RESET and reset.variables == ("v1", "v2")
+    assert GameEvent(EventKind.PROGRESS, 1, "v1", "up").variables == ()
+
+
+def test_a_cycling_value_no_longer_counts_toward_a_reset() -> None:
+    k = knowledge_for({0: VariableKind.PROGRESS, 1: VariableKind.LIVES, 2: VariableKind.SCORE})
+    k.support("v1", Evidence(CYCLES, "cycles", 0.0))
+    k.support("v2", Evidence(CYCLES, "cycles", 0.0))
+    assert k.get("v1").confidence is Confidence.MEDIUM  # weight 0: as sure as before
+    d = EventDetector(k)
+    d.observe(snap(0, 0, 3, 0))
+    d.observe(snap(1, 2, 1, 5))
+    events = d.observe(snap(2, 0, 3, 5))  # the two cyclers go home: no reset
+    assert all(e.kind is not EventKind.RESET for e in events)
+    assert any(e.kind is EventKind.SETBACK for e in d.observe(snap(3, 0, 2, 5)))  # still watched
+    # Through a saved and reloaded knowledge too.
+    again = EventDetector(Knowledge.from_dict(k.to_dict()))
+    again.observe(snap(0, 0, 3, 0))
+    again.observe(snap(1, 2, 1, 5))
+    assert all(e.kind is not EventKind.RESET for e in again.observe(snap(2, 0, 3, 5)))
