@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-006: `EventBus`, `AdapterRegistry` and `ConnectionService` (state machine with connected/disconnected/failed events, dropped-link detection).
 - T-005: `FakeEmulatorAdapter` (full contract over Toy Racer, with fault injection) and the reusable `AdapterContract` test suite.
 - T-004: Toy Racer, a deterministic synthetic racing game with RAM, screen rendering and save/restore, used to test every layer without an emulator.
 - T-003: `EmulatorAdapter` base class enforcing connection, capability and argument checks for every backend.
