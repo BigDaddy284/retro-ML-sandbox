@@ -194,7 +194,6 @@ def test_forget_and_link_loss(panel: LearningPanel, context: AppContext) -> None
     panel.forget()
     assert "forgotten" in panel.note_text
     assert t.agent is not None and t.agent.updates == 0 and panel.go_rows() == ()
-    panel.choose_speed(Speed.FAST)
     panel.start()
     while context.connection.is_connected:
         panel.tick()

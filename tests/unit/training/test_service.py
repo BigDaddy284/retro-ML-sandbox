@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from retro_ai_lab.core import ConfigurationError
+from retro_ai_lab.core import ConfigurationError, EmulatorDisconnectedError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
@@ -382,6 +382,24 @@ def test_link_loss_closes_the_go_and_reconnect_starts_afresh(lab: Lab) -> None:
     assert [c.reason for c in lab.changes] == ["start", "disconnected"]
 
 
+def test_link_dropping_during_the_checkpoint_refuses_to_start(lab: Lab) -> None:
+    lab.connect()
+    t = lab.training
+
+    class Flaky:
+        def available(self) -> bool:
+            return True
+
+        def checkpoint(self) -> None:
+            lab.connection.disconnect()
+            raise EmulatorDisconnectedError()
+
+    t._harness = Flaky()  # type: ignore[assignment]
+    with pytest.raises(ConfigurationError, match="went away"):
+        t.start()
+    assert t.status is Status.IDLE and not t.enabled and lab.changes == []
+
+
 def test_app_context_wires_the_training_service(tmp_path: Path) -> None:
     from retro_ai_lab.ui.context import AppContext
 
@@ -476,6 +494,19 @@ def test_forget_starts_from_scratch_and_deletes_the_file(lab: Lab) -> None:
     lab.connection.disconnect()
     with pytest.raises(ConfigurationError, match="no brain"):
         t.forget()
+
+
+def test_curve_reads_the_history(lab: Lab) -> None:
+    lab.connect()
+    t = lab.training
+    assert t.curve().attempts == 0 and t.curve().describe() == "No goes yet."
+    t.train(3)
+    c = t.curve(window=2)
+    assert c.attempts == 3 and [p.number for p in c.points] == [1, 2, 3]
+    assert c.rewards == tuple(r.result.reward for r in t.history)
+    assert c.describe().startswith("3 goes so far")
+    with pytest.raises(ConfigurationError):
+        t.curve(window=0)
 
 
 def test_service_without_a_store_never_saves(tmp_path: Path, lab: Lab) -> None:

@@ -38,6 +38,7 @@ class EpisodeSignals:
     def __init__(self, bus: EventBus) -> None:
         self._reward = 0.0
         self._resets = 0
+        self._completed = 0
         self._listening = False
         bus.subscribe(RewardEarned, self._on_reward)
         bus.subscribe(ObjectiveCompleted, self._on_completed)
@@ -48,9 +49,15 @@ class EpisodeSignals:
     def listening(self) -> bool:
         return self._listening
 
+    @property
+    def completed(self) -> int:
+        """Objectives completed since :meth:`start` (not cleared by :meth:`take`)."""
+        return self._completed
+
     def start(self) -> None:
         self._reward = 0.0
         self._resets = 0
+        self._completed = 0
         self._listening = True
 
     def stop(self) -> None:
@@ -70,6 +77,7 @@ class EpisodeSignals:
     def _on_completed(self, event: ObjectiveCompleted) -> None:
         if self._listening:
             self._reward += event.reward
+            self._completed += 1
 
     def _on_setback(self, event: ObjectiveSetback) -> None:
         if self._listening:
@@ -87,6 +95,11 @@ class EpisodeResult:
     reward: float
     ended_by: str  # "reset", "max_steps", "disconnected", "stopped", "mode change"
     states_seen: int
+    objectives: int = 0  # objectives completed during the go
+
+    @property
+    def succeeded(self) -> bool:
+        return self.objectives > 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +108,7 @@ class EpisodeResult:
             "reward": self.reward,
             "ended_by": self.ended_by,
             "states_seen": self.states_seen,
+            "objectives": self.objectives,
         }
 
     @classmethod
@@ -106,6 +120,7 @@ class EpisodeResult:
                 float(data["reward"]),
                 str(data["ended_by"]),
                 int(data["states_seen"]),
+                int(data.get("objectives", 0)),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"Bad go result: {exc}") from exc
@@ -313,7 +328,12 @@ class EpisodeRunner:
         self._agent.end_episode()
         self._last_buttons = frozenset()
         result = EpisodeResult(
-            self._steps, self._frames, self._reward, self._ended_by, len(self._states)
+            self._steps,
+            self._frames,
+            self._reward,
+            self._ended_by,
+            len(self._states),
+            self._signals.completed,
         )
         self._state = None
         return result

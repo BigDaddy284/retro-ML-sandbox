@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-601: Learning curve (points per go, rolling average, best and longest go, trend, success rate, described in plain words); goes record how many objectives they completed.
 - T-507: Learning panel (who plays, speed, Start / Pause / Stop, Start from scratch, what the AI is pressing and knows, recent goes); the play clock and pad yield to the AI while it plays.
 - T-506: The AI's brain (Q-table, settings, exploration, random state and the history of goes) is saved per game after every go and on disconnect, and restored on connect; `forget()` starts from scratch.
 - T-505: Training service with independent, guided and manual (learn from the child) modes, start / pause / resume / stop, a history of goes, checkpoint restarts and fast or live stepping; wired into the app context.
