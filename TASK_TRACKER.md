@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** Phase 8 complete; next: T-402..T-409 (later Phase 4) or real-emulator verification when the user's PC is available
+- **Current task:** none open. Phases 1–8 are implemented on the practice console; what remains needs the user's Windows PC: the real-emulator runs for BizHawk (T-117, docs/BIZHAWK.md) and mGBA (T-811, docs/MGBA.md), whose findings will file the next tasks.
 - **Last approved checkpoint:** `main` after T-709 (PR #58)
 - **Open blockers:** none for development. ADR-005 (BizHawk bridge) is now Accepted with its real-emulator verification left to T-117 on the user's Windows PC. ADR-006 (first demo game) is still *Proposed*: the user picks the game. ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -1279,7 +1279,7 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Completion report:** The adapter is eleven lines: the BizHawk adapter already read everything that differs (the emulator's name, `hold`, the command list) from the handshake, so making it a subclass only needed the script path, the emulator's name and the connect advice to become class attributes, and `open_link` to take the name it reports. The no-game message now says "the emulator" rather than EmuHawk. `hold` is reset on disconnect so a stale handshake can't describe the next emulator. The real-emulator skip rule was generalised: a module's `real_emulator` marker can name the environment variables it needs, so the BizHawk and mGBA tests are collected independently. The guide tells the child how to load the script in mGBA's scripting window and the developer what the first real run must answer (ARCHITECTURE §6.4); the opt-in test launches mGBA with `--script` and falls back to a running mGBA when that option is missing, since the CLI flag is not in mGBA's scripting reference.
 
 ### Later Phase 4 tasks
-T-402 to T-409 as listed in the summary table; each gets its own section when started.
+None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
 
 ### Later Phase 3 tasks
 None outstanding; refinements will be filed as they come up on real games.
