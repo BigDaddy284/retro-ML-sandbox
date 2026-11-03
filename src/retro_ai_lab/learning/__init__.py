@@ -11,6 +11,7 @@ from retro_ai_lab.learning.learner import (
     make_learner,
     register_learner,
 )
+from retro_ai_lab.learning.network import Network
 from retro_ai_lab.learning.qlearning import QLearningAgent, QTable, Settings
 from retro_ai_lab.learning.replay import ReplayBuffer, Transition
 from retro_ai_lab.learning.state import DEFAULT_BINS, State, StateEncoder, bucket
@@ -23,6 +24,7 @@ __all__ = [
     "Decision",
     "FeatureMap",
     "Learner",
+    "Network",
     "QLearningAgent",
     "QTable",
     "ReplayBuffer",
