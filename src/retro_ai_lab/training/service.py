@@ -876,6 +876,16 @@ class TrainingService:
     def _record(self, result: EpisodeResult) -> None:
         self._episodes += 1
         record = EpisodeRecord(self._episodes, self._mode, result, self._observation.frame)
+        why = self._runner.last_reset if self._runner is not None else ""
+        log.info(
+            "Go %d ended by %s after %d steps (%d frames), %+.1f points%s",
+            self._episodes,
+            result.ended_by,
+            result.steps,
+            result.frames,
+            result.reward,
+            f": {why}" if result.ended_by == "reset" and why else "",
+        )
         self._history.append(record)
         if self._agent is not None:
             self._policies.append((self._episodes, policy_of(self._agent)))

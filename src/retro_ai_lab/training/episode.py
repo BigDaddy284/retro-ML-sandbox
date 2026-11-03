@@ -42,6 +42,7 @@ class EpisodeSignals:
         self._resets = 0
         self._completed = 0
         self._listening = False
+        self._last_reset = ""  # what the detector blamed, for the log (T-840)
         bus.subscribe(RewardEarned, self._on_reward)
         bus.subscribe(ObjectiveCompleted, self._on_completed)
         bus.subscribe(ObjectiveSetback, self._on_setback)
@@ -56,10 +57,16 @@ class EpisodeSignals:
         """Objectives completed since :meth:`start` (not cleared by :meth:`take`)."""
         return self._completed
 
+    @property
+    def last_reset(self) -> str:
+        """The detail and frame of the last reset counted since :meth:`start`."""
+        return self._last_reset
+
     def start(self) -> None:
         self._reward = 0.0
         self._resets = 0
         self._completed = 0
+        self._last_reset = ""
         self._listening = True
 
     def stop(self) -> None:
@@ -86,8 +93,12 @@ class EpisodeSignals:
             self._reward += event.penalty
 
     def _on_discovery(self, update: DiscoveryUpdated) -> None:
-        if self._listening:
-            self._resets += sum(1 for e in update.events if e.kind is EventKind.RESET)
+        if not self._listening:
+            return
+        for event in update.events:
+            if event.kind is EventKind.RESET:
+                self._resets += 1
+                self._last_reset = f"{event.detail} (frame {event.frame})"
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +236,11 @@ class EpisodeRunner:
     def last_reward(self) -> float:
         """The reward the last step collected."""
         return self._last_reward
+
+    @property
+    def last_reset(self) -> str:
+        """What the detector blamed for the reset that ended the go, if one did (T-840)."""
+        return self._signals.last_reset
 
     @property
     def unsticks(self) -> int:
