@@ -12,6 +12,7 @@ from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.discovery_panel import DiscoveryPanel
 from retro_ai_lab.ui.game_panel import GamePanel
 from retro_ai_lab.ui.goals_panel import GoalsPanel
+from retro_ai_lab.ui.learning_panel import LearningPanel
 from retro_ai_lab.ui.link_watchdog import LinkWatchdog
 from retro_ai_lab.ui.panels import PANELS, Panel
 from retro_ai_lab.ui.rewards_panel import RewardsPanel
@@ -36,6 +37,8 @@ class MainWindow(QMainWindow):
         self._panels["rewards"].set_body(self._rewards_panel)
         self._goals_panel = GoalsPanel(self._context)
         self._panels["progress"].set_body(self._goals_panel)
+        self._learning_panel = LearningPanel(self._context)
+        self._panels["learning"].set_body(self._learning_panel)
         # Keys pressed anywhere in the window reach the controller pad.
         self.installEventFilter(self._game_panel.pad)
 
@@ -100,6 +103,10 @@ class MainWindow(QMainWindow):
     @property
     def goals_panel(self) -> GoalsPanel:
         return self._goals_panel
+
+    @property
+    def learning_panel(self) -> LearningPanel:
+        return self._learning_panel
 
     @property
     def rewards_panel(self) -> RewardsPanel:

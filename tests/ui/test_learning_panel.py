@@ -1,0 +1,216 @@
+"""T-507: the Learning panel and the game controls yielding to the AI."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from pytestqt.qtbot import QtBot
+
+from retro_ai_lab.core import Capabilities
+from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
+from retro_ai_lab.services import DiscoveryUpdated
+from retro_ai_lab.training import Mode, Speed, Status
+from retro_ai_lab.ui.context import AppContext
+from retro_ai_lab.ui.controller_pad import AI_HAS_CONTROLS, KEY_HINT
+from retro_ai_lab.ui.learning_panel import ENDED_BY, IDLE_TEXT, LearningPanel, go_cells
+from retro_ai_lab.ui.main_window import MainWindow
+from retro_ai_lab.understanding import Encoding, Evidence, Knowledge, VariableKind
+
+RAM = "ram"
+SURE = [Evidence("test", "", 6.0)]
+
+
+@pytest.fixture
+def context(tmp_path: Path) -> AppContext:
+    return AppContext(data_dir=tmp_path)
+
+
+@pytest.fixture
+def panel(qtbot: QtBot, context: AppContext) -> LearningPanel:
+    p = LearningPanel(context)
+    qtbot.addWidget(p)
+    p.show()
+    return p
+
+
+def connect(context: AppContext, **kw: object) -> Knowledge:
+    context.connection.connect("fake", seed=3, **kw)  # type: ignore[arg-type]
+    k = context.discovery.knowledge
+    assert k is not None
+    if k.at(RAM, LAYOUT.lane) is not None:
+        return k  # taught earlier in this test and saved by the knowledge store
+    added = (
+        k.propose(RAM, LAYOUT.lane, kind=VariableKind.POSITION, name="Lane", evidence=SURE),
+        k.propose(RAM, LAYOUT.lives, kind=VariableKind.LIVES, name="Lives", evidence=SURE),
+        k.propose(
+            RAM, LAYOUT.checkpoint, kind=VariableKind.PROGRESS, name="Checkpoint", evidence=SURE
+        ),
+        k.propose(
+            RAM,
+            LAYOUT.score,
+            encoding=Encoding.U16LE,
+            kind=VariableKind.SCORE,
+            name="Score",
+            evidence=SURE,
+        ),
+    )
+    context.bus.publish(DiscoveryUpdated(added, (), (), ()))
+    return k
+
+
+def test_idle_until_connected(panel: LearningPanel, context: AppContext) -> None:
+    assert panel.status_text == IDLE_TEXT and panel.go_rows() == ()
+    for name in ("start_button", "pause_button", "stop_button", "forget_button"):
+        assert not panel.findChild(object, name).isEnabled()  # type: ignore[union-attr]
+    assert not panel.ticking
+    panel.start()  # refused, explained, nothing raised
+    assert "Can't train yet" in panel.note_text
+    context.connection.connect(
+        "fake", capabilities=Capabilities(screen_capture=True, frame_advance=True, input=True)
+    )
+    assert panel.status_text == IDLE_TEXT  # no memory: nothing to learn from
+    context.connection.disconnect()
+    connect(context)
+    assert panel.status_text.startswith("Ready to train.")
+    assert panel.mode is Mode.GUIDED and panel.speed is Speed.LIVE
+    assert panel.findChild(object, "start_button").isEnabled()  # type: ignore[union-attr]
+    assert not panel.findChild(object, "stop_button").isEnabled()  # type: ignore[union-attr]
+    assert panel.findChild(object, "forget_button").isEnabled()  # type: ignore[union-attr]
+
+
+def test_start_tick_pause_resume_stop_and_the_goes_list(
+    panel: LearningPanel, context: AppContext
+) -> None:
+    connect(context)
+    t = context.training
+    panel.choose_mode(Mode.INDEPENDENT)
+    assert t.mode is Mode.INDEPENDENT and panel.mode is Mode.INDEPENDENT
+    panel.start()
+    assert t.status is Status.RUNNING and panel.ticking and panel.note_text == ""
+    assert panel.tick_interval_ms == int(1000 / 60 * t.frames_per_step)
+    assert not panel.findChild(object, "start_button").isEnabled()  # type: ignore[union-attr]
+    assert not panel.findChild(object, "forget_button").isEnabled()  # type: ignore[union-attr]
+    assert panel.tick() == 1 and panel.tick() == 1
+    assert t.episode is not None and t.episode.steps == 2
+    assert "Go 1: playing, step 2" in panel.status_text
+    assert "Pressing: " in panel.status_text and "situation" in panel.status_text
+    panel.pause_or_resume()
+    assert t.status is Status.PAUSED and not panel.ticking
+    assert panel.findChild(object, "pause_button").text() == "Resume"  # type: ignore[union-attr]
+    assert panel.tick() == 0 and t.episode.steps == 2
+    panel.pause_or_resume()
+    assert t.status is Status.RUNNING and panel.ticking
+    assert panel.findChild(object, "pause_button").text() == "Pause"  # type: ignore[union-attr]
+    while t.episodes < 1:
+        panel.tick()
+    assert len(panel.go_rows()) == 1
+    panel.tick()
+    panel.stop()
+    assert t.status is Status.IDLE and not panel.ticking
+    rows = panel.go_rows()
+    assert len(rows) == 2 and rows[0][0] == "2" and rows[1][0] == "1"  # newest first
+    assert rows[0][1] == "On its own" and rows[0][4] == ENDED_BY["stopped"]
+    assert rows[1][4] in (ENDED_BY["max_steps"], ENDED_BY["reset"])
+    assert panel.status_text.startswith("Resting after 2 goes.")
+    assert go_cells(t.history[0])[2] == str(t.history[0].result.steps)
+
+
+def test_fast_speed_takes_many_steps_per_tick(panel: LearningPanel, context: AppContext) -> None:
+    connect(context)
+    panel.choose_speed(Speed.FAST)
+    assert context.training.speed is Speed.FAST and panel.speed is Speed.FAST
+    panel.start()
+    assert panel.tick_interval_ms == 1
+    assert panel.tick() > 1
+    panel.choose_speed(Speed.LIVE)
+    assert panel.ticking and panel.tick_interval_ms > 1 and panel.tick() == 1
+    panel.stop()
+
+
+def test_game_controls_yield_to_the_ai_and_come_back(qtbot: QtBot, context: AppContext) -> None:
+    w = MainWindow(context)
+    qtbot.addWidget(w)
+    w.show()
+    game, learning = w.game_panel, w.learning_panel
+    assert learning.parent() is w.panel("learning").content
+    connect(context)
+    assert game.clock.running and game.clock.playing and game.pad.press("up")
+    game.pad.release("up")
+    learning.start()
+    assert context.training.ai_in_control
+    assert not game.clock.running and not game.clock.playing
+    assert game.pad.locked and not game.pad.press("up") and game.pad.message == AI_HAS_CONTROLS
+    assert not game.play_button.isEnabled()
+    assert learning.tick() == 1  # the AI plays while the clock is stopped
+    learning.stop()
+    assert not game.pad.locked and game.pad.message == KEY_HINT
+    assert game.clock.running and game.play_button.isEnabled()
+    assert game.pad.press("up")
+    game.pad.release("up")
+    # If the child had paused the game, it stays paused after the AI is done.
+    game.clock.pause()
+    learning.start()
+    learning.stop()
+    assert not game.clock.running and game.play_button.isEnabled()
+    w.close()
+
+
+def test_manual_mode_leaves_the_controls_with_the_child(qtbot: QtBot, context: AppContext) -> None:
+    w = MainWindow(context)
+    qtbot.addWidget(w)
+    w.show()
+    game, learning = w.game_panel, w.learning_panel
+    connect(context)
+    learning.choose_mode(Mode.MANUAL)
+    learning.start()
+    t = context.training
+    assert t.status is Status.RUNNING and not t.ai_in_control
+    assert game.clock.running and not game.pad.locked and not learning.ticking
+    assert learning.tick() == 0
+    assert "watching you play" in learning.status_text
+    agent = t.agent
+    assert agent is not None and agent.updates == 0
+    assert game.pad.press("up")
+    for _ in range(t.frames_per_step * 3):
+        game.clock.tick()
+    game.pad.release("up")
+    assert agent.updates == 3
+    learning.choose_mode(Mode.GUIDED)  # mid-go: closes the go, the AI takes over
+    assert game.pad.locked and len(learning.go_rows()) == 1
+    assert learning.go_rows()[0][1] == "You play"
+    assert learning.go_rows()[0][4] == ENDED_BY["mode change"]
+    learning.stop()
+    w.close()
+
+
+def test_forget_and_link_loss(panel: LearningPanel, context: AppContext) -> None:
+    connect(context, drop_after_ops=400)
+    t = context.training
+    panel.start()
+    panel.forget()
+    assert "Stop training" in panel.note_text and t.episodes == 0
+    panel.stop()
+    panel.forget()
+    assert "forgotten" in panel.note_text
+    assert t.agent is not None and t.agent.updates == 0 and panel.go_rows() == ()
+    panel.choose_speed(Speed.FAST)
+    panel.start()
+    while context.connection.is_connected:
+        panel.tick()
+    assert t.status is Status.IDLE and not panel.ticking
+    assert panel.status_text == IDLE_TEXT and "went away" in panel.note_text
+    assert not panel.findChild(object, "start_button").isEnabled()  # type: ignore[union-attr]
+    connect(context)
+    assert panel.note_text == "" and panel.go_rows()  # the brain came back from disk
+    assert panel.go_rows()[0][4] == ENDED_BY["disconnected"]
+
+
+def test_panel_unsubscribes_when_destroyed(qtbot: QtBot, context: AppContext) -> None:
+    p = LearningPanel(context)
+    qtbot.addWidget(p)
+    before = context.bridge.handler_count()
+    p.deleteLater()
+    qtbot.waitUntil(lambda: context.bridge.handler_count() < before)
+    connect(context)
+    context.connection.disconnect()

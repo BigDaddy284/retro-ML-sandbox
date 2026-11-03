@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 
 from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError, Frame
 from retro_ai_lab.services import ConnectionService, EmulatorConnected, EmulatorDisconnected
+from retro_ai_lab.training import TrainingStateChanged
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.controller_pad import ControllerPad
 from retro_ai_lab.ui.frame_view import FrameView
@@ -124,9 +125,12 @@ class GamePanel(QWidget):
         self._pump = FramePump(context.connection, fps=fps, parent=self)
         self._pump.subscribe(context.observation.observe_frame)
         self._pump.subscribe(self._on_frame)
+        self._ai_had_controls = False
+        self._resume_clock = False
         unsubscribe = (
             context.bridge.subscribe(EmulatorConnected, self._on_connected),
             context.bridge.subscribe(EmulatorDisconnected, self._on_disconnected),
+            context.bridge.subscribe(TrainingStateChanged, self._on_training_state),
         )
         # ``destroyed`` fires before children are deleted, so the pump is still
         # alive here. Capture what we need rather than ``self``, which is gone.
@@ -172,8 +176,22 @@ class GamePanel(QWidget):
         self._refresh_play_button()
 
     def _refresh_play_button(self) -> None:
-        self._play_button.setEnabled(self._clock.available)
+        self._play_button.setEnabled(self._clock.available and not self._ai_had_controls)
         self._play_button.setText("Pause" if self._clock.playing else "Play")
+
+    def _on_training_state(self, event: TrainingStateChanged) -> None:
+        """The game's own controls yield to the AI while it plays, and come back after."""
+        ai = self._context.training.ai_in_control
+        if ai and not self._ai_had_controls:
+            self._resume_clock = self._clock.playing
+            self._clock.pause()
+            self._pad.set_locked(True)
+        elif not ai and self._ai_had_controls:
+            self._pad.set_locked(False)
+            if self._resume_clock and self._clock.available:
+                self._clock.play()
+        self._ai_had_controls = ai
+        self._refresh_play_button()
 
     def _on_connected(self, event: EmulatorConnected) -> None:
         self._refresh_play_button()
@@ -187,6 +205,7 @@ class GamePanel(QWidget):
         self._pump.tick()  # show something straight away
 
     def _on_disconnected(self, event: EmulatorDisconnected) -> None:
+        self._ai_had_controls = False
         self._refresh_play_button()
         self._pump.stop()
         self._view.clear()

@@ -37,6 +37,7 @@ DEFAULT_KEYMAP: dict[int, str] = {
 NO_INPUT = "This emulator can't take button presses from here."
 NOT_CONNECTED = "Connect to a game to play it yourself."
 KEY_HINT = "Keys: arrows, Z = A, X = B, Enter = Start."
+AI_HAS_CONTROLS = "The AI has the controls while it plays."
 
 # Rough layout positions (row, col) for well-known buttons; others are appended.
 _LAYOUT: dict[str, tuple[int, int]] = {
@@ -72,6 +73,7 @@ class ControllerPad(QWidget):
         self._widgets: dict[str, QPushButton] = {}
         self._held: set[str] = set()
         self._enabled = False
+        self._locked = False
         self._send_errors = 0
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -110,12 +112,31 @@ class ControllerPad(QWidget):
     def send_errors(self) -> int:
         return self._send_errors
 
+    @property
+    def locked(self) -> bool:
+        """True while the AI is playing and the child's presses are refused."""
+        return self._locked
+
+    def set_locked(self, locked: bool) -> None:
+        if locked == self._locked:
+            return
+        self._locked = locked
+        if locked:
+            self.release_all()
+        self._grid_host.setEnabled(self._enabled and not locked)
+        if locked:
+            self._message.setText(AI_HAS_CONTROLS)
+        else:
+            self._message.setText(
+                KEY_HINT if self._enabled else (NO_INPUT if self._buttons else NOT_CONNECTED)
+            )
+
     def widget_for(self, name: str) -> QPushButton:
         return self._widgets[name]
 
     def press(self, name: str) -> bool:
         """Hold button ``name``. Returns False if the pad is inactive or unknown."""
-        if not self._enabled or name not in self._buttons or name in self._held:
+        if self._locked or not self._enabled or name not in self._buttons or name in self._held:
             return False
         self._held.add(name)
         self._widgets[name].setDown(True)
@@ -186,12 +207,14 @@ class ControllerPad(QWidget):
             self._grid.addWidget(widget, row, col)
             self._widgets[button.name] = widget
         self._enabled = event.capabilities.input
+        self._locked = False
         self._grid_host.setEnabled(self._enabled)
         self._message.setText(KEY_HINT if self._enabled else NO_INPUT)
 
     def _on_disconnected(self, event: EmulatorDisconnected) -> None:
         self._held.clear()
         self._enabled = False
+        self._locked = False
         self._clear_buttons()
         self._message.setText(NOT_CONNECTED)
         self.input_changed.emit(frozenset())
