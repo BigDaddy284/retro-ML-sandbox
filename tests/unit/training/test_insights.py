@@ -33,10 +33,10 @@ def test_policies_compare_by_hand_and_read_well() -> None:
     up, left = SPACE.index_of(["up"]), SPACE.index_of(["left"])
     agent.learn(A, up, 5.0, B, True)
     agent.learn(B, left, 5.0, A, True)
-    before = policy_of(agent.table)
+    before = policy_of(agent)
     assert before == {A.key: up, B.key: left}
     agent.learn(A, left, 50.0, B, True)  # A now prefers left; B unchanged
-    after = policy_of(agent.table)
+    after = policy_of(agent)
     changes = compare_policies(before, after)
     assert len(changes) == 1 and changes[0].state_key == A.key
     assert (changes[0].before, changes[0].after) == (up, left)

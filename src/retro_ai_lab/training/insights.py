@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from retro_ai_lab.learning.actions import ActionSpace
-from retro_ai_lab.learning.qlearning import QLearningAgent, QTable
+from retro_ai_lab.learning.learner import Learner
 from retro_ai_lab.learning.state import State
 from retro_ai_lab.rewards.exploitation import ExploitWarning
 from retro_ai_lab.rewards.goals import Goal
@@ -39,9 +39,9 @@ class Experiment:
     why: str
 
 
-def policy_of(table: QTable) -> dict[str, int]:
-    """The best known move for every situation the table knows."""
-    return {key: table.best(State.from_key(key)) for key in table.known_states()}
+def policy_of(learner: Learner) -> dict[str, int]:
+    """The best known move for every situation the learner knows."""
+    return learner.policy()
 
 
 def compare_policies(
@@ -86,7 +86,7 @@ def describe_changes(
 
 def suggest_experiments(
     curve: LearningCurve,
-    agent: QLearningAgent | None,
+    agent: Learner | None,
     warning: ExploitWarning | None,
     goal: Goal | None,
     profile: RewardProfile | None,

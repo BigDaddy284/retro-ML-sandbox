@@ -16,7 +16,7 @@ from typing import Any
 
 from retro_ai_lab.core import Button, ConfigurationError, EmulatorError
 from retro_ai_lab.core.events import EventBus
-from retro_ai_lab.learning.qlearning import QLearningAgent
+from retro_ai_lab.learning.learner import Learner
 from retro_ai_lab.learning.state import State, StateEncoder
 from retro_ai_lab.services.connection import ConnectionService
 from retro_ai_lab.services.discovery import DiscoveryUpdated
@@ -133,7 +133,7 @@ class EpisodeRunner:
         connection: ConnectionService,
         observation: ObservationService,
         bus: EventBus,
-        agent: QLearningAgent,
+        agent: Learner,
         encoder: StateEncoder,
         *,
         frames_per_step: int = DEFAULT_FRAMES_PER_STEP,
