@@ -311,6 +311,12 @@ class DQNLearner:
         )
         return self._epsilon
 
+    def configure(self, settings: Settings) -> None:
+        if not isinstance(settings, Settings):
+            raise ConfigurationError("Learning settings must be a Settings.")
+        self._settings = settings
+        self._epsilon = settings.epsilon
+
     def reset(self) -> None:
         self._last_decision = None
         self._epsilon = self._settings.epsilon

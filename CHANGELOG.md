@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-807: research mode service layer: a bounded step log fed by training (go, step, frame, situation, buttons, explored, value, reward) with CSV export; the AI's value for every move in the situation in front of it; learning settings read and applied to the brain in use (`TrainingService.set_settings`), saved with the brain. Every learner answers `values` and `configure`.
 - T-806: Competitions: "Race them!" runs every saved AI of the game from the same save state under the rewards and goal set now, three goes each with no learning or exploring, and shows a ranked scoreboard (points a go, then goal steps, then fewer steps).
 - T-805: Sharing: a saved AI can be written to one file ("Share…") and a friend's file loaded ("Load a shared AI…"); imports are checked for size, strict JSON, nesting, the saved-AI envelope and every part rebuilt before anything is kept, must be for the connected game, and never replace an existing saved AI.
 - T-804: A sixth panel, "Compare AIs": name and save the current AI, see every saved AI for the game in one table with the leader of each measure starred, read the comparison in plain words, watch the saved AIs' learning curves on one graph, and load or delete a saved AI.

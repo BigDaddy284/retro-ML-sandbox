@@ -124,6 +124,12 @@ class Stub:
     def greedy(self, state: State) -> int:
         return self.moves.get(state.key, 0)
 
+    def values(self, state: State) -> tuple[float, ...]:
+        return tuple(1.0 if i == self.greedy(state) else 0.0 for i in range(len(self._space)))
+
+    def configure(self, settings: Any) -> None:
+        self.settings = settings
+
     def learn(
         self, state: State, action: int, reward: float, next_state: State, done: bool = False
     ) -> float:

@@ -58,6 +58,12 @@ class GreedyPlayer:
     def greedy(self, state: State) -> int:
         return self._learner.greedy(state)
 
+    def values(self, state: State) -> tuple[float, ...]:
+        return self._learner.values(state)
+
+    def configure(self, settings: object) -> None:
+        """A race is played as the AI is; its settings are not touched."""
+
     def learn(
         self, state: State, action: int, reward: float, next_state: State, done: bool = False
     ) -> float:

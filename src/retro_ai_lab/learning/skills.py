@@ -156,6 +156,16 @@ class SkillsLearner:
     def choose(self, state: State) -> int:
         return self._current.choose(state)
 
+    def values(self, state: State) -> tuple[float, ...]:
+        return self._current.values(state)
+
+    def configure(self, settings: Settings) -> None:
+        if not isinstance(settings, Settings):
+            raise ConfigurationError("Learning settings must be a Settings.")
+        self._settings = settings
+        for skill in self._skills.values():
+            skill.configure(settings)
+
     def greedy(self, state: State) -> int:
         return self._current.greedy(state)
 
