@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMainWindow, QSplitter, QStatusBar, QToolBar, QWidget
+from PySide6.QtWidgets import QMainWindow, QPushButton, QSplitter, QStatusBar, QToolBar, QWidget
 
 from retro_ai_lab import __version__
 from retro_ai_lab.education import PANEL_TIP
@@ -17,6 +17,7 @@ from retro_ai_lab.ui.goals_panel import GoalsPanel
 from retro_ai_lab.ui.learning_panel import LearningPanel
 from retro_ai_lab.ui.link_watchdog import LinkWatchdog
 from retro_ai_lab.ui.panels import PANELS, Panel
+from retro_ai_lab.ui.research_dialog import ResearchDialog
 from retro_ai_lab.ui.rewards_panel import RewardsPanel
 from retro_ai_lab.ui.tips import TipDialog
 
@@ -55,6 +56,12 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self._connect_bar = ConnectBar(self._context)
         toolbar.addWidget(self._connect_bar)
+        self._research = ResearchDialog(self._context, self)
+        self._research_button = QPushButton("Research", self)
+        self._research_button.setObjectName("research_button")
+        self._research_button.setToolTip("For grown-ups: settings, values and the step log.")
+        self._research_button.clicked.connect(self.open_research)
+        toolbar.addWidget(self._research_button)
         self.addToolBar(toolbar)
 
         # Layout: [ Game | Activity / Rewards ] over [ Progress | Learning | Compare ]
@@ -139,6 +146,16 @@ class MainWindow(QMainWindow):
     @property
     def tip_dialog(self) -> TipDialog:
         return self._tips
+
+    @property
+    def research_dialog(self) -> ResearchDialog:
+        return self._research
+
+    def open_research(self) -> None:
+        """Bring the Research window up."""
+        self._research.show()
+        self._research.raise_()
+        self._research.activateWindow()
 
     def explain(self, panel_key: str) -> None:
         """Open the "What's this?" window on ``panel_key``'s tip."""
