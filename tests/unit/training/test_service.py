@@ -537,3 +537,94 @@ def test_service_without_a_store_never_saves(tmp_path: Path, lab: Lab) -> None:
     assert t.saves == 0 and t.save() is None
     lab.connection.disconnect()
     assert t.saves == 0
+
+
+# ------------------------------------------------------------ T-706: how the AI learns
+
+
+def test_auto_starts_with_a_table_and_promotes_when_the_game_grows(
+    lab: Lab, tmp_path: Path
+) -> None:
+    from retro_ai_lab.learning import AUTO, DQN, Q_TABLE, DQNLearner, QLearningAgent
+
+    assert lab.training.algorithm == AUTO
+    t = TrainingService(
+        lab.connection,
+        lab.observation,
+        lab.discovery,
+        lab.bus,
+        frames_per_step=4,
+        max_steps=50,
+        settings=Settings(epsilon=0.5),
+        seed=1,
+        store=BrainStore(tmp_path / "auto"),
+        promote_at=3,
+    )
+    changes: list[TrainingStateChanged] = []
+    lab.bus.subscribe(TrainingStateChanged, changes.append)
+    with pytest.raises(ConfigurationError):
+        TrainingService(lab.connection, lab.observation, lab.discovery, lab.bus, promote_at=0)
+    lab.connect()
+    table = t.agent
+    assert isinstance(table, QLearningAgent) and t.last_change == ""
+    t.train(1)
+    promoted = t.agent
+    assert isinstance(promoted, DQNLearner) and promoted.algorithm == DQN
+    assert promoted.episodes == 1 and promoted.updates == table.updates and promoted.known >= 3
+    assert t.episodes == 1 and len(t.history) == 1
+    assert [c.reason for c in changes if c.reason == "promoted"] == ["promoted"]
+    assert "neural network" in t.last_change and str(promoted.known) in t.last_change
+    assert t.algorithm == AUTO  # the setting is still "choose for me"
+    store = t.store
+    assert store is not None and t.game_id is not None
+    assert Brain.from_dict(store.load(t.game_id)).algorithm == DQN
+    t.train(1)
+    assert t.agent is promoted and t.episodes == 2
+    assert [c.reason for c in changes if c.reason == "promoted"] == ["promoted"]
+    lab.connection.disconnect()
+    lab.connect()
+    again = t.agent
+    assert isinstance(again, DQNLearner) and again.episodes == 2 and t.episodes == 2
+    assert [c.reason for c in changes if c.reason == "promoted"] == ["promoted"]
+    # A fixed choice never promotes.
+    fixed = TrainingService(
+        lab.connection, lab.observation, lab.discovery, lab.bus, max_steps=50, promote_at=3
+    )
+    fixed.set_algorithm(Q_TABLE)
+    lab.connection.disconnect()
+    lab.connect()
+    fixed.train(1)
+    assert isinstance(fixed.agent, QLearningAgent) and fixed.agent.known >= 3
+
+
+def test_set_algorithm_converts_the_brain_either_way(lab: Lab) -> None:
+    from retro_ai_lab.learning import AUTO, DQN, Q_TABLE, DQNLearner, QLearningAgent
+
+    t = lab.training
+    with pytest.raises(ConfigurationError, match="magic"):
+        t.set_algorithm("magic")
+    assert t.set_algorithm(DQN) == "" and t.algorithm == DQN  # no brain yet: nothing to convert
+    lab.connect()
+    assert isinstance(t.agent, DQNLearner)  # new brains follow the choice
+    assert t.set_algorithm(AUTO) == "" and isinstance(t.agent, DQNLearner)
+    t.train(1)
+    dqn = t.agent
+    assert isinstance(dqn, DQNLearner) and dqn.known > 0
+    note = t.set_algorithm(Q_TABLE)
+    table = t.agent
+    assert isinstance(table, QLearningAgent) and "simple table" in note
+    assert table.policy() == dqn.policy() and table.episodes == 1 and t.episodes == 1
+    assert lab.changes[-1].reason == "algorithm change"
+    assert t.store is not None and t.game_id is not None
+    assert Brain.from_dict(t.store.load(t.game_id)).algorithm == Q_TABLE
+    t.start()
+    t.step()
+    with pytest.raises(ConfigurationError, match="Stop training"):
+        t.set_algorithm(DQN)
+    t.stop()  # closes go 2
+    note = t.set_algorithm(DQN)
+    assert isinstance(t.agent, DQNLearner) and "neural network" in note
+    assert t.agent.episodes == 2 and t.episodes == 2
+    assert t.set_algorithm(DQN) == ""  # already there
+    t.train(1)
+    assert isinstance(t.agent, DQNLearner) and t.episodes == 3

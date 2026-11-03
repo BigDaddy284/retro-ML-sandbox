@@ -18,8 +18,17 @@ from pathlib import Path
 from retro_ai_lab.core import ConfigurationError, EmulatorError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.learning.actions import ActionSpace
-from retro_ai_lab.learning.learner import Q_TABLE, Decision, Learner, algorithms, make_learner
-from retro_ai_lab.learning.qlearning import Settings
+from retro_ai_lab.learning.learner import (
+    AUTO,
+    Q_TABLE,
+    Decision,
+    Learner,
+    algorithm_choices,
+    describe_algorithm,
+    make_learner,
+)
+from retro_ai_lab.learning.promotion import convert, promote
+from retro_ai_lab.learning.qlearning import QLearningAgent, Settings
 from retro_ai_lab.learning.state import StateEncoder
 from retro_ai_lab.rewards.exploitation import ExploitWarning
 from retro_ai_lab.rewards.goals import Goal
@@ -53,6 +62,7 @@ from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
 
 CHECKPOINT_SLOT = "training"
 DEFAULT_HISTORY = 200
+DEFAULT_PROMOTE_AT = 1000  # known situations before an "auto" brain moves to a network
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,13 +102,12 @@ class TrainingService:
         settings: Settings | None = None,
         seed: int | None = None,
         store: BrainStore | None = None,
-        algorithm: str = Q_TABLE,
+        algorithm: str = AUTO,
+        promote_at: int = DEFAULT_PROMOTE_AT,
     ) -> None:
-        if algorithm not in algorithms():
-            raise ConfigurationError(
-                f"There is no learning algorithm called {algorithm!r} "
-                f"(choices: {', '.join(algorithms())})."
-            )
+        _check_algorithm(algorithm)
+        if promote_at < 1:
+            raise ConfigurationError("promote_at must be at least 1.")
         if frames_per_step < 1:
             raise ConfigurationError("frames_per_step must be at least 1.")
         if max_steps < 1:
@@ -116,6 +125,8 @@ class TrainingService:
         self._settings = settings or Settings()
         self._seed = seed
         self._algorithm = algorithm
+        self._promote_at = promote_at
+        self._last_change = ""
         self._store = store
         self._history: deque[EpisodeRecord] = deque(maxlen=history)
         self._policies: deque[tuple[int, dict[str, int]]] = deque(maxlen=DEFAULT_WINDOW + 1)
@@ -143,8 +154,18 @@ class TrainingService:
 
     @property
     def algorithm(self) -> str:
-        """The learning algorithm new brains are built with."""
+        """How the AI learns: a registered algorithm, or ``auto`` (table first, then network)."""
         return self._algorithm
+
+    @property
+    def promote_at(self) -> int:
+        """Known situations at which an ``auto`` brain moves from the table to a network."""
+        return self._promote_at
+
+    @property
+    def last_change(self) -> str:
+        """The last promotion or conversion of the brain, in plain words ("" if none)."""
+        return self._last_change
 
     @property
     def enabled(self) -> bool:
@@ -291,6 +312,26 @@ class TrainingService:
             self._prepare_checkpoint()
         self._announce("mode change")
 
+    def set_algorithm(self, algorithm: str) -> str:
+        """Choose how the AI learns; converts the current brain when the choice differs.
+
+        Returns what happened to the brain in plain words ("" when nothing changed).
+        """
+        _check_algorithm(algorithm)
+        if self._status is not Status.IDLE:
+            raise ConfigurationError("Stop training before changing how the AI learns.")
+        self._algorithm = algorithm
+        if self._agent is None or algorithm == AUTO or self._agent.algorithm == algorithm:
+            return ""
+        was = describe_algorithm(self._agent.algorithm)[0].lower()
+        self._agent = convert(self._agent, algorithm, seed=self._seed)
+        self._runner = None
+        now = describe_algorithm(algorithm)[0].lower()
+        self._last_change = f"The AI moved from the {was} to the {now}, keeping what it learned."
+        self.save()
+        self._announce("algorithm change")
+        return self._last_change
+
     def set_speed(self, speed: Speed) -> None:
         if not isinstance(speed, Speed):
             raise ConfigurationError("speed must be a Speed.")
@@ -347,9 +388,7 @@ class TrainingService:
             raise ConfigurationError("Stop training before starting the AI from scratch.")
         if self.brain() is None or self._agent is None or self._game_id is None:
             raise ConfigurationError("There is no brain to forget.")
-        self._agent = make_learner(
-            self._algorithm, self._agent.space, self._settings, seed=self._seed
-        )
+        self._agent = self._new_agent(self._agent.space)
         self._history.clear()
         self._policies.clear()
         self._episodes = 0
@@ -440,8 +479,9 @@ class TrainingService:
         self._game_id = game_id_for(info.system, info.title, info.rom_hash)
         self._saves = 0
         space = ActionSpace.from_buttons(event.buttons)
-        self._agent = make_learner(self._algorithm, space, self._settings, seed=self._seed)
+        self._agent = self._new_agent(space)
         self._fresh_start = ""
+        self._last_change = ""
         if self._store is not None and self._store.exists(self._game_id):
             try:
                 brain = Brain.from_dict(self._store.load(self._game_id), space=space)
@@ -504,6 +544,27 @@ class TrainingService:
 
     # ------------------------------------------------------------ helpers
 
+    def _new_agent(self, space: ActionSpace) -> Learner:
+        name = Q_TABLE if self._algorithm == AUTO else self._algorithm
+        return make_learner(name, space, self._settings, seed=self._seed)
+
+    def _maybe_promote(self) -> None:
+        """Under ``auto``, move a table that has grown big to a network."""
+        agent = self._agent
+        if (
+            self._algorithm != AUTO
+            or not isinstance(agent, QLearningAgent)
+            or agent.known < self._promote_at
+        ):
+            return
+        self._agent, _ = promote(agent, seed=self._seed)
+        self._runner = None
+        self._last_change = (
+            f"The game got big ({agent.known} situations), so the AI moved from the simple "
+            "table to a neural network, keeping what it learned."
+        )
+        self._announce("promoted")
+
     def _ensure_runner(self) -> EpisodeRunner | None:
         if self._runner is not None and self._runner.running:
             return self._runner
@@ -552,11 +613,20 @@ class TrainingService:
         if self._agent is not None:
             self._policies.append((self._episodes, policy_of(self._agent)))
         self._bus.publish(EpisodeFinished(record))
+        self._maybe_promote()
         if self._connection.is_connected:
             self.save()
 
     def _announce(self, reason: str) -> None:
         self._bus.publish(TrainingStateChanged(self._status, self._mode, reason))
+
+
+def _check_algorithm(name: str) -> None:
+    if name not in algorithm_choices():
+        raise ConfigurationError(
+            f"There is no learning algorithm called {name!r} "
+            f"(choices: {', '.join(algorithm_choices())})."
+        )
 
 
 def _goes(n: int) -> str:

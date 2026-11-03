@@ -3,10 +3,12 @@
 The state encoder gives a learner a list of (variable, bucket) pairs. A table
 looks the pairs up as a key; a network needs a vector of fixed length whose
 slots always mean the same thing. The feature map hands every variable two
-slots the first time it is seen: "present" (0 or 1) and the bucket scaled
-to [-1, 1], and keeps the slots for good, so a variable that is missing
-from a state reads as absent rather than as bucket 0, and a network saved
-with the map keeps seeing the game the same way next session.
+slots the first time it is seen, "present" (0 or 1), the bucket scaled by
+``bins`` (fine: lanes, lives and speeds stay well apart) and the bucket
+scaled over the whole range a 16-bit value can reach (coarse: positions and
+scores still differ), and keeps the slots for good, so a variable that is
+missing from a state reads as absent rather than as bucket 0, and a network
+saved with the map keeps seeing the game the same way next session.
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ from retro_ai_lab.learning.state import DEFAULT_BINS, State
 
 SCHEMA_VERSION = 1
 DEFAULT_WIDTH = 32  # believed variables the vector has room for
-SLOTS_PER_VARIABLE = 2
+SLOTS_PER_VARIABLE = 3
 
 
 class FeatureMap:
@@ -92,7 +94,8 @@ class FeatureMap:
                 slot = self._slots[vid] = len(self._slots)
             base = SLOTS_PER_VARIABLE * slot
             row[base] = 1.0
-            row[base + 1] = max(-1.0, min(1.0, b / self._span))
+            row[base + 1] = max(-1.0, min(1.0, b / self._bins))  # fine: exact small values
+            row[base + 2] = max(-1.0, min(1.0, b / self._span))  # coarse: the whole range
 
     # ------------------------------------------------------------ persistence
 

@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-706: The AI picks how it learns by default (the simple table first, a neural network once the game has grown, keeping what it learned) and the Learning panel's "How the AI learns" picker lets the child choose; feature vectors gained a fine-scale slot per variable.
 - T-705: A Deep Q-Network learner (`dqn`): feature vectors in, a score per move out, trained from replay memory against a target network; saves and restores with the brain and works with the training service, panels and insights unchanged.
 - T-704: A small neural network in NumPy (`Network`: dense ReLU layers, masked Huber loss, gradient-checked backpropagation, Adam, target-network copies, JSON round trip) with no new dependency.
 - T-703: Feature vectors: a `FeatureMap` turns a situation into a fixed-length vector (present flag and scaled bucket per believed variable) for the coming network learners, and saves its slot order.
