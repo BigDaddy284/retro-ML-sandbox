@@ -190,7 +190,7 @@ class ConnectionService:
         """
         if self._state is not ConnectionState.CONNECTED or self._adapter is None:
             return False
-        if self._adapter.is_connected:
+        if self._adapter.check_link():
             return True
         self._finish_disconnect(expected=False, reason=LINK_LOST)
         return False

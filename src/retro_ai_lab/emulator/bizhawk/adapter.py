@@ -13,6 +13,7 @@ import base64
 import binascii
 from collections.abc import Sequence
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from retro_ai_lab.core import (
@@ -38,6 +39,7 @@ from retro_ai_lab.emulator.bizhawk.protocol import (
 )
 
 DEFAULT_CALL_TIMEOUT_S = 5.0
+SCRIPT_PATH = Path(__file__).with_name("retro_ai_lab.lua")  # the bridge the app ships
 DEFAULT_MAX_REGION_BYTES = 256 * 1024
 """Memory domains larger than this are not offered as regions.
 
@@ -134,8 +136,20 @@ class BizHawkAdapter(EmulatorAdapter):
 
     # -------------------------------------------------------------- hooks
 
+    def check_link(self) -> bool:
+        link = self._link
+        if not self._connected or link is None:
+            return False
+        if link.peer_closed():
+            self._drop()
+            return False
+        return True
+
     def _do_connect(self, timeout_s: float) -> None:
-        link = open_link(self._host, self._port, timeout_s=timeout_s)
+        try:
+            link = open_link(self._host, self._port, timeout_s=timeout_s)
+        except EmulatorError as exc:
+            raise EmulatorError(f"{exc} The script is at {SCRIPT_PATH}.") from exc
         try:
             answer = link.call("hello", timeout_s=timeout_s, script=PROTOCOL_VERSION)
             version = answer.get("script")

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import select
 import socket
 from typing import Any
 
@@ -102,6 +103,23 @@ class LineChannel:
                 raise EmulatorDisconnectedError("The emulator closed the connection.")
             self._buffer += chunk
 
+    def peer_closed(self) -> bool:
+        """Has the other end gone, without our sending anything to find out?
+
+        A socket that is readable yet yields no bytes has been closed by its
+        peer. Unread data waiting is not a closed peer. A channel we closed
+        ourselves counts as closed.
+        """
+        if not self._open:
+            return True
+        try:
+            readable, _, _ = select.select([self._sock], [], [], 0)
+            if not readable:
+                return False
+            return self._sock.recv(1, socket.MSG_PEEK) == b""
+        except OSError:
+            return True
+
     def close(self) -> None:
         if not self._open:
             return
@@ -140,6 +158,9 @@ class Link:
         except ProtocolError:
             self._channel.close()
             raise
+
+    def peer_closed(self) -> bool:
+        return self._channel.peer_closed()
 
     def close(self) -> None:
         self._channel.close()

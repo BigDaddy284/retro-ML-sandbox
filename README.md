@@ -27,6 +27,12 @@ pytest                  # runs the test suite (headless Qt)
 
 On Linux, Qt needs `libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0 libdbus-1-3 libfontconfig1`; see `.github/workflows/ci.yml`.
 
+## Playing on BizHawk
+
+The app connects to BizHawk's EmuHawk through a shipped Lua script. See
+[docs/BIZHAWK.md](docs/BIZHAWK.md) for setup and for the opt-in real-emulator
+test that verifies the bridge on your machine.
+
 ## Windows build
 
 Every push to `main` runs the **Package** workflow, which builds `RetroAILab.exe` with PyInstaller, launches it as a smoke test and uploads the folder as the `RetroAILab-windows` artifact (Actions tab → latest Package run → Artifacts). To build locally: `pip install pyinstaller && pyinstaller packaging/retro_ai_lab.spec --noconfirm`.

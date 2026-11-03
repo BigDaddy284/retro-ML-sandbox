@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-117: BizHawk (EmuHawk) appears in the console picker; a lost EmuHawk is noticed by the link watchdog without sending anything; a failed connect names the script's location; `docs/BIZHAWK.md` and an opt-in `tests/real_emulator/test_bizhawk.py` cover verification on a real EmuHawk.
 - T-116: The BizHawk adapter advances frames, sets the speed and saves/loads states: the bridge gained `step` (with optional bundled buttons, reads and screenshot), `speed`, `save` and `load`, so every adapter capability is now available on BizHawk and the episode runner drives it unchanged; `set_free_run` switches the bridge between holding the game and letting it run.
 - T-115: The BizHawk adapter reads memory: the bridge's `read` command serves checked reads of any domain from the handshake, the adapter offers domains up to 256 KiB as regions, and the memory observer works on top of it unchanged.
 - T-114: The BizHawk adapter holds controller buttons: `set_input` sends the whole pad to the bridge, which applies it with `joypad.set` before every frame until changed and hands the pad back to the player on disconnect.

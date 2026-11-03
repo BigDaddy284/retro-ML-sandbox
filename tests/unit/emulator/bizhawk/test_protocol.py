@@ -110,3 +110,16 @@ def test_open_link_explains_a_missing_bridge() -> None:
     with pytest.raises(EmulatorError, match="Couldn't find BizHawk on port") as info:
         open_link("127.0.0.1", port, timeout_s=1.0)
     assert "Lua Console" in str(info.value)
+
+
+def test_peer_closed_probes_without_sending() -> None:
+    ours, theirs = socket.socketpair()
+    channel = LineChannel(ours)
+    assert not channel.peer_closed()  # open and idle
+    theirs.sendall(b'{"id":1,"ok":true}\n')
+    assert not channel.peer_closed()  # unread data is not a closed peer
+    assert channel.receive_line(1.0) == b'{"id":1,"ok":true}'
+    theirs.close()
+    assert channel.peer_closed()
+    channel.close()
+    assert channel.peer_closed()  # our own closed channel counts too, quietly

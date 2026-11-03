@@ -75,10 +75,12 @@ class AdapterRegistry:
 
 def default_registry() -> AdapterRegistry:
     """The registry the application uses: every adapter that ships."""
+    from retro_ai_lab.emulator.bizhawk import BizHawkAdapter
     from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 
     registry = AdapterRegistry()
     registry.register(FakeEmulatorAdapter)
+    registry.register(BizHawkAdapter)
     return registry
 
 
