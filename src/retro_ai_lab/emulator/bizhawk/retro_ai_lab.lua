@@ -12,6 +12,15 @@ local SCRIPT_VERSION = 1
 local HOST = "127.0.0.1"
 local PORT = tonumber(RETRO_AI_LAB_PORT) or 43110
 
+-- EmuHawk has no socket library; socket.lua next to this file loads the one
+-- in the luasocket folder. Put this file's folder first so require finds it
+-- even when EmuHawk's working directory is elsewhere.
+do
+  local info = debug and debug.getinfo and debug.getinfo(1, "S")
+  local source = info and info.source or ""
+  local dir = source:sub(1, 1) == "@" and source:sub(2):match("^(.*)[/\\]") or nil
+  if dir then package.path = dir .. "/?.lua;" .. package.path end
+end
 local socket = require("socket")
 
 -------------------------------------------------------------------- base64

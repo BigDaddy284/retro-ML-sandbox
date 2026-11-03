@@ -77,3 +77,12 @@ def test_smoke_test_passes_against_the_unpackaged_entry_point(tmp_path: Path) ->
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "smoke test passed" in result.stdout
+
+
+def test_spec_and_package_data_ship_the_luasocket_loader() -> None:
+    """T-816: EmuHawk has no socket library, so the loader and its folder travel with the script."""
+    text = SPEC.read_text(encoding="utf-8")
+    assert "emulator/bizhawk/socket.lua" in text
+    assert "emulator/bizhawk/luasocket" in text
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"luasocket/x64/*"' in pyproject

@@ -117,7 +117,7 @@ Status: **Accepted** (in force), **Proposed** (needs user sign-off before work d
 
 ## 5. BizHawk bridge protocol (ADR-005, T-110)
 
-The app never links to BizHawk. A Lua script shipped with the app, `retro_ai_lab/emulator/bizhawk/retro_ai_lab.lua`, runs inside EmuHawk (Lua Console → Open script, or `EmuHawk.exe --lua=<path>`), listens on `127.0.0.1:43110` with LuaSocket (bundled with EmuHawk, `require("socket")`), and the `bizhawk` adapter connects to it. The script is the server so that nothing has to be running before the child opens the emulator, and so a dropped app can reconnect.
+The app never links to BizHawk. A Lua script shipped with the app, `retro_ai_lab/emulator/bizhawk/retro_ai_lab.lua`, runs inside EmuHawk (Lua Console → Open script, or `EmuHawk.exe --lua=<path>`), listens on `127.0.0.1:43110` with LuaSocket (`require("socket")`; EmuHawk does not bundle it, so `socket.lua` next to the script loads the DLL from `luasocket/x64/` the way Archipelago's connector does; found on the user's PC in T-816), and the `bizhawk` adapter connects to it. The script is the server so that nothing has to be running before the child opens the emulator, and so a dropped app can reconnect.
 
 **Sources checked (T-110):** the BizHawk Lua function reference (tasvideos.org/BizHawk/LuaFunctions) for every API named below, and Archipelago's `connector_bizhawk_generic.lua` as a worked example of LuaSocket + newline-delimited JSON on current EmuHawk. Nothing here was run on a real EmuHawk yet; T-117 does that on the user's Windows PC, and the "verify" column below says what it has to confirm.
 
