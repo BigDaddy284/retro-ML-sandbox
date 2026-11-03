@@ -12,6 +12,13 @@ from retro_ai_lab.services.connection import (
 )
 from retro_ai_lab.services.discovery import DiscoveryProgress, DiscoveryService, DiscoveryUpdated
 from retro_ai_lab.services.experiments import Comparison, ExperimentHarness, Trial, constant_plan
+from retro_ai_lab.services.goals import (
+    GoalChanged,
+    GoalService,
+    ObjectiveCompleted,
+    ObjectiveSetback,
+    TriggerOption,
+)
 from retro_ai_lab.services.observer import (
     InputRecorded,
     MemoryObserved,
@@ -39,8 +46,12 @@ __all__ = [
     "EmulatorDisconnected",
     "ExperimentHarness",
     "ExploitSuspected",
+    "GoalChanged",
+    "GoalService",
     "InputRecorded",
     "MemoryObserved",
+    "ObjectiveCompleted",
+    "ObjectiveSetback",
     "ObservationService",
     "RewardEarned",
     "RewardProfileChanged",
@@ -48,5 +59,6 @@ __all__ = [
     "ScreenObserved",
     "Session",
     "Trial",
+    "TriggerOption",
     "constant_plan",
 ]

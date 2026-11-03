@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-408 – Goal service
+- **Current task:** T-409 – Goals panel
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -56,7 +56,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-405 | Reward exploitation detection with plain-words explanation | 4 | Done | 8/8 | see PR #31 |
 | T-406 | Rewards panel: categories that expand, +/- buttons, value, toggle, suggested, personality picker | 4 | Done | 7/7 | see PR #32 |
 | T-407 | Goals and objectives model: overall goal, objectives with detection, dependencies, completion | 4 | Done | 9/9 | see PR #33 |
-| T-408 | Goal service: per-game goal persistence, completion tracking from events, suggested objectives | 4 | Planned | – | – |
+| T-408 | Goal service: per-game goal persistence, completion tracking from events, suggested objectives | 4 | Done | 6/6 | see PR #34 |
 | T-409 | Goals panel: edit the objective structure, see completion and confidence | 4 | Planned | – | – |
 | E-5 | Basic Learning (tabular Q-learning, save/load) | 5 | Epic | – | – |
 | E-6 | Training Interface (live/background, modes, graphs, history) | 6 | Epic | – | – |
@@ -552,6 +552,21 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 9 / 9 passed / 0 failed / 0 excluded (674 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Dependencies may point at objectives later in the list, so loading adds every objective first and sets dependencies second. The penalty is defined as a setback that happens before the objective is done (DESIGN.md §4.2 "optional penalty"), which is the one reading that can't punish a finished step.
 
+### T-408 – Goal service
+- **Status:** Done
+- **Phase:** 4
+- **Objective:** Make goals live: keep one goal per game on disk, let the AI add suggested objectives as it learns, tick objectives off as the game's events show them done, apply setback penalties, and expose the edits a child makes (DESIGN.md §4.1–§4.3) so they are saved and announced.
+- **Scope:** `services.goals.GoalService(connection, discovery, bus, store)`: loads or creates the game's `Goal` on connect (damaged file → new, default title "Get as far as you can in <game>"), merges suggested objectives on connect and whenever discoveries add or change beliefs, runs every detected event through `Goal.observe` and publishes `ObjectiveCompleted(frame, objective, reward)` / `ObjectiveSetback(frame, objective, penalty)`, offers edits (`set_title`, `add_objective`, `update_objective`, `remove_objective`, `move_objective`, `set_dependencies`, `mark_complete`, `mark_not_complete`, `reset_progress`, `refresh_suggestions`) which save and publish `GoalChanged(reason)`, `summary()`, and `trigger_options()` (the detection methods a child can pick from, in plain words, from what the AI believes); saves on disconnect. `AppContext.goal_store` and `AppContext.goals`. Goal rewards are announced separately from behaviour rewards so the learner (Phase 5) can weigh both. **Out of scope:** the panel (T-409).
+- **Acceptance criteria:**
+  1. No goal until a memory-capable game connects; the goal gets a title and the suggested objectives for the current knowledge; new beliefs add objectives and announce.
+  2. Events complete ready objectives once, publish completion with the reward, apply and publish setback penalties, and are ignored for disabled or blocked objectives.
+  3. Every edit changes the goal, saves it and announces; ids are generated; bad edits are refused with a clear error and nothing saved.
+  4. The goal (title, objectives, completion, edits) is remembered on reconnect; a damaged file and another game start fresh.
+  5. `summary()` and `trigger_options()` read well; the context owns the service and store.
+- **Test plan:** idle/connect/suggest; events complete/penalise/ignore; edits; persistence/damaged/other game; summary and options; context.
+- **Results:** 6 / 6 passed / 0 failed / 0 excluded (680 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Objective rewards travel as `ObjectiveCompleted` / `ObjectiveSetback` rather than being folded into the behaviour tally, so the learner (Phase 5) can weigh finishing a step of the goal separately from everyday points, and the rewards panel's total stays what it says it is.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -601,4 +616,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-405 completed (PR #31).
 - T-406 completed (PR #32).
 - T-407 completed (PR #33).
+- T-408 completed (PR #34).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
