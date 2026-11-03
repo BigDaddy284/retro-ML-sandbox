@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-705: A Deep Q-Network learner (`dqn`): feature vectors in, a score per move out, trained from replay memory against a target network; saves and restores with the brain and works with the training service, panels and insights unchanged.
 - T-704: A small neural network in NumPy (`Network`: dense ReLU layers, masked Huber loss, gradient-checked backpropagation, Adam, target-network copies, JSON round trip) with no new dependency.
 - T-703: Feature vectors: a `FeatureMap` turns a situation into a fixed-length vector (present flag and scaled bucket per believed variable) for the coming network learners, and saves its slot order.
 - T-702: Experience replay: a bounded, seeded memory of past steps (`Transition`, `ReplayBuffer`) that saves and reloads with the brain.
