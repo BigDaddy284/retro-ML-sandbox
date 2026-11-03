@@ -38,8 +38,7 @@ def test_profiles_a_run_on_the_simulator(qapp: QApplication) -> None:
     assert lines[0].startswith("Played 0.") and "no failures" in lines[0]
     assert lines[1] == f"Emulator round trips: {report.link_summary}."
     assert lines[2].startswith(
-        "App work per step (worker thread, snapshot bookkeeping): "
-        f"\u00d7{report.step_work.count}"
+        f"App work per step (worker thread, snapshot bookkeeping): \u00d7{report.step_work.count}"
     )
     assert lines[4].endswith(f"(a stall over {STUTTER_MS} ms shows as a stutter).")
 
