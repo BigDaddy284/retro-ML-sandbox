@@ -222,6 +222,35 @@ def test_suggestions_follow_progress_variables_and_relationships() -> None:
     assert len(suggest_goal(k, at_least=Confidence.HIGH)) == 2
 
 
+def test_merge_retires_and_rewords_stale_suggestions() -> None:
+    k = Knowledge("g", title="Game")
+    cp = k.propose(RAM, 1, kind=VariableKind.PROGRESS, name="Progress at ram[1]", evidence=SURE)
+    lap = k.propose(RAM, 0, kind=VariableKind.PROGRESS, name="Lap", evidence=SURE)
+    g = suggest_goal(k)
+    cp_obj, lap_obj = tuple(g)
+    g.complete(cp_obj.id, 9)
+    mine = Objective("mine", "Beat my record", trigger=Trigger(EventKind.PROGRESS, cp.id))
+    g.add(mine)
+    # The AI changes its mind: ram[1] was a position, and Lap gets a proper name.
+    k.update(cp.id, kind=VariableKind.POSITION)
+    k.update(lap.id, name="Lap number")
+    assert merge_suggestions(g, k) == ()
+    assert cp_obj.id not in g  # retired although it was "completed"
+    assert g.get("mine").description == "Beat my record"  # the child's step is untouched
+    assert g.get(lap_obj.id).description == "Get further in Lap number"
+    assert g.get(lap_obj.id).suggested and g.get(lap_obj.id).depends_on == ()
+    # An objective for a variable the knowledge has forgotten entirely is kept.
+    orphan = Objective(
+        "goal:progress:ghost",
+        "Get further in Ghost",
+        trigger=Trigger(EventKind.PROGRESS, "ghost"),
+        suggested=True,
+    )
+    g.add(orphan)
+    merge_suggestions(g, k)
+    assert "goal:progress:ghost" in g
+
+
 def test_toy_racer_goal_completes_a_checkpoint() -> None:
     k = Knowledge("toyracer")
     k.propose(RAM, LAYOUT.lives, kind=VariableKind.LIVES, name="Lives", evidence=SURE)

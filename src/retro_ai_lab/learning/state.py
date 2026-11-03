@@ -26,7 +26,7 @@ from retro_ai_lab.observation.memory import MemorySnapshot
 from retro_ai_lab.understanding.knowledge import Confidence, Knowledge, Variable, VariableKind
 
 DEFAULT_BINS = 8
-IGNORED_KINDS = frozenset({VariableKind.UNKNOWN, VariableKind.INPUT})
+IGNORED_KINDS = frozenset({VariableKind.UNKNOWN, VariableKind.INPUT, VariableKind.COUNTER})
 
 
 def bucket(value: int, kind: VariableKind, bins: int = DEFAULT_BINS) -> int:

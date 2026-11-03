@@ -30,6 +30,7 @@ DEFAULT_FRAMES_PER_STEP = 4
 DEFAULT_MAX_STEPS = 600
 DEFAULT_UNSTICK_AFTER = 25  # steps with nothing changing before Start is pressed
 DEFAULT_UNSTICK_BUTTONS: tuple[str, ...] = ("start",)
+DEFAULT_SETTLE_FRAMES = 5  # the understanding engine's event window
 
 
 class EpisodeSignals:
@@ -140,6 +141,7 @@ class EpisodeRunner:
         harness: ExperimentHarness | None = None,
         unstick_after: int | None = DEFAULT_UNSTICK_AFTER,
         unstick_buttons: tuple[str, ...] = DEFAULT_UNSTICK_BUTTONS,
+        settle_frames: int = DEFAULT_SETTLE_FRAMES,
     ) -> None:
         if frames_per_step < 1:
             raise ConfigurationError("frames_per_step must be at least 1.")
@@ -147,6 +149,8 @@ class EpisodeRunner:
             raise ConfigurationError("max_steps must be at least 1.")
         if unstick_after is not None and unstick_after < 1:
             raise ConfigurationError("unstick_after must be at least 1 (or None).")
+        if settle_frames < 0:
+            raise ConfigurationError("settle_frames must be >= 0.")
         self._connection = connection
         self._observation = observation
         self._agent = agent
@@ -156,6 +160,8 @@ class EpisodeRunner:
         self._harness = harness
         self._unstick_after = unstick_after
         self._unstick_buttons = unstick_buttons
+        self._settle_frames = settle_frames
+        self._restored = False
         self._unsticks = 0
         self._same_state = 0
         self._last_buttons: frozenset[str] = frozenset()
@@ -227,7 +233,9 @@ class EpisodeRunner:
         self._ended_by = None
         self._same_state = 0
         self._buttons = {b.name: b for b in self._connection.call(lambda a: a.buttons())}
-        if restore and self._harness is not None and self._harness.has_checkpoint:
+        self._restored = restore and self._harness is not None and self._harness.has_checkpoint
+        if self._restored:
+            assert self._harness is not None
             self._harness.restore()
         self._encoder.refresh()
         # Observe before listening: putting the game back to the checkpoint looks like
@@ -301,6 +309,11 @@ class EpisodeRunner:
         """After the frames passed: collect the reward, read the next state, learn."""
         self._frames += frames
         reward, resets = self._signals.take()
+        # Putting the game back to the checkpoint looks like a restart to the engine, and
+        # it may only notice a few frames later: a "reset" that soon after a restore is
+        # the restore itself, not the game starting over.
+        if self._restored and self._frames <= self._settle_frames:
+            resets = 0
         snapshot = self._observation.latest
         next_state = self._encoder.encode(snapshot) if snapshot is not None else state
         done = resets > 0
@@ -356,6 +369,7 @@ class EpisodeRunner:
 __all__ = [
     "DEFAULT_FRAMES_PER_STEP",
     "DEFAULT_MAX_STEPS",
+    "DEFAULT_SETTLE_FRAMES",
     "EpisodeResult",
     "EpisodeRunner",
     "EpisodeSignals",

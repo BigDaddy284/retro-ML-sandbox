@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-606 – First working demonstration on the Fake Emulator
-- **Last approved checkpoint:** `main` after T-409 (PRs #36–#42 merging in order as CI passes)
+- **Current task:** T-607 – Educational tips ("What's this?" explanations for every panel)
+- **Last approved checkpoint:** `main` after T-505 (PRs #41–#48 merging in order as CI passes)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -72,7 +72,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-603 | Progress panel: training attempts, success rate and trend beside the goal | 6 | Done | 2/2 | see PR #45 |
 | T-604 | AI activity: current and previous actions, exploring vs best-known, current objective | 6 | Done | 6/6 | see PR #46 |
 | T-605 | Behaviour changes and suggested experiments: what the AI now does differently, what to try next | 6 | Done | 4/4 | see PR #47 |
-| T-606 | First working demonstration on the Fake Emulator: DESIGN.md §17 steps 1–10 as one scripted test, including rewards changing behaviour | 6 | Planned | – | – |
+| T-606 | First working demonstration on the Fake Emulator: DESIGN.md §17 steps 1–10 as one scripted test, including rewards changing behaviour | 6 | Done | 5/5 | see PR #48 |
 | T-607 | Educational tips: "What's this?" explanations in simple and advanced words for every panel | 6 | Planned | – | – |
 | E-7 | Advanced Learning (DQN, hierarchical RL, demonstrations) | 7 | Epic | – | – |
 | E-8 | Expansion (VBA-M, comparison, sharing, competitions) | 8 | Epic | – | – |
@@ -772,6 +772,21 @@ Live and background training and the guided and manual modes were delivered in P
 - **Results:** 4 / 4 passed / 0 failed / 0 excluded (757 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** The suggestions are deliberately simple rules with a reason attached, so a child can see why each is offered; they will be revisited once real games show which ones help. Policy snapshots are taken once per go, so comparing habits costs nothing during play.
 
+### T-606 – First working demonstration on the Fake Emulator
+- **Status:** Done
+- **Phase:** 6
+- **Objective:** Prove DESIGN.md §17 end to end on Toy Racer with nothing taught by hand: connect, observe, list the buttons, examine memory, find the useful state, let the child set rewards, train towards a simple objective, show decisions and progress, change the rewards, and show that the change alters how the AI plays.
+- **Scope:** `tests/integration/test_first_demonstration.py`: one scripted run through the ten steps using only the services the panels drive (a 2400-frame scripted "first go" by a child, discovery on its own, `RewardService.set_value / set_enabled`, a hand-written "Score some points" step, 30 goes of independent training per reward profile from the same starting line, the curve, behaviour changes and experiment suggestions, persistence across a reconnect). Fixes the run uncovered: `learning.state` ignores `COUNTER` variables (frame counters made every situation unique); `rewards.goals.merge_suggestions` retires a suggested step whose variable the AI no longer thinks tracks progress even if it was "completed" (`Goal.reword` keeps the suggested flag when only the wording changes); `training.episode.EpisodeRunner(settle_frames=5)` ignores a reset seen within the engine's event window of a checkpoint restore, which used to end one go in ten at step 1. CI then showed that PySide6 6.12.0 on Python 3.11 drops one reference to `True` on every Qt signal emission and aborts the interpreter after a few thousand events (the demonstration sends tens of thousands): `pyproject.toml` keeps PySide6 below 6.12 on Python 3.11 (6.11.3 verified clean; 6.12.0 is fine on 3.12+) and `tests/ui/test_bridge.py` gains a guard that forwards 3000 events and checks the reference counts of `True`, `False` and `None` don't move. **Out of scope:** a real emulator (Phase 7), the GUI driving the same script (the panels are covered by their own tests), tuning the agent for Toy Racer.
+- **Acceptance criteria:**
+  1. Without teaching, discovery classifies lives, score and speed correctly and the frame counter as a counter, and the state encoder leaves counters out.
+  2. A reward profile is suggested and can be changed; a child's objective completes during training and is counted in the goes.
+  3. Every step publishes a decision (both exploring and best-known moves occur); the curve, behaviour changes, summary and experiment suggestions all have something to say after 30 goes.
+  4. With points rewarded and crashes free the AI drives at least twice as fast, scores more and runs out of lives sooner than with crashes punished and points worthless; the first profile earns positive reward and the second negative.
+  5. Rewards, the goal and the (forgotten then retrained) brain come back after a reconnect.
+- **Test plan:** the demonstration test (marked `slow`, about two seconds); a bridge test that forwards thousands of events and checks no reference leaks; unit tests for the three fixes (counter ignored by the encoder; stale completed suggestion retired, child's step and orphan kept, renamed variable reworded; reset within `settle_frames` of a restore ignored, later resets and resets without a restore honoured, negative value rejected).
+- **Results:** 5 / 5 passed / 0 failed / 0 excluded (761 in the full suite, on Python 3.13 with PySide6 6.12.0 and on Python 3.11 with PySide6 6.11.3). Lint, format and strict mypy clean.
+- **Completion report:** Measured on fake seed 5 with agent seed 7, over the last 10 of 30 goes: points-lover mean speed 1.20, score 331, 90 steps, reward +7.6; careful AI speed 0.39, score 247, 150 steps, reward −82. The careful AI still clips obstacles while exploring (an obstacle stops the car and costs a life), so "never crashes" is not claimed; the robust difference is speed and survival. Discovery still calls the checkpoint byte a position and the lap a flag at 2400 frames, so the suggested goal steps are switched off for the run and the child's own step is used; better progress detection is a Phase 7 refinement. Milestone 1 of DESIGN.md §17 is met on the synthetic game.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -830,5 +845,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-505 completed (PR #40).
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
-- Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47).
+- Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
