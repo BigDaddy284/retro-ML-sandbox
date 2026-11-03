@@ -47,6 +47,7 @@ class BizHawkSimulator:
         drop_after: int | None = None,
         no_game: bool = False,
         screenshot: str | None = "png",
+        short_reads: bool = False,
     ) -> None:
         if drop_after is not None and drop_after < 0:
             raise ConfigurationError("drop_after must be >= 0 or None.")
@@ -61,6 +62,7 @@ class BizHawkSimulator:
         if screenshot not in (None, "png", "garbage"):
             raise ConfigurationError("screenshot must be 'png', 'garbage' or None.")
         self._screenshot = screenshot
+        self._short_reads = short_reads
         self._server: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -246,6 +248,7 @@ class BizHawkSimulator:
             "mode": self._mode,
             "screenshot": self._screenshot_cmd,
             "input": self._input,
+            "read": self._read,
         }
 
     def _hello(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -268,6 +271,29 @@ class BizHawkSimulator:
             self._held = dict.fromkeys(PAD, False)
         self._closing = True
         return {}
+
+    def _read(self, request: dict[str, Any]) -> dict[str, Any]:
+        reads = request.get("reads")
+        if not isinstance(reads, list) or not all(isinstance(r, dict) for r in reads):
+            raise ConfigurationError("'reads' must be a list of {domain, addr, len}.")
+        out = []
+        for item in reads:
+            domain, addr, length = item.get("domain"), item.get("addr"), item.get("len")
+            if domain != DOMAIN:
+                raise ConfigurationError(f"Unknown memory domain '{domain}'.")
+            if not all(
+                isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in (addr, length)
+            ):
+                raise ConfigurationError("A read needs a whole-number address and length.")
+            if addr + length > RAM_SIZE:
+                raise ConfigurationError(
+                    f"Read of {length} bytes at {addr} is outside '{DOMAIN}' (size {RAM_SIZE})."
+                )
+            data = self._game.ram[addr : addr + length]
+            if self._short_reads:
+                data = data[:-1]
+            out.append(b64(data))
+        return {"reads": out}
 
     def _input(self, request: dict[str, Any]) -> dict[str, Any]:
         buttons = request.get("buttons")

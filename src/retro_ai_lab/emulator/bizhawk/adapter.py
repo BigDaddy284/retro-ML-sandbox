@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import binascii
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any
 
 from retro_ai_lab.core import (
@@ -37,6 +38,12 @@ from retro_ai_lab.emulator.bizhawk.protocol import (
 )
 
 DEFAULT_CALL_TIMEOUT_S = 5.0
+DEFAULT_MAX_REGION_BYTES = 256 * 1024
+"""Memory domains larger than this are not offered as regions.
+
+The memory observer reads every region whole, every frame; a multi-megabyte
+bus would swamp both the line protocol and the discovery engine.
+"""
 
 
 class BizHawkAdapter(EmulatorAdapter):
@@ -49,6 +56,7 @@ class BizHawkAdapter(EmulatorAdapter):
         port: int = DEFAULT_PORT,
         *,
         call_timeout_s: float = DEFAULT_CALL_TIMEOUT_S,
+        max_region_bytes: int = DEFAULT_MAX_REGION_BYTES,
     ) -> None:
         super().__init__()
         if not isinstance(host, str) or not host.strip():
@@ -61,9 +69,14 @@ class BizHawkAdapter(EmulatorAdapter):
             or call_timeout_s <= 0
         ):
             raise ConfigurationError("The call timeout must be a number of seconds above zero.")
+        if isinstance(max_region_bytes, bool) or not isinstance(max_region_bytes, int):
+            raise ConfigurationError("max_region_bytes must be a whole number of bytes.")
+        if max_region_bytes < 1:
+            raise ConfigurationError("max_region_bytes must be at least 1.")
         self._host = host
         self._port = port
         self._call_timeout_s = float(call_timeout_s)
+        self._max_region_bytes = max_region_bytes
         self._link: Link | None = None
         self._hello: dict[str, Any] = {}
         self._description: Description | None = None
@@ -144,7 +157,10 @@ class BizHawkAdapter(EmulatorAdapter):
             link.close()
 
     def _do_capabilities(self) -> Capabilities:
-        return self.description.capabilities(free_run=self._free_run)
+        caps = self.description.capabilities(free_run=self._free_run)
+        if caps.memory_read and not self._do_memory_regions():
+            caps = replace(caps, memory_read=False)
+        return caps
 
     def _do_game_info(self) -> GameInfo:
         return self.description.game_info
@@ -153,7 +169,15 @@ class BizHawkAdapter(EmulatorAdapter):
         return self.description.buttons
 
     def _do_memory_regions(self) -> Sequence[MemoryRegion]:
-        return self.description.regions
+        return tuple(r for r in self.description.regions if r.size <= self._max_region_bytes)
+
+    def _do_read_memory(self, region: str, offset: int, length: int) -> bytes:
+        domain = self.description.domain_names[region]
+        answer = self._call("read", reads=[{"domain": domain, "addr": offset, "len": length}])
+        reads = answer.get("reads")
+        if not isinstance(reads, list) or len(reads) != 1 or not isinstance(reads[0], str):
+            raise ProtocolError("The emulator's answer to a read was not one base64 string.")
+        return _b64decode(reads[0], "memory")
 
     def _do_capture_frame(self) -> Frame:
         answer = self._call("screenshot")
@@ -173,10 +197,7 @@ class BizHawkAdapter(EmulatorAdapter):
             raise EmulatorError("The emulator did not take a screenshot.")
         if not isinstance(image, str):
             raise ProtocolError("The emulator's screenshot was not base64 text.")
-        try:
-            data = base64.b64decode(image, validate=True)
-        except (binascii.Error, ValueError) as exc:
-            raise ProtocolError("The emulator's screenshot was not valid base64.") from exc
+        data = _b64decode(image, "screenshot")
         number = answer.get("frame")
         return decode_image(data, number=number if isinstance(number, int) else 0)
 
@@ -201,4 +222,11 @@ class BizHawkAdapter(EmulatorAdapter):
         self.mark_disconnected()
 
 
-__all__ = ["DEFAULT_CALL_TIMEOUT_S", "BizHawkAdapter"]
+def _b64decode(text: str, what: str) -> bytes:
+    try:
+        return base64.b64decode(text, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ProtocolError(f"The emulator's {what} was not valid base64.") from exc
+
+
+__all__ = ["DEFAULT_CALL_TIMEOUT_S", "DEFAULT_MAX_REGION_BYTES", "BizHawkAdapter"]

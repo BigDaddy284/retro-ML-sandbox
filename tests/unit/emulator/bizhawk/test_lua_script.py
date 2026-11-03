@@ -51,7 +51,7 @@ def test_handshake_hold_mode_and_reconnect() -> None:
             {"name": "System Bus", "size": 65536},
         ]
         assert hello["buttons"] == sorted(["Up", "Down", "Left", "Right", "A", "B", "Start"])
-        assert hello["commands"] == ["bye", "hello", "input", "mode", "ping", "screenshot"]
+        assert hello["commands"] == ["bye", "hello", "input", "mode", "ping", "read", "screenshot"]
         assert isinstance(hello["frame"], int)
         assert [b.name for b in adapter.buttons()] == [
             "a",
@@ -81,6 +81,42 @@ def test_handshake_hold_mode_and_reconnect() -> None:
         wait_until(lambda: host.frames > frames_before)
         adapter.connect(timeout_s=5.0)
         assert adapter.is_connected and host.paused
+        adapter.disconnect()
+        assert host.error is None
+
+
+def test_memory_reads_through_the_real_script() -> None:
+    with LuaScriptHost() as host:
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
+        adapter.connect(timeout_s=5.0)
+        assert adapter.capabilities().memory_read
+        assert [r.name for r in adapter.memory_regions()] == ["ram", "system_bus"]
+        assert adapter.read_memory("ram", 0, 32) == host.game.ram
+        assert adapter.read_memory("ram", 3, 5) == host.game.ram[3:8]
+        assert adapter.read_memory("ram", 0, 0) == b""
+        assert adapter.read_memory("system_bus", 0, 65536) == bytes(65536)  # chunked unpack
+        answer = adapter._call(
+            "read",
+            reads=[
+                {"domain": "RAM", "addr": 0, "len": 4},
+                {"domain": "RAM", "addr": 4, "len": 4},
+            ],
+        )
+        assert [base64.b64decode(r) for r in answer["reads"]] == [
+            host.game.ram[0:4],
+            host.game.ram[4:8],
+        ]
+        for reads, message in [
+            ([{"domain": "VRAM", "addr": 0, "len": 1}], "Unknown memory domain 'VRAM'"),
+            ([{"domain": "RAM", "addr": -1, "len": 1}], "whole-number address"),
+            ([{"domain": "RAM", "addr": 0, "len": 1.5}], "whole-number address"),
+            ([{"domain": "RAM", "addr": 30, "len": 4}], "outside 'RAM' \\(size 32\\)"),
+            ("RAM", "must be a list"),
+            ([1], "must be a list"),
+        ]:
+            with pytest.raises(EmulatorError, match=message):
+                adapter._call("read", reads=reads)
+        adapter.ping()
         adapter.disconnect()
         assert host.error is None
 

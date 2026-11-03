@@ -324,6 +324,7 @@ local pending = ""   -- a partial line received so far
 local free_run = false
 local closing = false
 local pad = {}       -- button name -> true, from the handshake
+local domain_sizes = {}  -- memory domain name -> size, from the handshake
 local prefixed = false  -- true when the core names buttons "P1 A" rather than "A"
 local held = {}      -- the full pad table joypad.set gets before every frame
 
@@ -354,11 +355,52 @@ local function domains()
     end
   end
   local out = json.array({})
+  domain_sizes = {}
   for _, name in ipairs(list) do
     local ok, size = pcall(memory.getmemorydomainsize, name)
     if ok and type(size) == "number" and size > 0 then
       out[#out + 1] = { name = name, size = size }
+      domain_sizes[name] = size
     end
+  end
+  return out
+end
+
+-- Bytes [addr, addr + len) of a memory domain as a Lua string.
+local function read_bytes(domain, addr, len)
+  local size = domain_sizes[domain]
+  if size == nil then
+    error("Unknown memory domain '" .. tostring(domain) .. "'.", 0)
+  end
+  if math.type(addr) ~= "integer" or math.type(len) ~= "integer" or addr < 0 or len < 0 then
+    error("A read needs a whole-number address and length.", 0)
+  end
+  if addr + len > size then
+    error("Read of " .. len .. " bytes at " .. addr .. " is outside '" .. domain
+      .. "' (size " .. size .. ").", 0)
+  end
+  if len == 0 then
+    return ""
+  end
+  local values = memory.read_bytes_as_array(addr, len, domain)
+  local parts = {}
+  local step = 4096  -- table.unpack is limited by the C stack
+  for i = 1, len, step do
+    parts[#parts + 1] = string.char(table.unpack(values, i, math.min(i + step - 1, len)))
+  end
+  return table.concat(parts)
+end
+
+local function serve_reads(reads)
+  if type(reads) ~= "table" then
+    error("'reads' must be a list of {domain, addr, len}.", 0)
+  end
+  local out = json.array({})
+  for i, item in ipairs(reads) do
+    if type(item) ~= "table" then
+      error("'reads' must be a list of {domain, addr, len}.", 0)
+    end
+    out[i] = base64.encode(read_bytes(item.domain, item.addr, item.len))
   end
   return out
 end
@@ -511,6 +553,10 @@ end
 
 function handlers.screenshot(req)
   return { image = take_screenshot() }
+end
+
+function handlers.read(req)
+  return { reads = serve_reads(req.reads) }
 end
 
 function handlers.bye(req)

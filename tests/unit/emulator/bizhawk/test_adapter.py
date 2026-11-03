@@ -16,6 +16,7 @@ from retro_ai_lab.core import (
     ProtocolError,
     UnsupportedCapabilityError,
 )
+from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.bizhawk import (
     PROTOCOL_VERSION,
     SCRIPT_PATH,
@@ -24,6 +25,9 @@ from retro_ai_lab.emulator.bizhawk import (
 )
 from retro_ai_lab.emulator.bizhawk.simulator import ROM_NAME, SYSTEM
 from retro_ai_lab.emulator.fake.toy_racer import BUTTONS
+from retro_ai_lab.emulator.registry import AdapterRegistry
+from retro_ai_lab.observation.memory import MemoryCapture
+from retro_ai_lab.services.connection import ConnectionService
 
 
 def wait_until(check: object, *, timeout_s: float = 5.0) -> None:
@@ -48,7 +52,9 @@ def test_handshake_disconnect_and_idempotence() -> None:
         assert info.system == SYSTEM and info.title == ROM_NAME
         assert info.rom_hash == "toyracer-0"
         # capabilities follow the simulator's commands: only screenshots so far
-        assert adapter.capabilities() == Capabilities(screen_capture=True, input=True)
+        assert adapter.capabilities() == Capabilities(
+            screen_capture=True, input=True, memory_read=True
+        )
         assert adapter.description.commands == {
             "hello",
             "ping",
@@ -56,12 +62,12 @@ def test_handshake_disconnect_and_idempotence() -> None:
             "bye",
             "screenshot",
             "input",
+            "read",
         }
         assert adapter.buttons() == tuple(Button(b.name, b.label) for b in BUTTONS)
         assert adapter.description.button_names["start"] == "Start"
         assert adapter.description.regions == (MemoryRegion("ram", 32, description="RAM"),)
-        with pytest.raises(UnsupportedCapabilityError):  # claimed only once 'read' exists
-            adapter.memory_regions()
+        assert adapter.memory_regions() == adapter.description.regions
         adapter.connect(timeout_s=2.0)  # no-op
         assert sim.connections == 1
         adapter.ping()
@@ -129,6 +135,78 @@ def test_dropped_link_is_noticed_on_the_next_call() -> None:
         with pytest.raises(EmulatorDisconnectedError):
             adapter.ping()
         assert not adapter.is_connected
+
+
+def test_read_memory_through_the_simulator() -> None:
+    with BizHawkSimulator() as sim:
+        adapter = BizHawkAdapter(port=sim.port)
+        adapter.connect(timeout_s=1.0)
+        assert adapter.capabilities().memory_read
+        assert adapter.memory_regions() == (MemoryRegion("ram", 32, description="RAM"),)
+        assert adapter.read_memory("ram", 0, 32) == sim.game.ram
+        assert adapter.read_memory("ram", 5, 3) == sim.game.ram[5:8]
+        assert adapter.read_memory("ram", 32, 0) == b""
+        assert sim.requests[-1]["reads"] == [{"domain": "RAM", "addr": 32, "len": 0}]
+        sent = len(sim.requests)
+        with pytest.raises(ConfigurationError, match="Unknown memory region"):
+            adapter.read_memory("vram", 0, 1)
+        with pytest.raises(ConfigurationError, match="outside region"):
+            adapter.read_memory("ram", 30, 4)
+        assert len(sim.requests) == sent  # the base class refused before sending
+        # the bridge's own checks, spoken to directly
+        for reads, message in [
+            ([{"domain": "VRAM", "addr": 0, "len": 1}], "Unknown memory domain 'VRAM'"),
+            ([{"domain": "RAM", "addr": -1, "len": 1}], "whole-number address"),
+            ([{"domain": "RAM", "addr": 0, "len": 1.5}], "whole-number address"),
+            ([{"domain": "RAM", "addr": 30, "len": 4}], "outside 'RAM' \\(size 32\\)"),
+            ("RAM", "must be a list"),
+        ]:
+            with pytest.raises(EmulatorError, match=message):
+                adapter._call("read", reads=reads)
+        assert adapter.is_connected
+        # the memory observer works on top of it unchanged
+        capture = MemoryCapture(_connection_for(adapter))
+        snapshot = capture.capture(frame=7)
+        assert snapshot.regions == {"ram": sim.game.ram}
+        adapter.disconnect()
+    with BizHawkSimulator(short_reads=True) as sim:
+        adapter = BizHawkAdapter(port=sim.port)
+        adapter.connect(timeout_s=1.0)
+        with pytest.raises(ConfigurationError, match="Backend returned 31 bytes"):
+            adapter.read_memory("ram", 0, 32)
+        adapter.disconnect()
+    with BizHawkSimulator() as sim:
+        adapter = BizHawkAdapter(port=sim.port, max_region_bytes=16)
+        adapter.connect(timeout_s=1.0)
+        assert not adapter.capabilities().memory_read
+        assert adapter.description.regions == (MemoryRegion("ram", 32, description="RAM"),)
+        with pytest.raises(UnsupportedCapabilityError):
+            adapter.memory_regions()
+        adapter.disconnect()
+    for bad in ({"max_region_bytes": 0}, {"max_region_bytes": True}, {"max_region_bytes": 2.5}):
+        with pytest.raises(ConfigurationError):
+            BizHawkAdapter(**bad)  # type: ignore[arg-type]
+
+
+def _connection_for(adapter: BizHawkAdapter) -> ConnectionService:
+    """A connection service already holding ``adapter`` (connected)."""
+    registry = AdapterRegistry()
+    registry.register(_Held)
+    _Held.instance = adapter
+    service = ConnectionService(registry, EventBus())
+    service.connect("held")
+    return service
+
+
+class _Held(BizHawkAdapter):
+    """Registry entry that hands out an existing adapter instead of a new one."""
+
+    name = "held"
+    display_name = "Held"
+    instance: BizHawkAdapter
+
+    def __new__(cls) -> BizHawkAdapter:  # type: ignore[misc]
+        return cls.instance
 
 
 def test_set_input_through_the_simulator() -> None:
