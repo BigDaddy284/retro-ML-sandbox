@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from retro_ai_lab.comparison import SavedAiService
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.core.paths import default_data_dir
 from retro_ai_lab.emulator.registry import AdapterRegistry, default_registry
@@ -15,7 +16,7 @@ from retro_ai_lab.services import (
     ObservationService,
     RewardService,
 )
-from retro_ai_lab.storage import BrainStore, GoalStore, KnowledgeStore, RewardStore
+from retro_ai_lab.storage import BrainStore, GoalStore, KnowledgeStore, RewardStore, SavedAiStore
 from retro_ai_lab.training import TrainingService
 from retro_ai_lab.ui.bridge import EventBridge
 
@@ -31,12 +32,14 @@ class AppContext:
     reward_store: RewardStore = field(init=False)
     goal_store: GoalStore = field(init=False)
     brain_store: BrainStore = field(init=False)
+    saved_ai_store: SavedAiStore = field(init=False)
     connection: ConnectionService = field(init=False)
     observation: ObservationService = field(init=False)
     discovery: DiscoveryService = field(init=False)
     rewards: RewardService = field(init=False)
     goals: GoalService = field(init=False)
     training: TrainingService = field(init=False)
+    saved_ais: SavedAiService = field(init=False)
     bridge: EventBridge = field(init=False)
 
     def __post_init__(self) -> None:
@@ -60,6 +63,10 @@ class AppContext:
             self.bus,
             store=self.brain_store,
             goals=self.goals,
+        )
+        self.saved_ai_store = SavedAiStore(self.data_dir / "saved_ais")
+        self.saved_ais = SavedAiService(
+            self.rewards, self.goals, self.training, self.bus, store=self.saved_ai_store
         )
         self.bridge = EventBridge(self.bus)
 

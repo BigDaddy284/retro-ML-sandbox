@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-802 – Saved AI service: save the current AI under a name, load one back, delete
+- **Current task:** T-803 – Comparison of saved AIs
 - **Last approved checkpoint:** `main` after T-709 (PR #58)
 - **Open blockers:** none for development. ADR-005 (BizHawk bridge) is now Accepted with its real-emulator verification left to T-117 on the user's Windows PC. ADR-006 (first demo game) is still *Proposed*: the user picks the game. ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -86,7 +86,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-709 | Better progress detection on a longer look (checkpoint vs position, lap vs flag) | 7 | Done | 5/5 | see PR #58 |
 | E-8 | Expansion (VBA-M, comparison, sharing, competitions) | 8 | Epic | – | – |
 | T-801 | Saved AIs: a named snapshot of rewards, goal and brain per game, on disk | 8 | Done | 5/5 | see PR #67 |
-| T-802 | Saved AI service: save the current AI under a name, load one back, delete; events | 8 | – | – | – |
+| T-802 | Saved AI service: save the current AI under a name, load one back, delete; events | 8 | Done | 5/5 | see PR #68 |
 | T-803 | Comparison: rewards, objectives, time, attempts, successes and behaviour differences between saved AIs, in child words | 8 | – | – | – |
 | T-804 | "Compare AIs" panel: save as, load, delete, comparison table, two curves on one graph | 8 | – | – | – |
 | T-805 | Sharing: export a saved AI as one file and import one safely (schema, size, same game) | 8 | – | – | – |
@@ -1111,6 +1111,23 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #67. **PR:** #67.
 - **Completion report:** A saved AI is a plain record of dictionaries, checked but not rebuilt, so a file can be listed and validated without a connected game or an action space; T-802 rebuilds the parts through the services that own them. Files carry `"kind": "saved_ai"` so the store can tell its own files from anything else in the folder, and the store refuses a second name that maps to the same file ("AI A" / "AI_A") instead of silently replacing the first. The per-game folder uses the same safe-name rule as the other stores.
 
+### T-802 – Saved AI service: save the current AI under a name, load one back, delete
+- **Status:** Done
+- **Phase:** 8
+- **Objective:** The live counterpart of T-801: while a game is connected, "save this AI as …" takes the current rewards, goal and brain into a `SavedAi`; "load …" puts a saved AI's parts back into the three services that own them, so AI A and AI B can be swapped in and trained in turn; "delete …" removes one. Everything the panel (T-804) needs, with no Qt.
+- **Scope:** `comparison/service.py`: `SavedAiService(rewards, goals, training, bus, *, store)` with `enabled` (a game is connected and all three parts exist), `game_id`, `names()`, `get(name)`, `save_as(name, notes="")` → `SavedAi`, `load(name)`, `delete(name)`, and the event `SavedAiChanged(game_id, name, reason)` ("saved", "loaded", "deleted"). `load` refuses while training is running ("Stop training first.") and refuses a saved AI for another game. The services it writes into gain a `replace` entry point that keeps their own invariants: `RewardService.replace(profile)` (same game; rebuilds the exploit detector, clears warnings, saves and announces "loaded"), `GoalService.replace(goal)` (same game; saves and announces "loaded"), `TrainingService.replace_brain(data)` (idle only; rebuilds the brain for the connected game's controls through the same path a saved brain takes on connect, saves and announces "loaded"). `AppContext` gains `saved_ai_store` and `saved_ais`. **Out of scope:** comparing (T-803), the panel (T-804), sharing files (T-805).
+- **Acceptance criteria:**
+  1. Connected to the practice console with a trained brain and edited rewards and goal, `save_as("AI A")` writes a file the store lists, holding the current profile, goal and brain; a second `save_as` with the same name replaces it; `names()` lists both AIs after saving "AI B".
+  2. After changing rewards, goal and brain, `load("AI A")` restores all three: the reward values, the goal's objectives, and the brain's episodes/steps/table; the stores on disk hold the loaded parts; one `SavedAiChanged("loaded")` plus the services' own "loaded" events are published.
+  3. `load` while training is running, `load` of a missing name, `save_as` with a bad name, and any operation while disconnected raise `ConfigurationError`/`UnsupportedCapabilityError` with a plain message and change nothing.
+  4. `delete` removes the file and announces; deleting a missing name returns False quietly.
+  5. The three `replace` methods refuse a part for another game and leave the service as it was.
+- **Expected changes:** `comparison/service.py`, `comparison/__init__.py`, `services/rewards.py`, `services/goals.py`, `training/service.py`, `ui/context.py`, tests.
+- **Test plan:** unit – service over the fake console (save/list/load/delete, replacement of all three parts, refusals, events); each `replace` method directly (same game, other game, idle rule); context owns the service. Regression – full suite.
+- **Results:** 5 new tests (4 service, 1 context) pass; full suite 902 passed, 5 skipped on Python 3.13 and 3.11; ruff and mypy strict clean.
+- **Commit:** see PR #68. **PR:** #68.
+- **Completion report:** Wiring the service showed a layering slip in T-801: the store imported the `SavedAi` model from the `comparison` package, which imports the services, which import storage, a circle. The store now works on the saved AI's dictionary like the brain store does (it checks the `kind`, `name` and `game_id` header itself), and the service does the model conversion; T-801's tests were adjusted to match. Loading puts the brain back first, because a brain that does not fit the connected controls is the likeliest refusal, and a refusal then leaves rewards and goal untouched. Each service got a `replace` that goes through its own save-and-announce path, so panels refresh through the "loaded" events they already handle.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -1182,5 +1199,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
 - Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56). T-708 completed (PR #57). T-709 completed (PR #58): Phase 7 complete.
-- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame. T-115 completed (PR #64): memory reads with a region size cap. T-116 completed (PR #65): step, speed and save states; every capability on; the episode runner drives the adapter. T-117 completed (PR #66): BizHawk in the app, socket probe for the watchdog, opt-in real-emulator test and docs/BIZHAWK.md; the real run waits for the user's Windows PC. Phase 8 broken down (T-801..T-808). T-801 completed (PR #67): saved AI record and store.
+- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame. T-115 completed (PR #64): memory reads with a region size cap. T-116 completed (PR #65): step, speed and save states; every capability on; the episode runner drives the adapter. T-117 completed (PR #66): BizHawk in the app, socket probe for the watchdog, opt-in real-emulator test and docs/BIZHAWK.md; the real run waits for the user's Windows PC. Phase 8 broken down (T-801..T-808). T-801 completed (PR #67): saved AI record and store. T-802 completed (PR #68): saved AI service (save as, load, delete) wired into the app context.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

@@ -211,6 +211,14 @@ class GoalService:
             self._announce("suggestions")
         return added
 
+    def replace(self, goal: Goal) -> None:
+        """Swap in another goal for the same game (loading a saved AI)."""
+        current = self._require()
+        if goal.game_id != current.game_id:
+            raise ConfigurationError(f"That goal is for {goal.game_id!r}, not the connected game.")
+        self._goal = goal
+        self._announce("loaded")
+
     def save(self) -> Path | None:
         if self._store is None or self._goal is None:
             return None

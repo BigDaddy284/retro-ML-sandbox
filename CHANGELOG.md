@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-802: Saved AI service: while a game is connected the current rewards, goal and brain can be saved under a name, a saved AI loaded back into all three services, or deleted; the app context owns it.
 - T-801: Saved AIs: a named snapshot of an AI's rewards, goal and brain for a game, stored as one JSON file per saved AI (the record the rest of Phase 8 loads, compares and shares).
 - T-117: BizHawk (EmuHawk) appears in the console picker; a lost EmuHawk is noticed by the link watchdog without sending anything; a failed connect names the script's location; `docs/BIZHAWK.md` and an opt-in `tests/real_emulator/test_bizhawk.py` cover verification on a real EmuHawk.
 - T-116: The BizHawk adapter advances frames, sets the speed and saves/loads states: the bridge gained `step` (with optional bundled buttons, reads and screenshot), `speed`, `save` and `load`, so every adapter capability is now available on BizHawk and the episode runner drives it unchanged; `set_free_run` switches the bridge between holding the game and letting it run.
