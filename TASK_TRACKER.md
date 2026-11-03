@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-505 – Training service
+- **Current task:** T-506 – Learning persistence
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -63,7 +63,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-502 | Action space from the emulator's buttons (singles and sensible combos) | 5 | Done | 5/5 | see PR #37 |
 | T-503 | Tabular Q-learning agent: choose, learn, explore less over time, JSON round-trip | 5 | Done | 5/5 | see PR #38 |
 | T-504 | Episode runner: act, advance, collect rewards from the services, learn, stop on reset; checkpoint restarts | 5 | Done | 7/7 | see PR #39 |
-| T-505 | Training service: independent / guided / manual modes, start / pause / stop, episode history, live or fast | 5 | Planned | – | – |
+| T-505 | Training service: independent / guided / manual modes, start / pause / stop, episode history, live or fast | 5 | Done | 11/11 | see PR #40 |
 | T-506 | Learning persistence: the AI's brain saved per game and restored on connect | 5 | Planned | – | – |
 | T-507 | Learning panel: mode picker, Start / Pause / Stop, Live / Fast, status and recent episodes | 5 | Planned | – | – |
 | E-6 | Training Interface (live/background, modes, graphs, history) | 6 | Epic | – | – |
@@ -646,8 +646,25 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 7 / 7 passed / 0 failed / 0 excluded (709 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** The first test on a game-over screen showed the learner can never leave it (Start is kept out of its menu), so the runner now presses Start after a run of unchanged steps. Episode ends come from the engine's own reset event, so the runner never has to know what "game over" looks like in a given game.
 
+### T-505 – Training service
+- **Status:** Done
+- **Phase:** 5
+- **Objective:** Run training as a service the UI and headless scripts can drive (DESIGN.md §8 training modes, §9 live and background training): the AI plays on its own (independent), plays while the child steers rewards and goals (guided), or watches the child play and learns from the demonstration (manual); the child can start, pause, resume and stop; every finished go is kept in a history.
+- **Scope:** `training.service`: `Mode` (INDEPENDENT, GUIDED, MANUAL; `label`, `description`, `ai_plays`, `allows_guidance`), `Speed` (LIVE, FAST), `Status` (IDLE, RUNNING, PAUSED), `EpisodeRecord(number, mode, result, frame)`, events `TrainingStateChanged(status, mode, reason)` and `EpisodeFinished(record)`; `TrainingService(connection, observation, discovery, bus, *, frames_per_step=4, max_steps=600, history=200, checkpoint=True, unstick_after=25, seed=None)` with `enabled`, `status`, `mode`, `speed`, `ai_in_control`, `agent`, `space`, `encoder`, `episode` (the running `EpisodeRunner`), `history`, `episodes`, `total_steps`, `last`, `summary()`; controls `set_mode`, `set_speed`, `start(mode=None)`, `pause()`, `resume()`, `stop()`, `step()` (one act-advance-learn step, beginning a new episode when needed; the GUI's timer calls this), `run_for(seconds)` (as many steps as fit, for fast training) and `train(episodes)` (headless). On connect a fresh agent is built from the pad's buttons (`ActionSpace.from_buttons`) and an encoder from the game's knowledge; on disconnect a running go is closed as "disconnected" and training stops. In AI modes, with save states, `start()` takes a checkpoint so every go restarts from where the child left the game (DESIGN.md §9 checkpoint training). In manual mode the service listens to `MemoryObserved` from the play clock and, every `frames_per_step` frames, learns from the buttons the child was holding (matched to the nearest action), with the same rewards. `EpisodeRunner` gains `begin(restore=)` and `observe_step(buttons)` for the demonstration path. **Out of scope:** saving the brain (T-506), the panel and the clock/pad hand-over (T-507), emulator speed control (the GUI steps faster in FAST; adapters' `speed_control` is left for a later task).
+- **Acceptance criteria:**
+  1. Idle and refusing to start until a connected emulator offers memory, input and frame stepping; bad settings and misuse (`pause` when idle, `resume` when running, `train` in manual mode) are refused with clear errors.
+  2. Independent and guided: `start` → RUNNING with the AI in control; `step()` acts and learns; a finished go is recorded (`EpisodeFinished`, `history`), the next begins on the next step; `pause` stops stepping and `resume` continues the same go; `stop` closes the go as "stopped", releases the buttons and goes IDLE.
+  3. With save states every go begins from the checkpoint taken at `start`; `train(3)` records three goes; `run_for` honours its budget.
+  4. Manual: the AI learns one update per `frames_per_step` frames the child plays, from the action matching the held buttons, with the rewards announced meanwhile; nothing is learned while paused; the game's reset closes the go and a new one begins; the AI is not in control.
+  5. Switching mode while running closes the current go ("mode change") and carries on in the new mode; switching speed is remembered.
+  6. Link loss mid-go records the go as "disconnected", goes IDLE without raising, and a reconnect starts with a fresh agent and an empty history.
+  7. `summary()` describes the situation in a child's words; `TrainingStateChanged` is announced for every status or mode change.
+- **Test plan:** idle and refusals; independent run with history and stop; pause and resume; checkpoint goes and `train`; manual demonstration learning; mode switch mid-go; disconnect and reconnect; `run_for` and summaries; state-change announcements.
+- **Results:** 11 / 11 passed / 0 failed / 0 excluded (720 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Two things surfaced in testing. Putting the game back to the checkpoint looks like a restart to the understanding engine, so the runner now starts listening for rewards only after the first observation of a go (otherwise every checkpoint go ended at step one). And link loss closes the go from inside the disconnect handler, so `step()` checks the go is still open before closing it again. In manual mode the service listens to the play clock's observations rather than driving frames itself, which keeps the child's inputs untouched.
+
 ### Later Phase 5 tasks
-T-502 to T-507 as listed in the summary table; each gets its own section when started.
+T-506 and T-507 as listed in the summary table; each gets its own section when started.
 
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
@@ -704,4 +721,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-502 completed (PR #37).
 - T-503 completed (PR #38).
 - T-504 completed (PR #39).
+- T-505 completed (PR #40).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

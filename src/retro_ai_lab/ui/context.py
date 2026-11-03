@@ -16,6 +16,7 @@ from retro_ai_lab.services import (
     RewardService,
 )
 from retro_ai_lab.storage import GoalStore, KnowledgeStore, RewardStore
+from retro_ai_lab.training import TrainingService
 from retro_ai_lab.ui.bridge import EventBridge
 
 
@@ -34,6 +35,7 @@ class AppContext:
     discovery: DiscoveryService = field(init=False)
     rewards: RewardService = field(init=False)
     goals: GoalService = field(init=False)
+    training: TrainingService = field(init=False)
     bridge: EventBridge = field(init=False)
 
     def __post_init__(self) -> None:
@@ -49,6 +51,7 @@ class AppContext:
         )
         self.goal_store = GoalStore(self.data_dir / "goals")
         self.goals = GoalService(self.connection, self.discovery, self.bus, store=self.goal_store)
+        self.training = TrainingService(self.connection, self.observation, self.discovery, self.bus)
         self.bridge = EventBridge(self.bus)
 
 
