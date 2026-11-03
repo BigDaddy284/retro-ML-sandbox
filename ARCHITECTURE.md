@@ -103,6 +103,7 @@ Status: **Accepted** (in force), **Proposed** (needs user sign-off before work d
 | ADR-007 | Real-emulator tests are opt-in (env vars) and backed by manual verification on the user's Windows PC | Accepted | Only honest way to cover emulator behaviour that CI can't run. |
 | ADR-008 | NumPy is a runtime dependency from Phase 2 (screen diffs) onwards | Accepted | Pixel work in pure Python is too slow at real console resolutions; PyTorch (Phase 5) depends on NumPy anyway, so this adds nothing new to the final package. |
 | ADR-009 | Phase 7 neural learners (DQN) are implemented on NumPy behind a `Learner` interface; PyTorch is a later, optional backend | Accepted | The states here are a few dozen binned numbers, which a two-layer network in NumPy trains in real time. PyTorch adds ~200 MB to the Windows build (and gigabytes with CUDA on Linux), which is a lot for a children's app and for CI; the `Learner` contract (T-701) makes a PyTorch learner a drop-in later without touching the training service, the brain store or the panels. Overturn by adding `torch` as an optional extra and registering a learner. |
+| ADR-010 | The second real adapter targets mGBA (Lua scripting with sockets, 0.10+) rather than VBA-M; Game Boy family games are reachable today through BizHawk's cores; VBA-M is revisited when its Lua engine ships in a release; see §6 | Proposed (T-808 spike, docs only; a real-machine check is part of the adapter task) | The released VBA-M (v2.2.3) has no scripting or remote-control interface: its only external route is a GDB stub (SDL port, GBA only) that reads memory but can't press buttons, step frames or take save states. VBA-M's unreleased Lua engine has no socket library, no screenshot and no range reads. mGBA's scripting API has everything the bridge protocol needs, one call each. |
 
 ## 5. BizHawk bridge protocol (ADR-005, T-110)
 
@@ -155,3 +156,34 @@ Memory reads are small (the app reads a few regions of up to a few KB per step; 
 ### 5.5 Testing without an emulator
 
 The Lua script runs in CI inside `lupa` (Lua 5.4 in-process, matching EmuHawk's NLua), with the `emu`, `memory`, `joypad`, `client`, `savestate`, `gameinfo` and `socket` globals stubbed by a small Python harness that plays the Toy Racer. A pure-Python `BizHawkSimulator` speaks the same protocol over a real TCP socket for adapter and service tests. Tests under `tests/real_emulator/` are opt-in (`RETRO_AI_LAB_EMULATOR_PATH` and `RETRO_AI_LAB_TEST_ROM`, ADR-007) and run only on a machine with EmuHawk and a ROM; `docs/BIZHAWK.md` tells the user how. Between requests the app sends nothing, so the adapter's `check_link()` probes the socket (a readable socket with no bytes is a closed peer) for the UI's link watchdog.
+
+## 6. Second emulator: VBA-M feasibility (ADR-010, T-808)
+
+DESIGN.md §7 names "VisualBoyAdvance / VBA-M" beside BizHawk as a practical emulator to target. The spike checked what each candidate offers against the adapter contract (§3) and the bridge protocol (§5), from the projects' own sources and documentation. Nothing here was run; the first task on a chosen emulator does that, as T-117 did for BizHawk.
+
+**Sources checked:** VBA-M's `README.md`, `CMakeLists.txt`, the `src/wx/lua/` sources on `master`, the `v2.2.3` tag, the SDL port's man page (`src/sdl/vbam.6`, the `--gdb` option); mGBA's scripting reference (mgba.io/docs/scripting.html) and the `mGBA-http` project as a worked example of a socket server in an mGBA script; the TASVideos VBA Lua function list (the old VBA-rr fork).
+
+### 6.1 What each emulator offers
+
+| need (adapter hook) | VBA-M v2.2.3 (released) | VBA-M `master` Lua engine (unreleased) | mGBA 0.10+ scripting |
+|---|---|---|---|
+| a way in | GDB remote stub, SDL port only, GBA only (`-G tcp[:PORT]`, port 55555) | Lua Console in the wx/Qt ports; `luaL_openlibs` only, **no LuaSocket** | Tools → Scripting; Lua with a `socket` API (`socket.bind`, `listen`, `accept`, `receive`, `send`, `received` callback) |
+| game info | none | `emu.romname()`, `emu.getsystem()` | `getGameTitle()`, `getGameCode()`, `checksum(C.CHECKSUM.CRC32)`, `platform()` |
+| memory_read | GDB `m addr,len` (any bus address) | `memory.readbyte/word/dword` only: **one call per byte**, no range read; bus addresses | `readRange(address, length)`; `emu.memory` domains with `base`, `size`, `name` (GBA: wram, iwram, vram, oam, io…; GB: wram, hram, vram…) |
+| input | none | `joypad.set(port, table)` | `setKeys(mask)`, `addKey`, `clearKeys`; `keysRead` callback |
+| frame_advance | none (instruction step only) | `emu.frameadvance()` (a coroutine yield; the host resumes the script once per frame), `emu.pause()`/`unpause()`, `registerbefore/after` | `runFrame()` ("run until the next frame"), `frame` callback; pausing from a script is **not documented** → verify |
+| screen_capture | none | **none** (`gui.text/box/line/pixel` draw only) | `screenshot(filename)` |
+| speed_control | none | `turbo` is a frontend global, not exposed | not documented → verify |
+| save_states | none | `savestate.create/save/load` | `saveStateSlot/loadStateSlot`, `saveStateBuffer/loadStateBuffer` |
+| systems | GBA (GB has no stub) | GB, GBC, GBA | GB, GBC, GBA |
+
+### 6.2 Findings
+
+1. **A VBA-M adapter is not feasible on the released VBA-M.** Every release up to v2.2.3 has no scripting and no remote-control interface. The GDB stub reads memory, but an adapter needs to press buttons, step frames and take save states, none of which the GDB protocol can do; it would give `memory_read` alone, which the training loop can't use.
+2. **VBA-M's Lua engine on `master` gets most of the way, with three gaps.** It appeared after v2.2.3 and is not in any release or changelog yet. It can read memory, hold buttons and step frames (its `emu.frameadvance()` is exactly the hold-mode model of §5.3) and has save states. It cannot take a screenshot, reads memory one byte per call (a 256-byte region is 256 Lua calls per step, fine for the practice-sized reads but slow for scans), and has **no socket library**, so the bridge would need another transport: Lua's standard `io` library is open, so a file- or named-pipe-based exchange polled once per frame would work on Windows but at frame-rate latency per request and with the bundled `step` command doing all the work. Feasible, with `screen_capture` off, once a release ships it.
+3. **mGBA matches the bridge protocol one call to one.** Its scripting API (0.10 and later) has sockets, a game title and checksum for the game id, range reads with named domains and sizes (the `hello` domain list), key setting, `runFrame()`, screenshots, and save states to slots or buffers. The `mGBA-http` project runs a socket server inside an mGBA script with these calls, so the route is known to work. The adapter would reuse the §5 protocol unchanged and the `BizHawkSimulator`/`lupa` test approach; the Lua script is a second file with the same commands. To verify on a real machine: whether `runFrame()` steps a paused emulator (hold mode) or whether the script must drive from the `frame` callback (free-run mode), and whether speed can be set from a script.
+4. **Game Boy family games are already covered.** BizHawk runs GB, GBC and GBA through its Gambatte and mGBA cores, so the child can play these games with the existing adapter today. A second adapter adds a second emulator, not new games.
+
+### 6.3 Decision (ADR-010, Proposed)
+
+The second real adapter is mGBA, built as `emulator/mgba/` with a shipped `retro_ai_lab.lua` that speaks the §5 protocol, after the BizHawk adapter has been verified on the user's PC (T-117's real run). VBA-M stays on the list: the objective in DESIGN.md §7 is kept, and the adapter is revisited when a VBA-M release ships the Lua engine, with the limitation (no screen capture, a slower transport) recorded then. Overturn by a VBA-M release that adds sockets or a screenshot call, or by the user preferring VBA-M for a reason the spike didn't see.

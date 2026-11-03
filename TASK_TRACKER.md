@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-808 – VBA-M feasibility spike
+- **Current task:** T-809 – Research dialog UI
 - **Last approved checkpoint:** `main` after T-709 (PR #58)
 - **Open blockers:** none for development. ADR-005 (BizHawk bridge) is now Accepted with its real-emulator verification left to T-117 on the user's Windows PC. ADR-006 (first demo game) is still *Proposed*: the user picks the game. ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -92,8 +92,9 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-805 | Sharing: export a saved AI as one file and import one safely (schema, size, same game) | 8 | Done | 5/5 | see PR #71 |
 | T-806 | Competitions: a challenge (game, start state, fixed settings, goes) and a scoreboard of saved AIs run under it | 8 | Done | 4/4 | see PR #72 |
 | T-807 | Research mode (service): bounded step log with CSV export, the current situation's values, learning settings read and applied | 8 | Done | 9/9 | see PR #73 |
-| T-808 | Second emulator adapter spike: VBA-M feasibility and ADR (docs only) | 8 | – | – | – |
+| T-808 | Second emulator adapter spike: VBA-M feasibility and ADR (docs only) | 8 | Done | n/a | see PR #74 |
 | T-809 | Research dialog UI: settings editing, situation table, CSV export | 8 | – | – | – |
+| T-810 | mGBA adapter: Lua socket script speaking the §5 protocol, adapter, simulator tests (ADR-010) | 8 | – | – | – |
 
 The **first working demonstration** (DESIGN.md §17) is reached at the end of E-5 plus the minimum of E-6, first on the Fake Emulator and then on a real game via BizHawk.
 
@@ -1212,6 +1213,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #73. **PR:** #73.
 - **Completion report:** The step log is fed by `TrainingStepped`, which now also says the step number, the reward collected and the situation the move was chosen in (the runner keeps `last_state`/`last_reward`); the older three-field form of the event still constructs, so nothing else changed. The go number is "the go in progress" at the time of the step, which is why the log empties when the brain starts from scratch or is replaced: those restart the count. `values` and `configure` were added to the `Learner` protocol rather than reached through `getattr`, so the type checker guarantees every learner (table, network, skills, the greedy race player, the test stub) answers them. Applying new settings restarts exploration from the new starting rate on purpose: a researcher who sets epsilon wants that rate now, not after the old decay runs out; the setting is saved with the brain so it survives a reload. `current_state()` refreshes the encoder first, as the runner does at the start of a go, so new discoveries show up without a go in between; it answers None once the game is disconnected even though the brain is kept for the reconnect.
 
+### T-808 – Spike: VBA-M feasibility for the second emulator adapter
+- **Status:** Done
+- **Phase:** 8
+- **Objective:** DESIGN.md §7 names VBA-M beside BizHawk. Find out, from the projects' own sources, whether a VBA-M adapter can meet the adapter contract (ARCHITECTURE §3) and the bridge protocol (§5), and decide what the second real adapter should be.
+- **Scope:** Documentation only: ARCHITECTURE.md §6 (what VBA-M v2.2.3, VBA-M's unreleased Lua engine and mGBA 0.10+ scripting each offer per adapter hook, findings, decision) and ADR-010. Sources: VBA-M's README, CMakeLists, `src/wx/lua/` on `master`, the `v2.2.3` tag, the SDL man page's `--gdb` option; mGBA's scripting reference; the `mGBA-http` project; TASVideos' VBA Lua list. **Out of scope:** any code; running an emulator (none available here).
+- **Acceptance criteria:**
+  1. ARCHITECTURE §6 gives, per adapter hook, what each candidate offers and names the gaps with the API behind each claim.
+  2. ADR-010 records the decision with the DESIGN.md §7 objective preserved and the conditions for revisiting it.
+  3. The follow-up task is in the summary table.
+- **Expected changes:** `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** n/a (documentation). Regression – full suite unchanged.
+- **Results:** n/a. Full suite unchanged (941 passed, 5 skipped).
+- **Commit:** see PR #74. **PR:** #74.
+- **Completion report:** The released VBA-M has no scripting or remote-control route at all; its GDB stub reads memory but can't press buttons, step frames or save states, so an adapter on it is not feasible and the requirement can't be met as written today. VBA-M's `master` has gained a Lua engine since v2.2.3 (frame-advance as a coroutine yield, joypad, byte reads, save states) but it ships no socket library, no screenshot and no range read, so an adapter would need a file or pipe transport and would run without screen capture; it is feasible once released and is kept as a revisit, not dropped. mGBA's scripting API has every call the bridge protocol needs, including sockets, so ADR-010 proposes mGBA as the second adapter (T-810), reusing the §5 protocol and the simulator/lupa tests. Game Boy family games are playable today through BizHawk's cores, so no game is blocked by this.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -1283,5 +1299,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
 - Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56). T-708 completed (PR #57). T-709 completed (PR #58): Phase 7 complete.
-- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame. T-115 completed (PR #64): memory reads with a region size cap. T-116 completed (PR #65): step, speed and save states; every capability on; the episode runner drives the adapter. T-117 completed (PR #66): BizHawk in the app, socket probe for the watchdog, opt-in real-emulator test and docs/BIZHAWK.md; the real run waits for the user's Windows PC. Phase 8 broken down (T-801..T-808). T-801 completed (PR #67): saved AI record and store. T-802 completed (PR #68): saved AI service (save as, load, delete) wired into the app context. T-803 completed (PR #69): scorecards, leaders, behaviour differences and the comparison in words. T-804 completed (PR #70): the Compare AIs panel with table, words and shared-scale graph. T-805 completed (PR #71): share a saved AI as a file and import one safely. T-806 completed (PR #72): saved AIs race under one set of conditions; scoreboard in the panel. T-807 completed (PR #73): research mode service layer (step log with CSV, situation values, learning settings); the dialog is T-809.
+- T-110 completed (PR #59, BizHawk protocol spike, docs only): ADR-005 Accepted; real-emulator verification is T-117. T-111 completed (PR #60): adapter connect/handshake, shipped Lua script, simulator, lupa harness. T-112 completed (PR #61): description from hello, capabilities derived from the script's commands. T-113 completed (PR #62): screenshots as frames. T-114 completed (PR #63): held input via joypad.set every frame. T-115 completed (PR #64): memory reads with a region size cap. T-116 completed (PR #65): step, speed and save states; every capability on; the episode runner drives the adapter. T-117 completed (PR #66): BizHawk in the app, socket probe for the watchdog, opt-in real-emulator test and docs/BIZHAWK.md; the real run waits for the user's Windows PC. Phase 8 broken down (T-801..T-808). T-801 completed (PR #67): saved AI record and store. T-802 completed (PR #68): saved AI service (save as, load, delete) wired into the app context. T-803 completed (PR #69): scorecards, leaders, behaviour differences and the comparison in words. T-804 completed (PR #70): the Compare AIs panel with table, words and shared-scale graph. T-805 completed (PR #71): share a saved AI as a file and import one safely. T-806 completed (PR #72): saved AIs race under one set of conditions; scoreboard in the panel. T-807 completed (PR #73): research mode service layer (step log with CSV, situation values, learning settings); the dialog is T-809. T-808 completed (PR #74, docs only): VBA-M not feasible on the released emulator; ADR-010 proposes mGBA as the second adapter (T-810).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
