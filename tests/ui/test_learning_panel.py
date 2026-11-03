@@ -221,7 +221,7 @@ def test_how_the_ai_learns_picker(panel: LearningPanel, context: AppContext) -> 
     combo = panel.findChild(object, "algorithm_combo")
     assert combo is not None and not combo.isEnabled()  # type: ignore[attr-defined]
     labels = [combo.itemText(i) for i in range(combo.count())]  # type: ignore[attr-defined]
-    assert labels == ["Choose for me", "Simple table", "Neural network"]
+    assert labels == ["Choose for me", "Simple table", "Neural network", "Skills per goal step"]
     assert panel.algorithm == AUTO
     connect(context)
     t = context.training

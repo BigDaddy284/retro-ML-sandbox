@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-708 – Hierarchical learning (Phase 7)
+- **Current task:** T-709 – Better progress detection (Phase 7)
 - **Last approved checkpoint:** `main` after T-507 (PRs #43–#49 merging in order as CI passes; T-701 stacked on them)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only the BizHawk work (T-110 onward). ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -82,7 +82,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-705 | DQN learner: network, target network and replay; learns a synthetic task; saves and reloads | 7 | Done | 6/6 | see PR #54 |
 | T-706 | Automatic algorithm choice (table while the game is small, network when it grows) and a "How the AI learns" control | 7 | Done | 7/7 | see PR #55 |
 | T-707 | Learning from demonstrations: the child's play is kept as experience the AI learns from | 7 | Done | 6/6 | see PR #56 |
-| T-708 | Hierarchical learning: a skill per goal step; the active step picks the skill | 7 | Ready | – | – |
+| T-708 | Hierarchical learning: a skill per goal step; the active step picks the skill | 7 | Done | 6/6 | see PR #57 |
 | T-709 | Better progress detection on a longer look (checkpoint vs position, lap vs flag) | 7 | Ready | – | – |
 | E-8 | Expansion (VBA-M, comparison, sharing, competitions) | 8 | Epic | – | – |
 
@@ -935,6 +935,24 @@ DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical l
 - **Commit:** see PR. **PR:** #56.
 - **Completion report:** As planned. `Demonstrations` wraps a `ReplayBuffer` so the record is bounded and round-trips like the DQN's memory; `clear()` starts the count again. The runner's `on_learned` hook reports every learned step with its source and the service keeps the child's ones; the AI's own steps are never demonstrations. The Learning panel now also refreshes its status on the child's steps (`TrainingStepped` in manual mode), since those do not come through its own tick. Known limitation: rehearsal feeds the moves to whichever learner is current at its normal learning rate; nothing weights them above the AI's own experience.
 
+### T-708 – Hierarchical learning: a skill per goal step
+- **Status:** Done
+- **Phase:** 7
+- **Objective:** DESIGN.md §6.2: the AI learns smaller skills that contribute to larger objectives. Each step of the goal gets its own skill (a learner of its own); the step the AI is working on picks the skill, so "get to the checkpoint" and "finish the lap" no longer fight over one table.
+- **Scope:** `learning.skills`: `SKILLS = "skills"`, `DEFAULT_SKILL = "*"` (used when there is no goal step), `SkillsLearner(space, settings=None, *, seed=None, inner=Q_TABLE)` registered as `"skills"`: one inner learner per skill id, created on demand through the registry (`inner` names the kind), `set_skill(id | None) -> Learner`, `skill`, `skills`, `skill_learner(id)`, `adopt(id, learner)`; the `Learner` contract routes `choose` / `greedy` / `learn` / `last_decision` / `epsilon` to the active skill, `updates` and `known` add up, `end_episode` decays every skill, `policy()` merges every skill's policy under a `skill=<n>` part (so insights still parse the keys), `stats()` names the skills, `reset()` drops them; JSON round trip. `describe_algorithm("skills")` = "Skills per goal step". `promotion.convert`: any learner → skills wraps it as the default skill; skills → anything converts its default skill (the other skills are dropped, said in the note). `TrainingService(goals=None)`: with a goal service, the AI's step and the child's observed step first set the active skill to the goal's next step (`None` without a goal or when the goal is done); `AppContext` passes its goal service. **Out of scope:** skills choosing sub-goals themselves, sharing experience between skills, a UI for skills beyond the picker label.
+- **Acceptance criteria:**
+  1. `SkillsLearner` satisfies `Learner`, is registered and labelled, creates a skill per id on demand (the default when none is set), and routes choosing and learning to the active skill while `updates` / `known` add up and `end_episode` decays every skill.
+  2. Two goal steps that want opposite moves in the same situation: the skills learner learns both (greedy differs by skill) where one table learns neither reliably.
+  3. `policy()` keys parse back through `State.from_key` and tell skills apart; `stats()` names the skills; `reset()` leaves only a fresh default.
+  4. A skills learner round-trips through JSON (every skill, the active one, the inner kind, counts); wrong controls, wrong algorithm and a newer schema are refused; the inner kind may be `dqn`.
+  5. `convert` wraps any learner into skills (its policy becomes the default skill's) and unwraps the default skill back; `set_algorithm("skills")` on the service works the same way.
+  6. With a goal service, the training service switches the active skill to the goal's next step as steps complete, in AI modes and in manual mode, and the saved brain restores every skill.
+- **Expected changes:** `learning/skills.py` (new), `learning/learner.py`, `learning/promotion.py`, `learning/__init__.py`, `training/service.py`, `ui/context.py`, `tests/unit/learning/test_skills.py` (new), `tests/unit/learning/test_promotion.py`, `tests/unit/training/test_service.py`.
+- **Test plan:** unit – conformance and routing; opposite-moves learning vs one table; policy keys, stats, reset; JSON round trip and refusals; convert both ways; service with a goal in AI and manual modes, save and restore. Regression – full suite.
+- **Results:** 6 / 6 passed / 0 failed / 0 excluded (5 skills tests, 1 service test; 814 in the full suite, on Python 3.13 and 3.11). Lint, format and strict mypy clean.
+- **Commit:** see PR. **PR:** #57.
+- **Completion report:** As planned. Skills are saved as an ordered list (the brain store sorts JSON keys, and the order numbers the skills in `policy()`, which the behaviour-change insights compare across goes). `stats()` adds up over every skill. The service test showed the goal service suggesting a new step once the two hand-made ones were done, so the AI keeps working on whatever the goal says is next; without a goal service the general skill plays. Known limitation: a skill starts from nothing when its step is first reached; sharing what the general skill knows with a new skill is a possible follow-up.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -994,5 +1012,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
-- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56).
+- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53). T-705 completed (PR #54). T-706 completed (PR #55). T-707 completed (PR #56). T-708 completed (PR #57).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

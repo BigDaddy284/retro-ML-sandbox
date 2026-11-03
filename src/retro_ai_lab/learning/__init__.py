@@ -20,6 +20,7 @@ from retro_ai_lab.learning.network import Network
 from retro_ai_lab.learning.promotion import convert, demote, promote
 from retro_ai_lab.learning.qlearning import QLearningAgent, QTable, Settings
 from retro_ai_lab.learning.replay import ReplayBuffer, Transition
+from retro_ai_lab.learning.skills import SKILLS, SkillsLearner
 from retro_ai_lab.learning.state import DEFAULT_BINS, State, StateEncoder, bucket
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "DEFAULT_BINS",
     "DQN",
     "Q_TABLE",
+    "SKILLS",
     "Action",
     "ActionSpace",
     "DQNConfig",
@@ -40,6 +42,7 @@ __all__ = [
     "QTable",
     "ReplayBuffer",
     "Settings",
+    "SkillsLearner",
     "State",
     "StateEncoder",
     "Transition",

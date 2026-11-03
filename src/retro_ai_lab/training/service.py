@@ -31,6 +31,7 @@ from retro_ai_lab.learning.learner import (
 from retro_ai_lab.learning.promotion import convert, promote
 from retro_ai_lab.learning.qlearning import QLearningAgent, Settings
 from retro_ai_lab.learning.replay import Transition
+from retro_ai_lab.learning.skills import SkillsLearner
 from retro_ai_lab.learning.state import StateEncoder
 from retro_ai_lab.rewards.exploitation import ExploitWarning
 from retro_ai_lab.rewards.goals import Goal
@@ -42,6 +43,7 @@ from retro_ai_lab.services.connection import (
 )
 from retro_ai_lab.services.discovery import DiscoveryService, game_id_for
 from retro_ai_lab.services.experiments import ExperimentHarness
+from retro_ai_lab.services.goals import GoalService
 from retro_ai_lab.services.observer import MemoryObserved, ObservationService
 from retro_ai_lab.storage.brains import BrainStore
 from retro_ai_lab.training.brain import Brain
@@ -106,6 +108,7 @@ class TrainingService:
         store: BrainStore | None = None,
         algorithm: str = AUTO,
         promote_at: int = DEFAULT_PROMOTE_AT,
+        goals: GoalService | None = None,
     ) -> None:
         _check_algorithm(algorithm)
         if promote_at < 1:
@@ -130,6 +133,7 @@ class TrainingService:
         self._promote_at = promote_at
         self._last_change = ""
         self._demonstrations = Demonstrations(seed=seed)
+        self._goals = goals
         self._store = store
         self._history: deque[EpisodeRecord] = deque(maxlen=history)
         self._policies: deque[tuple[int, dict[str, int]]] = deque(maxlen=DEFAULT_WINDOW + 1)
@@ -438,6 +442,7 @@ class TrainingService:
         runner = self._ensure_runner()
         if runner is None:
             return False
+        self._pick_skill()
         before = runner.steps
         went_on = runner.step()
         if runner.steps > before:
@@ -568,6 +573,7 @@ class TrainingService:
             return
         held = self._observation.inputs.held_at(frame)
         frames, self._manual_frames = self._manual_frames, 0
+        self._pick_skill()
         went_on = runner.observe_step(held, frames)
         self._total_steps += 1
         self._bus.publish(TrainingStepped(frame, runner.last_buttons, None))
@@ -575,6 +581,20 @@ class TrainingService:
             self._record(runner.finish())
 
     # ------------------------------------------------------------ helpers
+
+    def active_skill(self) -> str | None:
+        """The goal step the AI is working on (its id), or None without one."""
+        if self._goals is None or not self._goals.enabled:
+            return None
+        goal = self._goals.goal
+        if goal is None or goal.is_complete:
+            return None
+        nxt = goal.next()
+        return nxt.id if nxt is not None else None
+
+    def _pick_skill(self) -> None:
+        if isinstance(self._agent, SkillsLearner):
+            self._agent.set_skill(self.active_skill())
 
     def _on_learned(self, transition: Transition) -> None:
         if transition.source == CHILD:

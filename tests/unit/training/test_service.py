@@ -669,3 +669,69 @@ def test_manual_mode_keeps_the_childs_moves_as_demonstrations(lab: Lab) -> None:
     store.save(data)
     lab.connect()
     assert t.fresh_start == "" and t.demonstrations.count == 0
+
+
+# ------------------------------------------------------------ T-708: skills per goal step
+
+
+def test_the_goal_step_picks_the_skill(lab: Lab, tmp_path: Path) -> None:
+    from retro_ai_lab.learning import SKILLS, SkillsLearner
+    from retro_ai_lab.learning.skills import DEFAULT_SKILL
+
+    t = TrainingService(
+        lab.connection,
+        lab.observation,
+        lab.discovery,
+        lab.bus,
+        frames_per_step=4,
+        max_steps=20,
+        settings=Settings(epsilon=0.5),
+        seed=1,
+        store=BrainStore(tmp_path / "skills"),
+        algorithm=SKILLS,
+        goals=lab.goals,
+    )
+    lab.connect()
+    agent = t.agent
+    assert isinstance(agent, SkillsLearner) and agent.skill == DEFAULT_SKILL
+    goals = lab.goals
+    goal = goals.goal
+    assert goal is not None
+    for o in list(goal):
+        goals.remove_objective(o.id)
+    first = goals.add_objective("Get going")
+    second = goals.add_objective("Keep going", depends_on=[first.id])
+    t.train(1)
+    assert agent.skill == first.id and agent.skills == (DEFAULT_SKILL, first.id)
+    assert agent.skill_learner(first.id).updates == 20
+    goals.mark_complete(first.id)
+    t.train(1)
+    assert agent.skill == second.id and agent.skill_learner(second.id).updates == 20
+    goals.mark_complete(second.id)
+    t.start(Mode.MANUAL)
+    lab.play(["up"], 4)
+    # Both steps done: the AI works on whatever the goal suggests next (or the general skill).
+    assert agent.skill == (t.active_skill() or DEFAULT_SKILL)
+    assert agent.skill not in (first.id, second.id)
+    assert agent.skill_learner(agent.skill).updates == 1
+    t.stop()
+    goals.mark_not_complete(second.id)
+    t.start(Mode.MANUAL)
+    lab.play(["up"], 4)
+    assert agent.skill == second.id and agent.skill_learner(second.id).updates == 21
+    t.stop()
+    lab.connection.disconnect()
+    lab.connect()
+    again = t.agent
+    assert isinstance(again, SkillsLearner) and again is not agent
+    assert again.skills == agent.skills and again.updates == agent.updates
+    # Changing to skills by hand wraps the brain that was there.
+    plain = lab.training
+    plain.train(1)
+    assert plain.agent is not None
+    note = plain.set_algorithm(SKILLS)
+    assert isinstance(plain.agent, SkillsLearner) and "skills per goal step" in note
+    assert plain.agent.episodes == 1
+    plain.train(1)  # no goal service here: the general skill plays
+    assert plain.agent.skill == DEFAULT_SKILL and plain.agent.episodes == 2
+    assert plain.active_skill() is None
