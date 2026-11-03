@@ -295,6 +295,38 @@ def test_screenshot_over_the_socket_through_the_real_script(
         assert host.error is None
 
 
+def test_hello_leaves_out_a_domain_the_emulator_cannot_read() -> None:
+    """T-832: the user's EmuHawk threw a .NET exception on one domain's first read."""
+    with LuaScriptHost() as host:
+        host.unreadable.add(b"WRAM")
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
+        adapter.connect(timeout_s=5.0)
+        assert [d["name"] for d in adapter.hello["domains"]] == [
+            "RAM",
+            "System Bus",
+            "PRG ROM",
+            "CHR VROM",
+        ]
+        assert [r.name for r in adapter.memory_regions()] == ["ram"]
+        assert any(b"not offering memory domain 'WRAM'" in line for line in host.log)
+        assert adapter.read_memory("ram", 0, 32) == host.game.ram
+        adapter.disconnect()
+        assert host.error is None
+
+
+def test_a_read_that_fails_names_the_region() -> None:
+    """T-832: a .NET exception on a read reaches the app with the region in it."""
+    with LuaScriptHost() as host:
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
+        adapter.connect(timeout_s=5.0)
+        host.unreadable.add(b"RAM")  # breaks after the handshake probed it
+        with pytest.raises(EmulatorError, match=r"could not read 8 bytes at 4 of 'RAM': .*peek"):
+            adapter.read_memory("ram", 4, 8)
+        assert adapter.is_connected  # a refused read is not a lost link
+        adapter.disconnect()
+        assert host.error is None
+
+
 def test_hold_mode_step_unpauses_runs_and_pauses_again() -> None:
     """T-831: a paused EmuHawk never wakes emu.frameadvance(), so a step unpauses first.
 

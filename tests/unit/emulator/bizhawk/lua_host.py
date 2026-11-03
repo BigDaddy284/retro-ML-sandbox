@@ -134,6 +134,7 @@ class LuaScriptHost:
         self.exit_hooks = 0
         self.screenshots: list[bytes] = []
         self.write_screenshots = True
+        self.unreadable: set[bytes] = set()  # domains whose peek raises (T-832)
         self.states: dict[bytes, bytes] = {}
         self._bridge: dict[str, Any] = {
             "bind": self._bind,
@@ -367,6 +368,8 @@ class LuaScriptHost:
 
     def _readbytes(self, addr: int, length: int, domain: bytes) -> Any:
         self._record("read")
+        if domain in self.unreadable:
+            raise RuntimeError(f"A .NET exception occured in user-code: cannot peek {domain!r}")
         ram = self._game.ram
         data = ram[addr : addr + length] if domain == b"RAM" else bytes(length)
         return self._runtime.table_from(list(data))
