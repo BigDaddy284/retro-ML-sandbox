@@ -296,3 +296,36 @@ def test_a_cycling_value_no_longer_counts_toward_a_reset() -> None:
     again.observe(snap(0, 0, 3, 0))
     again.observe(snap(1, 2, 1, 5))
     assert all(e.kind is not EventKind.RESET for e in again.observe(snap(2, 0, 3, 5)))
+
+
+def test_a_reset_needs_most_of_the_moved_values_to_go_home() -> None:
+    """T-846: a few values back at their start while many others are not is no restart."""
+    from retro_ai_lab.understanding.events import RESET_SHARE
+
+    assert RESET_SHARE == 0.5
+    layout = {i: VariableKind.PROGRESS for i in range(5)}
+    layout[5] = VariableKind.LIVES
+    d = EventDetector(knowledge_for(layout))
+    d.observe(snap(0, 0, 0, 0, 0, 0, 3))
+    d.observe(snap(1, 1, 2, 3, 4, 5, 1))  # all six moved
+    assert d.moved == 6
+    # Two go home (one of them sure, and a drop): 2 of 6 is not the game starting over.
+    events = d.observe(snap(2, 0, 2, 3, 4, 5, 3))
+    assert all(e.kind is not EventKind.RESET for e in events)
+    # Three of six: that is half, and a restart.
+    d.observe(snap(3, 1, 2, 3, 4, 5, 1))
+    events = d.observe(snap(4, 0, 0, 3, 4, 5, 3))
+    assert [e.kind for e in events if e.kind is EventKind.RESET]
+    assert events[-1].variables == ("v1", "v2", "v6")
+
+
+def test_values_that_never_moved_do_not_count_against_a_reset() -> None:
+    """T-846: a value that sat still all along is not one the restart has to bring home."""
+    kinds = {0: VariableKind.PROGRESS, 1: VariableKind.LIVES, 2: VariableKind.SCORE}
+    d = EventDetector(knowledge_for(kinds))
+    d.observe(snap(0, 0, 3, 9))
+    d.observe(snap(1, 2, 1, 9))  # the score never moves
+    assert d.moved == 2
+    assert any(e.kind is EventKind.RESET for e in d.observe(snap(2, 0, 3, 9)))
+    d.reset()
+    assert d.moved == 0
