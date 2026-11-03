@@ -8,11 +8,14 @@ from pytestqt.qtbot import QtBot
 from retro_ai_lab.core import Capabilities
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import BUTTONS, LAYOUT
-from retro_ai_lab.services import DiscoveryService, ObservationService
+from retro_ai_lab.services import DiscoveryService, DiscoveryUpdated, ObservationService
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.discovery_panel import IDLE_TEXT, NO_SELECTION, DiscoveryPanel, badge
 from retro_ai_lab.ui.main_window import MainWindow
 from retro_ai_lab.understanding import Confidence, Evidence, VariableKind
+from retro_ai_lab.understanding.events import EventKind, GameEvent
+
+SURE = [Evidence("test", "", 6.0)]
 
 BY_NAME = {b.name: b for b in BUTTONS}
 
@@ -62,6 +65,7 @@ def test_discoveries_appear_with_badges_and_evidence(
     context.connection.connect("fake", seed=2)
     assert "Toy Racer" in panel.stage_text
     drive(context, 180)
+    panel.refresher.flush()  # the review's update may still be inside the refresh window
     ids = panel.variable_ids()
     assert len(ids) >= 5
     k = panel.knowledge
@@ -128,6 +132,7 @@ def test_rename_box_and_buttons_drive_the_same_actions(
 def test_events_and_relationships_are_listed(panel: DiscoveryPanel, context: AppContext) -> None:
     context.connection.connect("fake", seed=2)
     drive(context, 700)
+    panel.refresher.flush()
     assert panel.event_texts(), "events should be listed once the AI believes in a few values"
     assert all(t.startswith("Frame ") for t in panel.event_texts())
     assert len(panel.event_texts()) <= 8
@@ -195,3 +200,36 @@ def test_panel_saves_verdicts_and_shares_files(
     assert "Can't write" in panel.note_text
     ctx.connection.disconnect()
     assert not panel.findChild(object, "import_button").isEnabled()  # type: ignore[union-attr]
+
+
+def test_many_updates_rebuild_the_list_once(
+    panel: DiscoveryPanel, context: AppContext, qtbot: QtBot
+) -> None:
+    """T-843: training publishes an update on most steps; the list follows a few times a second."""
+    context.connection.connect("fake", seed=3)
+    k = context.discovery.knowledge
+    assert k is not None
+    rebuilds: list[int] = []
+    original = panel.refresh
+
+    def counted(*, keep: str | None = None) -> None:
+        rebuilds.append(1)
+        original(keep=keep)
+
+    panel.refresh = counted  # type: ignore[method-assign]
+    v = k.propose("ram", 0, kind=VariableKind.SCORE, name="Score", evidence=SURE)
+    context.bus.publish(DiscoveryUpdated((v,), (), (), ()))
+    assert rebuilds == [1] and v.id in panel.variable_ids()  # the first shows at once
+    for i in range(1, 11):
+        w = k.propose("ram", i, kind=VariableKind.PROGRESS, name=f"P{i}", evidence=SURE)
+        context.bus.publish(DiscoveryUpdated((w,), (), (), ()))
+    assert rebuilds == [1] and panel.refresher.pending
+    qtbot.waitUntil(lambda: not panel.refresher.pending, timeout=2000)
+    assert rebuilds == [1, 1] and len(panel.variable_ids()) == 11
+    # Events alone refresh the lists under the variables, not the variables.
+    event = GameEvent(EventKind.PROGRESS, 7, "v2", "P1 went up to 1.", 0, 1)
+    context.discovery.events.extend((event,))
+    panel.refresher.flush()
+    context.bus.publish(DiscoveryUpdated((), (), (event,), ()))
+    qtbot.waitUntil(lambda: not panel.refresher.pending, timeout=2000)
+    assert rebuilds == [1, 1] and any("P1 went up" in t for t in panel.event_texts())

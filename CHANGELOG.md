@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Changed: the Discovery and Rewards panels redraw their lists a few times a second at most while the AI trains, instead of on every step, and the Discovery list is rebuilt only when a value was added or changed; a change you make yourself still shows at once (T-843).
 - Added: when the game ignores the AI (a title-screen demo, a game-over screen) it works out for itself which button gets the game going, by pressing each one in turn and checking whether its own buttons matter afterwards; the answer is remembered with the game's knowledge and pressed whenever the game stops listening, and later goes start inside the game. Nothing is assumed per game: the old default of pressing Start when stuck is gone (T-844).
 - Changed: the suggested rewards and objectives are rebuilt only when a relationship the suggestions read actually changes, not on every step the finder reports one, and merging a goal with many objectives no longer slows down with their number (T-842).
 - Changed: with a lot of known values (1,600 on the user's Super Mario Bros.) the app did more work per step than the emulator; the detector and the long look now keep their list of watched values until the knowledge changes, and a value's confidence is worked out once instead of on every read (T-841).

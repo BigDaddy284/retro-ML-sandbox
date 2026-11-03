@@ -35,6 +35,7 @@ from retro_ai_lab.services import (
     RewardEarned,
     RewardProfileChanged,
 )
+from retro_ai_lab.ui.coalesce import Coalescer
 from retro_ai_lab.ui.context import AppContext
 
 IDLE_TEXT = "Connect to a game to choose what the AI gets points for."
@@ -69,6 +70,9 @@ class RewardsPanel(QWidget):
         self._items: dict[str, QTreeWidgetItem] = {}
         self._in_item_signal = False
         self._refresh_pending = False
+        # Suggestions change on many training steps; the tree is rebuilt a few
+        # times a second at most (T-843).
+        self._refresher = Coalescer(self._refresh_from_change, parent=self)
 
         self._personality = QComboBox(self)
         self._personality.setObjectName("personality_combo")
@@ -324,10 +328,21 @@ class RewardsPanel(QWidget):
         self.choose_personality(pid)
 
     def _on_profile_changed(self, event: RewardProfileChanged) -> None:
+        if event.reason == "suggestions":
+            self._refresher.request()  # the AI's churn: a few times a second is plenty
+        else:
+            self._refresher.cancel()
+            self._refresh_from_change()  # a person's change shows at once
+
+    def _refresh_from_change(self) -> None:
         if self._in_item_signal:
             self._refresh_pending = True
             return
         self.refresh()
+
+    @property
+    def refresher(self) -> Coalescer:
+        return self._refresher
 
     def _on_earned(self, event: RewardEarned) -> None:
         self._summary.setText(self._context.rewards.summary())

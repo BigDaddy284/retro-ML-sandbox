@@ -33,6 +33,7 @@ from retro_ai_lab.services import (
     EmulatorDisconnected,
 )
 from retro_ai_lab.ui.activity_strip import ActivityStrip
+from retro_ai_lab.ui.coalesce import Coalescer
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.understanding import Confidence, Knowledge, Variable, describe_key
 
@@ -145,6 +146,11 @@ class DiscoveryPanel(QWidget):
         layout.addWidget(self._events, 1)
         layout.addWidget(QLabel("What leads to what", self))
         layout.addWidget(self._relationships, 1)
+
+        # Updates arrive on most training steps; the list is rebuilt a few times a
+        # second at most (T-843), and only when a variable changed.
+        self._refresher = Coalescer(self._refresh_from_update, parent=self)
+        self._full_refresh = False
 
         bridge = context.bridge
         self._unsubscribe = (
@@ -385,7 +391,22 @@ class DiscoveryPanel(QWidget):
         self._summary.setText(self._context.discovery.summary())
 
     def _on_updated(self, event: DiscoveryUpdated) -> None:
-        self.refresh(keep=self._selected)
+        if event.added or event.changed:
+            self._full_refresh = True
+        self._refresher.request()
+
+    def _refresh_from_update(self) -> None:
+        if self._full_refresh:
+            self._full_refresh = False
+            self.refresh(keep=self._selected)
+            return
+        self._summary.setText(self._context.discovery.summary())
+        self._fill_events()
+        self._fill_relationships()
+
+    @property
+    def refresher(self) -> Coalescer:
+        return self._refresher
 
     def _on_connected(self, event: EmulatorConnected) -> None:
         self._set_enabled(True)

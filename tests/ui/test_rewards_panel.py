@@ -81,6 +81,7 @@ def test_rows_appear_under_their_categories(panel: RewardsPanel, context: AppCon
     assert panel.summary_text == "1 reward switched on; +0.0 earned."
     panel.select("reset:*")
     teach(context)
+    panel.refresher.flush()  # suggestions may wait for the refresh window (T-843)
     assert panel.selected_id == "reset:*"  # kept across the update
     assert panel.category_texts() == ("Collection (1)", "Survival (3)", "Progression (1)")
     k = context.discovery.knowledge
@@ -95,6 +96,7 @@ def test_rows_appear_under_their_categories(panel: RewardsPanel, context: AppCon
 def test_plus_minus_suggested_and_tick(panel: RewardsPanel, context: AppContext) -> None:
     context.connection.connect("fake", seed=2)
     k = teach(context)
+    panel.refresher.flush()
     checkpoint = k.at(RAM, LAYOUT.checkpoint)
     assert checkpoint
     bid = f"progress:{checkpoint.id}"
@@ -186,3 +188,33 @@ def test_main_window_hosts_the_panel(qtbot: QtBot, context: AppContext) -> None:
     qtbot.addWidget(window)
     assert isinstance(window.rewards_panel, RewardsPanel)
     assert window.rewards_panel.parent() is window.panel("rewards").content
+
+
+def test_many_profile_changes_rebuild_the_tree_once(
+    panel: RewardsPanel, context: AppContext, qtbot: QtBot
+) -> None:
+    """T-843: suggestions change on many training steps; the tree follows a few times a second."""
+    context.connection.connect("fake", seed=3)
+    k = teach(context)
+    rebuilds: list[int] = []
+    original = panel.refresh
+
+    def counted(*, keep: str | None = None) -> None:
+        rebuilds.append(1)
+        original(keep=keep)
+
+    panel.refresh = counted  # type: ignore[method-assign]
+    panel.refresher.flush()
+    qtbot.waitUntil(lambda: not panel.refresher.pending, timeout=2000)
+    qtbot.wait(300)  # out of the window the teach() refresh opened
+    rebuilds.clear()
+    for i in range(12):  # each new value brings new suggested rewards
+        v = k.propose(RAM, 16 + i, kind=VariableKind.SCORE, name=f"S{i}", evidence=SURE)
+        context.bus.publish(DiscoveryUpdated((v,), (), (), ()))
+    assert len(rebuilds) == 1 and panel.refresher.pending  # the leading one only
+    qtbot.waitUntil(lambda: not panel.refresher.pending, timeout=2000)
+    assert len(rebuilds) == 2 and len(panel.behaviour_ids()) >= 12
+    # A person's own change is never made to wait.
+    bid = panel.behaviour_ids()[0]
+    context.rewards.set_value(bid, 7.0)
+    assert len(rebuilds) == 3 and not panel.refresher.pending
