@@ -2,7 +2,7 @@
 
 Each :class:`Panel` has a header with a child-friendly title, an
 expand/collapse button and a "What's this?" button, and a content area. The
-five panels of DESIGN.md §10 are defined in :data:`PANELS`; their content is
+six panels (DESIGN.md §10 and §11) are defined in :data:`PANELS`; their content is
 filled in by later tasks.
 """
 
@@ -41,6 +41,7 @@ PANELS: tuple[PanelSpec, ...] = (
     ),
     PanelSpec("progress", "Progress", "How far the AI has got and how often it succeeds."),
     PanelSpec("learning", "Learning", "How the AI is getting better over time."),
+    PanelSpec("compare", "Compare AIs", "Save your AIs by name and see which one does best."),
 )
 
 
