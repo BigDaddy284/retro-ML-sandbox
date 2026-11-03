@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-307 (Ready)
-- **Last approved checkpoint:** `main` after T-306
+- **Current task:** T-308 (Ready)
+- **Last approved checkpoint:** `main` after T-307
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -46,7 +46,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-304 | Event detection: progression steps, resets, game over | 3 | Done | 8/8 | see PR #22 |
 | T-305 | Relationship discovery between events and variables | 3 | Done | 7/7 | see PR #23 |
 | T-306 | Discovery runner: automatic observe-experiment-propose loop with progress events | 3 | Done | 10/10 | see PR #24 |
-| T-307 | "What the AI is doing" panel: discoveries with confidence badges, confirm / correct / reject | 3 | – | – | – |
+| T-307 | "What the AI is doing" panel: discoveries with confidence badges, confirm / correct / reject | 3 | Done | 7/7 | see PR #25 |
 | T-308 | Knowledge persistence wiring: auto-save per game, export / import from the UI | 3 | – | – | – |
 | E-4 | Reward System (controls, categories, personalities, goals, objectives) | 4 | Epic | – | – |
 | E-5 | Basic Learning (tabular Q-learning, save/load) | 5 | Epic | – | – |
@@ -410,6 +410,22 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 10 / 10 passed / 0 failed / 0 excluded (587 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Experiments are synchronous and run inside the snapshot handler, so on the GUI thread they block for the length of the trials (about 70 frames on the fake emulator, instant). On a real emulator this will need either turbo during trials or a background worker; noted for T-11x.
 
+### T-307 – "What the AI is doing" panel
+- **Status:** Done
+- **Phase:** 3
+- **Objective:** Let a child see what the AI is doing and what it thinks it has found, in plain words with an honest confidence badge, and answer back: yes, no, or a name (DESIGN.md §3.5 "children should be able to inspect suggested discoveries and confirm or correct them").
+- **Scope:** `ui.discovery_panel.DiscoveryPanel` in the "What the AI is doing" slot of the main window: stage line and one-line summary from `DiscoveryProgress`, list of discoveries ("Score (Score, ram[8]) — Probably"), evidence of the selected one, "Yes, that's right" / "No, that's wrong" / rename box (naming confirms), "Try the buttons" (on-demand experiment, enabled only when save states exist), last eight events, top relationships. Badges: Not sure / A guess / Probably / Pretty sure / Confirmed by you / You said no. **Out of scope:** editing kind or encoding from the UI (T-308 or later), persistence (T-308).
+- **Acceptance criteria:**
+  1. Idle text and disabled controls before a game connects; stage text follows discovery progress; disconnect returns to idle.
+  2. Discoveries appear with the right badge and evidence; selection survives refreshes.
+  3. Confirm, reject and rename update the knowledge and the list; blank names and empty selections are no-ops; the buttons and the rename box drive the same actions.
+  4. Events and relationships are listed, newest events first, capped.
+  5. The experiment button runs an experiment and is disabled when unavailable, with the reason shown.
+  6. The main window hosts the panel in the activity slot.
+- **Test plan:** idle; discoveries with badges and evidence; confirm/reject/rename; widgets; events and relationships; experiment button incl. unavailable; main window hosting.
+- **Results:** 7 / 7 passed / 0 failed / 0 excluded (594 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Kept the vocabulary child-sized ("A guess", "Pretty sure") and kept the panel free of modal dialogs so it stays testable offscreen and unobtrusive while playing.
+
 ### Later Phase 3 tasks
 Details will be written into this file when each becomes the next task, following the template.
 
@@ -447,5 +463,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-304 completed (PR #22).
 - T-305 completed (PR #23).
 - T-306 completed (PR #24).
-- Next: T-307.
+- T-307 completed (PR #25).
+- Next: T-308.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
