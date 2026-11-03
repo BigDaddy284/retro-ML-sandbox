@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-302 (Ready)
-- **Last approved checkpoint:** `main` after T-301
+- **Current task:** T-303 (Ready)
+- **Last approved checkpoint:** `main` after T-302
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -41,7 +41,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-205 | Save-state experiment harness (repeatable trials) | 2 | Done | 12/12 | see PR #18 |
 | E-3 | Game Understanding (variables, events, relationships, confidence) | 3 | Epic | – | – |
 | T-301 | Knowledge model: variables, evidence, confidence, JSON store | 3 | Done | 40/40 | see PR #19 |
-| T-302 | Variable candidate finder from change statistics (counters, bounded values, 16-bit pairs) | 3 | – | – | – |
+| T-302 | Variable candidate finder from change statistics (counters, bounded values, 16-bit pairs) | 3 | Done | 9/9 (+ diff) | see PR #20 |
 | T-303 | Input linking via experiments: which inputs move which bytes | 3 | – | – | – |
 | T-304 | Event detection: progression steps, resets, game over | 3 | – | – | – |
 | T-305 | Relationship discovery between events and variables | 3 | – | – | – |
@@ -336,6 +336,20 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 40 / 40 passed / 0 failed / 0 excluded (546 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Phase 3 was broken into T-301..T-308 (table above). Confidence is derived, not stored, so editing evidence can never leave a stale level behind; `new_id()` reserves nothing until `add` succeeds.
 
+### T-302 – Variable candidate finder from change statistics
+- **Status:** Done
+- **Phase:** 3
+- **Objective:** Turn per-byte change statistics from ordinary play into first guesses about what each byte is (counter, score, lives, flag, progress, position, speed), each with plain-words evidence at Low or Medium confidence, with no knowledge of the game.
+- **Scope:** `observation.diff.ByteStats` gains `wraps`, `carry_ins`, `unit_steps`, `max_step`, `resets`, `mostly_up`; `understanding.variables` (`Candidate`, `find_candidates(tracker)`, `propose_candidates(knowledge, candidates)`), 16-bit little-endian pairing by carry detection, noise and constant exclusion. **Out of scope:** input linking (T-303), events (T-304), big-endian / BCD detection (added when a real game needs it; documented limitation).
+- **Acceptance criteria:**
+  1. Nothing is proposed before `MIN_TRANSITIONS` transitions; constants and noise are never proposed.
+  2. Synthetic bytes classify as counter / 16-bit counter / 16-bit score / lives / flag / progress / speed / position / unknown as documented.
+  3. On a 900-frame toy racer drive with crashes and restarts, the finder labels the frame counter (16-bit counter), score (16-bit score), timer (counter), position, speed, lap and checkpoint (progress), lives, and game-over (flag), proposes none of the noise or header bytes, and every proposal lands at Low or Medium confidence with evidence.
+  4. `propose_candidates` never touches a location the knowledge already has an opinion about (proposed, confirmed or rejected) and is idempotent.
+- **Test plan:** min transitions and bad argument; counter/constant/noise; 16-bit pairs; lives/flag/progress/speed/unknown; position; pair precedence and ordering; propose rules; toy racer discovery; proposals' confidence and evidence.
+- **Results:** 9 / 9 passed / 0 failed / 0 excluded (555 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** The first version treated "monotonic" strictly and found nothing on a realistic drive, because restarts reset the score and position. Rules now tolerate resets (`mostly_up`, pair detection allows stray drops) and classification quality on the toy racer is as listed above. Lane and the input mask are labelled "progress" for now; T-303's input linking is expected to correct them.
+
 ### Later Phase 3 tasks
 Details will be written into this file when each becomes the next task, following the template.
 
@@ -368,5 +382,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-204 completed (PR #17).
 - T-205 completed (PR #18). Phase 2 complete on the fake emulator.
 - Phase 3 broken into T-301..T-308. T-301 completed (PR #19).
-- Next: T-302.
+- T-302 completed (PR #20).
+- Next: T-303.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

@@ -9,8 +9,10 @@ from retro_ai_lab.understanding.knowledge import (
     VariableKind,
     confidence_from_evidence,
 )
+from retro_ai_lab.understanding.variables import Candidate, find_candidates, propose_candidates
 
 __all__ = [
+    "Candidate",
     "Confidence",
     "Encoding",
     "Evidence",
@@ -18,4 +20,6 @@ __all__ = [
     "Variable",
     "VariableKind",
     "confidence_from_evidence",
+    "find_candidates",
+    "propose_candidates",
 ]
