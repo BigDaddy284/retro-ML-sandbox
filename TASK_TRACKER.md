@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-404 – Reward service (persistence and live tally)
+- **Current task:** T-405 – Reward exploitation detection
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -52,7 +52,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-401 | Reward model: behaviours with category, trigger, +/- controls, suggested value, enable toggle, JSON round-trip | 4 | Done | 18/18 | see PR #27 |
 | T-402 | Reward suggestions: derive behaviours and suggested values from the game knowledge | 4 | Done | 7/7 | see PR #28 |
 | T-403 | AI personalities: Explorer, Collector, Completionist, Speedrunner, Battler, Survivor, Balanced presets | 4 | Done | 6/6 | see PR #29 |
-| T-404 | Reward service: per-game profile persistence, live reward tally from events | 4 | Planned | – | – |
+| T-404 | Reward service: per-game profile persistence, live reward tally from events | 4 | Done | 15/15 | see PR #30 |
 | T-405 | Reward exploitation detection with plain-words explanation | 4 | Planned | – | – |
 | T-406 | Rewards panel: categories that expand, +/- buttons, value, toggle, suggested, personality picker | 4 | Planned | – | – |
 | T-407 | Goals and objectives model: overall goal, objectives with detection, dependencies, completion | 4 | Planned | – | – |
@@ -491,6 +491,21 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 6 / 6 passed / 0 failed / 0 excluded (635 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** The toy racer test caught that a newly suggested behaviour ignored the profile's weights; `apply_suggestions` now resets each new behaviour to its weighted value.
 
+### T-404 – Reward service
+- **Status:** Done
+- **Phase:** 4
+- **Objective:** Make rewards live: keep one profile per game on disk, fill it from the knowledge as discoveries arrive, turn every detected event into a reward the learner (Phase 5) can use, and keep a running tally the UI can show.
+- **Scope:** `rewards.tally.RewardTally` (total, count, per-behaviour counts and sums, per-category sums, recent entries, `since(frame)`); `storage.rewards.RewardStore` (same shape as `KnowledgeStore`, sharing new `storage.jsonfiles` helpers); `services.rewards.RewardService(connection, discovery, bus, store)`: loads or creates the game's profile on connect (damaged file → new), applies suggestions on connect and on every `DiscoveryUpdated` that adds or changes beliefs, scores every event (`RewardEarned(frame, amount, behaviour_ids, event)` for non-zero amounts) into the tally, exposes the child's controls (`increase`, `decrease`, `set_value`, `set_enabled`, `reset_to_suggested`, `choose_personality`) which save and publish `RewardProfileChanged`, saves on disconnect; `AppContext.reward_store` and `AppContext.rewards`. **Out of scope:** exploitation detection (T-405), UI (T-406).
+- **Acceptance criteria:**
+  1. Tally sums, counts, groups and trims correctly; bad input rejected.
+  2. Store creates its folder, round-trips, lists games, loads-or-creates and deletes; export and load anywhere; damaged files raise.
+  3. Service: no profile until a memory-capable game connects; profile has the automatic behaviours for the current knowledge; new beliefs add behaviours and announce the change; events earn rewards into the tally and publish `RewardEarned`; disabled behaviours earn nothing.
+  4. Controls change the profile, save it and announce; the profile (values, personality, enabled flags) is remembered on reconnect; a damaged file starts fresh; a different game starts fresh.
+  5. The app context owns the service and the store under the data dir.
+- **Test plan:** tally unit tests; store tests mirroring the knowledge store; service connect/filter/suggest/earn/controls/persist/damaged/other game; context wiring.
+- **Results:** 15 / 15 passed / 0 failed / 0 excluded (650 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** The knowledge store's file helpers were lifted into `storage.jsonfiles` so both stores share one atomic-write and safe-name path. Rewards are scored from `DiscoveryUpdated` events rather than a second detector, so the learner and the panel see exactly the events the engine saw.
+
 ### Later Phase 4 tasks
 T-402 to T-408 as listed in the summary table; each gets its own section when started.
 
@@ -536,4 +551,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - Phase 4 broken into T-401..T-408. T-401 completed (PR #27).
 - T-402 completed (PR #28).
 - T-403 completed (PR #29).
+- T-404 completed (PR #30).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

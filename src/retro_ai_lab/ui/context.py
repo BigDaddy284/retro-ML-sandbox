@@ -8,8 +8,13 @@ from pathlib import Path
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.core.paths import default_data_dir
 from retro_ai_lab.emulator.registry import AdapterRegistry, default_registry
-from retro_ai_lab.services import ConnectionService, DiscoveryService, ObservationService
-from retro_ai_lab.storage import KnowledgeStore
+from retro_ai_lab.services import (
+    ConnectionService,
+    DiscoveryService,
+    ObservationService,
+    RewardService,
+)
+from retro_ai_lab.storage import KnowledgeStore, RewardStore
 from retro_ai_lab.ui.bridge import EventBridge
 
 
@@ -21,9 +26,11 @@ class AppContext:
     registry: AdapterRegistry = field(default_factory=default_registry)
     data_dir: Path = field(default_factory=default_data_dir)
     knowledge_store: KnowledgeStore = field(init=False)
+    reward_store: RewardStore = field(init=False)
     connection: ConnectionService = field(init=False)
     observation: ObservationService = field(init=False)
     discovery: DiscoveryService = field(init=False)
+    rewards: RewardService = field(init=False)
     bridge: EventBridge = field(init=False)
 
     def __post_init__(self) -> None:
@@ -32,6 +39,10 @@ class AppContext:
         self.knowledge_store = KnowledgeStore(self.data_dir / "knowledge")
         self.discovery = DiscoveryService(
             self.connection, self.observation, self.bus, store=self.knowledge_store
+        )
+        self.reward_store = RewardStore(self.data_dir / "rewards")
+        self.rewards = RewardService(
+            self.connection, self.discovery, self.bus, store=self.reward_store
         )
         self.bridge = EventBridge(self.bus)
 
