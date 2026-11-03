@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import gc
+import sys
 import threading
 from dataclasses import dataclass
 
@@ -82,3 +84,24 @@ def test_deleted_bridge_stops_forwarding(qapp: QApplication) -> None:
     shiboken6.delete(bridge)
     assert bus.publish(Ping(2)) == 0  # handler removed, nothing raised
     assert seen == [Ping(1)]
+
+
+def test_forwarding_thousands_of_events_leaks_no_references(qapp: QApplication) -> None:
+    """Guards against a Qt binding that drops a reference per signal emission.
+
+    PySide6 6.12.0 on Python 3.11 lost one reference to ``True`` for every
+    ``emit``; after a few thousand events the interpreter aborted. Training sends
+    thousands of events per minute, so the bridge must be reference-neutral.
+    """
+    bus = EventBus()
+    bridge = EventBridge(bus)
+    got: list[Ping] = []
+    bridge.subscribe(Ping, got.append)
+    gc.collect()
+    before = tuple(sys.getrefcount(x) for x in (True, False, None))
+    for i in range(3000):
+        bus.publish(Ping(i))
+    gc.collect()
+    after = tuple(sys.getrefcount(x) for x in (True, False, None))
+    assert len(got) == 3000
+    assert after == before, f"reference counts drifted (True, False, None): {before} -> {after}"

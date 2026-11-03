@@ -10,7 +10,10 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "PySide6>=6.6",
+    # PySide6 6.12.0 on Python 3.11 drops a reference to True on every signal emission
+    # and aborts the interpreter after a few thousand events (see tests/ui/test_bridge.py).
+    "PySide6>=6.6,<6.12; python_version < '3.12'",
+    "PySide6>=6.6; python_version >= '3.12'",
     "numpy>=1.26",
 ]
 
