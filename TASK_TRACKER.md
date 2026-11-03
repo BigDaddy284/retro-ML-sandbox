@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-406 – Rewards panel
+- **Current task:** T-407 – Goals and objectives model
 - **Last approved checkpoint:** `main` after T-308 (PRs #23–#26 merging in order)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
@@ -54,7 +54,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-403 | AI personalities: Explorer, Collector, Completionist, Speedrunner, Battler, Survivor, Balanced presets | 4 | Done | 6/6 | see PR #29 |
 | T-404 | Reward service: per-game profile persistence, live reward tally from events | 4 | Done | 15/15 | see PR #30 |
 | T-405 | Reward exploitation detection with plain-words explanation | 4 | Done | 8/8 | see PR #31 |
-| T-406 | Rewards panel: categories that expand, +/- buttons, value, toggle, suggested, personality picker | 4 | Planned | – | – |
+| T-406 | Rewards panel: categories that expand, +/- buttons, value, toggle, suggested, personality picker | 4 | Done | 7/7 | see PR #32 |
 | T-407 | Goals and objectives model: overall goal, objectives with detection, dependencies, completion | 4 | Planned | – | – |
 | T-408 | Goals panel: edit the objective structure, see completion and confidence | 4 | Planned | – | – |
 | E-5 | Basic Learning (tabular Q-learning, save/load) | 5 | Epic | – | – |
@@ -520,6 +520,22 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 8 / 8 passed / 0 failed / 0 excluded (658 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** `RewardEntry` now keeps each behaviour's share so the detector can tell progress reward apart inside a shared entry. The check runs on the frame of the newest scored event, so it costs nothing while no events arrive.
 
+### T-406 – Rewards panel
+- **Status:** Done
+- **Phase:** 4
+- **Objective:** Put the reward system in front of the child (DESIGN.md §5.1–§5.3, §5.5): behaviours grouped under categories that expand, each with its current reward, suggested reward and an on/off tick, + and - buttons, a "Use suggested" button, a personality picker, a running total, and the exploitation warning in plain words.
+- **Scope:** `ui.rewards_panel.RewardsPanel(context)` in the main window's "Rewards" slot: personality combo (`personality_combo`), summary line (`rewards_summary`), a tree (`rewards_tree`) with one expandable row per category ("Survival (2)") and child rows "name | reward | suggested | on" where the tick box switches the behaviour on or off, `plus_button` / `minus_button` / `suggested_button` acting on the selected row, `rewards_warning` (the farming warning and its suggestion, empty when none), `rewards_note`. Driven by `RewardProfileChanged`, `RewardEarned`, `ExploitSuspected` and connect/disconnect through the GUI bridge; every control goes through `RewardService` so changes are saved. Testable API: `behaviour_ids()`, `row_text(id)`, `category_texts()`, `select(id)`, `selected_id`, `increase_selected()`, `decrease_selected()`, `use_suggested_selected()`, `set_selected_enabled()`, `choose_personality(id)`, `personality_id`, `summary_text`, `warning_text`, `note_text`, `refresh()`. **Out of scope:** goals and objectives (T-407/T-408), adding a behaviour by hand (later; suggestions cover discovered behaviours).
+- **Acceptance criteria:**
+  1. Idle: no rows, controls disabled, "No game to reward."; after disconnect the rows stay readable but the controls are off.
+  2. Behaviours appear under their category in design order with reward, suggested value and tick; new discoveries add rows without losing the selection.
+  3. + / - / Use suggested change the selected behaviour's reward (shown with a sign, and "you set this" once a person changed it); the tick switches it on or off; all through the service (saved, announced).
+  4. The personality picker shows the current personality, applies a chosen one (values rescale) and shows "Custom" for a profile that has no preset.
+  5. The total updates as rewards are earned; a farming warning shows its explanation and suggestion and clears when it lapses.
+  6. The main window hosts the panel.
+- **Test plan:** idle; rows and categories; selection kept across updates; plus/minus/suggested/tick; personality; total and warning; main window; disconnect.
+- **Results:** 7 / 7 passed / 0 failed / 0 excluded (665 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** After a disconnect the tree rows are disabled, so re-selecting the kept row no longer fires Qt's current-item signal; the panel now sets the control buttons' state itself at the end of every refresh. Windows CI then caught a use-after-free: ticking a row rebuilt the tree while Qt was still inside that row's signal. A refresh that arrives during an item signal is now deferred by one event-loop tick.
+
 ### Later Phase 4 tasks
 T-402 to T-408 as listed in the summary table; each gets its own section when started.
 
@@ -567,4 +583,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-403 completed (PR #29).
 - T-404 completed (PR #30).
 - T-405 completed (PR #31).
+- T-406 completed (PR #32).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.

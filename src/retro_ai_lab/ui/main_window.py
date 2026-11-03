@@ -13,6 +13,7 @@ from retro_ai_lab.ui.discovery_panel import DiscoveryPanel
 from retro_ai_lab.ui.game_panel import GamePanel
 from retro_ai_lab.ui.link_watchdog import LinkWatchdog
 from retro_ai_lab.ui.panels import PANELS, Panel
+from retro_ai_lab.ui.rewards_panel import RewardsPanel
 
 WINDOW_TITLE = "Retro AI Lab"
 
@@ -30,6 +31,8 @@ class MainWindow(QMainWindow):
         self._panels["game"].set_body(self._game_panel)
         self._discovery_panel = DiscoveryPanel(self._context)
         self._panels["activity"].set_body(self._discovery_panel)
+        self._rewards_panel = RewardsPanel(self._context)
+        self._panels["rewards"].set_body(self._rewards_panel)
         # Keys pressed anywhere in the window reach the controller pad.
         self.installEventFilter(self._game_panel.pad)
 
@@ -90,6 +93,10 @@ class MainWindow(QMainWindow):
     @property
     def discovery_panel(self) -> DiscoveryPanel:
         return self._discovery_panel
+
+    @property
+    def rewards_panel(self) -> RewardsPanel:
+        return self._rewards_panel
 
     @property
     def game_panel(self) -> GamePanel:
