@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-704: A small neural network in NumPy (`Network`: dense ReLU layers, masked Huber loss, gradient-checked backpropagation, Adam, target-network copies, JSON round trip) with no new dependency.
 - T-703: Feature vectors: a `FeatureMap` turns a situation into a fixed-length vector (present flag and scaled bucket per believed variable) for the coming network learners, and saves its slot order.
 - T-702: Experience replay: a bounded, seeded memory of past steps (`Transition`, `ReplayBuffer`) that saves and reloads with the brain.
 - T-701: Every learning algorithm sits behind one `Learner` contract with a registry by name; saved brains record their algorithm (older brains load as `q_table`); the training service takes `algorithm=`.

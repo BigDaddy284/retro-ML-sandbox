@@ -5,7 +5,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-704 – NumPy neural network (Phase 7)
+- **Current task:** T-705 – DQN learner (Phase 7)
 - **Last approved checkpoint:** `main` after T-507 (PRs #43–#49 merging in order as CI passes; T-701 stacked on them)
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only the BizHawk work (T-110 onward). ADR-009 (NumPy networks behind a `Learner` interface, PyTorch later) was taken by the developer and can be overturned.
 
@@ -78,7 +78,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-701 | Learner interface: any learning algorithm behind one contract; brains record which algorithm they hold | 7 | Done | 5/5 | see PR #50 |
 | T-702 | Experience replay: a bounded memory of past steps the AI can learn from again | 7 | Done | 5/5 | see PR #51 |
 | T-703 | Feature vectors: a situation as numbers a neural network can read | 7 | Done | 6/6 | see PR #52 |
-| T-704 | Small neural network in NumPy (layers, Adam, gradient check; no new dependency) | 7 | Ready | – | – |
+| T-704 | Small neural network in NumPy (layers, Adam, gradient check; no new dependency) | 7 | Done | 6/6 | see PR #53 |
 | T-705 | DQN learner: network, target network and replay; learns a synthetic task; saves and reloads | 7 | Ready | – | – |
 | T-706 | Automatic algorithm choice (table while the game is small, network when it grows) and a "How the AI learns" control | 7 | Ready | – | – |
 | T-707 | Learning from demonstrations: the child's play is kept as experience the AI learns from | 7 | Ready | – | – |
@@ -865,6 +865,24 @@ DESIGN.md §6 and §16 "Advanced Learning": neural networks, DQN, hierarchical l
 - **Commit:** see PR. **PR:** #52.
 - **Completion report:** `FeatureMap` as planned: two slots per variable (present, scaled bucket), slots handed out in first-seen order and kept, `size = 2 * width` fixed from construction so a network's input layer never has to change. The scale is `bins + 16`, the largest bucket a 16-bit value reaches, and values are clipped to [-1, 1] regardless. Variables beyond the width are ignored and counted in `dropped` (a documented limit; the default width of 32 is far above what the engine believes in practice). The map saves with the slot order so a reloaded network reads identical vectors. Nothing uses it yet; T-705 does.
 
+### T-704 – NumPy neural network
+- **Status:** Done
+- **Phase:** 7
+- **Objective:** A small, dependable neural network with no new dependency (ADR-009) that the DQN learner (T-705) can train on feature vectors: dense layers, a loss on chosen outputs, Adam, copies for a target network and a JSON round trip.
+- **Scope:** `learning.network`: `Network(sizes, *, seed=None, learning_rate=1e-3)` – dense layers with ReLU between and a linear output, He-initialised from the seed, float64 parameters; `forward(x) -> (n, out)`; `loss(x, targets, mask=None)` – mean Huber loss over the outputs the mask selects (all outputs when none); `gradients(x, targets, mask=None) -> (loss, grads)`; `train_step(x, targets, mask=None) -> loss` applying one Adam update; `copy()` (independent weights, fresh optimiser state) and `load_from(other)` (sync a target network); `parameters` (the live arrays, for the gradient check), `steps`; `to_dict` / `from_dict` keeping weights, the optimiser state and the step count. **Out of scope:** convolutions, GPU, PyTorch, the learner itself (T-705).
+- **Acceptance criteria:**
+  1. `forward` returns `(n, out)` finite values for any `(n, in)` input; the same seed gives the same network, a different seed a different one; bad sizes or learning rate raise `ConfigurationError`, and a wrong input width raises `ConfigurationError`.
+  2. `gradients` match central finite differences on every parameter of a random small network to a relative error below 1e-6 (gradient check).
+  3. Adam fits a simple target function: the loss falls by at least 100× within 500 steps; a mask makes training ignore the outputs it leaves out (their loss contribution is zero and they barely move).
+  4. `copy()` gives a network that forwards identically but trains independently; `load_from` makes two networks forward identically again; mismatched sizes are refused.
+  5. A network round-trips through JSON (weights, optimiser state, steps) so that one more `train_step` after a reload gives the same loss and weights as without the reload; bad data is refused.
+  6. The Huber loss is never negative and is zero when outputs equal targets (property test).
+- **Expected changes:** `learning/network.py` (new), `learning/__init__.py`, `tests/unit/learning/test_network.py` (new).
+- **Test plan:** unit – shapes, determinism, validation; finite-difference gradient check; fitting and masking; copy / load_from; JSON round trip and bad data; hypothesis property on the loss. Regression – full suite.
+- **Results:** 6 / 6 passed / 0 failed / 0 excluded (789 in the full suite, on Python 3.13 and 3.11). Lint, format and strict mypy clean.
+- **Commit:** see PR. **PR:** #53.
+- **Completion report:** `Network` as planned: He-initialised dense layers, ReLU hidden units, linear outputs, a masked mean Huber loss, hand-written backpropagation checked against central finite differences on every parameter (relative error below 1e-6), Adam with bias correction, `copy()` / `load_from()` for a target network, and a JSON round trip that includes the optimiser moments and step count so training continues exactly after a reload. Parameters are float64 (tiny networks; exactness over speed). Nothing uses it yet; T-705 does.
+
 ### Later Phase 4 tasks
 T-402 to T-409 as listed in the summary table; each gets its own section when started.
 
@@ -924,5 +942,5 @@ None outstanding; refinements will be filed as they come up on real games.
 - T-506 completed (PR #41).
 - T-507 completed (PR #42). Phase 5 complete.
 - Phase 6 broken into T-601..T-607. T-601 completed (PR #43). T-602 completed (PR #44). T-603 completed (PR #45). T-604 completed (PR #46). T-605 completed (PR #47). T-606 completed (PR #48): DESIGN.md §17 first demonstration proven on the Fake Emulator. T-607 completed (PR #49). Phase 6 complete.
-- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52).
+- Phase 7 (Advanced Learning) broken into T-701..T-709 on the Fake Emulator; ADR-009 (NumPy networks behind a `Learner` interface). T-701 completed (PR #50). T-702 completed (PR #51). T-703 completed (PR #52). T-704 completed (PR #53).
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
