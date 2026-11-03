@@ -54,7 +54,12 @@ class AppContext:
         self.goals = GoalService(self.connection, self.discovery, self.bus, store=self.goal_store)
         self.brain_store = BrainStore(self.data_dir / "brains")
         self.training = TrainingService(
-            self.connection, self.observation, self.discovery, self.bus, store=self.brain_store
+            self.connection,
+            self.observation,
+            self.discovery,
+            self.bus,
+            store=self.brain_store,
+            goals=self.goals,
         )
         self.bridge = EventBridge(self.bus)
 

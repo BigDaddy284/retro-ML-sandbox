@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-708: Hierarchical learning (`skills`): a separate skill for each step of the goal, chosen by the step the AI is working on; any brain can be turned into skills and back from the "How the AI learns" picker.
 - T-707: The moves the child shows the AI in manual mode are kept as demonstrations, saved with the brain, counted in the Learning panel, and can be learned from again with "Learn from my moves again".
 - T-706: The AI picks how it learns by default (the simple table first, a neural network once the game has grown, keeping what it learned) and the Learning panel's "How the AI learns" picker lets the child choose; feature vectors gained a fine-scale slot per variable.
 - T-705: A Deep Q-Network learner (`dqn`): feature vectors in, a score per move out, trained from replay memory against a target network; saves and restores with the brain and works with the training service, panels and insights unchanged.

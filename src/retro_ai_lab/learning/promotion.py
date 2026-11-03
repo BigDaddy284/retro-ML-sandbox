@@ -12,6 +12,7 @@ from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning.dqn import DEFAULT_DISTIL_STEPS, DQN, DQNConfig, DQNLearner
 from retro_ai_lab.learning.learner import AUTO, Q_TABLE, Learner, algorithm_choices
 from retro_ai_lab.learning.qlearning import QLearningAgent
+from retro_ai_lab.learning.skills import DEFAULT_SKILL, SKILLS, SkillsLearner
 
 
 def promote(
@@ -53,6 +54,14 @@ def convert(
         )
     if algorithm == AUTO or agent.algorithm == algorithm:
         return agent
+    if algorithm == SKILLS:
+        skills = SkillsLearner(agent.space, getattr(agent, "settings", None), seed=seed)
+        skills.adopt(DEFAULT_SKILL, agent)
+        skills.resume_from(agent)
+        return skills
+    if isinstance(agent, SkillsLearner):
+        general = agent.skill_learner(DEFAULT_SKILL)  # the other skills are dropped
+        return convert(general, algorithm, seed=seed, config=config, steps=steps)
     if algorithm == DQN and isinstance(agent, QLearningAgent):
         return promote(agent, seed=seed, config=config, steps=steps)[0]
     if algorithm == Q_TABLE and isinstance(agent, DQNLearner):

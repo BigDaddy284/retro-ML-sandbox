@@ -42,7 +42,7 @@ def taught_table() -> QLearningAgent:
 
 
 def test_choices_and_labels() -> None:
-    assert AUTO == "auto" and algorithm_choices() == (AUTO, Q_TABLE, DQN)
+    assert AUTO == "auto" and algorithm_choices() == (AUTO, Q_TABLE, DQN, "skills")
     assert set(algorithm_choices()) == {AUTO, *algorithms()}
     assert describe_algorithm(AUTO)[0] == "Choose for me"
     assert describe_algorithm(Q_TABLE)[0] == "Simple table"

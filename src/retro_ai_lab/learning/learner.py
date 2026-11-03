@@ -32,6 +32,11 @@ _LABELS: dict[str, tuple[str, str]] = {
         "Guesses scores for situations it has never seen from ones like them. "
         "Better once the game gets big.",
     ),
+    "skills": (
+        "Skills per goal step",
+        "Learns a separate skill for each step of the goal and uses the one for the step "
+        "it is working on.",
+    ),
 }
 
 
