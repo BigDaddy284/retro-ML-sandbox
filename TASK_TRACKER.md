@@ -5,8 +5,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 
 ## Status
 
-- **Current task:** T-306 (Ready)
-- **Last approved checkpoint:** `main` after T-305
+- **Current task:** T-307 (Ready)
+- **Last approved checkpoint:** `main` after T-306
 - **Open blockers:** none. Two decisions are *Proposed* in `ARCHITECTURE.md` (ADR-005 first emulator protocol, ADR-006 first demo game); they block only T-110 onward and T-200 onward respectively.
 
 ## Summary
@@ -45,7 +45,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-303 | Input linking via experiments: which inputs move which bytes | 3 | Done | 7/7 | see PR #21 |
 | T-304 | Event detection: progression steps, resets, game over | 3 | Done | 8/8 | see PR #22 |
 | T-305 | Relationship discovery between events and variables | 3 | Done | 7/7 | see PR #23 |
-| T-306 | Discovery runner: automatic observe-experiment-propose loop with progress events | 3 | – | – | – |
+| T-306 | Discovery runner: automatic observe-experiment-propose loop with progress events | 3 | Done | 10/10 | see PR #24 |
 | T-307 | "What the AI is doing" panel: discoveries with confidence badges, confirm / correct / reject | 3 | – | – | – |
 | T-308 | Knowledge persistence wiring: auto-save per game, export / import from the UI | 3 | – | – | – |
 | E-4 | Reward System (controls, categories, personalities, goals, objectives) | 4 | Epic | – | – |
@@ -395,6 +395,21 @@ The **first working demonstration** (DESIGN.md §17) is reached at the end of E-
 - **Results:** 7 / 7 passed / 0 failed / 0 excluded (577 in the full suite). Lint, format and strict mypy clean.
 - **Completion report:** Events raised on the same frame (score bonus and checkpoint step) arrive in memory-layout order, so a one-way count missed the checkpoint → bonus link; same-frame pairs now count both ways.
 
+### T-306 – Discovery runner
+- **Status:** Done
+- **Phase:** 3
+- **Objective:** Run the understanding engine automatically while a game is connected: detect events and relationships on every snapshot, review the statistics into new proposals on a schedule, run button experiments on a schedule when save states exist, and announce every step so the UI can show what the AI is doing.
+- **Scope:** `services.discovery.DiscoveryService(connection, observation, bus, review_every=120, experiment_every=600)` with `knowledge`, `events`, `stage`, `summary()`, `review()`, `experiment()`, `can_experiment()`; events `DiscoveryProgress(stage, detail)` and `DiscoveryUpdated(added, changed, events, relationships)`; `game_id_for`; owned by `AppContext`. **Out of scope:** persistence (T-308), UI (T-307), choosing *when* in a game experiments are most informative (later; today they run from wherever the game is).
+- **Acceptance criteria:**
+  1. Idle until a memory-capable game connects; a fresh `Knowledge` per connect keyed by ROM hash (or system:title); the previous knowledge stays readable after disconnect.
+  2. Reviews run every `review_every` snapshots and propose variables; events and relationships are published as they happen.
+  3. Experiments run every `experiment_every` snapshots when save states are available (and on demand), relabelling the lane as a position and finding the controller byte on the toy racer; without save states they are reported unavailable and the schedule passes quietly.
+  4. Link loss during an experiment leaves the service idle and the connection service in charge of reporting it.
+  5. Bad schedules are rejected; experiments can be switched off.
+- **Test plan:** idle/connect/summary; game id; review schedule and progress stages; events and relationships while playing; experiments on schedule and on demand; no save states; disconnect/reconnect; link loss mid-experiment; bad schedules; app context wiring.
+- **Results:** 10 / 10 passed / 0 failed / 0 excluded (587 in the full suite). Lint, format and strict mypy clean.
+- **Completion report:** Experiments are synchronous and run inside the snapshot handler, so on the GUI thread they block for the length of the trials (about 70 frames on the fake emulator, instant). On a real emulator this will need either turbo during trials or a background worker; noted for T-11x.
+
 ### Later Phase 3 tasks
 Details will be written into this file when each becomes the next task, following the template.
 
@@ -431,5 +446,6 @@ Details will be written into this file when each becomes the next task, followin
 - T-303 completed (PR #21).
 - T-304 completed (PR #22).
 - T-305 completed (PR #23).
-- Next: T-306.
+- T-306 completed (PR #24).
+- Next: T-307.
 - Blockers: none for T-001 to T-012. ADR-005 / ADR-006 need user input before real-emulator work.
