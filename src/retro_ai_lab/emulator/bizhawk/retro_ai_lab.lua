@@ -349,6 +349,14 @@ local function pause()
   end
 end
 
+-- EmuHawk announces every screenshot on screen and in the console
+-- ("<path> saved."); at 30 pictures a second that is noise (T-833).
+local function show_messages(on)
+  if client and client.displaymessages then
+    client.displaymessages(on)
+  end
+end
+
 local function domains()
   local list = {}
   local names = memory.getmemorydomainlist()
@@ -497,6 +505,7 @@ function handlers.hello(req)
   if not free_run then
     pause()
   end
+  show_messages(false)
   return {
     script = SCRIPT_VERSION,
     bizhawk = client.getversion(),
@@ -726,6 +735,7 @@ local function drop_app()
   closing = false
   release_all()
   unpause()
+  show_messages(true)
 end
 
 local function serve_line(line)

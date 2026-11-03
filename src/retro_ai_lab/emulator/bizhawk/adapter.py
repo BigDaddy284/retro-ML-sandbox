@@ -12,7 +12,9 @@ from __future__ import annotations
 import base64
 import binascii
 import contextlib
+import logging
 import os
+import re
 import tempfile
 from collections.abc import Sequence
 from dataclasses import replace
@@ -55,14 +57,22 @@ The memory observer reads every region whole, every frame; a multi-megabyte
 bus would swamp both the line protocol and the discovery engine.
 """
 
-NOT_LIVE_MEMORY_WORDS = frozenset({"rom", "vrom", "bus", "bios"})
+NOT_LIVE_MEMORY_WORDS = frozenset({"rom", "vrom", "bus", "bios", "registers"})
 """Words in a domain's name that mark it as not worth snapshotting (T-827).
 
 Only live, writable memory tells the AI anything: ROM and BIOS never change,
 and a bus (EmuHawk's ``System Bus``, ``PPU Bus``) mirrors RAM and ROM plus
 hardware registers, some of which change the game's state when read. On a
-NES those domains are 100 KB a frame against 2 KB of RAM.
+NES those domains are 100 KB a frame against 2 KB of RAM. A "registers"
+domain (NesHawk's ``CPU registers``) is a view of the CPU, not memory, and
+reading it whole threw on the user's EmuHawk (T-833).
 """
+
+UNREADABLE_REGION = re.compile(r"could not read \d+ bytes at \d+ of '(?P<domain>[^']+)'")
+"""The bridge script's message for a read the emulator refused (T-832)."""
+
+
+log = logging.getLogger(__name__)
 
 
 def is_live_memory(ident: str) -> bool:
@@ -126,6 +136,7 @@ class BizHawkAdapter(EmulatorAdapter):
         self._free_run = False
         self._hold = True
         self._held: frozenset[Button] = frozenset()
+        self._unreadable: set[str] = set()  # regions the emulator refused to read (T-833)
 
     # ------------------------------------------------------------ queries
 
@@ -273,8 +284,15 @@ class BizHawkAdapter(EmulatorAdapter):
         return tuple(
             r
             for r in self.description.regions
-            if r.size <= self._max_region_bytes and is_live_memory(r.name)
+            if r.size <= self._max_region_bytes
+            and is_live_memory(r.name)
+            and r.name not in self._unreadable
         )
+
+    @property
+    def unreadable_regions(self) -> frozenset[str]:
+        """Regions the emulator refused to read since connect; no longer offered (T-833)."""
+        return frozenset(self._unreadable)
 
     def _do_read_memory(self, region: str, offset: int, length: int) -> bytes:
         return self._do_read_many([(region, offset, length)])[0]
@@ -402,6 +420,26 @@ class BizHawkAdapter(EmulatorAdapter):
         except (EmulatorDisconnectedError, ProtocolError):
             self._drop()
             raise
+        except EmulatorError as exc:
+            self._note_unreadable(str(exc))
+            raise
+
+    def _note_unreadable(self, message: str) -> None:
+        """A read the emulator refused drops that region from the offer (T-833)."""
+        match = UNREADABLE_REGION.search(message)
+        if match is None or self._description is None:
+            return
+        label = match.group("domain")
+        idents = [i for i, name in self._description.domain_names.items() if name == label]
+        if not idents or idents[0] in self._unreadable:
+            return
+        self._unreadable.add(idents[0])
+        log.warning(
+            "%s refused to read memory region '%s'; it is left out from now on (%s).",
+            self.emulator_name,
+            label,
+            message,
+        )
 
     def _drop(self) -> None:
         link, self._link = self._link, None
@@ -409,6 +447,7 @@ class BizHawkAdapter(EmulatorAdapter):
         self._description = None
         self._held = frozenset()
         self._hold = True
+        self._unreadable = set()
         if link is not None:
             link.close()
         self.mark_disconnected()
@@ -427,6 +466,7 @@ __all__ = [
     "IMAGE_TRANSFERS",
     "LOCAL_HOSTS",
     "NOT_LIVE_MEMORY_WORDS",
+    "UNREADABLE_REGION",
     "BizHawkAdapter",
     "is_live_memory",
 ]

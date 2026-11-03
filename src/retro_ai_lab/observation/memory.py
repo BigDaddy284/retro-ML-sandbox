@@ -129,11 +129,10 @@ class MemoryCapture:
 
         Hand them to ``EmulatorAdapter.step(reads=...)`` and give the bytes
         back to :meth:`from_reads`, so a frame step and its snapshot are one
-        request. The plan is made once per capture object: an emulator's
-        regions do not change while it is connected.
+        request. The plan is remade when the emulator's regions change,
+        which happens when it refuses to read one (T-833).
         """
-        if self._plan is None:
-            self._plan = self._connection.call(self._make_plan)
+        self._plan = self._connection.call(self._current_plan)
         return self._plan
 
     def from_reads(self, frame: int, chunks: Sequence[bytes]) -> MemorySnapshot:
@@ -158,9 +157,16 @@ class MemoryCapture:
             raise ConfigurationError("This emulator exposes no memory regions.")
         return tuple((n, 0, regions[n].size) for n in names)
 
+    def _current_plan(self, adapter: EmulatorAdapter) -> tuple[tuple[str, int, int], ...]:
+        plan = self._plan
+        if plan is not None and self._wanted is None:
+            offered = tuple(r.name for r in adapter.memory_regions())
+            if offered != tuple(name for name, _, _ in plan):
+                plan = None  # a region came or went: plan again
+        return self._make_plan(adapter) if plan is None else plan
+
     def _read_all(self, adapter: EmulatorAdapter, frame: int) -> MemorySnapshot:
-        if self._plan is None:
-            self._plan = self._make_plan(adapter)
+        self._plan = self._current_plan(adapter)
         chunks = adapter.read_many(list(self._plan))  # one request
         names = [n for n, _, _ in self._plan]
         return MemorySnapshot(frame, dict(zip(names, chunks, strict=True)))

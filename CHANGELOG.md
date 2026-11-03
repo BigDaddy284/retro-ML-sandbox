@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Fixed: NesHawk's "CPU registers" pseudo-domain threw on every frame step after the handshake had probed it; register domains are no longer watched, and any region the emulator refuses mid-game is dropped from the next step instead of stopping the game. EmuHawk's "<picture> saved." message on every screenshot is silenced while connected (T-833).
 - Fixed: on the user's EmuHawk one memory domain threw a .NET exception on every read, which stopped every frame step with an error that named nothing. The BizHawk script now leaves out, at connect, any domain it cannot read (and says which in the Lua console), and a read that fails later names the domain, address and length (T-832).
 - Fixed: with BizHawk, the first frame step never finished ("The emulator did not answer within 5 seconds") and EmuHawk sat paused, because a paused EmuHawk never wakes a script waiting in `emu.frameadvance()`. A step now unpauses, runs its frames and pauses again; the Lua test host runs EmuHawk's real loop order so this cannot pass unnoticed again (T-831).
 - A profiling tool, `python -m retro_ai_lab.tools.profile_play`, plays for a few seconds in the real window against the simulator or a running emulator and prints what the emulator's round trips and the app's own per-frame work cost; the bridge link now also keeps per-command totals since connect (T-830).

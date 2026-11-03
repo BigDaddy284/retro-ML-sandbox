@@ -534,6 +534,7 @@ def test_a_screenshot_file_the_app_did_not_ask_for_is_refused() -> None:
         ("bios", False),
         ("cart0", False),
         ("cartram", False),
+        ("cpu_registers", False),  # NesHawk's CPU view, not memory (T-833)
     ],
 )
 def test_live_memory_is_ram_not_rom_bus_or_bios(ident: str, live: bool) -> None:
