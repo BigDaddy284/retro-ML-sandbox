@@ -5,12 +5,12 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
-- T-873: the Learning panel has "Each go lasts" and "Give up when nothing changes for" boxes in seconds; a person's choice is kept per game.
-- T-872: a Points box in the Rewards panel takes any number for the picked reward (0.65, -3), applied on Enter or when leaving the box.
 - Changed: the "What the AI is doing" panel no longer shows the "Watching N values…" line twice, its three lists have bold headings, and "Try the buttons", "Share what it learned…" and "Load shared knowledge…" sit on one row (T-883).
 - Changed: a brighter, calmer look across the app: white panels on a soft background, each panel's header in its own colour (Game blue, What the AI is doing purple, Rewards amber, Progress green, Learning pink, Compare AIs teal), slightly bigger text, rounded buttons that clearly look greyed out when they can't be pressed, and tables with bold headers and striped rows; the Research window's step log gives the situation column the room (T-882).
 - Changed: every panel shows its name once: the panel's own header (collapse, "What's this?") is now the dock's title bar, with a pop-out button and a hide button beside it; a hidden panel comes back from the Panels menu as before (T-881).
 - Changed: the Research window shows its four sections as tabs (Learning settings, The situation now, Memory, Step log), so each table uses the whole window instead of three rows; each learning setting's explanation is written under it, and the Memory and Step log tabs show how many rows they hold (T-880).
+- T-873: the Learning panel has "Each go lasts" and "Give up when nothing changes for" boxes in seconds; a person's choice is kept per game.
+- T-872: a Points box in the Rewards panel takes any number for the picked reward (0.65, -3), applied on Enter or when leaving the box.
 - T-871: the "played" credit goes only to a guess that moved at most once in ten steps of the go, once per go and three goes at most, so values that move go after go outrank a one-off and busy values get nothing.
 - T-870: a guess whose value moved during a go the game listened to gets "played" evidence once, so the Rewards panel offers the values that move while playing ahead of look-alikes that never have.
 - T-869: a flag guess that switches more than once in ten steps is doubted at one review and dropped at the next, like a busy life count; the classifier no longer proposes a flag for such a byte.
