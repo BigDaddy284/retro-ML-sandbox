@@ -130,8 +130,9 @@ best guess of each role, in plain words: "Your score jumps up", "Losing a
 life", "Progress goes up" (and "Progress (2nd guess) goes up" when it offers
 a second progress value, as a game can have a level and a checkpoint). To
 call something by its real name, pick it in the Discovery panel, type the
-name and press Rename; every list follows. The Discovery panel and the log
-still show the memory address for grown-ups. Pick a reward and the line under
+name and press Rename; every list follows. The Discovery panel, the log and
+the Rewards table's last column (Address) still show the memory address for
+grown-ups. Pick a reward and the line under
 the table says what it means and what it is worth ("Losing a life: the AI
 loses 7.5 points each time."); hover a group's name for what the group is.
 The Points box next to + and − takes any number you type (0.65, -3); press
