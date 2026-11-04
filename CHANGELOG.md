@@ -7,6 +7,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ### Added
 - T-873: the Learning panel has "Each go lasts" and "Give up when nothing changes for" boxes in seconds; a person's choice is kept per game.
 - T-872: a Points box in the Rewards panel takes any number for the picked reward (0.65, -3), applied on Enter or when leaving the box.
+- Changed: the Research window shows its four sections as tabs (Learning settings, The situation now, Memory, Step log), so each table uses the whole window instead of three rows; each learning setting's explanation is written under it, and the Memory and Step log tabs show how many rows they hold (T-880).
 - T-871: the "played" credit goes only to a guess that moved at most once in ten steps of the go, once per go and three goes at most, so values that move go after go outrank a one-off and busy values get nothing.
 - T-870: a guess whose value moved during a go the game listened to gets "played" evidence once, so the Rewards panel offers the values that move while playing ahead of look-alikes that never have.
 - T-869: a flag guess that switches more than once in ten steps is doubted at one review and dropped at the next, like a busy life count; the classifier no longer proposes a flag for such a byte.

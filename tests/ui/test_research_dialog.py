@@ -202,3 +202,66 @@ def test_toolbar_button_opens_the_window_and_logging_outlives_it(
     assert len(context.step_log) > 0
     window.open_research()
     assert dialog.isVisible() and dialog.log_rows()
+
+
+# --------------------------------------------------------------- T-880: tabs
+
+
+def _tabs(dialog: ResearchDialog):  # type: ignore[no-untyped-def]
+    from PySide6.QtWidgets import QTabWidget
+
+    tabs = dialog.findChild(QTabWidget, "research_tabs")
+    assert tabs is not None
+    return tabs
+
+
+def test_research_sections_are_tabs(dialog: ResearchDialog) -> None:
+    from retro_ai_lab.ui.research_dialog import TAB_TITLES
+
+    tabs = _tabs(dialog)
+    assert TAB_TITLES == ("Learning settings", "The situation now", "Memory", "Step log")
+    assert [tabs.tabText(i) for i in range(tabs.count())] == list(TAB_TITLES)
+    for i, box in enumerate(("settings_box", "situation_box", "memory_box", "log_box")):
+        widget = dialog.findChild(object, box)
+        assert widget is not None and tabs.widget(i).isAncestorOf(widget)  # type: ignore[arg-type]
+    # The intro and the note sit outside the tabs, so they show whatever tab is picked.
+    for name in ("research_intro", "research_note"):
+        widget = dialog.findChild(object, name)
+        assert widget is not None and not tabs.isAncestorOf(widget)  # type: ignore[arg-type]
+    assert tabs.currentIndex() == 0
+
+
+def test_settings_explain_themselves(dialog: ResearchDialog) -> None:
+    from PySide6.QtWidgets import QLabel
+
+    _tabs(dialog).setCurrentIndex(0)
+    for key, _label, tip in SETTING_FIELDS:
+        hint = dialog.findChild(QLabel, f"setting_{key}_hint")
+        assert hint is not None and hint.text() == tip and hint.isVisible()
+
+
+def test_tab_titles_count_rows(dialog: ResearchDialog, context: AppContext) -> None:
+    tabs = _tabs(dialog)
+    assert tabs.tabText(2) == "Memory" and tabs.tabText(3) == "Step log"
+    connect(context)
+    context.training.train(2)
+    dialog.refresh()
+    steps = len(context.step_log)
+    assert steps > 0 and tabs.tabText(3) == f"Step log ({steps:,})"
+    memory = tabs.tabText(2)
+    assert memory.startswith("Memory (") and memory.endswith(")")
+    assert int(memory[len("Memory (") : -1].replace(",", "")) >= len(dialog.memory_rows()) > 0
+    dialog.clear_log()
+    assert tabs.tabText(3) == "Step log"
+    context.connection.disconnect()
+    dialog.refresh()
+    assert tabs.tabText(2) == "Memory"
+
+
+def test_picked_tab_stays_across_refresh(dialog: ResearchDialog, context: AppContext) -> None:
+    tabs = _tabs(dialog)
+    tabs.setCurrentIndex(3)
+    connect(context)
+    context.training.train(1)
+    dialog.refresh()
+    assert tabs.currentIndex() == 3

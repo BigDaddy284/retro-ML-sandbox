@@ -159,6 +159,10 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-871 | The "played" credit goes only to a guess that moved rarely during the go (at most once in ten steps), once per go and three goes at most, so a value that moves go after go outranks a one-off and timers and positions get nothing | 8 | Done | 2/2 | see PR #132 |
 | T-872 | A Points box in the Rewards panel: type any number for the picked reward (0.65, -3), since + and - move by whole steps and a suggested decimal could not be changed | 8 | Done | 1/1 | see PR #133 |
 | T-873 | The Learning panel has two boxes in seconds: how long each go lasts and how long nothing may change before a go gives up; a person's choice is kept per game | 8 | Done | 2/2 | see PR #134 |
+| T-880 | The Research window is split into four tabs (Learning settings, The situation now, Memory, Step log), each table with the whole window's height, and each setting's explanation shown under it | 8 | Done | 4/4 | see PR |
+| T-881 | One title per panel: the panel's header (collapse, "What's this?") becomes its dock's title bar, with pop-out and hide buttons, instead of a second title under the dock's | 8 | Ready | – | – |
+| T-882 | A colourful, calm app-wide look: card panels with a coloured header per panel, bigger text, clear buttons and tables, applied to the main window and the Research window | 8 | Ready | – | – |
+| T-883 | The "What the AI is doing" panel is grouped under bold headings and no longer shows the same "Watching …" line twice | 8 | Ready | – | – |
 
 The **first working demonstration** (DESIGN.md §17) is reached at the end of E-5 plus the minimum of E-6, first on the Fake Emulator and then on a real game via BizHawk.
 
@@ -2111,6 +2115,68 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** both new tests pass; full suite 1191 passed, 10 skipped; ruff and mypy clean.
 - **Commit:** see PR #134. **PR:** #134.
 - **Completion report:** the go length and the give-up time are two boxes in seconds in the Learning panel, kept per game in the brain file.
+### T-880 – The Research window in tabs
+- **Status:** Done
+- **Phase:** 8 (the user, 4 Nov: "research easy to use UI but without losing the detail it just needs presenting clearer")
+- **Objective:** The Research window stacked four sections in one column, so each table showed about three rows; put each section on its own tab so every table gets the window's height, and show each learning setting's explanation in the window instead of only on hover.
+- **Scope:** `ui/research_dialog.py` layout only: a `QTabWidget` (`research_tabs`) with tabs "Learning settings", "The situation now", "Memory" and "Step log"; the intro line above and the note line below stay outside the tabs; each setting row gets its plain explanation as a grey line; tab titles carry counts ("Memory (10)", "Step log (51)"). **Out of scope:** any change to what is shown, the settings, the memory naming or the log; the main window.
+- **Acceptance criteria:**
+  1. The dialog has a tab widget with exactly those four tabs in that order, and each section's group (settings, situation, memory, log) is on its own tab.
+  2. Every widget the window had is still there under the same object name and works as before (existing T-809/T-862 tests pass unchanged).
+  3. Each setting in `SETTING_FIELDS` shows its explanation as visible text in the settings tab.
+  4. The Memory and Step log tab titles show their row counts and follow refreshes; with nothing to show they carry no count.
+  5. The dialog opens on the settings tab and remembers the tab picked while it is open.
+- **Expected changes:** `src/retro_ai_lab/ui/research_dialog.py`, `tests/ui/test_research_dialog.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** new `test_research_sections_are_tabs` (tab order, each group on its tab, intro and note outside); `test_settings_explain_themselves` (every hint visible on the settings tab, matching `SETTING_FIELDS`); `test_tab_titles_count_rows` (no count when idle; counts after training steps; clear drops the log count); `test_picked_tab_stays_across_refresh` (pick Step log, refresh, still Step log); all existing Research tests unchanged; full suite, ruff, mypy.
+- **Results:** 4 new tests pass, 5 existing Research tests unchanged and passing; full suite 1192 passed, 10 skipped (the opt-in real-emulator tests, as before); ruff and mypy clean.
+- **Commit:** see the PR. **PR:** see the PR.
+- **Completion report:** the four sections are tabs; the settings tab shows each explanation under its box and stays compact at the top; the Memory and Step log tabs carry their counts; the group boxes lost their titles (the tab names them); the situation sentence can be selected and copied; the Memory table's columns start wide enough for "Score (fairly sure)". Checked by screenshots on the practice console.
+
+### T-881 – One title per panel
+- **Status:** Ready
+- **Phase:** 8 (same request)
+- **Objective:** Every panel showed its name twice (the dock's title bar, then the panel's own collapse button); make the panel header the dock's title bar so each panel has one header row.
+- **Scope:** `ui/panels.py` gives the header its own widget (`Panel.header`), with pop-out and hide buttons a dock can wire; `ui/main_window.py` sets it as each dock's title bar widget and wires pop-out (float/re-dock) and hide (close). **Out of scope:** the panels' contents; the saved-layout format (the docks and their names are unchanged, so `LAYOUT_VERSION` stays).
+- **Acceptance criteria:**
+  1. Each dock's `titleBarWidget()` is its panel's header, which holds the collapse button (panel title), "What's this?", pop out and hide.
+  2. Pop out floats the dock and pressing it again docks it back; hide hides the dock and the Panels menu brings it back.
+  3. Collapse, "What's this?", the Panels menu, Reset layout and the saved layout work as before (existing tests pass).
+- **Expected changes:** `src/retro_ai_lab/ui/panels.py`, `src/retro_ai_lab/ui/main_window.py`, `tests/ui/test_main_window.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** new `test_each_dock_has_one_header` (title bar widget is the header, holds the four buttons, no second title in the panel body); `test_pop_out_and_back` (floating toggles, button text/tooltip follows); `test_hide_button_hides_and_menu_restores`; a standalone `Panel` without a dock still shows its header; existing layout tests; full suite, ruff, mypy.
+- **Results:** –
+- **Commit:** –. **PR:** –.
+- **Completion report:** –
+
+### T-882 – A colourful, calm look
+- **Status:** Ready
+- **Phase:** 8 (same request; DESIGN.md §10 "colourful, modern and approachable")
+- **Objective:** The app used the plain platform grey, so panels, headings and disabled buttons blurred together; give it one stylesheet with white card panels on a soft background, a coloured header strip per panel, larger text, rounded buttons whose disabled state is obvious, and tables with alternating rows and clear headers.
+- **Scope:** new `ui/theme.py` (`PANEL_COLOURS`, `stylesheet()`, `apply_theme(app)`), called from `create_app`; each `Panel` carries its key as a property the stylesheet colours by; the Research window inherits the same look. **Out of scope:** dark mode; per-widget restyling inside panels beyond what the stylesheet selects.
+- **Acceptance criteria:**
+  1. `create_app` sets the Fusion style and the theme stylesheet; calling it twice does not stack the stylesheet.
+  2. Every panel key in `PANELS` has a colour, the stylesheet names each, and each `Panel` exposes its key as the `panel` property.
+  3. The stylesheet parses (Qt reports no warnings when it is applied to the main window and the Research window).
+  4. The tables in the panels and the Research window use alternating row colours.
+- **Expected changes:** `src/retro_ai_lab/ui/theme.py`, `src/retro_ai_lab/ui/app.py`, `src/retro_ai_lab/ui/panels.py`, `src/retro_ai_lab/ui/research_dialog.py`, `tests/ui/test_theme.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `tests/ui/test_theme.py`: colours for every panel; the stylesheet mentions every key's colour; `apply_theme` twice leaves one copy; no Qt stylesheet warning is logged when the window and Research window are shown with the theme (message handler); tables alternate rows; `create_app` uses Fusion; full suite and the packaging smoke test.
+- **Results:** –
+- **Commit:** –. **PR:** –.
+- **Completion report:** –
+
+### T-883 – The "What the AI is doing" panel grouped and without repeats
+- **Status:** Ready
+- **Phase:** 8 (same request)
+- **Objective:** The panel was a column of plain labels and lists, and while the AI watched it showed "Watching 10 values, …" twice (the stage line and the summary say the same then); group it under bold headings and show the summary only when it says something the stage line does not.
+- **Scope:** `ui/discovery_panel.py` layout: headings "Discoveries", "What just happened", "What leads to what" use a shared `section_heading()` from `ui/panels.py`; the summary label hides when its text equals the stage text. **Out of scope:** what the discovery service says.
+- **Acceptance criteria:**
+  1. When the stage and summary texts are the same, only the stage line is visible; when they differ both are.
+  2. `summary_text` still returns the summary.
+  3. Section headings are `QLabel`s with the `heading` property, used by the stylesheet.
+- **Expected changes:** `src/retro_ai_lab/ui/discovery_panel.py`, `src/retro_ai_lab/ui/panels.py`, `tests/ui/test_discovery_panel.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_summary_is_not_shown_twice` (drive a `DiscoveryProgress` whose detail equals the summary; summary hidden; then a different detail; both shown); `test_sections_have_headings`; existing discovery tests; full suite.
+- **Results:** –
+- **Commit:** –. **PR:** –.
+- **Completion report:** –
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

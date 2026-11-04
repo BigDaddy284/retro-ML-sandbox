@@ -1,16 +1,19 @@
-"""The Research window: learning settings, the situation now, the step log.
+"""The Research window: learning settings, the situation now, memory, the step log.
 
 DESIGN.md §16 Phase 8 "Advanced research mode". It is one window off the toolbar,
 so the six panels stay as they are for the child; a grown-up or an older child
 opens it to change how the AI learns, to see what the AI thinks every move is
 worth right now, and to take the step log away as a CSV file.
+
+Each of the four sections is a tab (T-880), so every table has the window's
+height instead of a few rows each; the intro and the note sit outside the tabs.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QModelIndex, QTimer
+from PySide6.QtCore import QModelIndex, Qt, QTimer
 from PySide6.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
@@ -22,6 +25,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -49,6 +53,7 @@ IDLE_TEXT = "Connect to a game the AI can learn to see what it is thinking."
 NO_SITUATION_TEXT = "Nothing observed yet. Play or train a little first."
 SITUATION_COLUMNS: tuple[str, ...] = ("Move", "Value", "Best")
 MEMORY_COLUMNS: tuple[str, ...] = ("Address", "Now", "Changes", "The AI thinks", "Name")
+MEMORY_WIDTHS: tuple[int, ...] = (90, 110, 110, 240)  # the last column takes the rest
 MAX_MEMORY_ROWS = 400
 NO_MEMORY_TEXT = "Connect to a game that shares its memory to see it here."
 MEMORY_WAITING_TEXT = "Watching the memory; play or train a little and the values appear."
@@ -67,6 +72,7 @@ SETTING_FIELDS: tuple[tuple[str, str, str], ...] = (
     ("epsilon_min", "Exploring floor", "Exploring never drops below this."),
     ("epsilon_decay", "Exploring decay", "Exploring is multiplied by this after every go."),
 )
+TAB_TITLES: tuple[str, ...] = ("Learning settings", "The situation now", "Memory", "Step log")
 WHAT_IS_THIS = (
     "For grown-ups and researchers: how the AI learns, what it thinks right now and "
     "every step it took. Changing the settings affects the next goes, not the ones done."
@@ -87,7 +93,7 @@ class ResearchDialog(QDialog):
         self.setObjectName("research_dialog")
         self.setWindowTitle("Research")
         self.setModal(False)
-        self.resize(760, 640)
+        self.resize(900, 680)
         self._context = context
         self._training = context.training
         self._log = context.step_log
@@ -97,7 +103,7 @@ class ResearchDialog(QDialog):
         intro.setWordWrap(True)
 
         # --- learning settings
-        settings_box = QGroupBox("Learning settings", self)
+        settings_box = QGroupBox(self)  # the tab says what it is
         settings_box.setObjectName("settings_box")
         form = QFormLayout(settings_box)
         self._spins: dict[str, QDoubleSpinBox] = {}
@@ -108,7 +114,15 @@ class ResearchDialog(QDialog):
             spin.setDecimals(3)
             spin.setSingleStep(0.01)
             spin.setToolTip(tip)
-            form.addRow(label, spin)
+            hint = QLabel(tip, settings_box)
+            hint.setObjectName(f"setting_{key}_hint")
+            hint.setProperty("hint", True)
+            hint.setWordWrap(True)
+            row = QVBoxLayout()
+            row.setSpacing(2)
+            row.addWidget(spin)
+            row.addWidget(hint)
+            form.addRow(label, row)
             self._spins[key] = spin
         self._apply = QPushButton("Apply", settings_box)
         self._apply.setObjectName("apply_settings_button")
@@ -123,11 +137,12 @@ class ResearchDialog(QDialog):
         form.addRow(buttons)
 
         # --- the situation now
-        situation_box = QGroupBox("The situation now", self)
+        situation_box = QGroupBox(self)  # the tab says what it is
         situation_box.setObjectName("situation_box")
         self._situation = QLabel(IDLE_TEXT, situation_box)
         self._situation.setObjectName("situation_text")
         self._situation.setWordWrap(True)
+        self._situation.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._values = QTreeWidget(situation_box)
         self._values.setObjectName("situation_table")
         self._values.setColumnCount(len(SITUATION_COLUMNS))
@@ -139,7 +154,7 @@ class ResearchDialog(QDialog):
         situation_layout.addWidget(self._values, 1)
 
         # --- the memory (T-862)
-        memory_box = QGroupBox("Memory", self)
+        memory_box = QGroupBox(self)  # the tab says what it is
         memory_box.setObjectName("memory_box")
         self._memory_summary = QLabel(NO_MEMORY_TEXT, memory_box)
         self._memory_summary.setObjectName("memory_summary")
@@ -156,6 +171,8 @@ class ResearchDialog(QDialog):
         self._memory_table.header().setSectionResizeMode(
             len(MEMORY_COLUMNS) - 1, QHeaderView.ResizeMode.Stretch
         )
+        for column, width in enumerate(MEMORY_WIDTHS):
+            self._memory_table.header().resizeSection(column, width)
         self._memory_table.currentItemChanged.connect(self._on_memory_current_changed)
         self._memory_selected: str | None = None  # "region[offset]"
         self._memory_name = QLineEdit(memory_box)
@@ -175,7 +192,7 @@ class ResearchDialog(QDialog):
         memory_layout.addLayout(naming)
 
         # --- the step log
-        log_box = QGroupBox("Step log", self)
+        log_box = QGroupBox(self)  # the tab says what it is
         log_box.setObjectName("log_box")
         self._log_summary = QLabel("", log_box)
         self._log_summary.setObjectName("log_summary")
@@ -203,12 +220,24 @@ class ResearchDialog(QDialog):
         self._note.setObjectName("research_note")
         self._note.setWordWrap(True)
 
+        self._tabs = QTabWidget(self)
+        self._tabs.setObjectName("research_tabs")
+        self._tabs.setDocumentMode(True)
+        for title, box in zip(
+            TAB_TITLES, (settings_box, situation_box, memory_box, log_box), strict=True
+        ):
+            page = QWidget(self._tabs)
+            page_layout = QVBoxLayout(page)
+            if box is settings_box:  # a short form: keep it at the top
+                page_layout.addWidget(box)
+                page_layout.addStretch(1)
+            else:  # a table: give it the whole page
+                page_layout.addWidget(box, 1)
+            self._tabs.addTab(page, title)
+
         layout = QVBoxLayout(self)
         layout.addWidget(intro)
-        layout.addWidget(settings_box)
-        layout.addWidget(situation_box, 1)
-        layout.addWidget(memory_box, 2)
-        layout.addWidget(log_box, 2)
+        layout.addWidget(self._tabs, 1)
         layout.addWidget(self._note)
 
         self._ticker = QTimer(self)
@@ -350,6 +379,10 @@ class ResearchDialog(QDialog):
         self._log.clear()
         self._show_log()
 
+    @property
+    def tabs(self) -> QTabWidget:
+        return self._tabs
+
     def refresh(self) -> None:
         self._show_settings()
         self._refresh_live()
@@ -403,6 +436,7 @@ class ResearchDialog(QDialog):
         enabled = self._context.discovery.enabled and snapshot is not None
         if not enabled or snapshot is None:
             self._memory_summary.setText(NO_MEMORY_TEXT)
+            self._count_tab(2, 0)
             table.blockSignals(False)
             self._memory_selected = None
             self._memory_name_button.setEnabled(False)
@@ -411,6 +445,7 @@ class ResearchDialog(QDialog):
         tracker = self._context.observation.tracker
         wanted = self._memory_filter.text().strip().lower()
         addresses = self._memory_addresses()
+        self._count_tab(2, len(addresses))
         shown = 0
         named = 0
         chosen: QTreeWidgetItem | None = None
@@ -487,12 +522,18 @@ class ResearchDialog(QDialog):
 
     def _show_log(self) -> None:
         self._log_summary.setText(settings_summary(len(self._log), self._log.dropped))
+        self._count_tab(3, len(self._log))
         self._export.setEnabled(len(self._log) > 0)
         self._clear.setEnabled(len(self._log) > 0)
         records = self._log.records[-MAX_ROWS:]
         self._log_table.clear()
         for record in reversed(records):  # newest first
             self._log_table.addTopLevelItem(QTreeWidgetItem(list(_cells(record))))
+
+    def _count_tab(self, index: int, count: int) -> None:
+        """Put ``count`` in the tab's title, or leave the bare title when there is none."""
+        title = TAB_TITLES[index]
+        self._tabs.setTabText(index, f"{title} ({count:,})" if count else title)
 
     def _ask_export(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -543,6 +584,7 @@ __all__ = [
     "REFRESH_MS",
     "SETTING_FIELDS",
     "SITUATION_COLUMNS",
+    "TAB_TITLES",
     "ResearchDialog",
     "settings_summary",
 ]
