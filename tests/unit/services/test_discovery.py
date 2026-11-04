@@ -429,44 +429,53 @@ def test_a_lives_guess_that_bounces_is_doubted_then_dropped(
     bus: EventBus,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """T-864/T-865: a "lives" byte that bounces, or changes nearly every step, is not lives."""
+    """T-864 to T-866: a lives or progress byte that bounces or is busy is neither."""
     assert discovery.doubt_bouncing() == ()  # nothing connected: nothing to doubt
     connection.connect("fake", seed=2)
     k = discovery.knowledge
     assert k is not None
     play(connection, observation, 600)  # the lane weaves left and right alike; lives go down
 
-    def plant(offset: int, name: str) -> Variable:
+    def plant(offset: int, name: str, kind: VariableKind = VariableKind.LIVES) -> Variable:
         found = k.at("ram", offset)  # the reviews may have proposed the byte already
         if found is None:
-            found = k.propose("ram", offset, kind=VariableKind.LIVES, name=name)
-        return k.update(found.id, kind=VariableKind.LIVES, name=name)
+            found = k.propose("ram", offset, kind=kind, name=name)
+        return k.update(found.id, kind=kind, name=name)
 
     bogus = plant(LAYOUT.lane, "Lane as lives")
     busy = plant(LAYOUT.position, "Position as lives")  # changes nearly every step
+    rushed = plant(LAYOUT.speed, "Speed as progress", VariableKind.PROGRESS)  # T-866: busy
     real = plant(LAYOUT.lives, "Lives")
+    level = plant(LAYOUT.checkpoint, "Checkpoint", VariableKind.PROGRESS)  # rare, mostly up
     sure = plant(LAYOUT.lap, "Sworn lives")  # the lap also bounces, but a person swore to it
     k.confirm(sure.id)
     seen: list[DiscoveryUpdated] = []
     bus.subscribe(DiscoveryUpdated, seen.append)
     caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
     changed = discovery.doubt_bouncing(frame=9)
-    assert {v.id for v in changed} == {bogus.id, busy.id}
+    assert {v.id for v in changed} == {bogus.id, busy.id, rushed.id}
     assert not any(k.get(v.id).rejected for v in changed)
+    assert "progress changes rarely" in k.get(rushed.id).evidence[-1].detail
     last = k.get(bogus.id).evidence[-1]
     assert last.kind == BOUNCES and last.frame == 9 and "does not bounce" in last.detail
     last = k.get(busy.id).evidence[-1]
     assert last.kind == BUSY and "changes rarely" in last.detail
     assert len(seen) == 1 and seen[0].changed == changed
-    assert "2 doubted (Position as lives, Lane as lives), 0 dropped (none)." in caplog.text
-    # The next review drops both; the real and the confirmed guesses are untouched.
+    assert "3 guesses change like no life count or progress does: 3 doubted (" in caplog.text
+    # The next review drops all three; the real and the confirmed guesses are untouched.
     update = discovery.review()
-    assert {v.id for v in update.changed if v.kind is VariableKind.LIVES} == {bogus.id, busy.id}
-    for gone in (bogus, busy):
+    assert {
+        v.id for v in update.changed if v.kind in (VariableKind.LIVES, VariableKind.PROGRESS)
+    } == {
+        bogus.id,
+        busy.id,
+        rushed.id,
+    }
+    for gone in (bogus, busy, rushed):
         assert k.get(gone.id).rejected
         assert "Rejected by the AI." in k.get(gone.id).evidence[-1].detail
-    assert "0 doubted (none), 2 dropped (" in caplog.text
-    for other in (real, sure):
+    assert "0 doubted (none), 3 dropped (" in caplog.text
+    for other in (real, level, sure):
         got = k.get(other.id)
         assert not got.rejected and not any(e.kind in (BOUNCES, BUSY) for e in got.evidence)
     assert k.get(sure.id).confirmed

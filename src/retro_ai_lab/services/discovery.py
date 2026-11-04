@@ -24,12 +24,13 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 from retro_ai_lab.core import ConfigurationError, EmulatorError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
+from retro_ai_lab.observation.diff import ByteStats
 from retro_ai_lab.services.connection import (
     ConnectionService,
     EmulatorConnected,
@@ -49,7 +50,12 @@ from retro_ai_lab.understanding.knowledge import (
 from retro_ai_lab.understanding.linking import apply_input_links, find_input_links
 from retro_ai_lab.understanding.longlook import LongLook
 from retro_ai_lab.understanding.relationships import RelationshipFinder
-from retro_ai_lab.understanding.variables import find_candidates, lives_doubt, propose_candidates
+from retro_ai_lab.understanding.variables import (
+    find_candidates,
+    lives_doubt,
+    progress_doubt,
+    propose_candidates,
+)
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +70,12 @@ DOUBTED_KINDS = frozenset({VariableKind.SCORE, VariableKind.PROGRESS})
 BOUNCES = "bounces"  # evidence kind: a "lives" byte going up nearly as often as down (T-864)
 BUSY = "busy"  # evidence kind: a "lives" byte changing more than once in ten steps (T-865)
 NOT_LIVES = frozenset({BOUNCES, BUSY})
+# Kinds re-checked at every review against the byte's fresh statistics (T-864 to T-866):
+# the doubt function says why the byte is not that kind, the words name the kind.
+KIND_DOUBTS: dict[VariableKind, tuple[Callable[[ByteStats], str | None], str]] = {
+    VariableKind.LIVES: (lives_doubt, "a life count"),
+    VariableKind.PROGRESS: (progress_doubt, "progress"),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,13 +320,13 @@ class DiscoveryService:
             return changed
 
     def doubt_bouncing(self, *, frame: int | None = None) -> tuple[Variable, ...]:
-        """A "lives" guess that changes like no life count does is dropped (T-864, T-865).
+        """A lives or progress guess that changes like no such value does is dropped.
 
-        Read off the change tracker's fresh statistics: a byte that goes up nearly
-        as often as down ("bounces") or changes more than once in ten steps
-        ("busy") is doubted the first time and rejected by the AI the next;
-        confirmed and already rejected guesses are left alone. Returns the
-        variables changed.
+        Read off the change tracker's fresh statistics (T-864 to T-866): a byte
+        that goes up nearly as often as down ("bounces") or changes more than
+        once in ten steps ("busy") is doubted the first time and rejected by the
+        AI the next; confirmed and already rejected guesses are left alone.
+        Returns the variables changed.
         """
         with self._lock:
             k = self._knowledge
@@ -324,24 +336,24 @@ class DiscoveryService:
             doubted: list[Variable] = []
             dropped: list[Variable] = []
             for v in k:
-                if v.confirmed or v.rejected or v.kind is not VariableKind.LIVES:
+                if v.confirmed or v.rejected or v.kind not in KIND_DOUBTS:
                     continue
                 try:
                     stats = tracker.stats(v.region, v.offset)
                 except ConfigurationError:
                     continue
-                reason = lives_doubt(stats)
+                judge, words = KIND_DOUBTS[v.kind]
+                reason = judge(stats)
                 if reason is None:
                     continue
                 if reason == BOUNCES:
                     what = (
-                        f"went up {stats.ups} times and down {stats.downs}; a life count "
-                        "does not bounce"
+                        f"went up {stats.ups} times and down {stats.downs}; {words} does not bounce"
                     )
                 else:
                     what = (
-                        f"changed {stats.changes} times in {stats.samples} steps; a life "
-                        "count changes rarely"
+                        f"changed {stats.changes} times in {stats.samples} steps; {words} "
+                        "changes rarely"
                     )
                 if any(e.kind in NOT_LIVES for e in v.evidence):
                     k.support(v.id, Evidence(reason, f"Still {what}.", 0.0, frame))
@@ -362,7 +374,7 @@ class DiscoveryService:
             changed = (*doubted, *dropped)
             if changed:
                 log.info(
-                    "%d life guesses change like no life count does: %d doubted (%s), "
+                    "%d guesses change like no life count or progress does: %d doubted (%s), "
                     "%d dropped (%s).",
                     len(changed),
                     len(doubted),
