@@ -251,6 +251,7 @@ class DQNLearner:
         self._replay.append(Transition(state, action, float(reward), next_state, bool(done)))
         self._remember(state, next_state)
         self._updates += 1
+        self._epsilon = min(self._epsilon, self._settings.exploring_after(self._updates))
         if len(self._replay) >= self._config.warmup:
             self._train_batch()
         return self.value(state, action)

@@ -53,9 +53,10 @@ def test_conformance_routing_and_counts() -> None:
     assert agent.greedy(A) == RIGHT
     action = agent.choose(A)
     assert agent.last_decision is not None and agent.last_decision.action == action
-    assert agent.epsilon == 0.3
-    assert agent.end_episode() == pytest.approx(0.3 * 0.995) and agent.episodes == 1
-    assert jump.epsilon == pytest.approx(0.3 * 0.995)  # every skill explores a little less
+    after = agent.settings.exploring_after  # exploring falls per step learned too (T-875)
+    assert agent.epsilon == pytest.approx(after(1))  # the default skill learned one step
+    assert agent.end_episode() == pytest.approx(0.995 * after(1)) and agent.episodes == 1
+    assert jump.epsilon == pytest.approx(0.995 * after(2))  # every skill explores a little less
     with pytest.raises(ConfigurationError):
         agent.set_skill("")
     with pytest.raises(ConfigurationError):

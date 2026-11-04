@@ -26,6 +26,9 @@ def test_settings_and_table_validation() -> None:
         dict(epsilon=0.1, epsilon_min=0.5),
         dict(epsilon_decay=float("nan")),
         dict(alpha="fast"),
+        dict(explore_steps=0),
+        dict(explore_steps=2.5),
+        dict(explore_steps="many"),
     ):
         with pytest.raises(ConfigurationError):
             Settings(**bad)  # type: ignore[arg-type]
@@ -72,6 +75,28 @@ def test_exploration_and_decay() -> None:
     assert agent.end_episode() == 0.1 and agent.episodes == 3  # floor
     agent.reset()
     assert agent.epsilon == 0.5 and agent.episodes == 0 and len(agent.table) == 0
+
+
+def test_exploring_falls_with_the_steps_learned() -> None:
+    """T-875: a straight line from the start to the floor over explore_steps learned steps."""
+    quick = Settings(epsilon=1.0, epsilon_min=0.05, epsilon_decay=0.5, explore_steps=100)
+    assert quick.exploring_after(0) == 1.0 and quick.exploring_after(50) == pytest.approx(0.525)
+    assert quick.exploring_after(100) == 0.05 and quick.exploring_after(1000) == 0.05
+    agent = QLearningAgent(SPACE, quick, seed=1)
+    for _ in range(50):
+        agent.learn(A, RIGHT, 0.0, B)
+    assert agent.epsilon == pytest.approx(0.525)
+    assert agent.end_episode() == pytest.approx(0.2625)  # the per-go decay still applies
+    agent.learn(A, RIGHT, 0.0, B)
+    assert agent.epsilon == pytest.approx(0.2625)  # the line (0.515) is higher: no change
+    for _ in range(60):
+        agent.learn(A, RIGHT, 0.0, B)
+    assert agent.epsilon == 0.05 and agent.updates == 111  # the floor, and never below it
+    assert Settings().explore_steps == 6000
+    data = agent.to_dict()
+    del data["settings"]["explore_steps"]  # a brain saved before T-875
+    assert QLearningAgent.from_dict(data, space=SPACE).settings.explore_steps == 6000
+    assert Settings(explore_steps=3000.0).explore_steps == 3000  # a whole number as a float
 
 
 def test_learns_a_two_state_chain() -> None:

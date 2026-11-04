@@ -159,7 +159,10 @@ address the AI is watching, its value now, how often it changes, what the AI
 thinks it is and how sure, and any name given to it. Filter by address
 ("ram[12]", "0x0c") or name, pick a row, type a name and press "Name it";
 every panel then uses that name. The AI still learns everything itself; the
-table only shows what it worked out and lets you name it.
+table only shows what it worked out and lets you name it. Its Learning
+settings box has the learning numbers for researchers; "Exploring steps" is
+how many learned steps it takes the AI to go from trying random moves to
+mostly choosing (6,000, about ten 40-second goes).
 
 To find a value yourself, like a cheat finder, use the Research window's
 "Search values" tab. Type the number you see on the screen (12, or hex like
