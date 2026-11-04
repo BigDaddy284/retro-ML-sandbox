@@ -10,7 +10,7 @@ from retro_ai_lab.core import Capabilities, ConfigurationError, UnsupportedCapab
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
 from retro_ai_lab.emulator.registry import default_registry
-from retro_ai_lab.rewards import Category
+from retro_ai_lab.rewards import Category, RewardProfile, is_button
 from retro_ai_lab.rewards.suggestions import SuggestionReport, apply_suggestions
 from retro_ai_lab.services import (
     ConnectionService,
@@ -34,6 +34,11 @@ from retro_ai_lab.understanding import (
 
 RAM = "ram"
 SURE = [Evidence("test", "", 6.0)]
+
+
+def own_ids(profile: RewardProfile) -> tuple[str, ...]:
+    """The profile's rows without the per-button rows every game gets (T-874)."""
+    return tuple(i for i in profile.ids() if not is_button(i))
 
 
 @pytest.fixture
@@ -113,7 +118,7 @@ def test_no_profile_until_a_memory_capable_game_connects(
     connection.connect("fake", seed=3)
     assert rewards.enabled
     assert rewards.profile is not None and rewards.profile.game_id == "toyracer-3"
-    assert rewards.profile.ids() == ("reset:*",)  # nothing known yet but "Starting over"
+    assert own_ids(rewards.profile) == ("reset:*",)  # nothing known yet but "Starting over"
     assert rewards.summary() == "1 reward switched on; +0.0 earned."
 
 
@@ -200,6 +205,45 @@ def test_events_earn_rewards_into_the_tally(
     assert "+" in rewards.summary() or "-" in rewards.summary()
 
 
+def test_buttons_held_earn_their_points(
+    rewards: RewardService,
+    connection: ConnectionService,
+    bus: EventBus,
+    earned: list[RewardEarned],
+) -> None:
+    """T-874: a row per button and one for repeats, scored every step, silent at zero."""
+    from retro_ai_lab.rewards import AGAIN_ID, Category, press_id
+    from retro_ai_lab.services import ButtonsHeld
+
+    bus.publish(ButtonsHeld(1, frozenset({"up"}), "ai"))  # nothing connected: ignored
+    connection.connect("fake", seed=3)
+    profile = rewards.profile
+    assert profile is not None
+    adapter = connection.adapter
+    names = [b.name for b in adapter.buttons()]  # type: ignore[union-attr]
+    rows = profile.by_category()[Category.CONTROLS]
+    assert [b.id for b in rows] == [*(press_id(n) for n in names), AGAIN_ID]
+    assert all(b.value == 0 for b in rows)
+    bus.publish(ButtonsHeld(2, frozenset({"up"}), "ai"))
+    bus.publish(ButtonsHeld(3, frozenset({"up"}), "ai"))
+    assert earned == [] and rewards.tally.count == 0  # all at zero: nothing to say
+    rewards.set_value(press_id("up"), 2)
+    rewards.set_value(AGAIN_ID, -1)
+    bus.publish(ButtonsHeld(4, frozenset(), "ai"))  # a step holding nothing earns nothing
+    bus.publish(ButtonsHeld(5, frozenset({"up"}), "ai"))  # not held the step before: +2
+    bus.publish(ButtonsHeld(6, frozenset({"up", "a"}), "ai"))  # Up again: +2 then -1
+    bus.publish(ButtonsHeld(7, frozenset({"a"}), "ai"))  # A again, worth nothing itself: -1
+    assert [(e.frame, e.amount) for e in earned] == [(5, 2.0), (6, 2.0), (6, -1.0), (7, -1.0)]
+    assert earned[0].behaviour_ids == (press_id("up"),) and earned[2].behaviour_ids == (AGAIN_ID,)
+    assert rewards.tally.by_category(profile)[Category.CONTROLS] == 2.0
+    # A person's points come back with the game; the rows are not duplicated.
+    connection.disconnect()
+    connection.connect("fake", seed=3)
+    profile = rewards.profile
+    assert profile is not None and profile.get(press_id("up")).value == 2
+    assert len(profile.by_category()[Category.CONTROLS]) == len(names) + 1
+
+
 def test_controls_save_and_are_remembered(
     rewards: RewardService,
     connection: ConnectionService,
@@ -237,7 +281,7 @@ def test_controls_save_and_are_remembered(
     connection.disconnect()
     connection.connect("fake", seed=4)
     assert rewards.profile is not None and rewards.profile.game_id == "toyracer-4"
-    assert rewards.profile.personality == "custom" and rewards.profile.ids() == ("reset:*",)
+    assert rewards.profile.personality == "custom" and own_ids(rewards.profile) == ("reset:*",)
     assert set(store.games()) == {"toyracer-3", "toyracer-4"}
 
 
@@ -246,9 +290,9 @@ def test_damaged_file_starts_fresh(
 ) -> None:
     store.path_for("toyracer-3").write_text("{nope", "utf-8")
     connection.connect("fake", seed=3)
-    assert rewards.profile is not None and rewards.profile.ids() == ("reset:*",)
+    assert rewards.profile is not None and own_ids(rewards.profile) == ("reset:*",)
     connection.disconnect()
-    assert store.load("toyracer-3").ids() == ("reset:*",)
+    assert own_ids(store.load("toyracer-3")) == ("reset:*",)
 
 
 def test_without_a_store_nothing_is_saved(

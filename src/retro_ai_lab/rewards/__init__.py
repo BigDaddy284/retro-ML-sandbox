@@ -1,5 +1,13 @@
 """Reward system (Phase 4): how children tell the AI what matters."""
 
+from retro_ai_lab.rewards.buttons import (
+    AGAIN_ID,
+    AGAIN_NAME,
+    button_behaviours,
+    ensure_button_rows,
+    is_button,
+    press_id,
+)
 from retro_ai_lab.rewards.exploitation import ExploitDetector, ExploitWarning
 from retro_ai_lab.rewards.goals import (
     GOAL_IDEAS,
@@ -40,6 +48,8 @@ from retro_ai_lab.rewards.words import (
 )
 
 __all__ = [
+    "AGAIN_ID",
+    "AGAIN_NAME",
     "CATEGORY_WORDS",
     "GOAL_IDEAS",
     "MAX_VALUE",
@@ -65,14 +75,18 @@ __all__ = [
     "Trigger",
     "apply_personality",
     "apply_suggestions",
+    "button_behaviours",
     "describe_category",
+    "ensure_button_rows",
     "explain_behaviour",
     "is_automatic",
+    "is_button",
     "is_own",
     "merge_suggestions",
     "own_behaviour",
     "own_id",
     "personality",
+    "press_id",
     "suggest_behaviours",
     "suggest_goal",
 ]

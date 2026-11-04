@@ -145,6 +145,9 @@ table: pick a value ("Your position"), "goes up" or "goes down", and the
 points (below zero takes points away), then press Add. "Going right is good,
 going left is bad" is two rows: goes up +2 and goes down -2. "Remove" takes a
 row of your own out again.
+The Controls group lists every button of the connected game ("Pressing A")
+and "Pressing the same button again"; all start at 0, so they change nothing
+until you give one points (below zero to put the AI off hammering a button).
 
 Grown-ups can open the Research window (toolbar) for a Memory table: each
 address the AI is watching, its value now, how often it changes, what the AI

@@ -59,6 +59,7 @@ def test_categories_follow_the_design_order_and_have_labels() -> None:
         "Quests and Story",
         "Efficiency",
         "Completion",
+        "Controls",  # T-874: added to the design's eight
     ]
     assert Category("quests") is Category.QUESTS
     with pytest.raises(ValueError):
@@ -173,6 +174,10 @@ def test_set_value_and_enabled() -> None:
     assert not p.set_enabled("b1", False).enabled
     assert p.set_enabled("b1", True).enabled
     assert p.enabled_count() == 1
+    assert p.active_count() == 1
+    assert p.set_value("b1", 0.0).value == 0.0
+    assert p.enabled_count() == 1 and p.active_count() == 0  # a row at 0 counts for nothing
+    p.set_value("b1", 500)
     assert p.update("b1", name="Coins", notes="shiny").name == "Coins"
     assert p.get("b1").notes == "shiny" and p.get("b1").value == MAX_VALUE
     with pytest.raises(ConfigurationError):

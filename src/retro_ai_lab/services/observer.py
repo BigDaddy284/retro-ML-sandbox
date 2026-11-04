@@ -41,6 +41,19 @@ class InputRecorded:
     event: InputEvent
 
 
+@dataclass(frozen=True, slots=True)
+class ButtonsHeld:
+    """What a go's step held, every step (T-874), unlike ``InputRecorded`` (changes only).
+
+    Published by the episode runner before the step's reward is collected, so a
+    reward on a button lands in the step that pressed it.
+    """
+
+    frame: int
+    buttons: frozenset[str]
+    source: str  # "ai" or "child"
+
+
 class ObservationService:
     def __init__(
         self,
