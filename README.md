@@ -111,7 +111,11 @@ Learning panel says so: get the game going yourself, or pin a spot inside it,
 then press Start again. It checks again after a go that ended stuck or
 with the game starting over. The Discovery panel's summary says
 what it found ("Start gets the game going."). To practise one part of a game,
-play to it yourself and press "Pin this spot" first.
+play to it yourself and press "Pin this spot" first. Each time it checks
+whether the game listens, it also notes which values change while nobody
+presses anything and ignore the controller (timers, enemies, a demo) and, after
+two such checks, drops any "score" or "progress" guess among them. The Discovery
+panel still lists a dropped guess, and you can put it back.
 
 ## Arranging the panels
 

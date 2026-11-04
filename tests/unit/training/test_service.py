@@ -39,6 +39,7 @@ from retro_ai_lab.training import (
 )
 from retro_ai_lab.understanding import Encoding, Evidence, Knowledge, VariableKind
 from retro_ai_lab.understanding.events import CYCLES, EventKind, GameEvent
+from retro_ai_lab.understanding.wakeup import InputProbe
 
 WENT_HOME = "Lives, Lap all went back to their starting values."
 
@@ -897,7 +898,9 @@ def test_the_ai_works_out_which_button_starts_the_game(
     import retro_ai_lab.training.service as module
 
     # The go-start probe (T-848) would find it out first; here the goes have to show it.
-    monkeypatch.setattr(module, "inputs_matter", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        module, "probe_inputs", lambda *args, **kwargs: InputProbe(True, frozenset())
+    )
     k = lab.connect()
     assert k.wake_button is None
     _drive_to_game_over(lab)
@@ -949,7 +952,9 @@ def test_identical_goes_trigger_the_search(tmp_path: Path, monkeypatch: pytest.M
     lab = Lab(bus, connection, observation, discovery, None, None, training, [], [])  # type: ignore[arg-type]
     lab.connect()
     _drive_to_game_over(lab)
-    monkeypatch.setattr(module, "inputs_matter", lambda *args, **kwargs: True)  # no T-848 probe
+    monkeypatch.setattr(
+        module, "probe_inputs", lambda *args, **kwargs: InputProbe(True, frozenset())
+    )  # no T-848 probe
     monkeypatch.setattr(EpisodeRunner, "fingerprint", property(lambda self: ("same",) * 8))
     monkeypatch.setattr(EpisodeRunner, "actions_varied", property(lambda self: True))
     t = lab.training
@@ -1089,6 +1094,28 @@ def test_a_second_search_after_a_wait_can_still_find_the_button(
     t.stop()
 
 
+def test_two_starts_drop_a_guess_that_moves_by_itself(lab: Lab) -> None:
+    """T-855: the probe at Start doubts a junk score guess, and the next Start drops it."""
+    k = lab.connect()
+    junk = k.propose(RAM, LAYOUT.timer, kind=VariableKind.SCORE, name="Timer as score")
+    real = k.get(next(v.id for v in k if v.name == "Score"))
+    t = lab.training
+    for starts in (1, 2):
+        t.start(Mode.INDEPENDENT)
+        assert t.step()
+        t.stop()
+        assert k.get(junk.id).rejected == (starts == 2)
+    assert not k.get(real.id).rejected
+    # No save states: no probe, nothing doubted, no error.
+    lab.connection.disconnect()
+    k2 = lab.connect(capabilities=Capabilities(memory_read=True, frame_advance=True, input=True))
+    junk2 = k2.propose(RAM, LAYOUT.timer, kind=VariableKind.SCORE, name="Timer again")
+    t2 = lab.training
+    t2.start(Mode.INDEPENDENT)
+    assert t2.step() and not k2.get(junk2.id).evidence
+    t2.stop()
+
+
 def test_the_search_runs_flat_out_and_puts_the_speed_back(
     lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1096,9 +1123,9 @@ def test_the_search_runs_flat_out_and_puts_the_speed_back(
     import retro_ai_lab.training.service as module
 
     speeds: list[float] = []
-    real_probe, real_search = module.inputs_matter, module.find_wake_button
+    real_probe, real_search = module.probe_inputs, module.find_wake_button
 
-    def probe(*args: object, **kwargs: object) -> bool:
+    def probe(*args: object, **kwargs: object) -> InputProbe:
         speeds.append(lab.adapter().speed)
         return real_probe(*args, **kwargs)  # type: ignore[arg-type]
 
@@ -1106,7 +1133,7 @@ def test_the_search_runs_flat_out_and_puts_the_speed_back(
         speeds.append(lab.adapter().speed)
         return real_search(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(module, "inputs_matter", probe)
+    monkeypatch.setattr(module, "probe_inputs", probe)
     monkeypatch.setattr(module, "find_wake_button", search)
     lab.connect()
     _drive_to_game_over(lab)
@@ -1147,13 +1174,13 @@ def test_a_listening_game_is_probed_only_after_a_go_that_went_wrong(
     import retro_ai_lab.training.service as module
 
     probes: list[int] = []
-    real = module.inputs_matter
+    real = module.probe_inputs
 
-    def counting(*args: object, **kwargs: object) -> bool:
+    def counting(*args: object, **kwargs: object) -> InputProbe:
         probes.append(1)
         return real(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(module, "inputs_matter", counting)
+    monkeypatch.setattr(module, "probe_inputs", counting)
     lab.connect()
     t = lab.training
     t.start(Mode.INDEPENDENT)  # in the game: it listens

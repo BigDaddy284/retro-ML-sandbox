@@ -39,7 +39,13 @@ from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.observer import MemoryObserved, ObservationService
 from retro_ai_lab.storage.knowledge import KnowledgeStore, export, load
 from retro_ai_lab.understanding.events import CYCLES, EventDetector, EventLog, GameEvent
-from retro_ai_lab.understanding.knowledge import Evidence, Knowledge, Relationship, Variable
+from retro_ai_lab.understanding.knowledge import (
+    Evidence,
+    Knowledge,
+    Relationship,
+    Variable,
+    VariableKind,
+)
 from retro_ai_lab.understanding.linking import apply_input_links, find_input_links
 from retro_ai_lab.understanding.longlook import LongLook
 from retro_ai_lab.understanding.relationships import RelationshipFinder
@@ -49,6 +55,12 @@ log = logging.getLogger(__name__)
 
 DEFAULT_REVIEW_EVERY = 120
 DEFAULT_EXPERIMENT_EVERY = 600
+
+
+MOVES_ALONE = "moves-alone"  # evidence kind: changed while nobody pressed anything (T-855)
+# The kinds a player earns by playing; one that moves by itself is not one. Lives and
+# health are left out: standing still is a fine way to lose them.
+DOUBTED_KINDS = frozenset({VariableKind.SCORE, VariableKind.PROGRESS})
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +83,13 @@ class DiscoveryUpdated:
     @property
     def is_empty(self) -> bool:
         return not (self.added or self.changed or self.events or self.relationships)
+
+
+def _names(variables: list[Variable], most: int = 5) -> str:
+    names = [v.display_name for v in variables[:most]]
+    if len(variables) > most:
+        names.append(f"and {len(variables) - most} more")
+    return ", ".join(names) or "none"
 
 
 def game_id_for(system: str, title: str, rom_hash: str | None) -> str:
@@ -223,6 +242,66 @@ class DiscoveryService:
                 )
                 self._announce(DiscoveryUpdated((), tuple(changed), (), ()))
             return tuple(changed)
+
+    def doubt_self_moving(
+        self, locations: Iterable[tuple[str, int]], *, frame: int | None = None
+    ) -> tuple[Variable, ...]:
+        """These bytes changed while nobody pressed anything (T-855).
+
+        A score or progress guess covering one of them is doubted the first time
+        and rejected by the AI the second time; confirmed and already rejected
+        guesses are left alone. Returns the variables changed.
+        """
+        moved = frozenset(locations)
+        if not moved:
+            return ()
+        with self._lock:
+            k = self._require()
+            doubted: list[Variable] = []
+            dropped: list[Variable] = []
+            for v in k:
+                if v.confirmed or v.rejected or v.kind not in DOUBTED_KINDS:
+                    continue
+                if not any((v.region, o) in moved for o in range(v.offset, v.offset + v.width)):
+                    continue
+                if any(e.kind == MOVES_ALONE for e in v.evidence):
+                    k.support(
+                        v.id,
+                        Evidence(
+                            MOVES_ALONE,
+                            "Changed again while nobody pressed anything; not something "
+                            "the player earns.",
+                            0.0,
+                            frame,
+                        ),
+                    )
+                    dropped.append(k.reject(v.id, by="the AI"))
+                else:
+                    doubted.append(
+                        k.support(
+                            v.id,
+                            Evidence(
+                                MOVES_ALONE,
+                                "Changed while nobody pressed anything. Once is a doubt; "
+                                "twice and the AI drops it.",
+                                0.0,
+                                frame,
+                            ),
+                        )
+                    )
+            changed = (*doubted, *dropped)
+            if changed:
+                log.info(
+                    "%d guesses changed while nobody pressed anything: %d doubted (%s), "
+                    "%d dropped (%s).",
+                    len(changed),
+                    len(doubted),
+                    _names(doubted),
+                    len(dropped),
+                    _names(dropped),
+                )
+                self._announce(DiscoveryUpdated((), changed, (), ()))
+            return changed
 
     def summary(self) -> str:
         """One line for the status bar / panel header."""

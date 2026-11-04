@@ -13,7 +13,7 @@ from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import _BUTTON_BIT, BUTTON_NAMES, LAYOUT, ToyRacer
 from retro_ai_lab.emulator.registry import default_registry
 from retro_ai_lab.services import ConnectionService
-from retro_ai_lab.understanding import find_wake_button, inputs_matter
+from retro_ai_lab.understanding import find_wake_button, inputs_matter, probe_inputs
 from retro_ai_lab.understanding.wakeup import DEFAULT_PRESSES, START_SLOT, WAKE_SLOT
 
 TITLE = 0xEE  # the lap byte's value while the two-press racer shows its "title screen"
@@ -166,6 +166,28 @@ def test_a_button_that_keeps_changing_things_is_not_pressed_forever(
     game = two_press(connection, presses_to_start=4)
     assert find_wake_button(connection, ["start"], playing, wait=4, presses=4) == "start"
     assert not game.state.game_over
+
+
+def test_the_probe_names_what_moves_by_itself(connection: ConnectionService) -> None:
+    """T-855: the timer and frame counter move whatever is held; the score needs the pad."""
+    game = adapter_of(connection).game
+    playing = [n for n in BUTTON_NAMES if n != "start"]
+    before = game.snapshot()
+    probe = probe_inputs(connection, playing, per_button=4)
+    assert game.snapshot() == before  # the game is put back where it was
+    assert probe.matters
+    offsets = {o for region, o in probe.self_moving if region == "ram"}
+    assert {LAYOUT.frame, LAYOUT.timer} <= offsets
+    assert set(range(LAYOUT.noise, LAYOUT.noise + 4)) <= offsets  # seeded noise replays
+    assert not {LAYOUT.score, LAYOUT.score + 1, LAYOUT.lives, LAYOUT.position} & offsets
+    # Coasting, the score and position move by themselves but answer to the pad (B
+    # brakes, Up speeds up), so they are not "self-moving": a racer's score is real.
+    for _ in range(8):
+        game.step(["up"])
+    probe = probe_inputs(connection, playing, per_button=4)
+    offsets = {o for region, o in probe.self_moving if region == "ram"}
+    assert {LAYOUT.frame, LAYOUT.timer} <= offsets
+    assert not {LAYOUT.score, LAYOUT.position} & offsets
 
 
 def test_misuse(connection: ConnectionService) -> None:

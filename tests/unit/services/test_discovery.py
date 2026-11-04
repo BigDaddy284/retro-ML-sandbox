@@ -18,7 +18,7 @@ from retro_ai_lab.services import (
     DiscoveryUpdated,
     ObservationService,
 )
-from retro_ai_lab.services.discovery import game_id_for
+from retro_ai_lab.services.discovery import MOVES_ALONE, game_id_for
 from retro_ai_lab.understanding import EventKind, VariableKind
 from retro_ai_lab.understanding.events import CYCLES
 
@@ -373,6 +373,53 @@ def test_doubt_reset_adds_the_evidence_once_and_announces(
     with pytest.raises(UnsupportedCapabilityError):
         connection.disconnect()
         discovery.doubt_reset((a.id,))
+
+
+def test_self_moving_guesses_are_doubted_then_rejected(
+    discovery: DiscoveryService,
+    connection: ConnectionService,
+    bus: EventBus,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """T-855: a score guess that changes while nobody presses anything is dropped."""
+    connection.connect("fake", seed=5)
+    k = discovery.knowledge
+    assert k is not None
+    real = k.propose("ram", LAYOUT.score, kind=VariableKind.SCORE, name="Score")
+    junk = k.propose("ram", LAYOUT.timer, kind=VariableKind.SCORE, name="Timer as score")
+    wide = k.propose(
+        "ram", LAYOUT.frame, kind=VariableKind.PROGRESS, name="Frame as progress"
+    )  # one byte; its second byte is what moves below
+    kept = k.propose("ram", LAYOUT.noise, kind=VariableKind.SCORE, name="Noise as score")
+    k.confirm(kept.id)
+    speed = k.propose("ram", LAYOUT.speed, kind=VariableKind.SPEED, name="Speed")
+    lives = k.propose("ram", LAYOUT.lives, kind=VariableKind.LIVES, name="Lives")
+    seen: list[DiscoveryUpdated] = []
+    bus.subscribe(DiscoveryUpdated, seen.append)
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
+    moved = {
+        ("ram", LAYOUT.timer),
+        ("ram", LAYOUT.frame),
+        ("ram", LAYOUT.noise),
+        ("ram", LAYOUT.speed),
+        ("ram", LAYOUT.lives),  # lost by standing still: never doubted
+    }
+    changed = discovery.doubt_self_moving(moved, frame=7)
+    assert {v.id for v in changed} == {junk.id, wide.id}
+    assert all(not k.get(v.id).rejected for v in changed)  # a doubt, not yet a no
+    assert [e.kind for e in k.get(junk.id).evidence][-1] == MOVES_ALONE
+    assert len(seen) == 1 and set(seen[0].changed) == set(changed)
+    assert "2 doubted (Timer as score, Frame as progress), 0 dropped (none)." in caplog.text
+    changed = discovery.doubt_self_moving(moved)
+    assert {v.id for v in changed} == {junk.id, wide.id}
+    assert all(k.get(v.id).rejected for v in changed)
+    assert "Rejected by the AI." in k.get(junk.id).evidence[-1].detail
+    assert not k.get(real.id).rejected and k.get(kept.id).confirmed
+    for other in (speed, lives):  # not doubted kinds
+        assert not any(e.kind == MOVES_ALONE for e in k.get(other.id).evidence)
+    assert "0 doubted (none), 2 dropped (Timer as score, Frame as progress)." in caplog.text
+    assert discovery.doubt_self_moving(moved) == () and discovery.doubt_self_moving(()) == ()
+    assert len(seen) == 2
 
 
 def test_memory_from_several_threads_is_observed_one_at_a_time(
