@@ -51,6 +51,7 @@ from retro_ai_lab.understanding.linking import apply_input_links, find_input_lin
 from retro_ai_lab.understanding.longlook import LongLook
 from retro_ai_lab.understanding.relationships import RelationshipFinder
 from retro_ai_lab.understanding.variables import (
+    RARE_RATE,
     find_candidates,
     flag_doubt,
     lives_doubt,
@@ -75,6 +76,7 @@ NOT_LIVES = frozenset({BOUNCES, BUSY})
 # the doubt function says why the byte is not that kind, the words name the kind.
 PLAYED = "played"  # evidence kind: the byte moved during a go, so it is worth a seat (T-870)
 PLAYED_WEIGHT = 0.5
+PLAYED_GOES = 3  # credit per go, this many goes at most (T-871)
 KIND_DOUBTS: dict[VariableKind, tuple[Callable[[ByteStats], str | None], str]] = {
     VariableKind.LIVES: (lives_doubt, "a life count"),
     VariableKind.PROGRESS: (progress_doubt, "progress"),
@@ -154,6 +156,7 @@ class DiscoveryService:
         self._since_review = 0
         self._since_experiment = 0
         self._go_changes: dict[tuple[str, int], int] | None = None  # at the go's start (T-870)
+        self._go_transitions = 0  # the tracker's count when the go began (T-871)
         self._experiments = 0
         self._reviews = 0
         self._stage = "idle"
@@ -395,6 +398,7 @@ class DiscoveryService:
         with self._lock:
             tracker = self._observation.tracker
             self._go_changes = {loc: st.changes for loc, st in tracker.all_stats().items()}
+            self._go_transitions = tracker.transitions
 
     def credit_played(self, *, frame: int | None = None) -> tuple[Variable, ...]:
         """The go is over: credit every guess whose bytes moved during it (T-870).
@@ -402,9 +406,14 @@ class DiscoveryService:
         Seats in the Rewards panel go by evidence, and every "progress" guess the
         classifier makes carries the same evidence, so ties went to the lowest
         address: a coin count at a high address lost its seat to junk that never
-        moved while anyone played. A guess that moved during a go now gets
-        ``PLAYED`` evidence once, which outranks a guess that never has. Called
-        only for a go the game listened to; returns the variables credited.
+        moved while anyone played. A guess that moved during a go gets ``PLAYED``
+        evidence, which outranks a guess that never has. The first build credited
+        everything that moved, up to 247 guesses a go (T-871): now only a guess
+        that moved rarely during the go (at most once in ten steps, as a coin
+        count, a level or a score does, where positions and timers move every
+        step) is credited, once per go and for ``PLAYED_GOES`` goes at most, so a
+        value that moves go after go outranks a one-off. Called only for a go the
+        game listened to; returns the variables credited.
         """
         with self._lock:
             before = self._go_changes
@@ -413,29 +422,39 @@ class DiscoveryService:
             if k is None or before is None:
                 return ()
             tracker = self._observation.tracker
+            steps = tracker.transitions - self._go_transitions
+            if steps <= 0:
+                return ()
             credited: list[Variable] = []
             for v in k:
-                if v.rejected or v.confirmed or any(e.kind == PLAYED for e in v.evidence):
+                if v.rejected or v.confirmed:
                     continue
-                moved = False
+                if sum(e.kind == PLAYED for e in v.evidence) >= PLAYED_GOES:
+                    continue
+                moved = 0
                 for offset in range(v.offset, v.offset + v.width):
                     try:
                         now = tracker.stats(v.region, offset).changes
                     except ConfigurationError:
                         continue
-                    if now > before.get((v.region, offset), 0):
-                        moved = True
-                        break
-                if moved:
+                    moved = max(moved, now - before.get((v.region, offset), 0))
+                if 0 < moved <= RARE_RATE * steps:
                     credited.append(
                         k.support(
                             v.id,
-                            Evidence(PLAYED, "Moved while the AI played.", PLAYED_WEIGHT, frame),
+                            Evidence(
+                                PLAYED,
+                                f"Moved {moved} times in a go of {steps} steps.",
+                                PLAYED_WEIGHT,
+                                frame,
+                            ),
                         )
                     )
             if credited:
                 log.info(
-                    "%d guesses moved while the AI played: %s.", len(credited), _names(credited)
+                    "%d guesses moved a few times while the AI played: %s.",
+                    len(credited),
+                    _names(credited),
                 )
                 self._announce(DiscoveryUpdated((), tuple(credited), (), ()))
             return tuple(credited)

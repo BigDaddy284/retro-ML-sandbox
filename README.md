@@ -129,9 +129,9 @@ name and press Rename; every list follows. The Discovery panel and the log
 still show the memory address for grown-ups. Pick a reward and the line under
 the table says what it means and what it is worth ("Losing a life: the AI
 loses 7.5 points each time."); hover a group's name for what the group is.
-The AI offers first the values that moved while it played: after a go in which
-you collected something, the counter appears as a new "Progress" or "Your
-score" row, and the Memory table in the Research window shows its value now,
+The AI offers first the values that moved a few times while it played, go
+after go: after some goes in which you collected something, the counter
+appears as a new "Progress" or "Your score" row, and the Memory table in the Research window shows its value now,
 so the row reading the same number as the screen is the one to name.
 To reward something the AI did not think of, use "Add a reward" under the
 table: pick a value ("Your position"), "goes up" or "goes down", and the

@@ -37,7 +37,7 @@ from retro_ai_lab.training import (
     TrainingService,
     TrainingStateChanged,
 )
-from retro_ai_lab.understanding import Encoding, Evidence, Knowledge, VariableKind
+from retro_ai_lab.understanding import Encoding, Evidence, Knowledge, Variable, VariableKind
 from retro_ai_lab.understanding.events import CYCLES, EventKind, GameEvent
 from retro_ai_lab.understanding.wakeup import InputProbe
 
@@ -1171,17 +1171,26 @@ def test_a_deaf_game_doubts_nothing(lab: Lab, monkeypatch: pytest.MonkeyPatch) -
     assert any(e.kind == MOVES_ALONE for e in k.get(junk.id).evidence)
 
 
-def test_a_go_credits_the_values_that_moved(lab: Lab) -> None:
-    """T-870: after a go the game listened to, every guess that moved during it is credited."""
-    from retro_ai_lab.services.discovery import PLAYED
+def test_a_go_credits_the_values_that_moved(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    """T-870: every go the game listened to begins a credit window and settles it at its end."""
+    lab.connect()
+    calls: list[str] = []
+    real_begin, real_credit = lab.discovery.begin_go, lab.discovery.credit_played
 
-    k = lab.connect()
-    moving = k.propose(RAM, LAYOUT.position, kind=VariableKind.PROGRESS, name="Position")
-    dead = k.propose(RAM, LAYOUT.header, kind=VariableKind.PROGRESS, name="Header")
+    def begin() -> None:
+        calls.append("begin")
+        real_begin()
+
+    def credit(*, frame: int | None = None) -> tuple[Variable, ...]:
+        calls.append(f"credit@{frame}")
+        return real_credit(frame=frame)
+
+    monkeypatch.setattr(lab.discovery, "begin_go", begin)
+    monkeypatch.setattr(lab.discovery, "credit_played", credit)
     t = lab.training
-    t.train(1)
-    assert any(e.kind == PLAYED for e in k.get(moving.id).evidence)
-    assert not any(e.kind == PLAYED for e in k.get(dead.id).evidence)
+    t.train(2)
+    assert [c.split("@")[0] for c in calls] == ["begin", "credit", "begin", "credit"]
+    assert all(int(c.split("@")[1]) > 0 for c in calls if c.startswith("credit"))
 
 
 def test_the_search_runs_flat_out_and_puts_the_speed_back(
