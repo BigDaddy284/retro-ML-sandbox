@@ -223,6 +223,26 @@ def test_suggestions_follow_progress_variables_and_relationships() -> None:
     assert len(suggest_goal(k, at_least=Confidence.HIGH)) == 2
 
 
+def test_steps_follow_the_offered_guesses() -> None:
+    """T-858: steps are suggested for the best three progress guesses, in plain words."""
+    k = Knowledge("g", title="Game")
+    first = k.propose(RAM, 0, kind=VariableKind.PROGRESS, evidence=SURE)
+    second = k.propose(RAM, 1, kind=VariableKind.PROGRESS, evidence=SURE)
+    k.propose(RAM, 2, kind=VariableKind.PROGRESS, name="Lap", evidence=MAYBE)
+    k.propose(RAM, 3, kind=VariableKind.PROGRESS, evidence=MAYBE)  # the fourth: not offered
+    g = suggest_goal(k)
+    assert [o.description for o in g] == [
+        "Get further in Progress",
+        "Get further in Progress (2nd guess)",
+        "Get further in Lap",
+    ]
+    # A name a person gives moves the guess to the front and rewords its step.
+    k.correct(second.id, name="World")
+    assert merge_suggestions(g, k) == ()
+    assert g.get(f"goal:progress:{second.id}").description == "Get further in World"
+    assert g.get(f"goal:progress:{first.id}").description == "Get further in Progress"
+
+
 def test_merge_retires_and_rewords_stale_suggestions() -> None:
     k = Knowledge("g", title="Game")
     cp = k.propose(RAM, 1, kind=VariableKind.PROGRESS, name="Progress at ram[1]", evidence=SURE)
@@ -287,8 +307,8 @@ def test_merge_handles_many_objectives_quickly() -> None:
     goal = Goal("big")
     started = time.perf_counter()
     added = merge_suggestions(goal, k)
-    # The AI acts on its best 16 progress values (T-850); all of them get an objective.
-    assert len(added) == 16 and merge_suggestions(goal, k) == ()
+    # The AI offers steps for its best three progress values (T-858), no more.
+    assert len(added) == 3 and merge_suggestions(goal, k) == ()
     outcome = goal.observe(GameEvent(EventKind.PROGRESS, 1, "v1", "up", 0, 1))
     assert [o.id for o in outcome.completed] == ["goal:progress:v1"]
     # The second objective depends on the first, now done: it completes on the same pass.

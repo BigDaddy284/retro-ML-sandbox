@@ -83,13 +83,14 @@ def test_filters_out_uncertain_and_rejected_variables() -> None:
 
 def test_confidence_scales_the_suggested_value() -> None:
     k = Knowledge("g")
-    low = k.propose(RAM, 0, kind=VariableKind.PROGRESS, name="A", evidence=MAYBE)
     mid = k.propose(RAM, 1, kind=VariableKind.PROGRESS, name="B", evidence=HALF)
     high = k.propose(RAM, 2, kind=VariableKind.PROGRESS, name="C", evidence=SURE)
     sure = k.propose(RAM, 3, kind=VariableKind.PROGRESS, name="D", evidence=MAYBE)
     k.confirm(sure.id)
     got = by_key(suggest_behaviours(k))
-    assert got[f"progress:{low.id}"].suggested == 5.0
+    alone = Knowledge("h")  # only three progress guesses are offered at once (T-858)
+    low = alone.propose(RAM, 0, kind=VariableKind.PROGRESS, name="A", evidence=MAYBE)
+    assert by_key(suggest_behaviours(alone))[f"progress:{low.id}"].suggested == 5.0
     assert got[f"progress:{mid.id}"].suggested == 7.5
     assert got[f"progress:{high.id}"].suggested == 10.0
     assert got[f"progress:{sure.id}"].suggested == 10.0
@@ -208,12 +209,28 @@ def test_toy_racer_profile_rewards_checkpoints_and_punishes_crashes() -> None:
     assert earned[EventKind.RESET] < 0
 
 
-def test_suggestions_cover_the_best_few_of_a_kind() -> None:
-    """T-850: 100 believed scores suggest 16 behaviours, not 100."""
+def test_only_the_best_guess_of_each_role_is_rewarded_in_plain_words() -> None:
+    """T-858: 100 believed scores suggest one behaviour, the best, named "Your score"."""
     k = Knowledge("g")
     for i in range(100):
         k.propose(RAM, i, kind=VariableKind.SCORE, evidence=[Evidence("t", "", 1.0)])
     best = k.propose(RAM, 100, kind=VariableKind.SCORE, evidence=SURE)
     suggested = by_key(suggest_behaviours(k))
-    assert len([key for key in suggested if key.startswith("score_gain:")]) == 16
-    assert f"score_gain:{best.id}" in suggested
+    assert [key for key in suggested if key.startswith("score_gain:")] == [f"score_gain:{best.id}"]
+    assert suggested[f"score_gain:{best.id}"].name == "Your score jumps up"
+    # A confirmed guess beats a stronger-looking unconfirmed one, and a person's name is kept.
+    told = k.propose(RAM, 101, kind=VariableKind.SCORE, evidence=[Evidence("t", "", 1.0)])
+    k.confirm(told.id)
+    k.correct(told.id, name="Coins")
+    suggested = by_key(suggest_behaviours(k))
+    assert [key for key in suggested if key.startswith("score_gain:")] == [f"score_gain:{told.id}"]
+    assert suggested[f"score_gain:{told.id}"].name == "Coins jumps up"
+    # Lives read as "a life"; two unnamed progress guesses say which guess they are.
+    lives = k.propose(RAM, 102, kind=VariableKind.LIVES, evidence=SURE)
+    first = k.propose(RAM, 103, kind=VariableKind.PROGRESS, evidence=SURE)
+    second = k.propose(RAM, 104, kind=VariableKind.PROGRESS, evidence=HALF)
+    suggested = by_key(suggest_behaviours(k))
+    assert suggested[f"setback:{lives.id}"].name == "Losing a life"
+    assert suggested[f"recovery:{lives.id}"].name == "Gaining a life"
+    assert suggested[f"progress:{first.id}"].name == "Progress goes up"
+    assert suggested[f"progress:{second.id}"].name == "Progress (2nd guess) goes up"

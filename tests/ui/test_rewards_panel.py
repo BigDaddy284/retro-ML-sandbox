@@ -208,12 +208,13 @@ def test_many_profile_changes_rebuild_the_tree_once(
     qtbot.waitUntil(lambda: not panel.refresher.pending, timeout=2000)
     qtbot.wait(300)  # out of the window the teach() refresh opened
     rebuilds.clear()
-    for i in range(12):  # each new value brings new suggested rewards
-        v = k.propose(RAM, 16 + i, kind=VariableKind.SCORE, name=f"S{i}", evidence=SURE)
+    for i in range(12):  # each new confirmed value takes the score's seat (T-858)
+        v = k.propose(RAM, 27 - i, kind=VariableKind.SCORE, name=f"S{i}", evidence=SURE)
+        k.confirm(v.id)
         context.bus.publish(DiscoveryUpdated((v,), (), (), ()))
     assert len(rebuilds) == 1 and panel.refresher.pending  # the leading one only
     qtbot.waitUntil(lambda: not panel.refresher.pending, timeout=2000)
-    assert len(rebuilds) == 2 and len(panel.behaviour_ids()) >= 12
+    assert len(rebuilds) == 2 and f"score_gain:{v.id}" in panel.behaviour_ids()
     # A person's own change is never made to wait.
     bid = panel.behaviour_ids()[0]
     context.rewards.set_value(bid, 7.0)

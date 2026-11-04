@@ -22,6 +22,8 @@ from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.observation.memory import MemorySnapshot
 
 BELIEVED_PER_KIND = 16  # the most guesses of one kind the AI acts on at once (T-850)
+OFFERED_PER_KIND = 1  # guesses of one kind offered as rewards and steps (T-858) ...
+OFFERED_MANY = 3  # ... except progress values and switches: a level, a checkpoint and a lap
 SCHEMA_VERSION = 2  # 2: relationships added (older files load fine)
 
 
@@ -323,6 +325,44 @@ class Relationship:
             raise ConfigurationError(f"Bad relationship: {exc}") from exc
 
 
+OFFERED_MANY_KINDS = frozenset({VariableKind.PROGRESS, VariableKind.FLAG})
+ROLE_WORDS: dict[VariableKind, str] = {
+    VariableKind.SCORE: "Your score",
+    VariableKind.LIVES: "a life",
+    VariableKind.HEALTH: "Health",
+    VariableKind.PROGRESS: "Progress",
+    VariableKind.POSITION: "Your position",
+    VariableKind.SPEED: "Speed",
+    VariableKind.COUNTER: "Timer",
+    VariableKind.FLAG: "Something",
+    VariableKind.INPUT: "The controller",
+    VariableKind.UNKNOWN: "Something",
+}
+_ORDINALS = ("1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th")
+
+
+def plain_names(variables: Iterable[Variable]) -> dict[str, str]:
+    """Names a kid can read, by variable id (T-858).
+
+    A name a person typed is used as typed. An unnamed guess is called by its role
+    ("Your score", "a life", "Progress"); when several unnamed guesses of one kind
+    are given, the later ones say which guess they are ("Progress (2nd guess)").
+    The order of ``variables`` is the order of the seats.
+    """
+    out: dict[str, str] = {}
+    seen: dict[VariableKind, int] = {}
+    for v in variables:
+        if v.name:
+            out[v.id] = v.name
+            continue
+        n = seen.get(v.kind, 0) + 1
+        seen[v.kind] = n
+        word = ROLE_WORDS.get(v.kind, "Something")
+        ordinal = _ORDINALS[n - 1] if n <= len(_ORDINALS) else f"{n}th"
+        out[v.id] = word if n == 1 else f"{word} ({ordinal} guess)"
+    return out
+
+
 class Knowledge:
     """Everything learned about one game. Mutable; persisted as JSON."""
 
@@ -448,6 +488,18 @@ class Knowledge:
                 chosen.append(item)
         chosen.sort()
         return tuple(v for _, v in chosen)
+
+    def offered(self, at_least: Confidence = Confidence.LOW) -> tuple[Variable, ...]:
+        """The best guess of each role, the ones rewards and steps are offered for (T-858).
+
+        A kid reading the Rewards panel should see one score, one lives counter and
+        a few progress values in plain words, not seven look-alike rows by address.
+        Seats are given as :meth:`believed` gives them (confirmed first, then by
+        confidence and evidence), one per kind, three for progress and flags.
+        """
+        few = self.believed(at_least, per_kind=OFFERED_MANY)
+        one = {v.id for v in self.believed(at_least, per_kind=OFFERED_PER_KIND)}
+        return tuple(v for v in few if v.kind in OFFERED_MANY_KINDS or v.id in one)
 
     def needs_help(self) -> tuple[Variable, ...]:
         """Beliefs that are worth asking a person about (DESIGN.md §3.4)."""
@@ -643,6 +695,9 @@ class Knowledge:
 
 __all__ = [
     "BELIEVED_PER_KIND",
+    "OFFERED_MANY",
+    "OFFERED_PER_KIND",
+    "ROLE_WORDS",
     "SCHEMA_VERSION",
     "THRESHOLDS",
     "Confidence",
@@ -654,4 +709,5 @@ __all__ = [
     "VariableKind",
     "confidence_from_evidence",
     "decode",
+    "plain_names",
 ]

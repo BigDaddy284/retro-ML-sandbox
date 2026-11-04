@@ -20,7 +20,13 @@ from dataclasses import dataclass
 
 from retro_ai_lab.rewards.model import Behaviour, Category, RewardProfile, Trigger, clamp
 from retro_ai_lab.understanding.events import EventKind
-from retro_ai_lab.understanding.knowledge import Confidence, Knowledge, Variable, VariableKind
+from retro_ai_lab.understanding.knowledge import (
+    Confidence,
+    Knowledge,
+    Variable,
+    VariableKind,
+    plain_names,
+)
 
 # (event kind, variable kind) -> (category, base value, name template)
 RULES: dict[tuple[EventKind, VariableKind], tuple[Category, float, str]] = {
@@ -76,11 +82,15 @@ def suggest_behaviours(
     """Behaviours the knowledge supports, each with a suggested value."""
     leads_to_progress, game_over_flags = _causes(knowledge)
     out: list[Behaviour] = []
-    for var in knowledge.believed(at_least):
+    offered = knowledge.offered(at_least)  # the best guess of each role (T-858)
+    names = plain_names(offered)
+    for var in offered:
         for (event_kind, var_kind), rule in RULES.items():
             if var_kind is not var.kind:
                 continue
-            out.append(_build(var, event_kind, rule, leads_to_progress, game_over_flags))
+            out.append(
+                _build(var, names[var.id], event_kind, rule, leads_to_progress, game_over_flags)
+            )
     out.append(
         Behaviour(
             RESET_KEY,
@@ -97,6 +107,7 @@ def suggest_behaviours(
 
 def _build(
     var: Variable,
+    name: str,
     event_kind: EventKind,
     rule: tuple[Category, float, str],
     leads_to_progress: set[str],
@@ -117,7 +128,7 @@ def _build(
     value = clamp(round(base * scale, 2))
     return Behaviour(
         key,
-        template.format(name=var.display_name),
+        template.format(name=name),
         category,
         Trigger(event_kind, var.id),
         suggested=value,

@@ -117,6 +117,17 @@ presses anything and ignore the controller (timers, enemies, a demo) and, after
 two such checks, drops any "score" or "progress" guess among them. The Discovery
 panel still lists a dropped guess, and you can put it back.
 
+## Reading the rewards
+
+The AI keeps every guess it makes about the game's memory, but the Rewards
+panel, the Progress panel's steps and the step-detection list only show its
+best guess of each role, in plain words: "Your score jumps up", "Losing a
+life", "Progress goes up" (and "Progress (2nd guess) goes up" when it offers
+a second progress value, as a game can have a level and a checkpoint). To
+call something by its real name, pick it in the Discovery panel, type the
+name and press Rename; every list follows. The Discovery panel and the log
+still show the memory address for grown-ups.
+
 ## Arranging the panels
 
 Every panel can be dragged by its title bar to another edge of the window,

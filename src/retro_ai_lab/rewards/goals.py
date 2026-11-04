@@ -24,7 +24,7 @@ from typing import Any
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.rewards.model import MAX_VALUE, Trigger
 from retro_ai_lab.understanding.events import EventKind, GameEvent
-from retro_ai_lab.understanding.knowledge import Confidence, Knowledge, VariableKind
+from retro_ai_lab.understanding.knowledge import Confidence, Knowledge, VariableKind, plain_names
 
 SCHEMA_VERSION = 1
 DEFAULT_REWARD = 25.0  # finishing a step of the goal matters more than a point
@@ -393,7 +393,9 @@ def merge_suggestions(
     its mind, so any "completion" it saw was a misreading); its wording follows
     the variable's name.
     """
-    progress = [v for v in knowledge.believed(at_least) if v.kind is VariableKind.PROGRESS]
+    offered = knowledge.offered(at_least)  # the best few progress guesses (T-858)
+    progress = [v for v in offered if v.kind is VariableKind.PROGRESS]
+    names = plain_names(offered)
     keys = {Trigger(EventKind.PROGRESS, v.id).key: v for v in progress}
     for o in list(goal):
         if not o.suggested or o.trigger is None or o.trigger.kind is not EventKind.PROGRESS:
@@ -403,7 +405,7 @@ def merge_suggestions(
             if vid is not None and vid in knowledge:
                 goal.remove(o.id)
             continue
-        wanted = f"Get further in {keys[o.trigger.key].display_name}"
+        wanted = f"Get further in {names[keys[o.trigger.key].id]}"
         if o.description != wanted:
             goal.reword(o.id, wanted)
     # Order by relationships: a cause comes before its effect.
@@ -425,7 +427,7 @@ def merge_suggestions(
         goal.add(
             Objective(
                 oid,
-                f"Get further in {var.display_name}",
+                f"Get further in {names[var.id]}",
                 Trigger(EventKind.PROGRESS, var.id),
                 confidence=var.confidence,
                 depends_on=deps,

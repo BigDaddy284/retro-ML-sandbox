@@ -131,6 +131,23 @@ def test_new_beliefs_add_suggested_objectives(
     assert labels[-1] == "Starting over" and len(labels) == 6
 
 
+def test_trigger_options_are_plain_words(
+    goals: GoalService,
+    connection: ConnectionService,
+    discovery: DiscoveryService,
+    bus: EventBus,
+) -> None:
+    """T-858: an unnamed guess is offered by its role, and only the best of each role."""
+    connection.connect("fake", seed=3)
+    k = discovery.knowledge
+    assert k is not None
+    k.propose(RAM, 40, kind=VariableKind.SCORE, evidence=[Evidence("t", "", 1.0)])
+    k.propose(RAM, 41, kind=VariableKind.SCORE, evidence=SURE)
+    k.propose(RAM, 42, kind=VariableKind.LIVES, evidence=SURE)
+    labels = [o.label for o in goals.trigger_options()]
+    assert labels == ["Your score jumps up", "Losing a life", "Gaining a life", "Starting over"]
+
+
 def test_events_complete_and_penalise_objectives(
     goals: GoalService,
     connection: ConnectionService,

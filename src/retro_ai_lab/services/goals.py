@@ -31,7 +31,7 @@ from retro_ai_lab.services.connection import (
 from retro_ai_lab.services.discovery import DiscoveryService, DiscoveryUpdated, game_id_for
 from retro_ai_lab.storage.goals import GoalStore
 from retro_ai_lab.understanding.events import EventKind, GameEvent
-from retro_ai_lab.understanding.knowledge import Confidence
+from retro_ai_lab.understanding.knowledge import Confidence, plain_names
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,13 +122,15 @@ class GoalService:
         knowledge = self._discovery.knowledge
         options: list[TriggerOption] = []
         if knowledge is not None:
-            for var in knowledge.believed(Confidence.LOW):
+            offered = knowledge.offered(Confidence.LOW)  # the best guess of each role (T-858)
+            names = plain_names(offered)
+            for var in offered:
                 for (event_kind, var_kind), (_category, _value, template) in RULES.items():
                     if var_kind is var.kind:
                         options.append(
                             TriggerOption(
                                 Trigger(event_kind, var.id),
-                                template.format(name=var.display_name),
+                                template.format(name=names[var.id]),
                             )
                         )
         options.append(TriggerOption(Trigger(EventKind.RESET), "Starting over"))
