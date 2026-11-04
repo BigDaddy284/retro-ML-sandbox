@@ -32,6 +32,16 @@ def _check(value: float, what: str, low: float, high: float) -> float:
     return number
 
 
+def _whole(value: object, what: str) -> int:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(f"{what} must be a whole number.") from exc
+    if not math.isfinite(number) or number != int(number) or number < 1:
+        raise ConfigurationError(f"{what} must be a whole number of 1 or more.")
+    return int(number)
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     alpha: float = 0.1  # learning rate: how far to move towards what happened
@@ -39,6 +49,9 @@ class Settings:
     epsilon: float = 1.0  # starting chance of trying something random
     epsilon_min: float = 0.05
     epsilon_decay: float = 0.995  # multiplied in at the end of every episode
+    # Learned steps over which exploring falls in a straight line to the floor (T-875):
+    # a 40-second go is 600 steps, so the per-go decay alone took hundreds of goes.
+    explore_steps: int = 6000
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "alpha", _check(self.alpha, "alpha", 0.0, 1.0))
@@ -48,6 +61,7 @@ class Settings:
         object.__setattr__(
             self, "epsilon_decay", _check(self.epsilon_decay, "epsilon_decay", 0.0, 1.0)
         )
+        object.__setattr__(self, "explore_steps", _whole(self.explore_steps, "explore_steps"))
         if self.epsilon_min > self.epsilon:
             raise ConfigurationError("epsilon_min can't be above epsilon.")
         if self.alpha == 0.0:
@@ -60,7 +74,14 @@ class Settings:
             "epsilon": self.epsilon,
             "epsilon_min": self.epsilon_min,
             "epsilon_decay": self.epsilon_decay,
+            "explore_steps": self.explore_steps,
         }
+
+    def exploring_after(self, updates: int) -> float:
+        """Where the step schedule puts exploring after this many learned steps."""
+        if updates >= self.explore_steps:
+            return self.epsilon_min
+        return self.epsilon - (self.epsilon - self.epsilon_min) * updates / self.explore_steps
 
 
 class QTable:
@@ -211,6 +232,7 @@ class QLearningAgent:
         target = reward + self._settings.gamma * future
         row[action] += self._settings.alpha * (target - row[action])
         self._updates += 1
+        self._epsilon = min(self._epsilon, self._settings.exploring_after(self._updates))
         return row[action]
 
     def end_episode(self) -> float:

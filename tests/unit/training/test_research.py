@@ -189,7 +189,8 @@ def test_settings_apply_to_the_brain_in_use_and_survive_a_reload(lab: Lab) -> No
     assert isinstance(agent, QLearningAgent) and agent.settings == quick  # new brains follow
     assert agent.epsilon == 0.3
     t.train(1)
-    assert agent.epsilon == pytest.approx(0.27)
+    # The per-step line caps exploring during the go; the per-go decay then multiplies it (T-875).
+    assert agent.epsilon == pytest.approx(0.9 * quick.exploring_after(agent.updates))
     t.start()
     t.step()
     with pytest.raises(ConfigurationError, match="Stop training"):

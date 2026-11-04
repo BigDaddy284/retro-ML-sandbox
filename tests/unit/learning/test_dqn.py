@@ -148,6 +148,17 @@ def test_exploration_reset_known_and_stats() -> None:
     assert "Knows 0 situations" in agent.stats()
 
 
+def test_exploring_falls_with_the_steps_learned() -> None:
+    """T-875: the network learner follows the same per-step line as the table."""
+    quick = Settings(epsilon=1.0, epsilon_min=0.05, epsilon_decay=0.5, explore_steps=100)
+    agent = DQNLearner(SPACE, quick, seed=5, config=QUICK)
+    chain(agent, 50)
+    assert agent.epsilon == pytest.approx(0.525)
+    assert agent.end_episode() == pytest.approx(0.2625)
+    chain(agent, 60)
+    assert agent.epsilon == 0.05 and agent.updates == 110
+
+
 def test_round_trip_and_refusals(tmp_path: Path) -> None:
     agent = DQNLearner(SPACE, Settings(epsilon=0.4), seed=6, config=QUICK)
     chain(agent, 40)

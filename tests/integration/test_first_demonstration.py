@@ -72,6 +72,10 @@ class Played:
     steps: list[int] = field(default_factory=list)
     scores: list[int] = field(default_factory=list)  # most points held in the go
     speeds: list[float] = field(default_factory=list)  # mean speed over the go
+    crashes: list[int] = field(default_factory=list)  # lives lost in the go
+
+    def crashes_per_step(self, goes: slice) -> float:
+        return sum(self.crashes[goes]) / sum(self.steps[goes])
 
     def recent(self, last: int = WINDOW) -> tuple[float, float, float, float]:
         """Means over the last ``last`` goes: reward, steps, score, speed."""
@@ -101,6 +105,7 @@ def train(ctx: AppContext, goes: int) -> Played:
         played.steps.append(result.steps)
         played.scores.append(best)
         played.speeds.append(statistics.fmean(speeds))
+        played.crashes.append(sum(e.count for e in result.earned if e.id.startswith("setback:")))
     t.stop()
     return played
 
@@ -197,17 +202,24 @@ def test_first_working_demonstration(tmp_path: Path) -> None:
     assert not profile.get(score_gain.id).enabled and profile.get(setback.id).value == -50
     assert all(b.value <= 0 for b in profile if b.enabled)
     adapter.game.restore(starting_line)
-    careful = train(ctx, GOES).recent()
+    careful_played = train(ctx, GOES)
+    careful = careful_played.recent()
 
-    # 10. Changing the rewards changed how it plays: the point-lover drives fast,
-    #     scores more per step and runs out of lives sooner; the careful one crawls
-    #     and lasts (long enough that its total can creep past the lover's, which is
-    #     why the score is compared per step).
+    # 10. Changing the rewards changed how it plays: the point-lover drives fast and
+    #     scores more per step; the careful one crawls (its total can creep past the
+    #     lover's, which is why the score is compared per step) and, with crashing
+    #     at -50, crashes less and less as it learns. (Go length is not compared: a
+    #     crawler's goes end as "stuck", so steps measure the give-up rule, not
+    #     caution; T-875.)
     lover_reward, lover_steps, lover_score, lover_speed = score_lover
     careful_reward, careful_steps, careful_score, careful_speed = careful
     assert lover_speed >= 2 * careful_speed, (score_lover, careful)
     assert lover_score / lover_steps > careful_score / careful_steps, (score_lover, careful)
-    assert lover_steps < careful_steps, (score_lover, careful)
+    early, late = slice(0, WINDOW), slice(-WINDOW, None)
+    assert careful_played.crashes_per_step(early) > 2 * careful_played.crashes_per_step(late), (
+        careful_played.crashes,
+        careful_played.steps,
+    )
     assert lover_reward > 0 > careful_reward, (score_lover, careful)
 
     # Everything the child did was saved and comes back after a reconnect.
