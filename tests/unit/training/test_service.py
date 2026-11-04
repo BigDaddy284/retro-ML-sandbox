@@ -402,14 +402,25 @@ def test_the_go_log_line_names_the_earners(lab: Lab, caplog: pytest.LogCaptureFi
     gain = GameEvent(EventKind.SCORE_GAIN, 5, score.id, "")
     lab.bus.publish(DiscoveryUpdated((), (), (gain,), ()))
     lab.bus.publish(DiscoveryUpdated((), (), (gain,), ()))
+    lives = k.at("ram", LAYOUT.lives)
+    checkpoint = k.at("ram", LAYOUT.checkpoint)
+    assert lives is not None and checkpoint is not None
+    crash = GameEvent(EventKind.SETBACK, 6, lives.id, "", 3, 2)
+    step = GameEvent(EventKind.PROGRESS, 7, checkpoint.id, "", 0, 1)
+    lab.bus.publish(DiscoveryUpdated((), (), (crash, step), ()))
     reset = GameEvent(EventKind.RESET, 99, None, WENT_HOME)
     lab.bus.publish(DiscoveryUpdated((), (), (reset,), ()))
     t.step()  # the go ends on the reset
     messages = [r.getMessage() for r in caplog.records]
     line = next(m for m in messages if m.startswith("Go 1 ended by reset"))
-    assert f", from {jump.name} {2 * jump.value:+,.1f} (2 times), " in line, line
+    assert ", from " in line and f"{jump.name} {2 * jump.value:+,.1f} (2 times), " in line, line
     assert line.endswith(f": {WENT_HOME} (frame 99)")
-    assert t.history[-1].result.earned[0].id == jump.id
+    # Every earner is named, none folded into "and N more" (T-877): the checkpoint step
+    # also completed a goal step, so there are five.
+    assert len(t.history[-1].result.earned) == 5 and " more" not in line, line
+    for name in (profile.get(f"setback:{lives.id}").name, "Starting over"):
+        assert name in line, line
+    assert jump.id in [e.id for e in t.history[-1].result.earned]
     while t.episodes < 2:
         t.step()
     line = next(m for m in caplog.records if m.getMessage().startswith("Go 2 ")).getMessage()

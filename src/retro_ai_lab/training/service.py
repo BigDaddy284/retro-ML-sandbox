@@ -1072,7 +1072,7 @@ class TrainingService:
         self._episodes += 1
         record = EpisodeRecord(self._episodes, self._mode, result, self._observation.frame)
         why = self._runner.last_reset if self._runner is not None else ""
-        earners = describe_earned(result.earned)
+        earners = describe_earned(result.earned, most=None)  # the whole breakdown (T-877)
         log.info(
             "Go %d ended by %s after %d steps (%d frames), %+.1f points%s%s",
             self._episodes,
