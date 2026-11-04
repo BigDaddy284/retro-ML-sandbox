@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Added: each "Go N ended by …" line in the log now says which rewards paid the points ("from Score at ram[0] jumps up +2,500.0 (120 times), … and 2 more"), and the go's record keeps the breakdown, so a log shows what the AI is really playing for (T-857).
 - Changed: a score or progress guess that changes while nobody presses anything and ends up the same whatever is held (a timer, an enemy, the title demo) is doubted when the AI checks whether the game listens and dropped by the AI at the next check, so junk guesses stop earning points and setting goals; a confirmed guess is never touched and a dropped one stays in the Discovery panel for a person to put back (T-855).
 - Fixed: the first column of the Rewards, Progress and Compare tables and the Research dialog's situation table (the names a person reads) is now wide by default and can be dragged wider; it was a stretch column Qt does not let a person drag, and it came out narrow (T-856).
 - Fixed: when a call to BizHawk timed out, its answer arrived during the next call, which then saw the wrong request number and dropped the link; a late answer is now skipped and only the slow call is lost (T-854).

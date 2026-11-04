@@ -384,6 +384,36 @@ def test_due_experiments_run_between_goes_not_mid_go(tmp_path: Path) -> None:
     assert not discovery.experiment_due or not discovery.experiments_allowed
 
 
+def test_the_go_log_line_names_the_earners(lab: Lab, caplog: pytest.LogCaptureFixture) -> None:
+    """T-857: a go's line says which rewards paid its points, and only when it earned any."""
+    k = lab.connect()
+    score = k.at("ram", LAYOUT.score)
+    profile = lab.rewards.profile
+    assert score is not None and profile is not None
+    jump = profile.find(f"score_gain:{score.id}")
+    assert jump is not None
+    t = lab.training
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.training.service")
+    t.start()
+    assert t.step()
+    gain = GameEvent(EventKind.SCORE_GAIN, 5, score.id, "")
+    lab.bus.publish(DiscoveryUpdated((), (), (gain,), ()))
+    lab.bus.publish(DiscoveryUpdated((), (), (gain,), ()))
+    reset = GameEvent(EventKind.RESET, 99, None, WENT_HOME)
+    lab.bus.publish(DiscoveryUpdated((), (), (reset,), ()))
+    t.step()  # the go ends on the reset
+    messages = [r.getMessage() for r in caplog.records]
+    line = next(m for m in messages if m.startswith("Go 1 ended by reset"))
+    assert f", from {jump.name} {2 * jump.value:+,.1f} (2 times), " in line, line
+    assert line.endswith(f": {WENT_HOME} (frame 99)")
+    assert t.history[-1].result.earned[0].id == jump.id
+    while t.episodes < 2:
+        t.step()
+    line = next(m for m in caplog.records if m.getMessage().startswith("Go 2 ")).getMessage()
+    assert (", from " in line) == bool(t.history[-1].result.earned), line
+    t.stop()
+
+
 def test_the_log_says_why_each_go_ended(lab: Lab, caplog: pytest.LogCaptureFixture) -> None:
     """T-840: the user's log file shows how each go ended and what a reset blamed."""
     lab.connect()

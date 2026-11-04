@@ -13,6 +13,7 @@ from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import BUTTONS, LAYOUT
 from retro_ai_lab.emulator.registry import default_registry
 from retro_ai_lab.learning import ActionSpace, QLearningAgent, Settings, StateEncoder
+from retro_ai_lab.rewards import Trigger
 from retro_ai_lab.services import (
     ConnectionService,
     DiscoveryService,
@@ -22,8 +23,15 @@ from retro_ai_lab.services import (
     ObservationService,
     RewardService,
 )
+from retro_ai_lab.services.rewards import RewardEarned
 from retro_ai_lab.storage import GoalStore, RewardStore
-from retro_ai_lab.training import EpisodeRunner, EpisodeSignals
+from retro_ai_lab.training import (
+    Earning,
+    EpisodeResult,
+    EpisodeRunner,
+    EpisodeSignals,
+    describe_earned,
+)
 from retro_ai_lab.understanding import (
     Encoding,
     EventKind,
@@ -370,3 +378,77 @@ def test_signals_keep_the_ids_a_reset_blamed(lab: Lab) -> None:
     assert signals.last_reset_ids == ("v3", "v4")
     signals.start()
     assert signals.last_reset_ids == ()
+
+
+def test_signals_say_what_earned_the_points(lab: Lab) -> None:
+    """T-857: the points are split by the behaviour (or goal step) that paid them."""
+    signals = EpisodeSignals(lab.bus)
+    lab.connection.connect("fake", seed=3)
+    k = teach(lab)
+    score = k.at(RAM, LAYOUT.score)
+    assert score
+    profile = lab.rewards.profile
+    assert profile is not None
+    jump = profile.find(f"score_gain:{score.id}")
+    assert jump is not None
+    gain = GameEvent(EventKind.SCORE_GAIN, 5, score.id, "")
+    lab.bus.publish(DiscoveryUpdated((), (), (gain,), ()))
+    assert not signals.earned  # not listening yet
+    signals.start()
+    lab.bus.publish(DiscoveryUpdated((), (), (gain,), ()))
+    lab.bus.publish(DiscoveryUpdated((), (), (gain,), ()))
+    assert [(e.id, e.name, e.count, e.amount) for e in signals.earned] == [
+        (jump.id, jump.name, 2, 2 * jump.value)
+    ]
+    # A completed step is credited by its description; a setback by the same key.
+    step = lab.goals.add_objective("Score some points", Trigger(EventKind.SCORE_GAIN, score.id))
+    lab.bus.publish(DiscoveryUpdated((), (), (gain,), ()))
+    earned = signals.earned
+    assert earned[0].id == f"step:{step.id}" and earned[0].name == "Score some points"
+    assert earned[0].count == 1 and earned[0].amount == step.reward
+    assert earned[1].id == jump.id and earned[1].count == 3
+    signals.stop()
+    lab.bus.publish(DiscoveryUpdated((), (), (gain,), ()))
+    assert signals.earned[1].count == 3  # ignored while not listening
+    signals.start()
+    assert not signals.earned  # a new go starts clean
+
+
+def test_shares_are_credited_not_split_evenly(lab: Lab) -> None:
+    """T-857: a reward event naming shares credits each behaviour what it gave."""
+    signals = EpisodeSignals(lab.bus)
+    signals.start()
+    event = GameEvent(EventKind.PROGRESS, 9, "v1", "")
+    lab.bus.publish(RewardEarned(9, 12.0, ("a", "b"), event, ("Alpha", "Beta"), (10.0, 2.0)))
+    lab.bus.publish(RewardEarned(10, 4.0, ("c", "d"), event))  # no shares: split evenly
+    assert [(e.name, e.count, e.amount) for e in signals.earned] == [
+        ("Alpha", 1, 10.0),
+        ("Beta", 1, 2.0),
+        ("c", 1, 2.0),
+        ("d", 1, 2.0),
+    ]
+
+
+def test_earnings_are_worded_and_saved() -> None:
+    """T-857: at most three earners, biggest first, the rest counted; a result round-trips."""
+    earned = (
+        Earning("s", "Score goes up", 120, 2500.0),
+        Earning("p", "Checkpoint", 1, 40.0),
+        Earning("l", "Losing Lives", 3, -30.0),
+        Earning("f", "Flag on", 2, 4.0),
+        Earning("g", "Gaining Lives", 1, 2.0),
+    )
+    assert describe_earned(earned) == (
+        "Score goes up +2,500.0 (120 times), Checkpoint +40.0 (once), "
+        "Losing Lives -30.0 (3 times), and 2 more"
+    )
+    assert describe_earned(earned, most=5).endswith("Gaining Lives +2.0 (once)")
+    assert describe_earned(()) == ""
+    with pytest.raises(ConfigurationError):
+        describe_earned(earned, most=0)
+    result = EpisodeResult(10, 40, 2516.0, "max_steps", 3, 1, earned)
+    assert EpisodeResult.from_dict(result.to_dict()) == result
+    old = {"steps": 1, "frames": 4, "reward": 0.0, "ended_by": "reset", "states_seen": 1}
+    assert EpisodeResult.from_dict(old).earned == ()
+    with pytest.raises(ConfigurationError):
+        EpisodeResult.from_dict({**old, "earned": [{"id": "x"}]})

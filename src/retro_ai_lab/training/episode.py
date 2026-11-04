@@ -37,6 +37,43 @@ FINGERPRINT_STEPS = 64  # state keys a go remembers, for spotting two identical 
 DEFAULT_SETTLE_FRAMES = 5  # the understanding engine's event window
 
 
+@dataclass(frozen=True, slots=True)
+class Earning:
+    """What one behaviour (or goal step) earned over a go (T-857)."""
+
+    id: str
+    name: str
+    count: int
+    amount: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "name": self.name, "count": self.count, "amount": self.amount}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Earning:
+        try:
+            return cls(
+                str(data["id"]), str(data["name"]), int(data["count"]), float(data["amount"])
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ConfigurationError(f"Bad earning: {exc}") from exc
+
+
+def describe_earned(earned: Iterable[Earning], most: int = 3) -> str:
+    """ "Score goes up +2,500.0 (120 times), Checkpoint +40.0 (once), and 2 more"; "" for nothing."""
+    if most < 1:
+        raise ConfigurationError("most must be positive.")
+    items = list(earned)
+    words = [
+        f"{e.name} {e.amount:+,.1f} ({'once' if e.count == 1 else f'{e.count} times'})"
+        for e in items[:most]
+    ]
+    rest = len(items) - len(words)
+    if rest > 0:
+        words.append(f"and {rest} more")
+    return ", ".join(words)
+
+
 class EpisodeSignals:
     """Adds up the points announced on the bus and notices game restarts."""
 
@@ -44,6 +81,7 @@ class EpisodeSignals:
         self._reward = 0.0
         self._resets = 0
         self._completed = 0
+        self._earned: dict[str, Earning] = {}
         self._listening = False
         self._last_reset = ""  # what the detector blamed, for the log (T-840)
         self._last_reset_ids: tuple[str, ...] = ()
@@ -71,10 +109,23 @@ class EpisodeSignals:
         """The values the last reset blamed (T-845)."""
         return self._last_reset_ids
 
+    @property
+    def earned(self) -> tuple[Earning, ...]:
+        """What paid since :meth:`start`, biggest amount first (T-857)."""
+        return tuple(sorted(self._earned.values(), key=lambda e: (-abs(e.amount), e.id)))
+
+    def _credit(self, key: str, name: str, amount: float) -> None:
+        had = self._earned.get(key)
+        if had is None:
+            self._earned[key] = Earning(key, name, 1, amount)
+        else:
+            self._earned[key] = Earning(key, name, had.count + 1, had.amount + amount)
+
     def start(self) -> None:
         self._reward = 0.0
         self._resets = 0
         self._completed = 0
+        self._earned = {}
         self._last_reset = ""
         self._last_reset_ids = ()
         self._listening = True
@@ -90,17 +141,26 @@ class EpisodeSignals:
         return out
 
     def _on_reward(self, event: RewardEarned) -> None:
-        if self._listening:
-            self._reward += event.amount
+        if not self._listening:
+            return
+        self._reward += event.amount
+        ids = event.behaviour_ids
+        shares = event.shares if len(event.shares) == len(ids) else ()
+        names = event.names if len(event.names) == len(ids) else ()
+        for i, bid in enumerate(ids):
+            share = shares[i] if shares else event.amount / len(ids)
+            self._credit(bid, names[i] if names else bid, share)
 
     def _on_completed(self, event: ObjectiveCompleted) -> None:
         if self._listening:
             self._reward += event.reward
             self._completed += 1
+            self._credit(f"step:{event.objective.id}", event.objective.description, event.reward)
 
     def _on_setback(self, event: ObjectiveSetback) -> None:
         if self._listening:
             self._reward += event.penalty
+            self._credit(f"step:{event.objective.id}", event.objective.description, event.penalty)
 
     def _on_discovery(self, update: DiscoveryUpdated) -> None:
         if not self._listening:
@@ -120,6 +180,7 @@ class EpisodeResult:
     ended_by: str  # "reset", "max_steps", "stuck", "disconnected", "stopped", "mode change"
     states_seen: int
     objectives: int = 0  # objectives completed during the go
+    earned: tuple[Earning, ...] = ()  # what paid, biggest first (T-857)
 
     @property
     def succeeded(self) -> bool:
@@ -133,6 +194,7 @@ class EpisodeResult:
             "ended_by": self.ended_by,
             "states_seen": self.states_seen,
             "objectives": self.objectives,
+            "earned": [e.to_dict() for e in self.earned],
         }
 
     @classmethod
@@ -145,6 +207,7 @@ class EpisodeResult:
                 str(data["ended_by"]),
                 int(data["states_seen"]),
                 int(data.get("objectives", 0)),
+                tuple(Earning.from_dict(e) for e in data.get("earned", ())),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"Bad go result: {exc}") from exc
@@ -446,6 +509,7 @@ class EpisodeRunner:
             self._ended_by,
             len(self._states),
             self._signals.completed,
+            self._signals.earned,
         )
         self._state = None
         return result
@@ -461,7 +525,9 @@ __all__ = [
     "DEFAULT_FRAMES_PER_STEP",
     "DEFAULT_MAX_STEPS",
     "DEFAULT_SETTLE_FRAMES",
+    "Earning",
     "EpisodeResult",
     "EpisodeRunner",
     "EpisodeSignals",
+    "describe_earned",
 ]
