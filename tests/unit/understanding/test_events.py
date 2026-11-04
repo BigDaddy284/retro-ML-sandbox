@@ -72,6 +72,31 @@ def test_progress_setback_recovery_and_flags() -> None:
     assert d.observe(snap(7, 2, 2, 0, 9)) == ()
 
 
+def test_asked_values_report_every_move() -> None:
+    """T-860: a value a person asked about reports UP and DOWN, whatever its kind."""
+    k = knowledge_for({0: VariableKind.POSITION, 1: VariableKind.LIVES, 2: VariableKind.SPEED})
+    d = EventDetector(k)
+    assert d.asked == frozenset()
+    d.observe(snap(0, 10, 3, 0))
+    assert d.observe(snap(1, 12, 3, 1)) == ()  # positions and speeds are not tracked
+    d.ask(["v1", "v2"])
+    assert d.observe(snap(2, 12, 3, 1)) == ()  # asking starts the watch; no false move
+    events = d.observe(snap(3, 15, 2, 2))
+    assert events[0] == GameEvent(EventKind.UP, 3, "v1", "Position went up to 15.", 12, 15)
+    assert [e.kind for e in events[1:]] == [EventKind.DOWN, EventKind.SETBACK]  # lives: both
+    assert events[1].delta == -1 and events[2].variable_id == "v2"
+    assert d.observe(snap(4, 15, 2, 3)) == ()  # the speed was not asked about
+    assert [e.kind for e in d.observe(snap(5, 9, 2, 3))] == [EventKind.DOWN]
+    d.ask([])  # no longer asked: the position is not tracked again
+    assert d.observe(snap(6, 20, 2, 3)) == ()
+    assert "v1" not in d.watching
+    # A rejected or unknown value is never tracked, however often it is asked for.
+    bad = k.propose(RAM, 3, kind=VariableKind.UNKNOWN, evidence=SURE)
+    k.reject(bad.id)
+    d.ask([bad.id, "nope"])
+    assert d.observe(snap(7, 20, 2, 3, 1)) == () and d.observe(snap(8, 20, 2, 3, 2)) == ()
+
+
 def test_reset_needs_two_values_returning_home_with_a_drop() -> None:
     k = knowledge_for({0: VariableKind.PROGRESS, 1: VariableKind.LIVES})
     d = EventDetector(k)

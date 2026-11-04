@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from retro_ai_lab.core import Capabilities, UnsupportedCapabilityError
+from retro_ai_lab.core import Capabilities, ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
 from retro_ai_lab.emulator.registry import default_registry
@@ -134,6 +134,43 @@ def test_new_beliefs_add_behaviours_and_announce(
     assert {"Losing Lives", "Gaining Lives", "Checkpoint goes up", "Score jumps up"} <= names
     assert rewards.refresh_suggestions().is_empty
     assert rewards.saves >= 2 and rewards.store is not None and rewards.store.exists("toyracer-3")
+
+
+def test_a_person_adds_a_reward_on_a_value_going_up_or_down(
+    rewards: RewardService,
+    connection: ConnectionService,
+    discovery: DiscoveryService,
+    bus: EventBus,
+    earned: list[RewardEarned],
+    changes: list[RewardProfileChanged],
+) -> None:
+    """T-860: the row is added, the detector is asked, the points are earned, and it stays."""
+    connection.connect("fake", seed=3)
+    k = teach(discovery, bus)
+    lane = k.propose(RAM, LAYOUT.lane, kind=VariableKind.POSITION, evidence=SURE)
+    up = rewards.add_own(lane.id, goes_up=True, value=2.0)
+    down = rewards.add_own(lane.id, goes_up=False, value=-2.0, name="Lane")
+    assert up.name == "Your position goes up" and down.name == "Lane goes down"
+    assert rewards.own() == (up, down) and discovery.asked == {lane.id}
+    assert changes[-1].reason == "control" and changes[-1].added == (down.id,)
+    bus.publish(DiscoveryUpdated((), (), (GameEvent(EventKind.UP, 9, lane.id, "", 1, 2),), ()))
+    assert earned[-1].amount == 2.0 and earned[-1].names == (up.name,)
+    assert rewards.refresh_suggestions().is_empty and rewards.own() == (up, down)
+    with pytest.raises(ConfigurationError):
+        rewards.add_own(lane.id, goes_up=True, value=1.0)  # already there
+    with pytest.raises(ConfigurationError):
+        rewards.add_own("nope", goes_up=True, value=1.0)
+    with pytest.raises(ConfigurationError):
+        rewards.remove_own("reset:*")
+    # Saved: the rows and the asking come back after a reconnect.
+    connection.disconnect()
+    discovery.ask_for(())
+    connection.connect("fake", seed=3)
+    assert [b.id for b in rewards.own()] == [up.id, down.id] and discovery.asked == {lane.id}
+    rewards.remove_own(up.id)
+    rewards.remove_own(down.id)
+    assert rewards.own() == () and discovery.asked == frozenset()
+    assert changes[-1].removed == (down.id,)
 
 
 def test_events_earn_rewards_into_the_tally(

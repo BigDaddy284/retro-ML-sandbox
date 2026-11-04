@@ -18,6 +18,7 @@ from retro_ai_lab.rewards.model import (
     RewardProfile,
     Trigger,
 )
+from retro_ai_lab.rewards.own import MINE, OWN_NOTE, is_own, own_behaviour, own_id
 from retro_ai_lab.rewards.personalities import (
     PERSONALITIES,
     Personality,
@@ -42,6 +43,8 @@ __all__ = [
     "CATEGORY_WORDS",
     "GOAL_IDEAS",
     "MAX_VALUE",
+    "MINE",
+    "OWN_NOTE",
     "PERSONALITIES",
     "PICK_ONE",
     "SCHEMA_VERSION",
@@ -65,7 +68,10 @@ __all__ = [
     "describe_category",
     "explain_behaviour",
     "is_automatic",
+    "is_own",
     "merge_suggestions",
+    "own_behaviour",
+    "own_id",
     "personality",
     "suggest_behaviours",
     "suggest_goal",
