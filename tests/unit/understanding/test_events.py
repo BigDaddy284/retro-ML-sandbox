@@ -344,6 +344,24 @@ def test_a_reset_needs_most_of_the_moved_values_to_go_home() -> None:
     assert events[-1].variables == ("v1", "v2", "v6")
 
 
+def test_flags_switching_back_are_not_a_restart() -> None:
+    """T-867: a door closing is not the game starting over; a number must drop home."""
+    kinds = {0: VariableKind.FLAG, 1: VariableKind.FLAG, 2: VariableKind.PROGRESS}
+    d = EventDetector(knowledge_for(kinds))
+    d.observe(snap(0, 0, 0, 0))
+    d.observe(snap(1, 1, 1, 2))  # both flags on, progress away from home
+    d.observe(snap(2, 1, 1, 3))
+    # Both flags switch back while progress stays out: two of three moved, one sure, a
+    # "drop" from 1 to 0, and still no restart.
+    events = d.observe(snap(3, 0, 0, 3))
+    assert {e.kind for e in events} == {EventKind.FLAG_OFF}
+    # Progress dropping home alongside a flag is a restart, and the flag is named too.
+    d.observe(snap(4, 1, 0, 3))
+    events = d.observe(snap(5, 0, 0, 0))
+    reset = [e for e in events if e.kind is EventKind.RESET]
+    assert reset and set(reset[0].variables) == {"v1", "v3"}
+
+
 def test_values_that_never_moved_do_not_count_against_a_reset() -> None:
     """T-846: a value that sat still all along is not one the restart has to bring home."""
     kinds = {0: VariableKind.PROGRESS, 1: VariableKind.LIVES, 2: VariableKind.SCORE}
