@@ -395,3 +395,41 @@ def test_believed_keeps_the_best_few_of_each_kind() -> None:
     assert k.believed(Confidence.MEDIUM) == (sure, k.get(confirmed.id), elsewhere)
     with pytest.raises(ConfigurationError):
         k.believed(per_kind=0)
+
+
+def test_offered_keeps_one_seat_per_role_and_names_them() -> None:
+    """T-858: rewards and steps are offered for the best guess of each role, in plain words."""
+    from retro_ai_lab.understanding.knowledge import OFFERED_MANY, plain_names
+
+    assert OFFERED_MANY == 3
+    k = Knowledge("g")
+    weak = [Evidence("t", "", 1.0)]
+    strong = [Evidence("t", "", 3.0)]
+    scores = [k.propose("ram", i, kind=VariableKind.SCORE, evidence=weak) for i in range(5)]
+    best_score = k.propose("ram", 10, kind=VariableKind.SCORE, evidence=strong)
+    told = k.propose("ram", 11, kind=VariableKind.LIVES, evidence=weak)
+    k.confirm(told.id)
+    k.correct(told.id, name="Hearts")
+    k.propose("ram", 12, kind=VariableKind.LIVES, evidence=strong)  # loses to the confirmed one
+    progress = [
+        k.propose("ram", 20 + i, kind=VariableKind.PROGRESS, evidence=strong) for i in range(4)
+    ]
+    flags = [k.propose("ram", 30 + i, kind=VariableKind.FLAG, evidence=weak) for i in range(2)]
+    offered = k.offered()
+    assert [v.id for v in offered] == [
+        best_score.id,
+        told.id,
+        *(v.id for v in progress[:3]),
+        *(v.id for v in flags),
+    ]
+    assert scores[0].id not in {v.id for v in offered}
+    assert k.offered(Confidence.MEDIUM) == (best_score, k.get(told.id), *progress[:3])
+    names = plain_names(offered)
+    assert names[best_score.id] == "Your score" and names[told.id] == "Hearts"
+    assert [names[v.id] for v in progress[:3]] == [
+        "Progress",
+        "Progress (2nd guess)",
+        "Progress (3rd guess)",
+    ]
+    assert [names[v.id] for v in flags] == ["Something", "Something (2nd guess)"]
+    assert plain_names(()) == {}

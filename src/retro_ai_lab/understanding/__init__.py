@@ -10,6 +10,7 @@ from retro_ai_lab.understanding.knowledge import (
     Variable,
     VariableKind,
     confidence_from_evidence,
+    plain_names,
 )
 from retro_ai_lab.understanding.linking import InputLinks, apply_input_links, find_input_links
 from retro_ai_lab.understanding.longlook import LongLook
@@ -41,6 +42,7 @@ __all__ = [
     "find_input_links",
     "find_wake_button",
     "inputs_matter",
+    "plain_names",
     "probe_inputs",
     "propose_candidates",
 ]
