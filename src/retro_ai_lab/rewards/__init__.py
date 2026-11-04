@@ -31,11 +31,19 @@ from retro_ai_lab.rewards.suggestions import (
     suggest_behaviours,
 )
 from retro_ai_lab.rewards.tally import BehaviourTotal, RewardEntry, RewardTally
+from retro_ai_lab.rewards.words import (
+    CATEGORY_WORDS,
+    PICK_ONE,
+    describe_category,
+    explain_behaviour,
+)
 
 __all__ = [
+    "CATEGORY_WORDS",
     "GOAL_IDEAS",
     "MAX_VALUE",
     "PERSONALITIES",
+    "PICK_ONE",
     "SCHEMA_VERSION",
     "STEP",
     "Behaviour",
@@ -54,6 +62,8 @@ __all__ = [
     "Trigger",
     "apply_personality",
     "apply_suggestions",
+    "describe_category",
+    "explain_behaviour",
     "is_automatic",
     "merge_suggestions",
     "personality",
