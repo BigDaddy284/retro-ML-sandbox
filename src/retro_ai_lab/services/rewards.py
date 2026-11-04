@@ -36,6 +36,8 @@ class RewardEarned:
     amount: float
     behaviour_ids: tuple[str, ...]
     event: GameEvent
+    names: tuple[str, ...] = ()  # the behaviours' names, same order as the ids (T-857)
+    shares: tuple[float, ...] = ()  # what each behaviour gave, same order as the ids
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,9 +251,13 @@ class RewardService:
             return
         amount = float(sum(b.value for b in matched))
         ids = tuple(b.id for b in matched)
-        self._tally.record(game_event.frame, amount, ids, shares=[b.value for b in matched])
+        shares = tuple(float(b.value) for b in matched)
+        self._tally.record(game_event.frame, amount, ids, shares=shares)
         if amount != 0.0:
-            self._bus.publish(RewardEarned(game_event.frame, amount, ids, game_event))
+            names = tuple(b.name for b in matched)
+            self._bus.publish(
+                RewardEarned(game_event.frame, amount, ids, game_event, names, shares)
+            )
 
     def _watch_for_exploits(self, now: int) -> None:
         if self._detector is None:

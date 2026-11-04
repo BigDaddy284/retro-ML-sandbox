@@ -59,6 +59,7 @@ from retro_ai_lab.training.episode import (
     DEFAULT_UNSTICK_AFTER,
     EpisodeResult,
     EpisodeRunner,
+    describe_earned,
 )
 from retro_ai_lab.training.insights import (
     BehaviourChange,
@@ -1028,13 +1029,15 @@ class TrainingService:
         self._episodes += 1
         record = EpisodeRecord(self._episodes, self._mode, result, self._observation.frame)
         why = self._runner.last_reset if self._runner is not None else ""
+        earners = describe_earned(result.earned)
         log.info(
-            "Go %d ended by %s after %d steps (%d frames), %+.1f points%s",
+            "Go %d ended by %s after %d steps (%d frames), %+.1f points%s%s",
             self._episodes,
             result.ended_by,
             result.steps,
             result.frames,
             result.reward,
+            f", from {earners}" if earners else "",
             f": {why}" if result.ended_by == "reset" and why else "",
         )
         self._history.append(record)
