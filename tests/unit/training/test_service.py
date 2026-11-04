@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, replace
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -1230,6 +1231,30 @@ def test_go_settings_are_a_persons_choice_per_game(lab: Lab) -> None:
     lab.connection.disconnect()
     lab.connection.connect("fake", seed=9)
     assert t.max_steps == 50 and t.unstick_after == DEFAULT_UNSTICK_AFTER
+
+
+def test_every_step_announces_the_buttons_held(lab: Lab) -> None:
+    """T-874: the runner says what each step held, before the step's reward is collected."""
+    from retro_ai_lab.rewards import AGAIN_ID, Category
+    from retro_ai_lab.services import ButtonsHeld
+
+    held: list[ButtonsHeld] = []
+    lab.bus.subscribe(ButtonsHeld, held.append)
+    lab.connect()
+    t = lab.training
+    t.train(1)
+    assert t.last is not None and len(held) == t.last.result.steps
+    assert all(h.source == "ai" for h in held)
+    # The points for a repeated button land in the go that pressed it.
+    profile = lab.rewards.profile
+    assert profile is not None
+    lab.rewards.set_value(AGAIN_ID, 1.0)
+    before = lab.rewards.tally.by_category(profile)[Category.CONTROLS]
+    held.clear()
+    t.train(1)
+    repeats = sum(len(a.buttons & b.buttons) for a, b in pairwise(held))
+    assert lab.rewards.tally.by_category(profile)[Category.CONTROLS] - before == float(repeats)
+    assert t.last is not None and t.last.result.reward >= float(repeats) - 1e-9
 
 
 def test_the_search_runs_flat_out_and_puts_the_speed_back(

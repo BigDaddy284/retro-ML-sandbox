@@ -15,6 +15,7 @@ from pathlib import Path
 
 from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
+from retro_ai_lab.rewards.buttons import ensure_button_rows
 from retro_ai_lab.rewards.exploitation import ExploitDetector, ExploitWarning
 from retro_ai_lab.rewards.model import Behaviour, RewardProfile
 from retro_ai_lab.rewards.own import is_own, own_behaviour, own_id
@@ -27,6 +28,7 @@ from retro_ai_lab.services.connection import (
     EmulatorDisconnected,
 )
 from retro_ai_lab.services.discovery import DiscoveryService, DiscoveryUpdated, game_id_for
+from retro_ai_lab.services.observer import ButtonsHeld
 from retro_ai_lab.storage.rewards import RewardStore
 from retro_ai_lab.understanding.events import EventKind, GameEvent
 from retro_ai_lab.understanding.knowledge import plain_names
@@ -86,8 +88,10 @@ class RewardService:
         self._warnings: list[ExploitSuspected] = []
         self._watch = RelationshipWatch()
         self._current: ExploitSuspected | None = None
+        self._held: frozenset[str] = frozenset()  # the step before's buttons (T-874)
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
+        bus.subscribe(ButtonsHeld, self._on_buttons_held)
         bus.subscribe(DiscoveryUpdated, self._on_discovery)
 
     # ------------------------------------------------------------ queries
@@ -126,7 +130,7 @@ class RewardService:
     def summary(self) -> str:
         if self._profile is None or not self._enabled:
             return "No game to reward."
-        n = self._profile.enabled_count()
+        n = self._profile.active_count()
         return f"{n} reward{'s' if n != 1 else ''} switched on; {self._tally.total:+.1f} earned."
 
     # ------------------------------------------------------------ controls
@@ -266,6 +270,8 @@ class RewardService:
         self._warnings.clear()
         self._current = None
         self._watch.reset()
+        self._held = frozenset()
+        ensure_button_rows(self._profile, event.buttons)  # a row per button (T-874)
         self._ask_for_own()
         self._bus.publish(RewardProfileChanged((), self._profile.ids(), (), "loaded"))
         self.refresh_suggestions()
@@ -308,6 +314,21 @@ class RewardService:
             self._bus.publish(
                 RewardEarned(game_event.frame, amount, ids, game_event, names, shares)
             )
+
+    def _on_buttons_held(self, event: ButtonsHeld) -> None:
+        """Score the buttons a step held (T-874): a press each, a repeat for those held before."""
+        profile = self._profile
+        if not self._enabled or profile is None:
+            return
+        before, self._held = self._held, event.buttons
+        for name in sorted(event.buttons):
+            press = GameEvent(EventKind.PRESS, event.frame, name, f"{name} held")
+            if profile.reward_for(press) != 0.0:
+                self._score(press)
+            if name in before:
+                again = GameEvent(EventKind.REPEAT, event.frame, name, f"{name} held again")
+                if profile.reward_for(again) != 0.0:
+                    self._score(again)
 
     def _watch_for_exploits(self, now: int) -> None:
         if self._detector is None:

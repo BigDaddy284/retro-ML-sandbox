@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-874: the Rewards panel has a Controls group with a row for every button of the connected game and one for pressing the same button again, each at 0 until a person sets points; the summary counts only rows worth something.
 - T-873: the Learning panel has "Each go lasts" and "Give up when nothing changes for" boxes in seconds; a person's choice is kept per game.
 - T-872: a Points box in the Rewards panel takes any number for the picked reward (0.65, -3), applied on Enter or when leaving the box.
 - T-871: the "played" credit goes only to a guess that moved at most once in ten steps of the go, once per go and three goes at most, so values that move go after go outrank a one-off and busy values get nothing.
