@@ -461,7 +461,7 @@ def test_a_lives_guess_that_bounces_is_doubted_then_dropped(
     last = k.get(busy.id).evidence[-1]
     assert last.kind == BUSY and "changes rarely" in last.detail
     assert len(seen) == 1 and seen[0].changed == changed
-    assert "3 guesses change like no life count or progress does: 3 doubted (" in caplog.text
+    assert "3 guesses change like no life count, progress or flag does: 3 doubted (" in caplog.text
     # The next review drops all three; the real and the confirmed guesses are untouched.
     update = discovery.review()
     assert {
@@ -480,6 +480,41 @@ def test_a_lives_guess_that_bounces_is_doubted_then_dropped(
         assert not got.rejected and not any(e.kind in (BOUNCES, BUSY) for e in got.evidence)
     assert k.get(sure.id).confirmed
     assert discovery.doubt_bouncing() == ()
+
+
+def test_a_busy_flag_guess_is_doubted_then_dropped(
+    discovery: DiscoveryService,
+    connection: ConnectionService,
+    observation: ObservationService,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """T-869: a flag switching more than once in ten steps is no event worth rewarding."""
+    connection.connect("fake", seed=2)
+    k = discovery.knowledge
+    assert k is not None
+    play(connection, observation, 600)
+
+    def plant(offset: int, name: str) -> Variable:
+        found = k.at("ram", offset)
+        if found is None:
+            found = k.propose("ram", offset, kind=VariableKind.FLAG, name=name)
+        return k.update(found.id, kind=VariableKind.FLAG, name=name)
+
+    blink = plant(LAYOUT.timer, "Timer as flag")  # changes every step
+    over = plant(LAYOUT.game_over, "Game over")  # switches rarely, if at all
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
+    changed = discovery.doubt_bouncing(frame=4)
+    assert [v.id for v in changed] == [blink.id]
+    last = k.get(blink.id).evidence[-1]
+    assert last.kind == BUSY and last.frame == 4 and "a flag changes rarely" in last.detail
+    assert not k.get(blink.id).rejected
+    assert "1 guesses change like no life count, progress or flag does: 1 doubted (" in caplog.text
+    discovery.review()
+    assert k.get(blink.id).rejected
+    assert "Rejected by the AI." in k.get(blink.id).evidence[-1].detail
+    assert "0 doubted (none), 1 dropped (Timer as flag)" in caplog.text
+    got = k.get(over.id)
+    assert not got.rejected and not any(e.kind == BUSY for e in got.evidence)
 
 
 def test_a_person_names_a_value_by_address(

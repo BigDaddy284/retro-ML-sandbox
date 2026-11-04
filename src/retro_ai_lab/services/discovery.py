@@ -52,6 +52,7 @@ from retro_ai_lab.understanding.longlook import LongLook
 from retro_ai_lab.understanding.relationships import RelationshipFinder
 from retro_ai_lab.understanding.variables import (
     find_candidates,
+    flag_doubt,
     lives_doubt,
     progress_doubt,
     propose_candidates,
@@ -70,11 +71,12 @@ DOUBTED_KINDS = frozenset({VariableKind.SCORE, VariableKind.PROGRESS})
 BOUNCES = "bounces"  # evidence kind: a "lives" byte going up nearly as often as down (T-864)
 BUSY = "busy"  # evidence kind: a "lives" byte changing more than once in ten steps (T-865)
 NOT_LIVES = frozenset({BOUNCES, BUSY})
-# Kinds re-checked at every review against the byte's fresh statistics (T-864 to T-866):
+# Kinds re-checked at every review against the byte's fresh statistics (T-864 to T-866, T-869):
 # the doubt function says why the byte is not that kind, the words name the kind.
 KIND_DOUBTS: dict[VariableKind, tuple[Callable[[ByteStats], str | None], str]] = {
     VariableKind.LIVES: (lives_doubt, "a life count"),
     VariableKind.PROGRESS: (progress_doubt, "progress"),
+    VariableKind.FLAG: (flag_doubt, "a flag"),
 }
 
 
@@ -322,7 +324,7 @@ class DiscoveryService:
     def doubt_bouncing(self, *, frame: int | None = None) -> tuple[Variable, ...]:
         """A lives or progress guess that changes like no such value does is dropped.
 
-        Read off the change tracker's fresh statistics (T-864 to T-866): a byte
+        Read off the change tracker's fresh statistics (T-864 to T-866, T-869): a byte
         that goes up nearly as often as down ("bounces") or changes more than
         once in ten steps ("busy") is doubted the first time and rejected by the
         AI the next; confirmed and already rejected guesses are left alone.
@@ -374,7 +376,7 @@ class DiscoveryService:
             changed = (*doubted, *dropped)
             if changed:
                 log.info(
-                    "%d guesses change like no life count or progress does: %d doubted (%s), "
+                    "%d guesses change like no life count, progress or flag does: %d doubted (%s), "
                     "%d dropped (%s).",
                     len(changed),
                     len(doubted),
