@@ -142,6 +142,7 @@ class MgbaScriptHost:
         self._next_handle = 1
         self.port = 0
         self.mask = 0
+        self.real_mask = 0  # what the host's person holds on the controller (T-887)
         self.masks: list[int] = []  # setKeys per frame
         self.frames = 0
         self.log: list[bytes] = []
@@ -278,6 +279,7 @@ class MgbaScriptHost:
         """One emulated frame, the way mGBA pumps a script."""
         try:
             self._deliver_socket_events()
+            self.mask = self.real_mask  # the person's keys, unless keysRead overrides them
             self._fire(b"keysRead")
             self._game.step(self.pressed)
             self.masks.append(self.mask)

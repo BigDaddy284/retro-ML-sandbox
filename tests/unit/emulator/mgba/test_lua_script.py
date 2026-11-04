@@ -331,3 +331,26 @@ def _lossy(value: Any) -> Any:
 
 def test_protocol_errors_are_the_adapters(monkeypatch: pytest.MonkeyPatch) -> None:
     assert issubclass(ProtocolError, EmulatorError)
+
+
+def test_a_watched_step_leaves_the_keys_to_the_person() -> None:
+    """T-887: with ``watch`` the script sets no keys; the person plays, and is reported."""
+    with MgbaScriptHost() as host:
+        adapter = connected(host)
+        up_bit = 1 << GBA_KEYS[b"UP"]
+        host.real_mask = up_bit
+        plain = adapter.step(1)  # an ordinary step overrides the person's keys
+        assert plain.pressed is None and host.masks[-1] == 0
+        watched = adapter.step(2, watch=True)
+        assert watched.pressed == frozenset({"up"})
+        assert host.masks[-2:] == [up_bit, up_bit]  # the person's keys reached the game
+        host.real_mask = 0
+        assert adapter.step(1, watch=True).pressed == frozenset()
+        with pytest.raises(EmulatorError, match="hold the pad and watch"):
+            adapter._call("step", frames=1, watch=True, buttons={"UP": True})
+        host.real_mask = up_bit  # an ordinary step takes the keys back
+        a_bit = 1 << GBA_KEYS[b"A"]
+        adapter.step(1, pressed={Button("a", "A")})
+        assert host.masks[-1] == a_bit
+        adapter.disconnect()
+        assert host.error is None

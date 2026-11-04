@@ -74,6 +74,10 @@ class RecordingAdapter(EmulatorAdapter):
     def _do_advance_frames(self, n: int) -> None:
         self.calls.append(("advance", n))
 
+    def _do_watch_pad(self) -> frozenset[str]:
+        self.calls.append(("watch", None))
+        return frozenset({"a"})
+
     def _do_set_speed(self, multiplier: float) -> None:
         self.calls.append(("speed", multiplier))
 
@@ -501,7 +505,9 @@ def test_step_refuses_a_short_read_and_a_missing_screenshot() -> None:
         a.step(1, reads=[("ram", 0, 4)])
 
     class Blind(RecordingAdapter):
-        def _do_step(self, frames: int, pressed: Any, reads: Any, screenshot: bool) -> StepResult:
+        def _do_step(
+            self, frames: int, pressed: Any, reads: Any, screenshot: bool, watch: bool = False
+        ) -> StepResult:
             return StepResult(frames)
 
     b = Blind()
@@ -510,6 +516,31 @@ def test_step_refuses_a_short_read_and_a_missing_screenshot() -> None:
         b.step(1, screenshot=True)
     with pytest.raises(ConfigurationError, match="answered 0 reads for 1"):
         b.step(1, reads=[("ram", 0, 1)])
+    with pytest.raises(ConfigurationError, match="without reporting the pad"):
+        b.step(1, watch=True)
+
+
+def test_a_watched_step_leaves_the_pad_to_the_person(adapter: RecordingAdapter) -> None:
+    """T-887: ``watch`` sets nothing and answers what the person held."""
+    result = adapter.step(2, watch=True, reads=[("ram", 0, 1)])
+    assert result == StepResult(2, (bytes([0]),), None, frozenset({"a"}))
+    assert [name for name, _ in adapter.calls[1:]] == ["advance", "read", "watch"]
+    assert adapter.step(1).pressed is None
+    with pytest.raises(ConfigurationError, match="hold the pad and watch"):
+        adapter.step(1, pressed={A}, watch=True)
+    blind = RecordingAdapter(Capabilities(frame_advance=True))
+    blind.connect()
+    with pytest.raises(UnsupportedCapabilityError, match="input"):
+        blind.step(1, watch=True)
+
+    class Deaf(RecordingAdapter):
+        def _do_watch_pad(self) -> frozenset[str]:
+            return EmulatorAdapter._do_watch_pad(self)
+
+    deaf = Deaf()
+    deaf.connect()
+    with pytest.raises(UnsupportedCapabilityError, match="cannot watch"):
+        deaf.step(1, watch=True)
 
 
 def test_step_requires_a_connection() -> None:

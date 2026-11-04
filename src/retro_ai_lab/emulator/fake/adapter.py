@@ -127,6 +127,11 @@ class FakeEmulatorAdapter(EmulatorAdapter):
         for _ in range(n):
             self._game.step(names)
 
+    def _do_watch_pad(self) -> frozenset[str]:
+        """The toy game has no real controller: what is held is what was set."""
+        self._tick()
+        return frozenset(b.name for b in self._held)
+
     def _do_set_speed(self, multiplier: float) -> None:
         self._tick()
         self._speed = multiplier

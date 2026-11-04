@@ -233,12 +233,14 @@ class StepResult:
 
     ``reads`` holds one ``bytes`` per requested read, in request order;
     ``frame`` is the screenshot taken after the last frame, if one was asked
-    for.
+    for; ``pressed`` names the buttons the person held on the real controller
+    during a watched step (T-887), ``None`` when the step did not watch.
     """
 
     frames: int
     reads: tuple[bytes, ...] = ()
     frame: Frame | None = None
+    pressed: frozenset[str] | None = None
 
     def __post_init__(self) -> None:
         _require_int(self.frames, "StepResult frames", minimum=1)
@@ -246,6 +248,11 @@ class StepResult:
             raise ConfigurationError("StepResult reads must be a tuple of bytes.")
         if self.frame is not None and not isinstance(self.frame, Frame):
             raise ConfigurationError("StepResult frame must be a Frame or None.")
+        if self.pressed is not None and (
+            not isinstance(self.pressed, frozenset)
+            or not all(isinstance(name, str) for name in self.pressed)
+        ):
+            raise ConfigurationError("StepResult pressed must be a frozenset of names or None.")
 
 
 __all__ = ["Button", "Capabilities", "Frame", "GameInfo", "MemoryRegion", "StepResult"]

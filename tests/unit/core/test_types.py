@@ -17,6 +17,7 @@ from retro_ai_lab.core import (
     Frame,
     GameInfo,
     MemoryRegion,
+    StepResult,
 )
 
 # ---------------------------------------------------------------- Button
@@ -253,3 +254,13 @@ def test_frame_is_immutable() -> None:
     f = Frame(1, 1, 1, b"\x00")
     with pytest.raises(dataclasses.FrozenInstanceError):
         f.width = 2  # type: ignore[misc]
+
+
+def test_step_result_pressed_is_names_or_none() -> None:
+    """T-887: a watched step names the buttons the person held."""
+    assert StepResult(1).pressed is None
+    assert StepResult(1, pressed=frozenset({"a", "up"})).pressed == frozenset({"a", "up"})
+    with pytest.raises(ConfigurationError, match="pressed"):
+        StepResult(1, pressed={"a"})  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError, match="pressed"):
+        StepResult(1, pressed=frozenset({1}))  # type: ignore[arg-type]

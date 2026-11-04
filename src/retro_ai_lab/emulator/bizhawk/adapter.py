@@ -337,6 +337,7 @@ class BizHawkAdapter(EmulatorAdapter):
         pressed: frozenset[Button] | None,
         reads: Sequence[tuple[str, int, int]],
         screenshot: bool,
+        watch: bool = False,
     ) -> StepResult:
         """One ``step`` request carries buttons, frames, reads and the screenshot.
 
@@ -352,12 +353,23 @@ class BizHawkAdapter(EmulatorAdapter):
         if screenshot:
             fields["screenshot"] = True
             fields.update(self._image_fields())
+        if watch:
+            fields["watch"] = True
         answer = self._call("step", **fields)
         if pressed is not None:
             self._held = pressed
         data = tuple(self._reads_from(answer, len(reads))) if reads else ()
         frame = self._frame_from(answer) if screenshot else None
-        return StepResult(frames, data, frame)
+        held = self._pressed_from(answer) if watch else None
+        return StepResult(frames, data, frame, held)
+
+    def _pressed_from(self, answer: dict[str, Any]) -> frozenset[str] | None:
+        """The buttons a watched step saw the person hold, as our names (T-887)."""
+        labels = answer.get("pressed")
+        if not isinstance(labels, list) or not all(isinstance(n, str) for n in labels):
+            return None
+        by_label = {label: ident for ident, label in self.description.button_names.items()}
+        return frozenset(by_label[label] for label in labels if label in by_label)
 
     def _do_capture_frame(self) -> Frame:
         answer = self._call("screenshot", **self._image_fields())

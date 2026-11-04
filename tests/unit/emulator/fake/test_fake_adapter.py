@@ -174,3 +174,12 @@ def test_drop_link_simulates_an_unexpected_disconnect(fake: FakeEmulatorAdapter)
 def test_bad_fault_settings_are_rejected(kwargs: dict[str, Any]) -> None:
     with pytest.raises(ConfigurationError):
         FakeEmulatorAdapter(**kwargs)
+
+
+def test_a_watched_step_answers_what_the_toy_pad_holds(fake: FakeEmulatorAdapter) -> None:
+    """T-887: the fake game has no real controller; what is held is what it reports."""
+    assert fake.step(1, watch=True).pressed == frozenset()
+    fake.set_input({BY_NAME["up"], BY_NAME["a"]})
+    result = fake.step(2, watch=True)
+    assert result.pressed == frozenset({"up", "a"})
+    assert fake.step(1).pressed is None

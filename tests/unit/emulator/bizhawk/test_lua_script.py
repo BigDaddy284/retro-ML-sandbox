@@ -589,3 +589,37 @@ def test_bundled_step_through_the_real_script(
         assert result.reads == (host.game.ram,)
         assert result.frame is not None and result.frame.number == host.frames
         adapter.disconnect()
+
+
+def test_a_watched_step_leaves_the_pad_to_the_person() -> None:
+    """T-887: with ``watch`` the script sets no pad; the person plays, and is reported."""
+    with LuaScriptHost() as host:
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
+        adapter.connect(timeout_s=5.0)
+        reference = ToyRacer(0)
+        reference.restore(host.game.snapshot())
+        host.real_pad = ("up",)
+        # an ordinary step overrides the person's pad: nothing held means nothing pressed
+        plain = adapter.step(1)
+        reference.step(())
+        assert plain.pressed is None and host.game.snapshot() == reference.snapshot()
+        sets_before = host.calls.count("joypad_set")
+        watched = adapter.step(2, watch=True)
+        for _ in range(2):
+            reference.step(("up",))
+        assert host.game.snapshot() == reference.snapshot()
+        assert watched.pressed == frozenset({"up"})
+        assert host.calls.count("joypad_set") == sets_before  # the pad was left alone
+        host.real_pad = ()
+        assert adapter.step(1, watch=True).pressed == frozenset()
+        reference.step(())
+        # holding and watching at once is refused by the script too
+        with pytest.raises(EmulatorError, match="hold the pad and watch"):
+            adapter._call("step", frames=1, watch=True, buttons={"Up": True})
+        # and an ordinary step after a watched one takes the pad back
+        host.real_pad = ("up",)
+        adapter.step(1, pressed={Button("a", "A")})
+        reference.step(("a",))
+        assert host.game.snapshot() == reference.snapshot()
+        adapter.disconnect()
+        assert host.error is None
