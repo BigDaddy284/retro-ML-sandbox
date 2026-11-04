@@ -60,7 +60,7 @@ class Earning:
 
 
 def describe_earned(earned: Iterable[Earning], most: int = 3) -> str:
-    """ "Score goes up +2,500.0 (120 times), Checkpoint +40.0 (once), and 2 more"; "" for nothing."""
+    """Word the top earners: "Score +2,500.0 (120 times), Lap +40.0 (once), and 2 more"."""
     if most < 1:
         raise ConfigurationError("most must be positive.")
     items = list(earned)
