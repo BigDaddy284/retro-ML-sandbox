@@ -2349,7 +2349,7 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Test plan:** `test_state_key_round_trip_and_describe` gains the `most` check; `test_insights` describes a six-value state; `tests/ui/test_learning_panel.py::test_insights_scroll_instead_of_squashing_the_graph`; full suite.
 - **Results:** 3/3 quality gates passed. Full suite 1266 passed, 10 skipped; ruff and mypy clean.
 - **Commit:** see PR. **PR:** pending.
-- **Completion report:** The advice under the graph is short and boxed; the graph keeps its room in a compact dock.
+- **Completion report:** The advice under the graph is short and boxed; the graph keeps its room in a compact dock. Also fixed here: the mGBA Lua test host cleared its key mask at the top of every frame since T-887 before the script set it again, so `test_adapter_drives_the_real_script` could read an empty pad from another thread (one Windows CI job of PR #144); the host now replaces the mask only when no keysRead callback set it.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
