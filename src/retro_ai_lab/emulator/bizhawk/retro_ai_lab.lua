@@ -645,6 +645,20 @@ function handlers.read(req)
 end
 
 local MAX_STEP_FRAMES = 3600
+-- After answering a request in hold mode, how long the turn waits for the
+-- app's next one, and how many requests a turn serves before EmuHawk gets
+-- the loop back (a step hands it back itself, frame by frame) (T-890).
+local SERVE_WAIT_S = 0.004
+local SERVE_MOST = 8
+local served_since_yield = 0
+
+-- Wall-clock seconds, for saying where a step's time went (T-890).
+local function now()
+  if type(socket.gettime) == "function" then
+    return socket.gettime()
+  end
+  return os.clock()
+end
 
 -- Run exactly `frames` frames with the held pad, then stop again in hold mode.
 --
@@ -657,7 +671,7 @@ local MAX_STEP_FRAMES = 3600
 -- emu.yield() before the first frame, and set again between frames.
 -- While watching, the pad is never set, so the person's controller reaches
 -- the game, and it is sampled around every frame into `seen`.
-local function run_frames(frames, seen)
+local function run_frames(frames, seen, took)
   local function hold()
     if seen then
       sample_pad(seen)
@@ -666,6 +680,7 @@ local function run_frames(frames, seen)
     end
   end
   if free_run then
+    local started = now()
     for _ = 1, frames do
       hold()
       emu.frameadvance()
@@ -673,11 +688,15 @@ local function run_frames(frames, seen)
     if seen then
       sample_pad(seen)
     end
+    took.frames = now() - started
     return
   end
   hold()
+  local started = now()
   emu.yield()
+  took.latch = now() - started
   unpause()
+  started = now()
   for i = 1, frames do
     emu.frameadvance()
     if i < frames then
@@ -687,6 +706,8 @@ local function run_frames(frames, seen)
     end
   end
   pause()
+  took.frames = now() - started
+  served_since_yield = 0
 end
 
 local function pressed_names(seen)
@@ -725,7 +746,8 @@ function handlers.step(req)
     release_all()
     seen = {}
   end
-  run_frames(frames, seen)
+  local took = {}
+  run_frames(frames, seen, took)
   local body = {}
   if req.reads ~= nil then
     body.reads = serve_reads(req.reads)
@@ -736,6 +758,9 @@ function handlers.step(req)
   if seen then
     body.pressed = pressed_names(seen)
   end
+  -- Seconds spent waiting for the pad-latching turn and running the frames,
+  -- so the app's link log can say which turn of EmuHawk's loop costs what.
+  body.took = { latch = took.latch or 0, frames = took.frames or 0 }
   return body
 end
 
@@ -827,6 +852,17 @@ local function serve_line(line)
   end
 end
 
+-- In hold mode the app's next request usually follows its last answer within
+-- a few milliseconds; waiting for it here serves it in this same turn instead
+-- of after a paused turn of EmuHawk's loop, which costs about a frame (T-890).
+local function wait_for_request()
+  if free_run or served_since_yield >= SERVE_MOST or type(socket.select) ~= "function" then
+    return false
+  end
+  local ok, ready = pcall(socket.select, { app }, nil, SERVE_WAIT_S)
+  return ok and type(ready) == "table" and ready[1] ~= nil
+end
+
 -- Accept a connection if none, then serve every complete line waiting.
 local function service()
   if app == nil then
@@ -839,16 +875,21 @@ local function service()
     pending = ""
     print("Retro AI Lab connected.")
   end
+  local served = 0
   while app do
     local line, err, partial = app:receive("*l")
     if line then
       serve_line(pending .. line)
       pending = ""
+      served = served + 1
+      served_since_yield = served_since_yield + 1
     elseif err == "timeout" then
       if partial and partial ~= "" then
         pending = pending .. partial
       end
-      return
+      if served == 0 or not app or not wait_for_request() then
+        return
+      end
     else
       print("Retro AI Lab disconnected (" .. tostring(err) .. ").")
       drop_app()
@@ -878,6 +919,7 @@ local function main()
   end
   while true do
     service()
+    served_since_yield = 0
     if app and not free_run then
       emu.yield()
     else
