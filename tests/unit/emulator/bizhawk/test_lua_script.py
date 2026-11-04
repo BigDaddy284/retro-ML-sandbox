@@ -398,9 +398,11 @@ def test_hold_mode_step_unpauses_runs_and_pauses_again() -> None:
         reference.restore(host.game.snapshot())
         answer = adapter._call("step", frames=1, buttons={"Up": True})
         assert answer["frame"] == host.game.state.frame
-        assert host.frames == before + 1 and host.paused
+        assert host.frames == before + 1
         reference.step(("up",))  # the pad reached the very first frame
         assert host.game.snapshot() == reference.snapshot()
+        # T-893: the pause comes only once no request follows the step
+        wait_until(lambda: host.paused)
         pad_calls = [c for c in host.calls[calls_before:] if c in ("pause", "unpause")]
         assert pad_calls == ["unpause", "pause"]
         assert host.pressed == ()  # nothing left armed for a frame that must not run
@@ -425,9 +427,10 @@ def test_step_advances_exactly_and_keeps_the_hold() -> None:
         for _ in range(5):  # the held button went into every one of those frames
             reference.step(("up",))
         assert host.game.snapshot() == reference.snapshot()
-        assert host.paused
+        wait_until(lambda: host.paused)
         # nothing moves while the app thinks
         time.sleep(0.2)
+        assert host.frames == before + 5
         assert host.frames == before + 5
         # a bundled step: buttons, reads and a screenshot in one round trip
         host.write_screenshots = True
@@ -656,8 +659,9 @@ def test_a_step_costs_its_frames_in_turns_and_requests_share_a_turn() -> None:
         assert json.loads(channel.receive_line(5.0))["ok"] is True  # the third
         assert host.on_select is None  # it was sent from inside the wait
         assert host.answered_at[-1] - host.answered_at[-2] == 4
-        assert host.frames == before + 12 and host.paused
-        # a turn with nothing served does not wait
+        assert host.frames == before + 12
+        wait_until(lambda: host.paused)  # after the wait for a next step (T-893)
+        # a turn with nothing served, and no step just run, does not wait
         selects = host.calls.count("select")
         time.sleep(0.05)
         assert host.calls.count("select") == selects
@@ -679,3 +683,50 @@ def test_the_link_log_keeps_the_scripts_step_timing() -> None:
         assert "step:latch \u00d72" in summary and "step:frames \u00d72" in summary
         adapter.disconnect()
         assert host.error is None
+
+
+def test_steps_that_follow_each_other_keep_the_emulator_running() -> None:
+    """T-893: the user's video showed BizHawk's status bar flickering while they played.
+
+    Every step paused and unpaused EmuHawk, 15 to 26 times a second. A step
+    now leaves the emulator running, and the turn waits up to PAUSE_AFTER_S
+    for the next request: a step within that wait runs its frames straight
+    away, with no pause, no unpause and no latch turn; only silence pauses.
+    """
+    import socket as sockets
+
+    from retro_ai_lab.emulator.bizhawk.protocol import LineChannel, encode_request
+
+    with LuaScriptHost() as host:
+        raw = sockets.create_connection(("127.0.0.1", host.port), timeout=5.0)
+        channel = LineChannel(raw)
+        channel.send_line(encode_request(1, "hello"))
+        assert json.loads(channel.receive_line(5.0))["ok"] is True
+        wait_until(lambda: host.paused)
+        before, mark = host.frames, len(host.calls)
+        reference = ToyRacer(0)
+        reference.restore(host.game.snapshot())
+        answers = []
+        for n in range(2, 8):  # six steps, each sent after the last answer, within the wait
+            channel.send_line(encode_request(n, "step", frames=2, buttons={"Up": n % 2 == 0}))
+            answers.append(json.loads(channel.receive_line(5.0)))
+            assert answers[-1]["ok"], answers[-1]
+            assert not host.paused and host.frames == before + 2 * (n - 1)
+        for n in range(2, 8):  # the pad changed between steps and reached every frame
+            for _ in range(2):
+                reference.step(("up",) if n % 2 == 0 else ())
+        assert host.game.snapshot() == reference.snapshot()
+        pauses = [c for c in host.calls[mark:] if c in ("pause", "unpause")]
+        assert pauses == ["unpause"]  # once, before the first step
+        assert answers[0]["took"]["latch"] > 0 and answers[1]["took"]["latch"] == 0
+        wait_until(lambda: host.paused)  # silence pauses it
+        assert host.frames == before + 12
+        time.sleep(0.1)
+        assert host.frames == before + 12  # and nothing runs while paused
+        # the next step starts from paused: a latch turn, then an unpause
+        channel.send_line(encode_request(9, "step", frames=1))
+        assert json.loads(channel.receive_line(5.0))["took"]["latch"] > 0
+        assert host.frames == before + 13
+        channel.send_line(encode_request(10, "bye"))
+        assert json.loads(channel.receive_line(5.0))["ok"] is True
+        wait_until(lambda: not host.paused)
