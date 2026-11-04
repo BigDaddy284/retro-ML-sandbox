@@ -28,6 +28,7 @@ from retro_ai_lab.services.observer import (
 )
 from retro_ai_lab.services.rewards import (
     ExploitSuspected,
+    GoStarted,
     RewardEarned,
     RewardProfileChanged,
     RewardService,
@@ -48,6 +49,7 @@ __all__ = [
     "EmulatorDisconnected",
     "ExperimentHarness",
     "ExploitSuspected",
+    "GoStarted",
     "GoalChanged",
     "GoalService",
     "InputRecorded",

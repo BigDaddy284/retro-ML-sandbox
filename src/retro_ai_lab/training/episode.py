@@ -24,7 +24,7 @@ from retro_ai_lab.services.discovery import DiscoveryUpdated
 from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.goals import ObjectiveCompleted, ObjectiveSetback
 from retro_ai_lab.services.observer import ButtonsHeld, ObservationService
-from retro_ai_lab.services.rewards import RewardEarned
+from retro_ai_lab.services.rewards import GoStarted, RewardEarned
 from retro_ai_lab.understanding.events import EventKind
 
 DEFAULT_FRAMES_PER_STEP = 4
@@ -392,6 +392,7 @@ class EpisodeRunner:
                 "Can't see the game's memory, so there is nothing to learn from."
             )
         self._signals.start()
+        self._bus.publish(GoStarted(self._observation.frame))  # T-878
         self._state = self._encoder.encode(snapshot)
         self._states.add(self._state.key)
         return self._state

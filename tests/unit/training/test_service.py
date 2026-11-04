@@ -25,6 +25,7 @@ from retro_ai_lab.services import (
     DiscoveryService,
     DiscoveryUpdated,
     GoalService,
+    GoStarted,
     ObservationService,
     RewardService,
 )
@@ -385,6 +386,22 @@ def test_due_experiments_run_between_goes_not_mid_go(tmp_path: Path) -> None:
     assert seen >= 3, "experiments still happen while training"
     assert ran_at and all(steps == 1 for steps in ran_at), ran_at  # the first step of a go
     assert not discovery.experiment_due or not discovery.experiments_allowed
+
+
+def test_every_go_announces_its_start(lab: Lab) -> None:
+    """T-878: the runner says when a go begins, before any step, so rewards start afresh."""
+    lab.connect()
+    seen: list[GoStarted] = []
+    lab.bus.subscribe(GoStarted, seen.append)
+    t = lab.training
+    t.start()
+    t.step()  # the runner is built on the first step
+    assert len(seen) == 1 and t.episodes == 0
+    while t.episodes < 2:
+        t.step()
+    t.step()
+    assert len(seen) == 3  # the two finished goes and the one under way
+    t.stop()
 
 
 def test_the_go_log_line_names_the_earners(lab: Lab, caplog: pytest.LogCaptureFixture) -> None:
