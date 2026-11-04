@@ -16,6 +16,7 @@ from __future__ import annotations
 from PySide6.QtCore import QModelIndex, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -34,6 +35,7 @@ from retro_ai_lab.rewards import (
     RewardProfile,
     describe_category,
     explain_behaviour,
+    is_own,
 )
 from retro_ai_lab.services import (
     EmulatorConnected,
@@ -45,11 +47,14 @@ from retro_ai_lab.services import (
 from retro_ai_lab.ui.coalesce import Coalescer
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.panels import name_column
+from retro_ai_lab.understanding import plain_names
 
 IDLE_TEXT = "Connect to a game to choose what the AI gets points for."
 CUSTOM_LABEL = "Custom"
 YOU_SET_THIS = "you set this"
 COLUMNS = ("Behaviour", "Reward", "Suggested", "On")
+OWN_POINTS_DEFAULT = 2.0
+OWN_POINTS_LIMIT = 50.0
 
 
 def signed(value: float) -> str:
@@ -118,6 +123,28 @@ class RewardsPanel(QWidget):
         self._explain.setObjectName("rewards_explain")
         self._explain.setWordWrap(True)
 
+        # A reward of the child's own: a value, a direction and the points (T-861).
+        self._own_value = QComboBox(self)
+        self._own_value.setObjectName("own_value_combo")
+        self._own_direction = QComboBox(self)
+        self._own_direction.setObjectName("own_direction_combo")
+        self._own_direction.addItem("goes up", True)
+        self._own_direction.addItem("goes down", False)
+        self._own_points = QDoubleSpinBox(self)
+        self._own_points.setObjectName("own_points_spin")
+        self._own_points.setRange(-OWN_POINTS_LIMIT, OWN_POINTS_LIMIT)
+        self._own_points.setDecimals(1)
+        self._own_points.setSingleStep(1.0)
+        self._own_points.setValue(OWN_POINTS_DEFAULT)
+        self._own_points.setToolTip("Points each time it happens; below zero takes points away")
+        self._add_own = QPushButton("Add a reward", self)
+        self._add_own.setObjectName("add_own_button")
+        self._add_own.clicked.connect(self._on_add_own_clicked)
+        self._remove_own = QPushButton("Remove", self)
+        self._remove_own.setObjectName("remove_own_button")
+        self._remove_own.setToolTip("Take out a reward you added")
+        self._remove_own.clicked.connect(self.remove_selected_own)
+
         self._warning = QLabel("", self)
         self._warning.setObjectName("rewards_warning")
         self._warning.setWordWrap(True)
@@ -133,6 +160,13 @@ class RewardsPanel(QWidget):
         controls.addWidget(self._minus)
         controls.addWidget(self._plus)
         controls.addWidget(self._suggested)
+        controls.addWidget(self._remove_own)
+        own = QHBoxLayout()
+        own.addWidget(QLabel("Add a reward:", self))
+        own.addWidget(self._own_value, 1)
+        own.addWidget(self._own_direction)
+        own.addWidget(self._own_points)
+        own.addWidget(self._add_own)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -141,6 +175,7 @@ class RewardsPanel(QWidget):
         layout.addWidget(self._tree, 1)
         layout.addWidget(self._explain)
         layout.addLayout(controls)
+        layout.addLayout(own)
         layout.addWidget(self._warning)
         layout.addWidget(self._note)
 
@@ -220,6 +255,35 @@ class RewardsPanel(QWidget):
         if self._selected is not None:
             self._control(lambda bid: self._context.rewards.reset_to_suggested(bid))
 
+    def own_choices(self) -> tuple[tuple[str, str], ...]:
+        """(variable id, name) pairs a reward of one's own can be put on (T-861)."""
+        return tuple(
+            (str(self._own_value.itemData(i)), self._own_value.itemText(i))
+            for i in range(self._own_value.count())
+        )
+
+    def add_own(self, variable_id: str, goes_up: bool, value: float) -> None:
+        """Add a reward of the child's own; the note says how it went."""
+        name = next((n for vid, n in self.own_choices() if vid == variable_id), None)
+        try:
+            b = self._context.rewards.add_own(variable_id, goes_up=goes_up, value=value, name=name)
+        except (UnsupportedCapabilityError, ConfigurationError) as exc:
+            self._note.setText(str(exc))
+            return
+        self._note.setText("Reward added.")
+        self.select(b.id)
+
+    def remove_selected_own(self) -> None:
+        bid = self._selected
+        if bid is None or not is_own(bid):
+            return
+        try:
+            self._context.rewards.remove_own(bid)
+        except (UnsupportedCapabilityError, ConfigurationError) as exc:
+            self._note.setText(str(exc))
+            return
+        self._note.setText("Reward removed.")
+
     def set_selected_enabled(self, enabled: bool) -> None:
         self._control(lambda bid: self._context.rewards.set_enabled(bid, enabled))
 
@@ -255,8 +319,12 @@ class RewardsPanel(QWidget):
         )
         self._show_personality(profile)
         self._show_warning()
+        self._fill_own_choices()
         self._tree.setEnabled(enabled)
         self._personality.setEnabled(enabled and profile is not None)
+        can_add = enabled and profile is not None and self._own_value.count() > 0
+        for w in (self._own_value, self._own_direction, self._own_points, self._add_own):
+            w.setEnabled(can_add)
         keep = keep if keep is not None else self._selected
         if keep is not None and keep in self._items:
             self.select(keep)
@@ -296,6 +364,33 @@ class RewardsPanel(QWidget):
     def _set_controls_enabled(self, on: bool) -> None:
         for w in (self._plus, self._minus, self._suggested):
             w.setEnabled(on)
+        self._remove_own.setEnabled(on and self._selected is not None and is_own(self._selected))
+
+    def _fill_own_choices(self) -> None:
+        """The AI's offered guesses by their plain names, then any other named value."""
+        knowledge = self._context.discovery.knowledge
+        current = self._own_value.currentData()
+        self._own_value.blockSignals(True)
+        self._own_value.clear()
+        if knowledge is not None and self._context.rewards.enabled:
+            offered = knowledge.offered()
+            names = plain_names(offered)
+            seen: set[str] = set()
+            for v in offered:
+                self._own_value.addItem(names[v.id], v.id)
+                seen.add(v.id)
+            for v in knowledge:
+                if v.name and not v.rejected and v.id not in seen:
+                    self._own_value.addItem(v.name, v.id)
+        index = self._own_value.findData(current) if current else 0
+        self._own_value.setCurrentIndex(max(index, 0))
+        self._own_value.blockSignals(False)
+
+    def _on_add_own_clicked(self) -> None:
+        vid = self._own_value.currentData()
+        if vid is None:
+            return
+        self.add_own(str(vid), bool(self._own_direction.currentData()), self._own_points.value())
 
     def _show_personality(self, profile: RewardProfile | None) -> None:
         wanted = profile.personality if profile is not None else "custom"

@@ -249,6 +249,55 @@ def test_picking_a_reward_explains_it(panel: RewardsPanel, context: AppContext) 
     assert panel._items[bid].toolTip(0).startswith("Losing Lives: the AI loses 9 points each time.")
 
 
+def test_adding_and_removing_a_reward_of_my_own(panel: RewardsPanel, context: AppContext) -> None:
+    """T-861: pick a value, a direction and the points; the row appears and can be removed."""
+    from retro_ai_lab.rewards import OWN_NOTE
+
+    assert panel.own_choices() == ()
+    assert not button(panel, "add_own_button").isEnabled()  # type: ignore[attr-defined]
+    context.connection.connect("fake", seed=2)
+    k = teach(context)
+    lane = k.propose(RAM, LAYOUT.lane, kind=VariableKind.POSITION, evidence=SURE)
+    k.propose(RAM, LAYOUT.speed, kind=VariableKind.SPEED, evidence=SURE, name="Speed")
+    context.bus.publish(DiscoveryUpdated((lane,), (), (), ()))
+    panel.refresher.flush()
+    choices = dict(panel.own_choices())
+    assert choices[lane.id] == "Your position" and "Speed" in choices.values()
+    assert button(panel, "add_own_button").isEnabled()  # type: ignore[attr-defined]
+    lives = k.at(RAM, LAYOUT.lives)
+    assert lives
+    panel.select(f"setback:{lives.id}")
+    assert not button(panel, "remove_own_button").isEnabled()  # type: ignore[attr-defined]
+    panel.add_own(lane.id, True, 2.0)
+    assert panel.note_text == "Reward added."
+    up = f"mine:up:{lane.id}"
+    assert panel.selected_id == up and panel.row_text(up) == (
+        "Your position goes up",
+        f"+2  ({YOU_SET_THIS})",
+        "+2",
+        "on",
+    )
+    assert panel.explain_text.startswith("Your position goes up: the AI gets 2 points each time.")
+    assert OWN_NOTE in panel.explain_text
+    assert button(panel, "remove_own_button").isEnabled()  # type: ignore[attr-defined]
+    panel.add_own(lane.id, False, -2.0)
+    down = f"mine:down:{lane.id}"
+    assert panel.row_text(down)[:2] == ("Your position goes down", f"-2  ({YOU_SET_THIS})")
+    assert "Progression (3)" in panel.category_texts()  # the checkpoint and the two of mine
+    panel.add_own(lane.id, True, 1.0)
+    assert panel.note_text == "That reward is already there."
+    # The AI's own suggestions leave the rows alone; Remove takes one out.
+    context.rewards.refresh_suggestions()
+    panel.refresher.flush()
+    assert up in panel.behaviour_ids() and down in panel.behaviour_ids()
+    panel.select(down)
+    panel.remove_selected_own()
+    assert panel.note_text == "Reward removed." and down not in panel.behaviour_ids()
+    assert up in panel.behaviour_ids()
+    context.connection.disconnect()
+    assert not button(panel, "add_own_button").isEnabled()  # type: ignore[attr-defined]
+
+
 def test_the_name_column_can_be_dragged_wider(qtbot: QtBot, context: AppContext) -> None:
     """T-856: the first column of every table is wide and Interactive, the last stretches."""
     from PySide6.QtWidgets import QHeaderView, QTreeWidget

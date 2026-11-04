@@ -129,6 +129,11 @@ name and press Rename; every list follows. The Discovery panel and the log
 still show the memory address for grown-ups. Pick a reward and the line under
 the table says what it means and what it is worth ("Losing a life: the AI
 loses 7.5 points each time."); hover a group's name for what the group is.
+To reward something the AI did not think of, use "Add a reward" under the
+table: pick a value ("Your position"), "goes up" or "goes down", and the
+points (below zero takes points away), then press Add. "Going right is good,
+going left is bad" is two rows: goes up +2 and goes down -2. "Remove" takes a
+row of your own out again.
 
 ## Arranging the panels
 
