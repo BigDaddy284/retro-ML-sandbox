@@ -1150,6 +1150,27 @@ def test_two_starts_drop_a_guess_that_moves_by_itself(lab: Lab) -> None:
     t2.stop()
 
 
+def test_a_deaf_game_doubts_nothing(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    """T-868: while a demo plays, everything moves by itself; that says nothing about play."""
+    import retro_ai_lab.training.service as module
+    from retro_ai_lab.services.discovery import MOVES_ALONE
+
+    k = lab.connect()
+    junk = k.propose(RAM, LAYOUT.frame, kind=VariableKind.PROGRESS, name="Frame as progress")
+    moving = frozenset({(RAM, LAYOUT.frame)})
+    monkeypatch.setattr(module, "probe_inputs", lambda *a, **kw: InputProbe(False, moving))
+    t = lab.training
+    t.start(Mode.INDEPENDENT)
+    t.step()  # the probe says the game is deaf: the search runs, nothing is doubted
+    t.stop()
+    assert not any(e.kind == MOVES_ALONE for e in k.get(junk.id).evidence)
+    monkeypatch.setattr(module, "probe_inputs", lambda *a, **kw: InputProbe(True, moving))
+    t.start(Mode.INDEPENDENT)
+    assert t.step()
+    t.stop()
+    assert any(e.kind == MOVES_ALONE for e in k.get(junk.id).evidence)
+
+
 def test_the_search_runs_flat_out_and_puts_the_speed_back(
     lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:
