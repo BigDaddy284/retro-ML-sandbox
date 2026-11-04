@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QTreeWidget
+from PySide6.QtWidgets import QApplication, QLabel, QTreeWidget
 from pytestqt.qtbot import QtBot
 
 from retro_ai_lab.core import Capabilities
@@ -209,6 +209,9 @@ def test_total_and_warning(panel: RewardsPanel, context: AppContext) -> None:
     context.rewards._current = ExploitSuspected(5, warning)  # as the service would set it
     context.bus.publish(ExploitSuspected(5, warning))
     assert panel.warning_text == "Hmm. Why.\nDo this."
+    label = panel.findChild(QLabel, "rewards_warning")
+    assert label is not None and label.property("warning") is True  # themed, not inline (T-876)
+    assert label.styleSheet() == ""
     context.rewards._current = None
     context.bus.publish(
         DiscoveryUpdated((), (), (GameEvent(EventKind.SCORE_GAIN, 500, score.id, ""),), ())
