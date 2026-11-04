@@ -164,7 +164,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-882 | A colourful, calm app-wide look: card panels with a coloured header per panel, bigger text, clear buttons and tables, applied to the main window and the Research window | 8 | Done | 5/5 | see PR |
 | T-883 | The "What the AI is doing" panel is grouped under bold headings and no longer shows the same "Watching …" line twice | 8 | Done | 3/3 | see PR |
 | T-884 | A value search over all of the game's memory, like a cheat finder: start from every byte or an exact number (decimal or hex), then narrow by exact value, went up, went down, changed or stayed the same | 8 | Done | 26/26 | see PR |
-| T-885 | A "Search values" tab in the Research window runs that search and turns a found value into a reward for it going up or down | 8 | Ready | – | – |
+| T-885 | A "Search values" tab in the Research window runs that search and turns a found value into a reward for it going up or down | 8 | Done | 3/3 | see PR |
 
 The **first working demonstration** (DESIGN.md §17) is reached at the end of E-5 plus the minimum of E-6, first on the Fake Emulator and then on a real game via BizHawk.
 
@@ -2199,10 +2199,10 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Completion report:** `ValueSearch` keeps candidate offsets and their bytes at the last scan and the one before (so the table shows Now and Before), per region, as NumPy arrays; a failed scan changes nothing.
 
 ### T-885 – A "Search values" tab with rewards
-- **Status:** Ready
+- **Status:** Done
 - **Phase:** 8 (same request)
 - **Objective:** Put the search in the Research window with every value shown in decimal and hex, and let a person turn a found byte into a reward for it going up or down.
-- **Scope:** `ui/research_dialog.py`: a fifth tab "Search values" with a number box, "New search", "Is exactly", "Went up", "Went down", "Changed", "Didn't change", "Start over"; a line saying how many bytes match and at which frame; a table (Address, Offset in hex, Now, Before, each value as `12 (0x0C)`), first 500 rows; a name box, a Points box (typed, two decimals) and "Reward going up" / "Reward going down", which name the byte (`DiscoveryService.name_value`, so it is confirmed and watched) and add the person's own reward (`RewardService.add_own`). **Out of scope:** the Rewards panel (the new row appears there by itself, as with "Add a reward").
+- **Scope:** `ui/research_dialog.py`: a fifth tab "Search values" with a number box, "New search", "Is exactly", "Went up", "Went down", "Changed", "Didn't change", "Start over"; a line saying how many bytes match and at which frame; a table (Address, Offset in hex, Now (live, updated with the window), Last scan, Scan before; each value as `12 (0x0C)`), first 500 rows; a name box, a Points box (typed, two decimals) and "Reward going up" / "Reward going down", which name the byte (`DiscoveryService.name_value`, so it is confirmed and watched) and add the person's own reward (`RewardService.add_own`). **Out of scope:** the Rewards panel (the new row appears there by itself, as with "Add a reward").
 - **Acceptance criteria:**
   1. With no game or no memory snapshot, the buttons are off and the line says why.
   2. A new search then scans narrow the table; every row shows decimal and hex; the tab title shows the match count.
@@ -2211,9 +2211,9 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
   5. Disconnecting clears the search.
 - **Expected changes:** `src/retro_ai_lab/ui/research_dialog.py`, `tests/ui/test_research_dialog.py`, `TASK_TRACKER.md`, `CHANGELOG.md`, `README.md`.
 - **Test plan:** UI tests on the practice console: idle state; new search then "Went up" after the score rises finds the score byte among the matches; exact value in hex narrows to the matching bytes; bad number note; reward added up and down with the right name, value and trigger, duplicates refused, missing row/name refused; disconnect clears; tab order now five tabs (T-880 test updated for the new tab); full suite.
-- **Results:** –
-- **Commit:** –. **PR:** –.
-- **Completion report:** –
+- **Results:** 3 new UI tests pass (the T-880 tab test updated for the fifth tab); full suite 1236 passed, 10 skipped (opt-in real-emulator); ruff and mypy clean.
+- **Commit:** see the PR. **PR:** see the PR.
+- **Completion report:** the Search values tab searches every byte the emulator shares, shows decimal and hex, keeps Now live, and "Reward going up/down" names and confirms the byte (so the AI watches it) and adds the person's own reward with typed points (decimals allowed). A search uses the latest snapshot the app took, which is fresh while the game plays through the app (the play clock or training); the summary line says which frame it used. One byte per value (no two-byte scores yet). Checked by screenshot on the practice console.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

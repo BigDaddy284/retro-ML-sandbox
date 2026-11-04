@@ -153,6 +153,17 @@ thinks it is and how sure, and any name given to it. Filter by address
 every panel then uses that name. The AI still learns everything itself; the
 table only shows what it worked out and lets you name it.
 
+To find a value yourself, like a cheat finder, use the Research window's
+"Search values" tab. Type the number you see on the screen (12, or hex like
+0x0C or $0C) and press New search, or leave the box empty to start from every
+byte. Play a little, then press the scan that fits: "Is exactly" (with the new
+number), "Went up", "Went down", "Changed" or "Didn't change"; each compares
+with the scan before. Every value is shown in decimal and hex, and "Now" keeps
+up with the game. When a few bytes are left, pick one, give it a name and
+points, and press "Reward going up" or "Reward going down": the byte is named
+for the AI and the reward appears in the Rewards panel under Progression. The
+app only reads the game's memory; it never changes it.
+
 After a long run on an older build, the AI may have dropped the real score or
 lives for reasons a newer build no longer has. Press "Start from scratch" in
 the Learning panel once so it forgets that game and can find the real values
