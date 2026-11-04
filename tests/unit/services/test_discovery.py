@@ -18,7 +18,7 @@ from retro_ai_lab.services import (
     DiscoveryUpdated,
     ObservationService,
 )
-from retro_ai_lab.services.discovery import BOUNCES, MOVES_ALONE, game_id_for
+from retro_ai_lab.services.discovery import BOUNCES, BUSY, MOVES_ALONE, game_id_for
 from retro_ai_lab.understanding import EventKind, Variable, VariableKind
 from retro_ai_lab.understanding.events import CYCLES
 
@@ -429,7 +429,7 @@ def test_a_lives_guess_that_bounces_is_doubted_then_dropped(
     bus: EventBus,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """T-864: a "lives" byte that goes up nearly as often as down is not a life count."""
+    """T-864/T-865: a "lives" byte that bounces, or changes nearly every step, is not lives."""
     assert discovery.doubt_bouncing() == ()  # nothing connected: nothing to doubt
     connection.connect("fake", seed=2)
     k = discovery.knowledge
@@ -443,6 +443,7 @@ def test_a_lives_guess_that_bounces_is_doubted_then_dropped(
         return k.update(found.id, kind=VariableKind.LIVES, name=name)
 
     bogus = plant(LAYOUT.lane, "Lane as lives")
+    busy = plant(LAYOUT.position, "Position as lives")  # changes nearly every step
     real = plant(LAYOUT.lives, "Lives")
     sure = plant(LAYOUT.lap, "Sworn lives")  # the lap also bounces, but a person swore to it
     k.confirm(sure.id)
@@ -450,19 +451,24 @@ def test_a_lives_guess_that_bounces_is_doubted_then_dropped(
     bus.subscribe(DiscoveryUpdated, seen.append)
     caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
     changed = discovery.doubt_bouncing(frame=9)
-    assert [v.id for v in changed] == [bogus.id] and not k.get(bogus.id).rejected
+    assert {v.id for v in changed} == {bogus.id, busy.id}
+    assert not any(k.get(v.id).rejected for v in changed)
     last = k.get(bogus.id).evidence[-1]
     assert last.kind == BOUNCES and last.frame == 9 and "does not bounce" in last.detail
+    last = k.get(busy.id).evidence[-1]
+    assert last.kind == BUSY and "changes rarely" in last.detail
     assert len(seen) == 1 and seen[0].changed == changed
-    assert "1 doubted (Lane as lives), 0 dropped (none)." in caplog.text
-    # The next review drops it; the real and the confirmed guesses are untouched.
+    assert "2 doubted (Position as lives, Lane as lives), 0 dropped (none)." in caplog.text
+    # The next review drops both; the real and the confirmed guesses are untouched.
     update = discovery.review()
-    assert [v.id for v in update.changed if v.kind is VariableKind.LIVES] == [bogus.id]
-    assert k.get(bogus.id).rejected and "Rejected by the AI." in k.get(bogus.id).evidence[-1].detail
-    assert "0 doubted (none), 1 dropped (Lane as lives)." in caplog.text
+    assert {v.id for v in update.changed if v.kind is VariableKind.LIVES} == {bogus.id, busy.id}
+    for gone in (bogus, busy):
+        assert k.get(gone.id).rejected
+        assert "Rejected by the AI." in k.get(gone.id).evidence[-1].detail
+    assert "0 doubted (none), 2 dropped (" in caplog.text
     for other in (real, sure):
         got = k.get(other.id)
-        assert not got.rejected and not any(e.kind == BOUNCES for e in got.evidence)
+        assert not got.rejected and not any(e.kind in (BOUNCES, BUSY) for e in got.evidence)
     assert k.get(sure.id).confirmed
     assert discovery.doubt_bouncing() == ()
 

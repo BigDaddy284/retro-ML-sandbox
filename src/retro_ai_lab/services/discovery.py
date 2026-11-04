@@ -49,7 +49,7 @@ from retro_ai_lab.understanding.knowledge import (
 from retro_ai_lab.understanding.linking import apply_input_links, find_input_links
 from retro_ai_lab.understanding.longlook import LongLook
 from retro_ai_lab.understanding.relationships import RelationshipFinder
-from retro_ai_lab.understanding.variables import find_candidates, lives_bounce, propose_candidates
+from retro_ai_lab.understanding.variables import find_candidates, lives_doubt, propose_candidates
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +62,8 @@ MOVES_ALONE = "moves-alone"  # evidence kind: changed while nobody pressed anyth
 # health are left out: standing still is a fine way to lose them.
 DOUBTED_KINDS = frozenset({VariableKind.SCORE, VariableKind.PROGRESS})
 BOUNCES = "bounces"  # evidence kind: a "lives" byte going up nearly as often as down (T-864)
+BUSY = "busy"  # evidence kind: a "lives" byte changing more than once in ten steps (T-865)
+NOT_LIVES = frozenset({BOUNCES, BUSY})
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,11 +308,13 @@ class DiscoveryService:
             return changed
 
     def doubt_bouncing(self, *, frame: int | None = None) -> tuple[Variable, ...]:
-        """A "lives" guess that goes up nearly as often as down is not a life count (T-864).
+        """A "lives" guess that changes like no life count does is dropped (T-864, T-865).
 
-        Read off the change tracker's fresh statistics: such a guess is doubted the
-        first time and rejected by the AI the next; confirmed and already rejected
-        guesses are left alone. Returns the variables changed.
+        Read off the change tracker's fresh statistics: a byte that goes up nearly
+        as often as down ("bounces") or changes more than once in ten steps
+        ("busy") is doubted the first time and rejected by the AI the next;
+        confirmed and already rejected guesses are left alone. Returns the
+        variables changed.
         """
         with self._lock:
             k = self._knowledge
@@ -326,29 +330,30 @@ class DiscoveryService:
                     stats = tracker.stats(v.region, v.offset)
                 except ConfigurationError:
                     continue
-                if not lives_bounce(stats):
+                reason = lives_doubt(stats)
+                if reason is None:
                     continue
-                if any(e.kind == BOUNCES for e in v.evidence):
-                    k.support(
-                        v.id,
-                        Evidence(
-                            BOUNCES,
-                            f"Still going up ({stats.ups} times) nearly as often as down "
-                            f"({stats.downs}); a life count does not bounce.",
-                            0.0,
-                            frame,
-                        ),
+                if reason == BOUNCES:
+                    what = (
+                        f"went up {stats.ups} times and down {stats.downs}; a life count "
+                        "does not bounce"
                     )
+                else:
+                    what = (
+                        f"changed {stats.changes} times in {stats.samples} steps; a life "
+                        "count changes rarely"
+                    )
+                if any(e.kind in NOT_LIVES for e in v.evidence):
+                    k.support(v.id, Evidence(reason, f"Still {what}.", 0.0, frame))
                     dropped.append(k.reject(v.id, by="the AI"))
                 else:
                     doubted.append(
                         k.support(
                             v.id,
                             Evidence(
-                                BOUNCES,
-                                f"Went up {stats.ups} times and down {stats.downs}; a life "
-                                "count does not bounce. Once is a doubt; twice and the AI "
-                                "drops it.",
+                                reason,
+                                f"{what[0].upper()}{what[1:]}. Once is a doubt; twice and "
+                                "the AI drops it.",
                                 0.0,
                                 frame,
                             ),
@@ -357,7 +362,7 @@ class DiscoveryService:
             changed = (*doubted, *dropped)
             if changed:
                 log.info(
-                    "%d life guesses go up nearly as often as down: %d doubted (%s), "
+                    "%d life guesses change like no life count does: %d doubted (%s), "
                     "%d dropped (%s).",
                     len(changed),
                     len(doubted),

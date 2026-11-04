@@ -14,8 +14,8 @@ pre-built game profiles):
 * two neighbouring bytes where the upper one changes only when the lower
   one rolls over are one 16-bit value;
 * a 16-bit value that only goes up, in uneven steps, looks like a score;
-* a byte that nearly only goes down, through a handful of values, looks
-  like lives (it jumps back up on a restart);
+* a byte that nearly only goes down, rarely, through a handful of values,
+  looks like lives (it jumps back up on a restart);
 * exactly two values, rarely switching, looks like a flag;
 * a handful of values, mostly climbing, rarely changing, looks like
   progress (level, lap, checkpoint);
@@ -45,6 +45,7 @@ NOISE_RATE = 0.9
 RARE_RATE = 0.1
 FEW_VALUES = 16
 BOUNCE_UPS = 4  # a "lives" byte restored this often is judged on its ups against its downs
+LIVES_SAMPLES = 100  # a "lives" byte is judged on how often it changes after this many steps
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +98,24 @@ def lives_bounce(st: ByteStats) -> bool:
     return st.ups >= BOUNCE_UPS and st.downs < 2 * st.ups
 
 
+def lives_busy(st: ByteStats) -> bool:
+    """A life count changes rarely: more than one change in ten steps is no life count (T-865).
+
+    Judged only after ``LIVES_SAMPLES`` observed steps, so a lively first few
+    seconds do not condemn a byte.
+    """
+    return st.samples >= LIVES_SAMPLES and st.change_rate > RARE_RATE
+
+
+def lives_doubt(st: ByteStats) -> str | None:
+    """Why this byte is not a life count ("busy" or "bounces"), or None when it may be."""
+    if lives_busy(st):
+        return "busy"
+    if lives_bounce(st):
+        return "bounces"
+    return None
+
+
 def _classify_single(st: ByteStats) -> tuple[VariableKind, tuple[Evidence, ...]] | None:
     """Kind and evidence for one 8-bit byte, or None to skip it."""
     if st.constant or _is_noise(st):
@@ -136,11 +155,11 @@ def _classify_single(st: ByteStats) -> tuple[VariableKind, tuple[Evidence, ...]]
             Evidence("two-values", "Only ever two different values.", 1.5),
             Evidence("rare" if rare else "sometimes", "Switches now and then.", 0.5),
         )
-    if st.downs > 0 and st.downs >= 2 * st.ups and values <= FEW_VALUES:
+    if st.downs > 0 and st.downs >= 2 * st.ups and values <= FEW_VALUES and rare:
         return VariableKind.LIVES, (
             Evidence("mostly-down", "Nearly always goes down.", 1.5),
             Evidence("few-values", f"Only {values} different values seen.", 1.0),
-            Evidence("rare" if rare else "sometimes", "Changes rarely.", 0.5),
+            Evidence("rare", "Changes rarely.", 0.5),
         )
     if values <= FEW_VALUES and rare and st.ups >= st.downs:
         return VariableKind.PROGRESS, (
@@ -239,11 +258,14 @@ def _overlaps(v: Variable, c: Candidate) -> bool:
 __all__ = [
     "BOUNCE_UPS",
     "FEW_VALUES",
+    "LIVES_SAMPLES",
     "MIN_TRANSITIONS",
     "NOISE_RATE",
     "RARE_RATE",
     "Candidate",
     "find_candidates",
     "lives_bounce",
+    "lives_busy",
+    "lives_doubt",
     "propose_candidates",
 ]
