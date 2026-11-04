@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QLabel
 from pytestqt.qtbot import QtBot
 
 from retro_ai_lab.core import Capabilities
@@ -390,3 +392,18 @@ def test_the_go_timers_are_editable_in_seconds(panel: LearningPanel, context: Ap
     assert "Stop training" in panel.note_text and t.max_steps == seconds_to_steps(30, fps)
     panel.stop()
     assert go.isEnabled() and panel.go_seconds == 30.0  # type: ignore[attr-defined]
+
+
+def test_insights_scroll_instead_of_squashing_the_graph(panel: LearningPanel) -> None:
+    """T-889: the advice under the graph is bounded to a few lines and scrolls."""
+    from retro_ai_lab.ui.learning_panel import INSIGHTS_LINES
+
+    scroll = panel.insights_scroll
+    assert scroll.widget() is panel.findChild(QLabel, "learning_insights")
+    assert scroll.maximumHeight() == panel.insights_max_height()
+    assert scroll.maximumHeight() < panel.fontMetrics().lineSpacing() * (INSIGHTS_LINES + 1)
+    assert scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    layout = panel.layout()
+    assert layout is not None
+    order = [layout.itemAt(i).widget() for i in range(layout.count())]
+    assert order.index(panel.graph) < order.index(scroll)

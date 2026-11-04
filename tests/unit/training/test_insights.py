@@ -7,6 +7,7 @@ from retro_ai_lab.learning import ActionSpace, QLearningAgent, Settings, State
 from retro_ai_lab.rewards import ExploitWarning, Goal, Objective, RewardProfile
 from retro_ai_lab.training import EpisodeRecord, EpisodeResult, LearningCurve, Mode
 from retro_ai_lab.training.insights import (
+    BehaviourChange,
     compare_policies,
     describe_changes,
     describe_experiments,
@@ -46,6 +47,9 @@ def test_policies_compare_by_hand_and_read_well() -> None:
         "Over the last 4 goes the AI changed its mind in 1 of 2 situations. "
         "Where v1=1 it used to press up; now it presses left."
     )
+    wide = State(tuple((f"v{i}", i) for i in range(6)))  # a real game: dozens of values (T-889)
+    text = describe_changes((BehaviourChange(wide.key, up, left),), 9, 3, None, SPACE)
+    assert "Where v0=0, v1=1, v2=2, v3=3 and 2 more it used to press up" in text
     assert describe_changes((), 2, 1, None, SPACE) == (
         "Over the last 1 go the AI kept the same favourite move in every situation it knew."
     )

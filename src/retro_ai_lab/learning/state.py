@@ -60,13 +60,19 @@ class State:
             raise ConfigurationError(f"Bad state key {key!r}.") from exc
         return cls(parts)
 
-    def describe(self, knowledge: Knowledge | None = None) -> str:
+    def describe(self, knowledge: Knowledge | None = None, *, most: int | None = None) -> str:
+        """The situation in words; ``most`` caps the values named ("and N more", T-889)."""
         if not self.parts:
             return "nothing known yet"
+        if most is not None and most < 1:
+            raise ConfigurationError("most must be at least 1 (or None).")
         words = []
         for vid, b in self.parts:
             name = knowledge.get(vid).display_name if knowledge and vid in knowledge else vid
             words.append(f"{name}={b}")
+        if most is not None and len(words) > most:
+            left = len(words) - most
+            return ", ".join(words[:most]) + f" and {left} more"
         return ", ".join(words)
 
 
