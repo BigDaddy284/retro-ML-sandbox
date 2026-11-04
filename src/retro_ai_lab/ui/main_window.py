@@ -38,6 +38,7 @@ from retro_ai_lab.ui.link_watchdog import LinkWatchdog
 from retro_ai_lab.ui.panels import PANELS, Panel
 from retro_ai_lab.ui.research_dialog import ResearchDialog
 from retro_ai_lab.ui.rewards_panel import RewardsPanel
+from retro_ai_lab.ui.theme import polish_views
 from retro_ai_lab.ui.tips import TipDialog
 
 WINDOW_TITLE = "Retro AI Lab"
@@ -149,6 +150,7 @@ class MainWindow(QMainWindow):
         status.setObjectName("status_bar")
         self.setStatusBar(status)
         self.set_status("Ready. Connect to a game to begin.")
+        polish_views(self)  # T-882: tables with alternating rows, the Research window's too
         status.addPermanentWidget(_VersionLabel(self))
 
         self._watchdog = LinkWatchdog(self._context.connection, parent=self)

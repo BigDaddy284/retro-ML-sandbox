@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 from retro_ai_lab import __version__
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.main_window import LAYOUT_FILE, MainWindow
+from retro_ai_lab.ui.theme import apply_theme
 
 APP_NAME = "Retro AI Lab"
 ORGANISATION = "RetroAILab"
@@ -26,6 +27,7 @@ def create_app(argv: Sequence[str] | None = None) -> QApplication:
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(ORGANISATION)
     app.setApplicationVersion(__version__)
+    apply_theme(app)  # T-882
     return app
 
 

@@ -93,6 +93,7 @@ class Panel(QFrame):
 
         self._button = QToolButton(self._header)
         self._button.setObjectName(f"panel_{spec.key}_toggle")
+        self._button.setProperty("panelTitle", True)
         self._button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._button.setArrowType(Qt.ArrowType.DownArrow)
         self._button.setText(spec.title)

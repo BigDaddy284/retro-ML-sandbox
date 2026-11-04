@@ -161,7 +161,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-873 | The Learning panel has two boxes in seconds: how long each go lasts and how long nothing may change before a go gives up; a person's choice is kept per game | 8 | Done | 2/2 | see PR #134 |
 | T-880 | The Research window is split into four tabs (Learning settings, The situation now, Memory, Step log), each table with the whole window's height, and each setting's explanation shown under it | 8 | Done | 4/4 | see PR |
 | T-881 | One title per panel: the panel's header (collapse, "What's this?") becomes its dock's title bar, with pop-out and hide buttons, instead of a second title under the dock's | 8 | Done | 4/4 | see PR |
-| T-882 | A colourful, calm app-wide look: card panels with a coloured header per panel, bigger text, clear buttons and tables, applied to the main window and the Research window | 8 | Ready | – | – |
+| T-882 | A colourful, calm app-wide look: card panels with a coloured header per panel, bigger text, clear buttons and tables, applied to the main window and the Research window | 8 | Done | 5/5 | see PR |
 | T-883 | The "What the AI is doing" panel is grouped under bold headings and no longer shows the same "Watching …" line twice | 8 | Ready | – | – |
 
 The **first working demonstration** (DESIGN.md §17) is reached at the end of E-5 plus the minimum of E-6, first on the Fake Emulator and then on a real game via BizHawk.
@@ -2148,7 +2148,7 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Completion report:** each panel has one header row (collapse arrow and title, "What's this?", pop out ⧉ / dock back ⇲, hide ✕) which is also the dock's drag handle; the pop-out tooltip follows the dock however it was floated. A floating panel uses the same header as its window title bar, so it is dragged by the header. Verified by screenshots; a real Windows check of dragging a floated panel is part of the user's next build check.
 
 ### T-882 – A colourful, calm look
-- **Status:** Ready
+- **Status:** Done
 - **Phase:** 8 (same request; DESIGN.md §10 "colourful, modern and approachable")
 - **Objective:** The app used the plain platform grey, so panels, headings and disabled buttons blurred together; give it one stylesheet with white card panels on a soft background, a coloured header strip per panel, larger text, rounded buttons whose disabled state is obvious, and tables with alternating rows and clear headers.
 - **Scope:** new `ui/theme.py` (`PANEL_COLOURS`, `stylesheet()`, `apply_theme(app)`), called from `create_app`; each `Panel` carries its key as a property the stylesheet colours by; the Research window inherits the same look. **Out of scope:** dark mode; per-widget restyling inside panels beyond what the stylesheet selects.
@@ -2159,9 +2159,9 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
   4. The tables in the panels and the Research window use alternating row colours.
 - **Expected changes:** `src/retro_ai_lab/ui/theme.py`, `src/retro_ai_lab/ui/app.py`, `src/retro_ai_lab/ui/panels.py`, `src/retro_ai_lab/ui/research_dialog.py`, `tests/ui/test_theme.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
 - **Test plan:** `tests/ui/test_theme.py`: colours for every panel; the stylesheet mentions every key's colour; `apply_theme` twice leaves one copy; no Qt stylesheet warning is logged when the window and Research window are shown with the theme (message handler); tables alternate rows; `create_app` uses Fusion; full suite and the packaging smoke test.
-- **Results:** –
-- **Commit:** –. **PR:** –.
-- **Completion report:** –
+- **Results:** 5 new tests pass; full suite 1201 passed, 10 skipped (opt-in real-emulator); ruff and mypy clean.
+- **Commit:** see the PR. **PR:** see the PR.
+- **Completion report:** `ui/theme.py` sets Fusion, a 10 pt minimum font, a palette and the stylesheet (between start and end markers, so re-applying replaces it and leaves other rules); each panel header has its own tint, accent strip and bold coloured title; the Research button stands out; tabs, group boxes, tables and buttons are restyled; `polish_views` gives the tables alternating rows. Combo and spin boxes are left to Fusion's own drawing plus the palette, because a stylesheet border makes Qt drop their arrows (seen in screenshots, and CSS triangles do not render in Qt). Also in this task: the Research step log's number columns start narrow so the situation column is readable, and its cell shows the whole situation on hover. The theme's colours are a first pass; the user may want them changed.
 
 ### T-883 – The "What the AI is doing" panel grouped and without repeats
 - **Status:** Ready

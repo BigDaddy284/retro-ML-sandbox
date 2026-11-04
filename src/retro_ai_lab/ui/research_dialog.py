@@ -45,6 +45,7 @@ from retro_ai_lab.training import (
 )
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.panels import name_column
+from retro_ai_lab.ui.theme import polish_views
 from retro_ai_lab.understanding import Confidence, Variable
 
 REFRESH_MS = 500
@@ -54,6 +55,7 @@ NO_SITUATION_TEXT = "Nothing observed yet. Play or train a little first."
 SITUATION_COLUMNS: tuple[str, ...] = ("Move", "Value", "Best")
 MEMORY_COLUMNS: tuple[str, ...] = ("Address", "Now", "Changes", "The AI thinks", "Name")
 MEMORY_WIDTHS: tuple[int, ...] = (90, 110, 110, 240)  # the last column takes the rest
+LOG_WIDTHS: dict[int, int] = {0: 50, 1: 60, 2: 70, 4: 110, 5: 75, 6: 80, 7: 80}
 MAX_MEMORY_ROWS = 400
 NO_MEMORY_TEXT = "Connect to a game that shares its memory to see it here."
 MEMORY_WAITING_TEXT = "Watching the memory; play or train a little and the values appear."
@@ -201,6 +203,9 @@ class ResearchDialog(QDialog):
         self._log_table.setColumnCount(len(LOG_COLUMNS))
         self._log_table.setHeaderLabels(list(LOG_COLUMNS))
         self._log_table.header().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self._log_table.header().setStretchLastSection(False)
+        for column, width in LOG_WIDTHS.items():  # narrow numbers, so the situation fits
+            self._log_table.header().resizeSection(column, width)
         self._log_table.setRootIsDecorated(False)
         self._export = QPushButton("Save as CSV…", log_box)
         self._export.setObjectName("export_log_button")
@@ -260,6 +265,7 @@ class ResearchDialog(QDialog):
                 off()
 
         self.destroyed.connect(release)
+        polish_views(self)
         self.refresh()
 
     # ------------------------------------------------------------- API
@@ -528,7 +534,9 @@ class ResearchDialog(QDialog):
         records = self._log.records[-MAX_ROWS:]
         self._log_table.clear()
         for record in reversed(records):  # newest first
-            self._log_table.addTopLevelItem(QTreeWidgetItem(list(_cells(record))))
+            item = QTreeWidgetItem(list(_cells(record)))
+            item.setToolTip(3, item.text(3))  # the whole situation, when it is cut short
+            self._log_table.addTopLevelItem(item)
 
     def _count_tab(self, index: int, count: int) -> None:
         """Put ``count`` in the tab's title, or leave the bare title when there is none."""
