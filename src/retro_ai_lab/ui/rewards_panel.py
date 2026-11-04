@@ -161,7 +161,7 @@ class RewardsPanel(QWidget):
         self._warning = QLabel("", self)
         self._warning.setObjectName("rewards_warning")
         self._warning.setWordWrap(True)
-        self._warning.setStyleSheet("color: #a04000;")
+        self._warning.setProperty("warning", True)  # the theme picks the colour (T-876)
         self._note = QLabel("", self)
         self._note.setObjectName("rewards_note")
         self._note.setWordWrap(True)
