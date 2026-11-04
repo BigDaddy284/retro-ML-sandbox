@@ -19,7 +19,14 @@ from retro_ai_lab.understanding import (
     find_candidates,
     propose_candidates,
 )
-from retro_ai_lab.understanding.variables import BOUNCE_UPS, MIN_TRANSITIONS, lives_bounce
+from retro_ai_lab.understanding.variables import (
+    BOUNCE_UPS,
+    LIVES_SAMPLES,
+    MIN_TRANSITIONS,
+    lives_bounce,
+    lives_busy,
+    lives_doubt,
+)
 
 
 def track(rows: Iterable[bytes]) -> ChangeTracker:
@@ -191,3 +198,22 @@ def test_a_life_count_restored_by_restarts_does_not_bounce() -> None:
     assert not lives_bounce(ByteStats(samples=600, changes=12, ups=4, downs=8))  # two lives
     assert lives_bounce(ByteStats(samples=600, changes=11, ups=4, downs=7))
     assert lives_bounce(ByteStats(samples=600, changes=217, ups=101, downs=116))  # the log
+
+
+def test_a_life_count_changes_rarely() -> None:
+    """T-865: a byte that drops nearly every step is a sub-counter, not a life count."""
+    from retro_ai_lab.observation.diff import ByteStats
+
+    assert LIVES_SAMPLES == 100
+    assert not lives_busy(ByteStats(samples=60, changes=50, ups=10, downs=40))  # too early to say
+    assert not lives_busy(ByteStats(samples=600, changes=26, ups=6, downs=20))  # Toy Racer
+    assert lives_busy(ByteStats(samples=600, changes=496, ups=99, downs=397))  # the log
+    assert lives_doubt(ByteStats(samples=600, changes=26, ups=6, downs=20)) is None
+    assert lives_doubt(ByteStats(samples=600, changes=11, ups=4, downs=7)) == "bounces"
+    assert lives_doubt(ByteStats(samples=600, changes=496, ups=99, downs=397)) == "busy"
+    assert lives_doubt(ByteStats(samples=600, changes=217, ups=101, downs=116)) == "busy"
+    # The classifier no longer proposes lives for a byte that ticks down 5, 4, 3, 2, 1, 5 ...
+    rows = [bytes([5 - (i % 5), 3 - (i // 150)]) for i in range(450)]
+    cands = by_offset(find_candidates(track(rows)))
+    assert cands[1].kind is VariableKind.LIVES
+    assert 0 not in cands or cands[0].kind is not VariableKind.LIVES
