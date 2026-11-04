@@ -68,7 +68,7 @@ from retro_ai_lab.training.insights import (
     suggest_experiments,
 )
 from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
-from retro_ai_lab.understanding.wakeup import find_wake_button, inputs_matter
+from retro_ai_lab.understanding.wakeup import find_wake_button, probe_inputs
 
 CHECKPOINT_SLOT = "training"
 # Two goes this long with the same states although the AI pressed different buttons
@@ -937,10 +937,15 @@ class TrainingService:
             return True
         harness.restore()
         try:
-            return inputs_matter(self._connection, self._playing_buttons())
+            probe = probe_inputs(self._connection, self._playing_buttons())
         except ConfigurationError as exc:
             log.info("Could not check whether the game listens: %s", exc)
             return True
+        try:  # the same probe shows what moves by itself: doubt those guesses (T-855)
+            self._discovery.doubt_self_moving(probe.self_moving, frame=self._observation.frame)
+        except (ConfigurationError, UnsupportedCapabilityError) as exc:
+            log.info("Could not note the values that move by themselves: %s", exc)
+        return probe.matters
 
     def _playing_buttons(self) -> tuple[str, ...]:
         """The buttons the AI plays with (its action space), else all of them."""

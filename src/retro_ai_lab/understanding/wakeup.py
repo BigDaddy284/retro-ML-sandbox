@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from retro_ai_lab.core import ConfigurationError
@@ -48,6 +49,15 @@ DEFAULT_WAIT = 300  # frames to let the game settle after the press (a splash sc
 DEFAULT_PRESSES = 3  # most presses of one button while each keeps changing something
 
 
+@dataclass(frozen=True, slots=True)
+class InputProbe:
+    """What one probe from a save state showed (T-848, T-855)."""
+
+    matters: bool  # holding the buttons changed where memory ended up
+    self_moving: frozenset[tuple[str, int]]  # bytes that changed holding nothing, and
+    # ended up the same whatever was held: a timer, an enemy, a demo; not a score
+
+
 def inputs_matter(
     connection: ConnectionService,
     buttons: Iterable[str],
@@ -55,11 +65,24 @@ def inputs_matter(
     per_button: int = DEFAULT_PER_BUTTON,
     settle: int = DEFAULT_SETTLE,
 ) -> bool:
-    """From where the game is now: does holding buttons change where memory ends up?
+    """From where the game is now: does holding buttons change where memory ends up?"""
+    return probe_inputs(connection, buttons, per_button=per_button, settle=settle).matters
+
+
+def probe_inputs(
+    connection: ConnectionService,
+    buttons: Iterable[str],
+    *,
+    per_button: int = DEFAULT_PER_BUTTON,
+    settle: int = DEFAULT_SETTLE,
+) -> InputProbe:
+    """Probe from where the game is now: do the buttons matter, and what moves by itself?
 
     The busy probe holds each button in turn for ``per_button`` frames; the idle
     probe plays the same number of frames holding nothing. Leaves the game where
-    it was. Locations that differ between two idle runs (noise) are ignored.
+    it was. Locations that differ between two idle runs (noise) are ignored. The
+    bytes that changed during the idle run yet ended the same after the busy run
+    are ``self_moving`` (T-855): they move whether or not anyone plays.
     """
     names = tuple(dict.fromkeys(buttons))
     if not names:
@@ -72,6 +95,7 @@ def inputs_matter(
     frames = per_button * len(names)
     connection.call(lambda a: a.save_state(WAKE_SLOT))
     try:
+        before = _probe(connection, capture, [])
         idle = _probe(connection, capture, [((), frames + settle)])
         again = _probe(connection, capture, [((), frames + settle)])
         unstable = _differences(idle, again)
@@ -82,7 +106,9 @@ def inputs_matter(
         busy = _probe(connection, capture, plan)
     finally:
         connection.call(lambda a: a.load_state(WAKE_SLOT))
-    return bool(_differences(idle, busy) - unstable)
+    driven = _differences(idle, busy) - unstable
+    alone = _differences(before, idle) - unstable - driven
+    return InputProbe(bool(driven), alone)
 
 
 def find_wake_button(
@@ -212,6 +238,8 @@ __all__ = [
     "PRESS_SLOT",
     "START_SLOT",
     "WAKE_SLOT",
+    "InputProbe",
     "find_wake_button",
     "inputs_matter",
+    "probe_inputs",
 ]
