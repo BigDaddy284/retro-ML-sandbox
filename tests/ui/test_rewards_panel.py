@@ -111,8 +111,10 @@ def test_rows_appear_under_their_categories(panel: RewardsPanel, context: AppCon
     assert k is not None
     lives = k.at(RAM, LAYOUT.lives)
     assert lives
-    assert panel.row_text(f"setback:{lives.id}") == ("Losing Lives", "-10", "-10", "on")
-    assert panel.row_text("reset:*") == ("Starting over", "-5", "-5", "on")
+    lives_at = f"ram[{LAYOUT.lives}] (0x{LAYOUT.lives:04X})"  # the Address column (T-879)
+    assert panel.row_text(f"setback:{lives.id}") == ("Losing Lives", "-10", "-10", "on", lives_at)
+    assert panel.row_text("reset:*") == ("Starting over", "-5", "-5", "on", "")
+    assert panel.row_text("button:press:up")[4] == ""
     assert button(panel, "personality_combo").isEnabled()  # type: ignore[attr-defined]
 
 
@@ -328,6 +330,7 @@ def test_adding_and_removing_a_reward_of_my_own(panel: RewardsPanel, context: Ap
         f"+2  ({YOU_SET_THIS})",
         "+2",
         "on",
+        f"ram[{LAYOUT.lane}] (0x{LAYOUT.lane:04X})",
     )
     assert panel.explain_text.startswith("Your position goes up: the AI gets 2 points each time.")
     assert OWN_NOTE in panel.explain_text

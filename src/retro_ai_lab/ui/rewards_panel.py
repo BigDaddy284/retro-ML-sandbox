@@ -48,12 +48,13 @@ from retro_ai_lab.services import (
 from retro_ai_lab.ui.coalesce import Coalescer
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.panels import name_column
-from retro_ai_lab.understanding import plain_names
+from retro_ai_lab.understanding import Knowledge, plain_names
 
 IDLE_TEXT = "Connect to a game to choose what the AI gets points for."
 CUSTOM_LABEL = "Custom"
 YOU_SET_THIS = "you set this"
-COLUMNS = ("Behaviour", "Reward", "Suggested", "On")
+COLUMNS = ("Behaviour", "Reward", "Suggested", "On", "Address")
+ADDRESS_COLUMN = 4
 OWN_POINTS_DEFAULT = 2.0
 OWN_POINTS_LIMIT = 50.0
 
@@ -67,6 +68,18 @@ def behaviour_cells(behaviour: Behaviour) -> tuple[str, str, str]:
     if behaviour.custom:
         reward += f"  ({YOU_SET_THIS})"
     return behaviour.name, reward, signed(behaviour.suggested)
+
+
+def address_cell(behaviour: Behaviour, knowledge: Knowledge | None) -> str:
+    """The memory address behind a row, "ram[777] (0x0309)", or "" when there is none (T-879)."""
+    var_id = behaviour.trigger.variable_id
+    if knowledge is None or var_id is None:
+        return ""
+    try:
+        v = knowledge.get(var_id)
+    except ConfigurationError:
+        return ""  # a button name, or a value the knowledge no longer has
+    return f"{v.region}[{v.offset}] (0x{v.offset:04X})"
 
 
 def category_text(category: Category, count: int) -> str:
@@ -243,7 +256,7 @@ class RewardsPanel(QWidget):
     def row_text(self, behaviour_id: str) -> tuple[str, ...]:
         item = self._items[behaviour_id]
         on = "on" if item.checkState(3) == Qt.CheckState.Checked else "off"
-        return (item.text(0), item.text(1), item.text(2), on)
+        return (item.text(0), item.text(1), item.text(2), on, item.text(ADDRESS_COLUMN))
 
     def category_texts(self) -> tuple[str, ...]:
         out = []
@@ -327,6 +340,7 @@ class RewardsPanel(QWidget):
         self._tree.clear()
         self._items.clear()
         if profile is not None:
+            knowledge = self._context.discovery.knowledge
             for category, behaviours in profile.by_category().items():
                 if not behaviours:
                     continue
@@ -335,7 +349,7 @@ class RewardsPanel(QWidget):
                 top.setToolTip(0, describe_category(category))
                 self._tree.addTopLevelItem(top)
                 for b in behaviours:
-                    self._items[b.id] = self._add_row(top, b, enabled)
+                    self._items[b.id] = self._add_row(top, b, enabled, knowledge)
                 top.setExpanded(True)
         self._tree.blockSignals(False)
         self._summary.setText(
@@ -360,9 +374,11 @@ class RewardsPanel(QWidget):
 
     # ----------------------------------------------------------- internals
 
-    def _add_row(self, top: QTreeWidgetItem, b: Behaviour, enabled: bool) -> QTreeWidgetItem:
+    def _add_row(
+        self, top: QTreeWidgetItem, b: Behaviour, enabled: bool, knowledge: Knowledge | None
+    ) -> QTreeWidgetItem:
         name, reward, suggested = behaviour_cells(b)
-        row = QTreeWidgetItem(top, [name, reward, suggested, ""])
+        row = QTreeWidgetItem(top, [name, reward, suggested, "", address_cell(b, knowledge)])
         row.setData(0, Qt.ItemDataRole.UserRole, b.id)
         flags = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable
         if enabled:
