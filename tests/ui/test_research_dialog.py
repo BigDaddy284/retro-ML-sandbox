@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from pytestqt.qtbot import QtBot
 
+from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning import Settings
 from retro_ai_lab.training import COLUMNS, Mode, StepLog
 from retro_ai_lab.ui.context import AppContext
@@ -15,6 +16,8 @@ from retro_ai_lab.ui.research_dialog import (
     IDLE_TEXT,
     LOG_COLUMNS,
     MAX_ROWS,
+    MEMORY_COLUMNS,
+    NO_MEMORY_TEXT,
     NO_SITUATION_TEXT,
     SETTING_FIELDS,
     ResearchDialog,
@@ -84,6 +87,48 @@ def test_situation_table_shows_every_move(dialog: ResearchDialog, context: AppCo
     assert text.startswith("In the situation ") and "Lane=" in text
     context.connection.disconnect()
     assert dialog.situation_text == IDLE_TEXT and dialog.situation_rows() == ()
+
+
+def test_memory_view_lists_names_and_filters(dialog: ResearchDialog, context: AppContext) -> None:
+    """T-862: the memory table shows state bytes and guesses, filters, and names a value."""
+    from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
+
+    assert dialog.memory_summary == NO_MEMORY_TEXT and dialog.memory_rows() == ()
+    assert len(MEMORY_COLUMNS) == 5
+    connect(context)
+    context.training.train(2)  # a few steps: the tracker has seen the bytes move
+    dialog.refresh()
+    rows = {r[0]: r for r in dialog.memory_rows()}
+    lane = f"ram[{LAYOUT.lane}]"
+    assert lane in rows and rows[lane][3].startswith("Position (") and rows[lane][4] == "Lane"
+    assert "(0x" in rows[lane][1] and rows[lane][2].endswith("of steps")
+    assert "values that change like game state" in dialog.memory_summary
+    assert "named" in dialog.memory_summary
+    # The filter narrows by name, by address and by hex offset.
+    dialog.set_memory_filter("lane")
+    assert [r[0] for r in dialog.memory_rows()] == [lane]
+    dialog.set_memory_filter(f"0x{LAYOUT.score:02x}")
+    assert [r[0] for r in dialog.memory_rows()] == [f"ram[{LAYOUT.score}]"]
+    dialog.set_memory_filter("")
+    # Naming: nothing picked, then a guess renamed and confirmed, then a bare address named.
+    assert not dialog.name_memory("Track")
+    assert "Pick a value" in dialog.note_text
+    dialog.select_memory(lane)
+    assert dialog.name_memory("Track position")
+    assert dialog.note_text.startswith("Track position:")
+    rows = {r[0]: r for r in dialog.memory_rows()}
+    assert rows[lane][4] == "Track position" and "(confirmed)" in rows[lane][3]
+    bare = next(r[0] for r in dialog.memory_rows() if r[3] == "")
+    dialog.select_memory(bare)
+    assert not dialog.name_memory("   ") and "needs a name" in dialog.note_text
+    assert dialog.name_memory("Mystery")
+    rows = {r[0]: r for r in dialog.memory_rows()}
+    assert rows[bare][4] == "Mystery" and rows[bare][3] == "Unknown (confirmed)"
+    with pytest.raises(ConfigurationError):
+        dialog.select_memory("ram[9999]")
+    context.connection.disconnect()
+    dialog.refresh()
+    assert dialog.memory_summary == NO_MEMORY_TEXT and dialog.memory_rows() == ()
 
 
 def test_log_count_rows_csv_and_clear(

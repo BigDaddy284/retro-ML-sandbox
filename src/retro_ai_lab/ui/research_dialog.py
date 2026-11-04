@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QModelIndex, QTimer
 from PySide6.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -40,12 +41,24 @@ from retro_ai_lab.training import (
 )
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.panels import name_column
+from retro_ai_lab.understanding import Confidence, Variable
 
 REFRESH_MS = 500
 MAX_ROWS = 200
 IDLE_TEXT = "Connect to a game the AI can learn to see what it is thinking."
 NO_SITUATION_TEXT = "Nothing observed yet. Play or train a little first."
 SITUATION_COLUMNS: tuple[str, ...] = ("Move", "Value", "Best")
+MEMORY_COLUMNS: tuple[str, ...] = ("Address", "Now", "Changes", "The AI thinks", "Name")
+MAX_MEMORY_ROWS = 400
+NO_MEMORY_TEXT = "Connect to a game that shares its memory to see it here."
+MEMORY_WAITING_TEXT = "Watching the memory; play or train a little and the values appear."
+SURENESS: dict[Confidence, str] = {
+    Confidence.UNKNOWN: "no idea yet",
+    Confidence.LOW: "a hunch",
+    Confidence.MEDIUM: "fairly sure",
+    Confidence.HIGH: "sure",
+    Confidence.CONFIRMED: "confirmed",
+}
 LOG_COLUMNS: tuple[str, ...] = tuple(c.replace("_", " ").capitalize() for c in COLUMNS)
 SETTING_FIELDS: tuple[tuple[str, str, str], ...] = (
     ("alpha", "Learning rate (alpha)", "How far a value moves towards what happened, 0 to 1."),
@@ -125,6 +138,42 @@ class ResearchDialog(QDialog):
         situation_layout.addWidget(self._situation)
         situation_layout.addWidget(self._values, 1)
 
+        # --- the memory (T-862)
+        memory_box = QGroupBox("Memory", self)
+        memory_box.setObjectName("memory_box")
+        self._memory_summary = QLabel(NO_MEMORY_TEXT, memory_box)
+        self._memory_summary.setObjectName("memory_summary")
+        self._memory_summary.setWordWrap(True)
+        self._memory_filter = QLineEdit(memory_box)
+        self._memory_filter.setObjectName("memory_filter")
+        self._memory_filter.setPlaceholderText("Filter by address (ram[12], 0x0c) or name")
+        self._memory_filter.textChanged.connect(lambda _t: self._show_memory())
+        self._memory_table = QTreeWidget(memory_box)
+        self._memory_table.setObjectName("memory_table")
+        self._memory_table.setColumnCount(len(MEMORY_COLUMNS))
+        self._memory_table.setHeaderLabels(list(MEMORY_COLUMNS))
+        self._memory_table.setRootIsDecorated(False)
+        self._memory_table.header().setSectionResizeMode(
+            len(MEMORY_COLUMNS) - 1, QHeaderView.ResizeMode.Stretch
+        )
+        self._memory_table.currentItemChanged.connect(self._on_memory_current_changed)
+        self._memory_selected: str | None = None  # "region[offset]"
+        self._memory_name = QLineEdit(memory_box)
+        self._memory_name.setObjectName("memory_name_edit")
+        self._memory_name.setPlaceholderText("Name the picked value, in your words")
+        self._memory_name_button = QPushButton("Name it", memory_box)
+        self._memory_name_button.setObjectName("memory_name_button")
+        self._memory_name_button.clicked.connect(self._on_memory_name_clicked)
+        self._memory_name.returnPressed.connect(self._on_memory_name_clicked)
+        naming = QHBoxLayout()
+        naming.addWidget(self._memory_name, 1)
+        naming.addWidget(self._memory_name_button)
+        memory_layout = QVBoxLayout(memory_box)
+        memory_layout.addWidget(self._memory_summary)
+        memory_layout.addWidget(self._memory_filter)
+        memory_layout.addWidget(self._memory_table, 1)
+        memory_layout.addLayout(naming)
+
         # --- the step log
         log_box = QGroupBox("Step log", self)
         log_box.setObjectName("log_box")
@@ -158,6 +207,7 @@ class ResearchDialog(QDialog):
         layout.addWidget(intro)
         layout.addWidget(settings_box)
         layout.addWidget(situation_box, 1)
+        layout.addWidget(memory_box, 2)
         layout.addWidget(log_box, 2)
         layout.addWidget(self._note)
 
@@ -222,6 +272,52 @@ class ResearchDialog(QDialog):
         self.refresh()
         return True
 
+    @property
+    def memory_summary(self) -> str:
+        return self._memory_summary.text()
+
+    def memory_rows(self) -> tuple[tuple[str, ...], ...]:
+        """(address, now, changes, the AI thinks, name) per row shown."""
+        out = []
+        for i in range(self._memory_table.topLevelItemCount()):
+            item = self._memory_table.topLevelItem(i)
+            if item is not None:
+                out.append(tuple(item.text(c) for c in range(len(MEMORY_COLUMNS))))
+        return tuple(out)
+
+    def set_memory_filter(self, text: str) -> None:
+        self._memory_filter.setText(text)
+
+    def select_memory(self, address: str | None) -> None:
+        """Pick a row by its address text, such as "ram[12]"."""
+        if address is None:
+            self._memory_table.clearSelection()
+            self._memory_table.setCurrentIndex(QModelIndex())
+            return
+        for i in range(self._memory_table.topLevelItemCount()):
+            item = self._memory_table.topLevelItem(i)
+            if item is not None and item.text(0) == address:
+                self._memory_table.setCurrentItem(item)
+                return
+        raise ConfigurationError(f"No row at {address}.")
+
+    def name_memory(self, name: str) -> bool:
+        """Name the picked address; the note says how it went."""
+        address = self._memory_selected
+        if address is None:
+            self._note.setText("Pick a value in the memory table first.")
+            return False
+        region, _, rest = address.partition("[")
+        try:
+            var = self._context.discovery.name_value(region, int(rest.rstrip("]")), name)
+        except (UnsupportedCapabilityError, ConfigurationError, ValueError) as exc:
+            self._note.setText(str(exc))
+            return False
+        self._note.setText(f"{var.display_name}: remembered for next time.")
+        self._memory_name.clear()
+        self._show_memory()
+        return True
+
     def situation_rows(self) -> tuple[tuple[str, str, str], ...]:
         return tuple(
             (item.text(0), item.text(1), item.text(2))
@@ -284,7 +380,93 @@ class ResearchDialog(QDialog):
 
     def _refresh_live(self) -> None:
         self._show_situation()
+        self._show_memory()
         self._show_log()
+
+    def _memory_addresses(self) -> tuple[tuple[str, int], ...]:
+        """Bytes that behave like game state, plus every address the AI has a guess at."""
+        observation = self._context.observation
+        knowledge = self._context.discovery.knowledge
+        keys: set[tuple[str, int]] = set(observation.tracker.classify()["state"])
+        if knowledge is not None:
+            for v in knowledge:
+                if not v.rejected:
+                    keys.add((v.region, v.offset))
+        return tuple(sorted(keys))
+
+    def _show_memory(self) -> None:
+        keep = self._memory_selected
+        table = self._memory_table
+        table.blockSignals(True)
+        table.clear()
+        snapshot = self._context.observation.latest
+        enabled = self._context.discovery.enabled and snapshot is not None
+        if not enabled or snapshot is None:
+            self._memory_summary.setText(NO_MEMORY_TEXT)
+            table.blockSignals(False)
+            self._memory_selected = None
+            self._memory_name_button.setEnabled(False)
+            return
+        knowledge = self._context.discovery.knowledge
+        tracker = self._context.observation.tracker
+        wanted = self._memory_filter.text().strip().lower()
+        addresses = self._memory_addresses()
+        shown = 0
+        named = 0
+        chosen: QTreeWidgetItem | None = None
+        for region, offset in addresses:
+            var = knowledge.at(region, offset) if knowledge is not None else None
+            if var is not None and var.rejected:
+                var = None
+            address = f"{region}[{offset}]"
+            name = var.name if var is not None else ""
+            if name:
+                named += 1
+            if wanted and not _memory_matches(wanted, address, offset, name, var):
+                continue
+            if shown >= MAX_MEMORY_ROWS:
+                shown += 1
+                continue
+            try:
+                now = snapshot.byte(region, offset)
+            except (ConfigurationError, KeyError, IndexError):
+                continue
+            stats = tracker.stats(region, offset)
+            item = QTreeWidgetItem(
+                [
+                    address,
+                    f"{now} (0x{now:02x})",
+                    f"{stats.change_rate:.0%} of steps" if stats.samples else "not seen yet",
+                    _thinks(var),
+                    name,
+                ]
+            )
+            table.addTopLevelItem(item)
+            if address == keep:
+                chosen = item
+            shown += 1
+        table.blockSignals(False)
+        if chosen is not None:
+            table.setCurrentItem(chosen)
+        else:
+            self._memory_selected = None
+        self._memory_name_button.setEnabled(self._memory_selected is not None)
+        if not addresses:
+            self._memory_summary.setText(MEMORY_WAITING_TEXT)
+            return
+        text = f"{len(addresses):,} values that change like game state or carry a guess"
+        if named:
+            text += f"; {named} named"
+        if shown > MAX_MEMORY_ROWS:
+            text += f"; showing the first {MAX_MEMORY_ROWS:,}, use the filter"
+        self._memory_summary.setText(text + ".")
+
+    def _on_memory_current_changed(self, current: QTreeWidgetItem | None, _p: object) -> None:
+        self._memory_selected = current.text(0) if current is not None else None
+        self._memory_name_button.setEnabled(self._memory_selected is not None)
+
+    def _on_memory_name_clicked(self) -> None:
+        self.name_memory(self._memory_name.text())
 
     def _show_situation(self) -> None:
         t = self._training
@@ -323,6 +505,27 @@ class ResearchDialog(QDialog):
         self.refresh()
 
 
+def _thinks(var: Variable | None) -> str:
+    if var is None:
+        return ""
+    return f"{var.kind.label} ({SURENESS[var.confidence]})"
+
+
+def _memory_matches(
+    wanted: str, address: str, offset: int, name: str, var: Variable | None
+) -> bool:
+    if wanted in address.lower() or wanted in name.lower():
+        return True
+    if var is not None and wanted in var.kind.label.lower():
+        return True
+    if wanted.startswith("0x"):
+        try:
+            return int(wanted, 16) == offset
+        except ValueError:
+            return False
+    return wanted.isdigit() and int(wanted) == offset
+
+
 def _cells(record: StepRecord) -> tuple[str, ...]:
     cells = list(record.row())
     cells[6] = "" if record.value is None else f"{record.value:+.3f}"
@@ -333,7 +536,9 @@ def _cells(record: StepRecord) -> tuple[str, ...]:
 __all__ = [
     "IDLE_TEXT",
     "LOG_COLUMNS",
+    "MAX_MEMORY_ROWS",
     "MAX_ROWS",
+    "MEMORY_COLUMNS",
     "NO_SITUATION_TEXT",
     "REFRESH_MS",
     "SETTING_FIELDS",
