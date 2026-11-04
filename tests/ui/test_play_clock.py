@@ -13,7 +13,7 @@ from retro_ai_lab.core import Capabilities
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.main_window import MainWindow
-from retro_ai_lab.ui.play_clock import PlayClock
+from retro_ai_lab.ui.play_clock import MAX_FRAMES_PER_STEP, PlayClock
 
 
 @pytest.fixture
@@ -452,3 +452,77 @@ def test_a_failing_step_is_reported_once_until_the_message_changes(
         "Frame step failed: worse",
         "Frame step failed: hiccup",
     ]
+
+
+# ------------------------------------------------------- T-888 real time
+
+
+def test_the_timer_sends_the_frames_the_wall_clock_owes(qtbot: QtBot, context: AppContext) -> None:
+    """One pulse catches up what the wall clock owes in a single step, up to the cap."""
+    now = [100.0]
+    clock = PlayClock(context, fps=100, clock=lambda: now[0])
+    clock.pause()
+    context.connection.connect("fake")
+    clock.play()  # the origin is when play started
+    now[0] += 0.05  # five frames owed at 100 fps
+    qtbot.waitUntil(lambda: clock.frames == 5)
+    assert game(context).game.state.frame == 5 and clock.forgiven == 0
+    obs = context.observation
+    assert obs.frame == 5 and obs.latest is not None and obs.latest.frame == 5
+    qtbot.waitUntil(lambda: clock.early > 0)  # nothing more is owed, so pulses send nothing
+    assert clock.frames == 5
+    now[0] += 1.0  # a stall: a hundred frames owed
+    qtbot.waitUntil(lambda: clock.frames == 5 + MAX_FRAMES_PER_STEP)
+    assert clock.forgiven == 100 - MAX_FRAMES_PER_STEP  # the backlog is let go, not raced
+    early = clock.early
+    qtbot.waitUntil(lambda: clock.early > early)
+    assert clock.frames == 5 + MAX_FRAMES_PER_STEP
+    clock.pause()
+
+
+def test_a_direct_pulse_still_sends_one_frame(
+    qtbot: QtBot, clock: PlayClock, context: AppContext
+) -> None:
+    context.connection.connect("fake")
+    clock.pause()
+    assert clock.pulse()
+    qtbot.waitUntil(lambda: clock.frames == 1)
+    assert clock.pulse(3)
+    qtbot.waitUntil(lambda: clock.frames == 4)
+    with pytest.raises(ValueError):
+        clock.pulse(0)
+
+
+def test_an_empty_pad_watches_the_real_controller_and_records_it(qtbot: QtBot) -> None:
+    """T-888: with nothing held on screen the step watches the emulator's controller."""
+    from retro_ai_lab.emulator.bizhawk.simulator import BizHawkSimulator
+
+    with BizHawkSimulator() as sim:
+        context = AppContext()
+        clock = PlayClock(context, fps=100)
+        clock.pause()
+        context.connection.connect("bizhawk", port=sim.port, call_timeout_s=2.0, timeout_s=2.0)
+        sim.real_pad = ("up",)
+        clock.set_inputs(lambda: frozenset())
+        assert clock.pulse()
+        qtbot.waitUntil(lambda: clock.frames == 1)
+        assert clock.pulse()
+        qtbot.waitUntil(lambda: clock.frames == 2)
+        request = sim.requests[-1]
+        assert request["cmd"] == "step" and request["watch"] is True and "buttons" not in request
+        assert sim.game.state.speed == 2  # the person's Up reached both frames
+        inputs = context.observation.inputs
+        assert inputs.held_at(2) == frozenset({"up"}) and inputs.held_at(0) == frozenset({"up"})
+        assert inputs.latest is not None and inputs.latest.source == "human"
+        sim.real_pad = ()
+        assert clock.pulse()
+        qtbot.waitUntil(lambda: clock.frames == 3)
+        assert inputs.held_at(3) == frozenset()
+        # the on-screen pad wins whenever it holds something
+        held = frozenset({b for b in context.connection.session.buttons if b.name == "up"})  # type: ignore[union-attr]
+        clock.set_inputs(lambda: held)
+        assert clock.pulse()
+        qtbot.waitUntil(lambda: clock.frames == 4)
+        request = sim.requests[-1]
+        assert "watch" not in request and request["buttons"]["Up"] is True
+        context.connection.disconnect()

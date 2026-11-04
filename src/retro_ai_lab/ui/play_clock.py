@@ -14,11 +14,19 @@ pad's held buttons, the memory reads the observation service wants, and,
 every ``screenshot_every``-th pulse, a screenshot, which comes out of
 :attr:`PlayClock.frame_captured`. A real emulator therefore answers one
 message per frame instead of three.
+
+The clock keeps real time (T-888): each timer pulse sends the frames the
+wall clock owes since play started, several in one request when the link is
+slower than a frame, ``MAX_FRAMES_PER_STEP`` at most, with any longer
+backlog forgiven rather than raced through. When the on-screen pad holds
+nothing, the step watches the emulator's own controller (T-887) and records
+what the person held, so a real controller plays and teaches the AI.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
@@ -30,6 +38,7 @@ from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.worker import report
 
 DEFAULT_FPS = 60
+MAX_FRAMES_PER_STEP = 6  # a tenth of a second at 60 fps: the most one request catches up
 
 log = logging.getLogger(__name__)
 
@@ -91,9 +100,15 @@ def _step(
     Returns the screenshot (a ``Frame``) when one was asked for, else None.
     """
     reads: Reads = observation.snapshot_reads()
+    watch = pressed is not None and not pressed  # an empty pad leaves the controller to the person
     result = connection.call(
-        lambda a: a.step(n, pressed=pressed, reads=reads, screenshot=screenshot)
+        lambda a: a.step(
+            n, pressed=None if watch else pressed, reads=reads, screenshot=screenshot, watch=watch
+        )
     )
+    if result.pressed is not None:
+        # What the person held during these frames, logged at the frame they started on.
+        observation.record_input(result.pressed, "human")
     observation.advance(n, snapshot=result.reads if reads else None)
     return result.frame
 
@@ -110,12 +125,19 @@ class PlayClock(QObject):
         parent: QObject | None = None,
         *,
         screenshot_every: int = 1,
+        clock: Callable[[], float] = time.monotonic,
     ):
         super().__init__(parent)
         if fps <= 0:
             raise ValueError("fps must be positive")
         if screenshot_every <= 0:
             raise ValueError("screenshot_every must be positive")
+        self._fps = fps
+        self._clock = clock
+        self._origin = clock()  # when play started, for the frames owed (T-888)
+        self._sent = 0  # frames sent since the origin
+        self._forgiven = 0
+        self._early = 0
         self._connection: ConnectionService = context.connection
         self._observation = context.observation
         self._capabilities = Capabilities()
@@ -126,7 +148,7 @@ class PlayClock(QObject):
         self._last_failure: str | None = None
         self._timer = QTimer(self)
         self._timer.setInterval(max(1, 1000 // fps))
-        self._timer.timeout.connect(self.pulse)
+        self._timer.timeout.connect(self._on_timer)
         self._available = False
         self._wanted = True  # the child's Play/Pause choice
         self._frames = 0
@@ -186,6 +208,21 @@ class PlayClock(QObject):
         return self._skipped
 
     @property
+    def steps(self) -> int:
+        """Steps (requests) started since connect; each carries one or more frames (T-888)."""
+        return self._pulses
+
+    @property
+    def forgiven(self) -> int:
+        """Frames the wall clock owed beyond a step's cap and the clock let go (T-888)."""
+        return self._forgiven
+
+    @property
+    def early(self) -> int:
+        """Timer pulses that came before a whole frame was owed (T-888)."""
+        return self._early
+
+    @property
     def screenshot_every(self) -> int:
         """A screenshot rides along on every n-th pulse (the first included)."""
         return self._screenshot_every
@@ -220,14 +257,43 @@ class PlayClock(QObject):
         self.pause() if self._wanted else self.play()
         return self._wanted
 
-    def pulse(self) -> bool:
-        """Advance one frame on the worker. Returns True if a step started.
+    def _owed(self) -> int:
+        """Frames the wall clock owes since play started, capped; the rest is forgiven.
+
+        A stall (a slow link, a sleeping laptop) would otherwise be followed
+        by a burst of catching up; the game simply goes on from where it is.
+        """
+        # A hair of slack keeps 0.05 s at 100 fps from rounding down to 4 frames.
+        should = int((self._clock() - self._origin) * self._fps + 1e-6)
+        owed = should - self._sent
+        if owed > MAX_FRAMES_PER_STEP:
+            self._forgiven += owed - MAX_FRAMES_PER_STEP
+            self._sent = should - MAX_FRAMES_PER_STEP
+            owed = MAX_FRAMES_PER_STEP
+        return owed
+
+    def _on_timer(self) -> None:
+        """Each timer pulse sends the frames owed, if any and if the worker is free."""
+        if self._in_flight:
+            self._skipped += 1
+            return
+        owed = self._owed()
+        if owed < 1:
+            self._early += 1
+            return
+        self.pulse(owed)
+
+    def pulse(self, frames: int = 1) -> bool:
+        """Advance ``frames`` frames on the worker. Returns True if a step started.
 
         Nothing starts, and the clock stops, when the emulator cannot step or
         is gone. Nothing starts either while the previous step is still
         running: that pulse is skipped, so the game runs as fast as the link
-        allows instead of queueing up frames.
+        allows instead of queueing up frames. The timer calls this with the
+        frames the wall clock owes (T-888); a direct call sends one.
         """
+        if frames < 1:
+            raise ValueError("frames must be positive")
         if not self._available or not self._connection.is_connected:
             self._stop()
             return False
@@ -235,6 +301,7 @@ class PlayClock(QObject):
             self._skipped += 1
             return False
         self._in_flight = True
+        self._sent += frames
         screenshot = self._capabilities.screen_capture and (
             self._pulses % self._screenshot_every == 0
         )
@@ -242,7 +309,7 @@ class PlayClock(QObject):
         task = _StepTask(
             self._connection,
             self._observation,
-            1,
+            frames,
             self._generation,
             pressed=self._pressed(),
             screenshot=screenshot,
@@ -311,6 +378,8 @@ class PlayClock(QObject):
     def _apply(self) -> None:
         want = self._wanted and self._available
         if want and not self._timer.isActive():
+            self._origin = self._clock()
+            self._sent = 0
             self._timer.start()
             self.state_changed.emit(True)
         elif not want and self._timer.isActive():
@@ -341,4 +410,4 @@ class PlayClock(QObject):
         self._stop()
 
 
-__all__ = ["DEFAULT_FPS", "PlayClock"]
+__all__ = ["DEFAULT_FPS", "MAX_FRAMES_PER_STEP", "PlayClock"]

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.emulator.bizhawk.protocol import CallStats
 from retro_ai_lab.tools.profile_play import STUTTER_MS, Report, main, profile
+from retro_ai_lab.ui.play_clock import MAX_FRAMES_PER_STEP
 
 
 def _closed_port() -> int:
@@ -24,7 +25,8 @@ def test_profiles_a_run_on_the_simulator(qapp: QApplication) -> None:
     assert 0.4 <= report.seconds <= 3.0
     assert report.interval_ms == 16  # the app's 60 fps clock
     assert report.steps > 0 and report.pictures > 0
-    assert report.wanted >= report.steps
+    assert report.frames >= report.steps  # a step carries at least one frame (T-888)
+    assert report.wanted + MAX_FRAMES_PER_STEP >= report.frames
     assert report.failure is None
     assert report.link_summary.startswith("step \u00d7")  # the slowest command first
     assert "hello \u00d71" in report.link_summary
@@ -36,6 +38,7 @@ def test_profiles_a_run_on_the_simulator(qapp: QApplication) -> None:
     assert report.longest_stall_s > 0
     lines = report.lines()
     assert lines[0].startswith("Played 0.") and "no failures" in lines[0]
+    assert f"in {report.steps} steps" in lines[0]
     assert lines[1] == f"Emulator round trips: {report.link_summary}."
     assert lines[2].startswith(
         f"App work per step (worker thread, snapshot bookkeeping): \u00d7{report.step_work.count}"

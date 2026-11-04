@@ -44,13 +44,18 @@ class Report:
     skipped: int
     failure: str | None
     link_summary: str
+    frames: int = 0  # the frames those steps carried (T-888: several per step when behind)
+    forgiven: int = 0  # frames the clock owed beyond a step's cap and let go
     step_work: CallStats = field(default_factory=CallStats)
     picture_work: CallStats = field(default_factory=CallStats)
     longest_stall_s: float = 0.0
 
     def lines(self) -> list[str]:
         """The report as the lines the tool prints."""
-        kept = f"{self.steps} of the {self.wanted} frames the clock wanted"
+        kept = (
+            f"{self.frames} of the {self.wanted} frames the clock wanted in {self.steps} steps"
+            f" ({self.forgiven} frames let go after stalls)"
+        )
         pictures = f"{self.pictures} pictures"
         skipped = f"{self.skipped} pulses skipped while a step was still running"
         failed = f"last failure: {self.failure}" if self.failure else "no failures"
@@ -186,10 +191,12 @@ def profile(
             adapter=adapter,
             seconds=elapsed,
             interval_ms=clock.interval_ms,
-            steps=clock.frames,
+            steps=clock.steps,
             wanted=int(elapsed * 1000 / clock.interval_ms),
             pictures=clock.frames_captured,
             skipped=clock.skipped,
+            frames=clock.frames,
+            forgiven=clock.forgiven,
             failure=clock.last_failure,
             link_summary=summary,
             step_work=step_work.stats,
