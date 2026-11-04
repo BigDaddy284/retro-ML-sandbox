@@ -59,14 +59,17 @@ class Earning:
             raise ConfigurationError(f"Bad earning: {exc}") from exc
 
 
-def describe_earned(earned: Iterable[Earning], most: int = 3) -> str:
-    """Word the top earners: "Score +2,500.0 (120 times), Lap +40.0 (once), and 2 more"."""
-    if most < 1:
+def describe_earned(earned: Iterable[Earning], most: int | None = 3) -> str:
+    """Word the top earners: "Score +2,500.0 (120 times), Lap +40.0 (once), and 2 more".
+
+    ``most=None`` words every earner (the log wants the whole breakdown, T-877).
+    """
+    if most is not None and most < 1:
         raise ConfigurationError("most must be positive.")
     items = list(earned)
     words = [
         f"{e.name} {e.amount:+,.1f} ({'once' if e.count == 1 else f'{e.count} times'})"
-        for e in items[:most]
+        for e in (items if most is None else items[:most])
     ]
     rest = len(items) - len(words)
     if rest > 0:

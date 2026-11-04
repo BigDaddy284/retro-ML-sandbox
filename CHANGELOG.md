@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-877: the go's log line names every reward that paid instead of three and "and N more".
 - T-876: the Rewards panel's warning line uses the theme's warning colour.
 - Changed: the app now has the look of Stills & Reels and StackSpace, with the same colours value for value: dark by default, a light mode and Match Windows (a toolbar button switches and the choice is remembered), the blue-to-purple accent on the Research button and the picked tab, rounded buttons, capital section headings, dark scroll bars and, on Windows, a title bar in the app's colours; each panel keeps a thin coloured strip so children can tell them apart (T-886).
 - Added: a "Search values" tab in the Research window: search the game's memory by number (decimal or hex), went up, went down, changed or stayed the same, see each byte in decimal and hex with its value live, then pick one, name it and press "Reward going up" or "Reward going down" with any points; the reward appears in the Rewards panel (T-885).

@@ -443,6 +443,10 @@ def test_earnings_are_worded_and_saved() -> None:
         "Losing Lives -30.0 (3 times), and 2 more"
     )
     assert describe_earned(earned, most=5).endswith("Gaining Lives +2.0 (once)")
+    assert describe_earned(earned, most=None) == describe_earned(earned, most=5)  # T-877
+    assert "more" not in describe_earned(earned, most=None)
+    with pytest.raises(ConfigurationError):
+        describe_earned(earned, most=0)
     assert describe_earned(()) == ""
     with pytest.raises(ConfigurationError):
         describe_earned(earned, most=0)
