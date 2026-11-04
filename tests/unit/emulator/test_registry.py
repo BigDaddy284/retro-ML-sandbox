@@ -105,6 +105,11 @@ def test_default_registry_ships_the_fake_and_bizhawk_adapters() -> None:
 
     reg = default_registry()
     assert reg.names() == ("fake", "bizhawk", "mgba")
+    assert [i.name for i in reg.describe()] == ["fake", "bizhawk", "mgba"]
+    hidden = default_registry(practice_console=False)
+    assert hidden.names() == ("fake", "bizhawk", "mgba")  # still reachable by name (T-892)
+    assert [i.name for i in hidden.describe()] == ["bizhawk", "mgba"]
+    assert isinstance(hidden.create("fake", seed=1), FakeEmulatorAdapter)
     assert reg.get("mgba") is MgbaAdapter and issubclass(MgbaAdapter, BizHawkAdapter)
     assert reg.get("bizhawk") is BizHawkAdapter
     assert isinstance(reg.create("bizhawk", port=43111), BizHawkAdapter)
