@@ -82,6 +82,7 @@ class BizHawkSimulator:
         self._client: socket.socket | None = None
         self._closing = False
         self._held: dict[str, bool] = dict.fromkeys(PAD, False)
+        self.real_pad: tuple[str, ...] = ()  # what the simulated person holds (T-887), as names
         self._speed: int | None = None
         self._states: dict[str, bytes] = {}
 
@@ -324,10 +325,18 @@ class BizHawkSimulator:
         frames = request.get("frames")
         if isinstance(frames, bool) or not isinstance(frames, int) or not 1 <= frames <= 3600:
             raise ConfigurationError("'frames' must be a whole number from 1 to 3600.")
+        watch = request.get("watch")
+        if watch is not None and not isinstance(watch, bool):
+            raise ConfigurationError("'watch' must be true or false.")
+        if watch and "buttons" in request:
+            raise ConfigurationError("A step cannot hold the pad and watch it at once.")
         if "buttons" in request:
             self._input(request)
-        with self._lock:
-            pressed = tuple(b.name for b in BUTTONS if self._held.get(b.label, False))
+        if watch:  # the pad is left to the person (T-887)
+            pressed = tuple(b.name for b in BUTTONS if b.name in self.real_pad)
+        else:
+            with self._lock:
+                pressed = tuple(b.name for b in BUTTONS if self._held.get(b.label, False))
         for _ in range(frames):
             if self._frame_delay_s:
                 time.sleep(self._frame_delay_s)
@@ -337,6 +346,8 @@ class BizHawkSimulator:
             body.update(self._read(request))
         if request.get("screenshot") is True:
             body.update(self._screenshot_cmd(request))
+        if watch:
+            body["pressed"] = [b.label for b in BUTTONS if b.name in pressed]
         return body
 
     def _speed_cmd(self, request: dict[str, Any]) -> dict[str, Any]:

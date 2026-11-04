@@ -84,6 +84,14 @@ scripts. See [docs/BIZHAWK.md](docs/BIZHAWK.md) and [docs/MGBA.md](docs/MGBA.md)
 for setup and for the opt-in real-emulator tests that verify each bridge on
 your machine.
 
+While the game runs, your own controller or keyboard in the emulator's
+window plays as usual: the app only takes the pad while a button is held on
+its on-screen pad. In "You play" and "With your help" the AI learns from
+whatever you press, on the real controller or on screen. The game keeps
+real time: when the link is slower than a frame, the app asks for several
+frames at once (a tenth of a second at most) rather than letting the game
+crawl.
+
 To see what playing costs on your PC, run the profiling tool while the
 bridge script is loaded:
 
