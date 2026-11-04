@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-889: the advice under the Learning graph names at most four values of a situation ("and 12 more") and sits in a scrolling box of at most five lines, so a compact panel keeps its graph and the text stays readable.
 - T-888: playing keeps real time (the play clock sends the frames the wall clock owes, six at most per request, and forgives a longer stall) and, when the on-screen pad holds nothing, watches the emulator's real controller and records what the person pressed, so "You play" and "With your help" run at full speed from a real controller.
 - T-887: a step can `watch` the pad: the emulator leaves the controller to the person for those frames and answers with the buttons they held, on BizHawk, mGBA and the fake game, so manual play can use a real controller (the play clock uses it in T-888).
 - T-879: the Rewards table has an Address column at the end with the memory address behind each row.

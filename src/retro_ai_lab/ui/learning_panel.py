@@ -11,14 +11,16 @@ shows how its recent goes went. Everything goes through
 
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QPushButton,
+    QScrollArea,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -67,6 +69,7 @@ def steps_to_seconds(steps: int, frames_per_step: int) -> float:
 
 FAST_SLICE_SECONDS = 0.02  # how long each fast tick may hog the GUI
 FAST_TICK_MS = 1
+INSIGHTS_LINES = 5  # the advice under the graph scrolls past this many lines (T-889)
 ENDED_BY = {
     "reset": "the game started over",
     "max_steps": "time was up",
@@ -166,6 +169,17 @@ class LearningPanel(QWidget):
         self._insights = QLabel("", self)
         self._insights.setObjectName("learning_insights")
         self._insights.setWordWrap(True)
+        self._insights.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        # A word-wrapped label in a vertical layout claims its whole wrapped height
+        # and squashes the graph above it; a bounded scroll area keeps the graph's
+        # room and lets long advice scroll instead (T-889).
+        self._insights_scroll = QScrollArea(self)
+        self._insights_scroll.setObjectName("insights_scroll")
+        self._insights_scroll.setWidgetResizable(True)
+        self._insights_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._insights_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._insights_scroll.setWidget(self._insights)
+        self._insights_scroll.setMaximumHeight(self.insights_max_height())
 
         self._tree = QTreeWidget(self)
         self._tree.setObjectName("goes_tree")
@@ -208,7 +222,7 @@ class LearningPanel(QWidget):
         layout.addLayout(timers)
         layout.addWidget(self._status)
         layout.addWidget(self._graph, 2)
-        layout.addWidget(self._insights)
+        layout.addWidget(self._insights_scroll)
         layout.addWidget(self._tree, 1)
         layout.addWidget(self._note)
 
@@ -259,6 +273,14 @@ class LearningPanel(QWidget):
     @property
     def graph(self) -> LearningGraph:
         return self._graph
+
+    def insights_max_height(self) -> int:
+        """The most room the advice under the graph may take: INSIGHTS_LINES lines (T-889)."""
+        return self._insights.fontMetrics().lineSpacing() * INSIGHTS_LINES + 8
+
+    @property
+    def insights_scroll(self) -> QScrollArea:
+        return self._insights_scroll
 
     @property
     def insights_text(self) -> str:

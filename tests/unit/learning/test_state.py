@@ -55,6 +55,11 @@ def test_state_key_round_trip_and_describe() -> None:
     assert s.key == f"{lane.id}=2;v9=-3" and State.from_key(s.key) == s
     assert hash(s) == hash(State.from_key(s.key)) and {s: 1}[State.from_key(s.key)] == 1
     assert s.describe(k) == "Lane=2, v9=-3" and s.describe() == f"{lane.id}=2, v9=-3"
+    wide = State(tuple((f"v{i}", i) for i in range(6)))
+    assert wide.describe(most=4) == "v0=0, v1=1, v2=2, v3=3 and 2 more"  # T-889
+    assert wide.describe(most=6) == wide.describe() and s.describe(k, most=2) == "Lane=2, v9=-3"
+    with pytest.raises(ConfigurationError):
+        wide.describe(most=0)
     assert State().key == "" and State.from_key("") == State()
     assert State().describe() == "nothing known yet"
     with pytest.raises(ConfigurationError):

@@ -143,6 +143,7 @@ class MgbaScriptHost:
         self.port = 0
         self.mask = 0
         self.real_mask = 0  # what the host's person holds on the controller (T-887)
+        self._keys_set = False  # did a keysRead callback set the keys this frame?
         self.masks: list[int] = []  # setKeys per frame
         self.frames = 0
         self.log: list[bytes] = []
@@ -279,8 +280,13 @@ class MgbaScriptHost:
         """One emulated frame, the way mGBA pumps a script."""
         try:
             self._deliver_socket_events()
-            self.mask = self.real_mask  # the person's keys, unless keysRead overrides them
+            # The person's keys reach the frame unless a keysRead callback sets its own
+            # (T-887); the mask is only ever replaced, never cleared first, so a test
+            # reading it from another thread sees a real frame's keys (T-889 flake).
+            self._keys_set = False
             self._fire(b"keysRead")
+            if not self._keys_set:
+                self.mask = self.real_mask
             self._game.step(self.pressed)
             self.masks.append(self.mask)
             self.frames += 1
@@ -409,6 +415,7 @@ class MgbaScriptHost:
 
     def _set_keys(self, mask: int) -> None:
         self._record("setKeys")
+        self._keys_set = True
         self.mask = int(mask)
 
     def _screenshot(self, path: bytes) -> None:

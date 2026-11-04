@@ -55,6 +55,9 @@ def compare_policies(
     )
 
 
+SITUATION_VALUES = 4  # values named when saying where the AI changed its mind (T-889)
+
+
 def describe_changes(
     changes: tuple[BehaviourChange, ...],
     known: int,
@@ -76,7 +79,7 @@ def describe_changes(
         f"situation{'s' if known != 1 else ''}."
     )
     example = changes[0]
-    where = State.from_key(example.state_key).describe(knowledge)
+    where = State.from_key(example.state_key).describe(knowledge, most=SITUATION_VALUES)
     text += (
         f" Where {where} it used to press {space[example.before].label}; "
         f"now it presses {space[example.after].label}."
