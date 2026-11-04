@@ -110,6 +110,20 @@ def is_live_memory(ident: str) -> bool:
     return not (set(words) & NOT_LIVE_MEMORY_WORDS or ident.startswith("cart"))
 
 
+def script_version_message(found: object, emulator: str, script: Path) -> str:
+    """What to do when the emulator runs a bridge script of another version (T-891).
+
+    After a new build the emulator usually still has the old script open, so
+    the message says where the right one is and how to swap it.
+    """
+    age = "an older" if isinstance(found, int) and found < PROTOCOL_VERSION else "a different"
+    return (
+        f"{emulator} is running {age} bridge script (version {found!r}; this app needs "
+        f"{PROTOCOL_VERSION}). In the emulator's Lua console remove that script and open "
+        f"the one that came with this app, {script}, then connect again."
+    )
+
+
 class BizHawkAdapter(EmulatorAdapter):
     name = "bizhawk"
     display_name = "BizHawk (EmuHawk)"
@@ -269,8 +283,7 @@ class BizHawkAdapter(EmulatorAdapter):
             version = answer.get("script")
             if version != PROTOCOL_VERSION:
                 raise ProtocolError(
-                    f"The bridge script speaks protocol {version!r} but this app needs "
-                    f"{PROTOCOL_VERSION}. Use the retro_ai_lab.lua that came with this app."
+                    script_version_message(version, cls.emulator_name, cls.script_path)
                 )
             description = Description.from_hello(answer)
         except BaseException:

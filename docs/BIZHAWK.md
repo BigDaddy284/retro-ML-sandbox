@@ -31,6 +31,10 @@ No Lua knowledge is needed: the script is written, you only open it.
    checkout and pick `src\retro_ai_lab\emulator\bizhawk\retro_ai_lab.lua`
    (in the built app it is `_internal\retro_ai_lab\emulator\bizhawk\retro_ai_lab.lua`
    next to `RetroAILab.exe`).
+   **After installing a new build, do this again**: the Lua Console keeps the
+   old script open, and the app refuses an old script at Connect with a
+   message naming the file to open. Remove the old entry (select it, Script >
+   Remove) and open the script from the new build's folder.
    The script appears in the list with a green tick and the console prints
    `Retro AI Lab is waiting for the app on port 43110.` Leave the window open.
    (A red X means the script hit an error; the text in the console says what.
