@@ -113,7 +113,14 @@ class MainWindow(QMainWindow):
                 | QDockWidget.DockWidgetFeature.DockWidgetFloatable
                 | QDockWidget.DockWidgetFeature.DockWidgetClosable
             )
-            dock.setWidget(self._panels[spec.key])
+            panel = self._panels[spec.key]
+            dock.setWidget(panel)
+            # One title per panel (T-881): the panel's header is the dock's title bar.
+            dock.setTitleBarWidget(panel.header)
+            panel.show_dock_buttons()
+            panel.pop_out_requested.connect(lambda d=dock: d.setFloating(not d.isFloating()))
+            panel.hide_requested.connect(dock.close)
+            dock.topLevelChanged.connect(panel.set_floating)
             self._docks[spec.key] = dock
         self._panels_menu = QMenu(PANELS_MENU, self)
         self._panels_menu.setObjectName("panels_menu")

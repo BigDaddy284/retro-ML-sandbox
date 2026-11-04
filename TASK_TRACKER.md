@@ -160,7 +160,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-872 | A Points box in the Rewards panel: type any number for the picked reward (0.65, -3), since + and - move by whole steps and a suggested decimal could not be changed | 8 | Done | 1/1 | see PR #133 |
 | T-873 | The Learning panel has two boxes in seconds: how long each go lasts and how long nothing may change before a go gives up; a person's choice is kept per game | 8 | Done | 2/2 | see PR #134 |
 | T-880 | The Research window is split into four tabs (Learning settings, The situation now, Memory, Step log), each table with the whole window's height, and each setting's explanation shown under it | 8 | Done | 4/4 | see PR |
-| T-881 | One title per panel: the panel's header (collapse, "What's this?") becomes its dock's title bar, with pop-out and hide buttons, instead of a second title under the dock's | 8 | Ready | – | – |
+| T-881 | One title per panel: the panel's header (collapse, "What's this?") becomes its dock's title bar, with pop-out and hide buttons, instead of a second title under the dock's | 8 | Done | 4/4 | see PR |
 | T-882 | A colourful, calm app-wide look: card panels with a coloured header per panel, bigger text, clear buttons and tables, applied to the main window and the Research window | 8 | Ready | – | – |
 | T-883 | The "What the AI is doing" panel is grouped under bold headings and no longer shows the same "Watching …" line twice | 8 | Ready | – | – |
 
@@ -2133,7 +2133,7 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Completion report:** the four sections are tabs; the settings tab shows each explanation under its box and stays compact at the top; the Memory and Step log tabs carry their counts; the group boxes lost their titles (the tab names them); the situation sentence can be selected and copied; the Memory table's columns start wide enough for "Score (fairly sure)". Checked by screenshots on the practice console.
 
 ### T-881 – One title per panel
-- **Status:** Ready
+- **Status:** Done
 - **Phase:** 8 (same request)
 - **Objective:** Every panel showed its name twice (the dock's title bar, then the panel's own collapse button); make the panel header the dock's title bar so each panel has one header row.
 - **Scope:** `ui/panels.py` gives the header its own widget (`Panel.header`), with pop-out and hide buttons a dock can wire; `ui/main_window.py` sets it as each dock's title bar widget and wires pop-out (float/re-dock) and hide (close). **Out of scope:** the panels' contents; the saved-layout format (the docks and their names are unchanged, so `LAYOUT_VERSION` stays).
@@ -2143,9 +2143,9 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
   3. Collapse, "What's this?", the Panels menu, Reset layout and the saved layout work as before (existing tests pass).
 - **Expected changes:** `src/retro_ai_lab/ui/panels.py`, `src/retro_ai_lab/ui/main_window.py`, `tests/ui/test_main_window.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
 - **Test plan:** new `test_each_dock_has_one_header` (title bar widget is the header, holds the four buttons, no second title in the panel body); `test_pop_out_and_back` (floating toggles, button text/tooltip follows); `test_hide_button_hides_and_menu_restores`; a standalone `Panel` without a dock still shows its header; existing layout tests; full suite, ruff, mypy.
-- **Results:** –
-- **Commit:** –. **PR:** –.
-- **Completion report:** –
+- **Results:** 4 new tests pass; the existing window, layout, Panels menu and collapse tests pass unchanged; full suite 1196 passed, 10 skipped (opt-in real-emulator); ruff and mypy clean.
+- **Commit:** see the PR. **PR:** see the PR.
+- **Completion report:** each panel has one header row (collapse arrow and title, "What's this?", pop out ⧉ / dock back ⇲, hide ✕) which is also the dock's drag handle; the pop-out tooltip follows the dock however it was floated. A floating panel uses the same header as its window title bar, so it is dragged by the header. Verified by screenshots; a real Windows check of dragging a floated panel is part of the user's next build check.
 
 ### T-882 – A colourful, calm look
 - **Status:** Ready
