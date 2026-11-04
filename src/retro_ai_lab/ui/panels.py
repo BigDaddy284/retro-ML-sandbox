@@ -42,6 +42,13 @@ def name_column(tree: QTreeWidget, width: int = NAME_COLUMN_WIDTH) -> None:
     header.setStretchLastSection(True)
 
 
+def section_heading(text: str, parent: QWidget | None = None) -> QLabel:
+    """A bold heading over a part of a panel (the stylesheet styles ``heading``)."""
+    label = QLabel(text, parent)
+    label.setProperty("heading", True)
+    return label
+
+
 @dataclass(frozen=True, slots=True)
 class PanelSpec:
     key: str
@@ -242,4 +249,5 @@ __all__ = [
     "Panel",
     "PanelSpec",
     "name_column",
+    "section_heading",
 ]

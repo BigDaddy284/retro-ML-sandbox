@@ -162,7 +162,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-880 | The Research window is split into four tabs (Learning settings, The situation now, Memory, Step log), each table with the whole window's height, and each setting's explanation shown under it | 8 | Done | 4/4 | see PR |
 | T-881 | One title per panel: the panel's header (collapse, "What's this?") becomes its dock's title bar, with pop-out and hide buttons, instead of a second title under the dock's | 8 | Done | 4/4 | see PR |
 | T-882 | A colourful, calm app-wide look: card panels with a coloured header per panel, bigger text, clear buttons and tables, applied to the main window and the Research window | 8 | Done | 5/5 | see PR |
-| T-883 | The "What the AI is doing" panel is grouped under bold headings and no longer shows the same "Watching …" line twice | 8 | Ready | – | – |
+| T-883 | The "What the AI is doing" panel is grouped under bold headings and no longer shows the same "Watching …" line twice | 8 | Done | 3/3 | see PR |
 
 The **first working demonstration** (DESIGN.md §17) is reached at the end of E-5 plus the minimum of E-6, first on the Fake Emulator and then on a real game via BizHawk.
 
@@ -2164,19 +2164,20 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Completion report:** `ui/theme.py` sets Fusion, a 10 pt minimum font, a palette and the stylesheet (between start and end markers, so re-applying replaces it and leaves other rules); each panel header has its own tint, accent strip and bold coloured title; the Research button stands out; tabs, group boxes, tables and buttons are restyled; `polish_views` gives the tables alternating rows. Combo and spin boxes are left to Fusion's own drawing plus the palette, because a stylesheet border makes Qt drop their arrows (seen in screenshots, and CSS triangles do not render in Qt). Also in this task: the Research step log's number columns start narrow so the situation column is readable, and its cell shows the whole situation on hover. The theme's colours are a first pass; the user may want them changed.
 
 ### T-883 – The "What the AI is doing" panel grouped and without repeats
-- **Status:** Ready
+- **Status:** Done
 - **Phase:** 8 (same request)
-- **Objective:** The panel was a column of plain labels and lists, and while the AI watched it showed "Watching 10 values, …" twice (the stage line and the summary say the same then); group it under bold headings and show the summary only when it says something the stage line does not.
-- **Scope:** `ui/discovery_panel.py` layout: headings "Discoveries", "What just happened", "What leads to what" use a shared `section_heading()` from `ui/panels.py`; the summary label hides when its text equals the stage text. **Out of scope:** what the discovery service says.
+- **Objective:** The panel was a column of plain labels and lists, and while the AI watched it showed "Watching 10 values, …" twice: when the engine is watching, its stage line is a copy of the summary taken at that moment (which then goes stale while the summary keeps updating). Group the panel under bold headings, put its three "do something" buttons on one row, and hide the stage line while it is only a copy of the summary.
+- **Scope:** `ui/discovery_panel.py` layout: the headings "What the AI thinks it has found", "What just happened" and "What leads to what" (same words) use a shared `section_heading()` from `ui/panels.py`; "Try the buttons", "Share what it learned…" and "Load shared knowledge…" share a row; the stage label hides while its text was the summary when it arrived, and shows again for any other stage text. **Out of scope:** what the discovery service says.
 - **Acceptance criteria:**
-  1. When the stage and summary texts are the same, only the stage line is visible; when they differ both are.
-  2. `summary_text` still returns the summary.
-  3. Section headings are `QLabel`s with the `heading` property, used by the stylesheet.
+  1. A stage event whose detail equals the summary at that moment hides the stage line, and it stays hidden as the summary changes; a stage event with other words (experimenting, "Watching Toy Racer to learn how it works.", idle) shows it again.
+  2. `stage_text` and `summary_text` still return the two texts.
+  3. The three section headings are `QLabel`s with the `heading` property and the same words as before.
+  4. The three action buttons sit in one row.
 - **Expected changes:** `src/retro_ai_lab/ui/discovery_panel.py`, `src/retro_ai_lab/ui/panels.py`, `tests/ui/test_discovery_panel.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
-- **Test plan:** `test_summary_is_not_shown_twice` (drive a `DiscoveryProgress` whose detail equals the summary; summary hidden; then a different detail; both shown); `test_sections_have_headings`; existing discovery tests; full suite.
-- **Results:** –
-- **Commit:** –. **PR:** –.
-- **Completion report:** –
+- **Test plan:** `test_the_watching_line_is_not_shown_twice` (publish a `DiscoveryProgress` whose detail is the summary: stage hidden, summary shown; drive frames so the summary changes: still hidden; publish an experimenting stage: shown; disconnect: shown with the idle text); `test_sections_have_headings` (heading property, words); `test_action_buttons_share_a_row`; existing discovery tests; full suite.
+- **Results:** 3 new tests pass; existing discovery tests unchanged; full suite 1204 passed, 10 skipped (opt-in real-emulator); ruff and mypy clean.
+- **Commit:** see the PR. **PR:** see the PR.
+- **Completion report:** the repeated "Watching N values…" line is gone (the live summary stays); the three headings are bold; Try the buttons, Share and Load sit on one row. Checked by screenshot on the practice console.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
