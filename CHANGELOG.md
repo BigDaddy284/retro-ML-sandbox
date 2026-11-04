@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-875: the chance of a random move now also falls with the steps learned (to its floor after 6,000 by default, about ten 40-second goes), not only by a little per go; the Research window's settings box has the number as "Exploring steps".
 - T-874: the Rewards panel has a Controls group with a row for every button of the connected game and one for pressing the same button again, each at 0 until a person sets points; the summary counts only rows worth something.
 - T-873: the Learning panel has "Each go lasts" and "Give up when nothing changes for" boxes in seconds; a person's choice is kept per game.
 - T-872: a Points box in the Rewards panel takes any number for the picked reward (0.65, -3), applied on Enter or when leaving the box.

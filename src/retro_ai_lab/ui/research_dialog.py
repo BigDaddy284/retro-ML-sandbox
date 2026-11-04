@@ -9,6 +9,7 @@ worth right now, and to take the step log away as a CSV file.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QModelIndex, QTimer
 from PySide6.QtWidgets import (
@@ -66,7 +67,9 @@ SETTING_FIELDS: tuple[tuple[str, str, str], ...] = (
     ("epsilon", "Exploring (epsilon)", "Chance of trying a random move at the start."),
     ("epsilon_min", "Exploring floor", "Exploring never drops below this."),
     ("epsilon_decay", "Exploring decay", "Exploring is multiplied by this after every go."),
+    ("explore_steps", "Exploring steps", "Learned steps over which exploring falls to the floor."),
 )
+WHOLE_NUMBER_FIELDS: dict[str, tuple[int, int]] = {"explore_steps": (1, 1_000_000)}
 WHAT_IS_THIS = (
     "For grown-ups and researchers: how the AI learns, what it thinks right now and "
     "every step it took. Changing the settings affects the next goes, not the ones done."
@@ -104,9 +107,15 @@ class ResearchDialog(QDialog):
         for key, label, tip in SETTING_FIELDS:
             spin = QDoubleSpinBox(settings_box)
             spin.setObjectName(f"setting_{key}")
-            spin.setRange(0.0, 1.0)
-            spin.setDecimals(3)
-            spin.setSingleStep(0.01)
+            if key in WHOLE_NUMBER_FIELDS:
+                low, high = WHOLE_NUMBER_FIELDS[key]
+                spin.setRange(low, high)
+                spin.setDecimals(0)
+                spin.setSingleStep(100)
+            else:
+                spin.setRange(0.0, 1.0)
+                spin.setDecimals(3)
+                spin.setSingleStep(0.01)
             spin.setToolTip(tip)
             form.addRow(label, spin)
             self._spins[key] = spin
@@ -263,7 +272,8 @@ class ResearchDialog(QDialog):
     def apply_settings(self) -> bool:
         """Make the boxes the live settings; False (with a note) when refused."""
         try:
-            settings = Settings(**self.settings_values())
+            values: dict[str, Any] = dict(self.settings_values())
+            settings = Settings(**values)
             self._training.set_settings(settings)
         except (UnsupportedCapabilityError, ConfigurationError) as exc:
             self._note.setText(str(exc))

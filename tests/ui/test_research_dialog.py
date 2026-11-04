@@ -63,6 +63,13 @@ def test_settings_follow_the_live_ones_and_apply(
     assert dialog.settings_values()["epsilon"] == 0.4
     with pytest.raises(Exception, match="no setting called"):
         dialog.set_settings_values(speed=1.0)
+    # Exploring steps is a whole number from 1 up (T-875).
+    assert dialog.settings_values()["explore_steps"] == 6000
+    dialog.set_settings_values(explore_steps=0)
+    assert dialog.settings_values()["explore_steps"] == 1
+    dialog.set_settings_values(explore_steps=1234.6)
+    assert dialog.settings_values()["explore_steps"] == 1235
+    assert dialog.apply_settings() and t.settings.explore_steps == 1235
     # Not while training runs.
     t.start()
     assert not dialog.findChild(object, "setting_alpha").isEnabled()  # type: ignore[union-attr]
