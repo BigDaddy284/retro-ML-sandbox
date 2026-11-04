@@ -135,6 +135,13 @@ points (below zero takes points away), then press Add. "Going right is good,
 going left is bad" is two rows: goes up +2 and goes down -2. "Remove" takes a
 row of your own out again.
 
+Grown-ups can open the Research window (toolbar) for a Memory table: each
+address the AI is watching, its value now, how often it changes, what the AI
+thinks it is and how sure, and any name given to it. Filter by address
+("ram[12]", "0x0c") or name, pick a row, type a name and press "Name it";
+every panel then uses that name. The AI still learns everything itself; the
+table only shows what it worked out and lets you name it.
+
 ## Arranging the panels
 
 Every panel can be dragged by its title bar to another edge of the window,

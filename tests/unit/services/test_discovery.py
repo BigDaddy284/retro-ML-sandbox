@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from retro_ai_lab.core import Capabilities, UnsupportedCapabilityError
+from retro_ai_lab.core import Capabilities, ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import BUTTONS, LAYOUT
@@ -420,6 +420,30 @@ def test_self_moving_guesses_are_doubted_then_rejected(
     assert "0 doubted (none), 2 dropped (Timer as score, Frame as progress)." in caplog.text
     assert discovery.doubt_self_moving(moved) == () and discovery.doubt_self_moving(()) == ()
     assert len(seen) == 2
+
+
+def test_a_person_names_a_value_by_address(
+    discovery: DiscoveryService,
+    connection: ConnectionService,
+    updates: list[DiscoveryUpdated],
+) -> None:
+    """T-862: naming an address confirms the AI's guess there, or makes a named value."""
+    with pytest.raises(UnsupportedCapabilityError):
+        discovery.name_value("ram", 0, "Lives")
+    connection.connect("fake", seed=3)
+    k = discovery.knowledge
+    assert k is not None
+    guess = k.propose("ram", LAYOUT.lives, kind=VariableKind.LIVES)
+    updates.clear()
+    named = discovery.name_value("ram", LAYOUT.lives, "  Hearts ")
+    assert named.id == guess.id and named.name == "Hearts" and named.confirmed
+    assert updates[-1].changed == (named,) and updates[-1].added == ()
+    fresh = discovery.name_value("ram", LAYOUT.lane, "Lane")
+    assert fresh.id != guess.id and fresh.name == "Lane" and fresh.confirmed
+    assert fresh.kind is VariableKind.UNKNOWN and k.at("ram", LAYOUT.lane) == fresh
+    assert updates[-1].added == (fresh,) and updates[-1].changed == ()
+    with pytest.raises(ConfigurationError):
+        discovery.name_value("ram", LAYOUT.lane, "   ")
 
 
 def test_memory_from_several_threads_is_observed_one_at_a_time(

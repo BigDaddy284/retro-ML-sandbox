@@ -354,6 +354,34 @@ class DiscoveryService:
         self._announce(DiscoveryUpdated(tuple(imported), (), (), imported.relationships()))
         return imported
 
+    def name_value(self, region: str, offset: int, name: str) -> Variable:
+        """A person names the value at an address (T-862).
+
+        The AI's guess there is confirmed under that name; where it had none, a
+        named value of unknown kind is made and confirmed, so the lists use the name.
+        """
+        name = name.strip()
+        if not name:
+            raise ConfigurationError("The value needs a name.")
+        with self._lock:
+            k = self._require()
+            var = k.at(region, offset)
+            if var is None:
+                var = k.propose(
+                    region,
+                    offset,
+                    name=name,
+                    evidence=[Evidence("user", "Named by a person.", 0.0)],
+                )
+                k.correct(var.id, name=name)
+                added: tuple[Variable, ...] = (k.get(var.id),)
+                changed: tuple[Variable, ...] = ()
+            else:
+                k.correct(var.id, name=name)
+                added, changed = (), (k.get(var.id),)
+        self._announce(DiscoveryUpdated(added, changed, (), ()))
+        return k.get(var.id)
+
     def ask_for(self, var_ids: Iterable[str]) -> None:
         """Have the detector report every move of these values as UP or DOWN (T-860)."""
         with self._lock:
