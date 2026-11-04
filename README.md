@@ -75,6 +75,8 @@ retro-ai-lab            # opens the desktop app
 pytest                  # runs the test suite (headless Qt)
 ```
 
+The Console list offers only real emulators. To play on the built-in practice console (Toy Racer, what the tests use) set `RETRO_AI_LAB_PRACTICE_CONSOLE=1` before starting the app.
+
 On Linux, Qt needs `libegl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0 libdbus-1-3 libfontconfig1`; see `.github/workflows/ci.yml`.
 
 ## Playing on BizHawk or mGBA

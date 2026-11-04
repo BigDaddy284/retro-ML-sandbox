@@ -220,7 +220,7 @@ def test_bizhawk_is_offered_and_a_missing_emulahawk_is_explained(qtbot: QtBot) -
         "Practice console (Toy Racer)",
         "BizHawk (EmuHawk)",
         "mGBA",
-    ]
+    ]  # the tests ask for the practice console; see test_the_built_app_hides_the_practice_console
     b.select_adapter("bizhawk")
     with socket.socket() as probe:  # a port nobody is listening on
         probe.bind(("127.0.0.1", 0))
@@ -231,3 +231,29 @@ def test_bizhawk_is_offered_and_a_missing_emulahawk_is_explained(qtbot: QtBot) -
     assert re.search(re.escape(str(SCRIPT_PATH)), b.status_text)
     assert b.last_error is not None
     assert ctx.connection.state is ConnectionState.DISCONNECTED
+
+
+def test_the_built_app_hides_the_practice_console(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-892: the user asked for the test game to go; it stays reachable by name."""
+    from retro_ai_lab.emulator.registry import default_registry
+
+    monkeypatch.delenv("RETRO_AI_LAB_PRACTICE_CONSOLE")
+    ctx = AppContext(registry=default_registry())
+    b = ConnectBar(ctx)
+    qtbot.addWidget(b)
+    assert [b._picker.itemText(i) for i in range(b._picker.count())] == [
+        "BizHawk (EmuHawk)",
+        "mGBA",
+    ]
+    assert b.selected_adapter == "bizhawk"
+    with pytest.raises(ValueError, match="No adapter 'fake' in the picker"):
+        b.select_adapter("fake")
+    assert "fake" in ctx.registry and ctx.registry.get("fake").name == "fake"
+    for value in ("1", "true", "YES", " on "):
+        monkeypatch.setenv("RETRO_AI_LAB_PRACTICE_CONSOLE", value)
+        assert default_registry().describe()[0].name == "fake", value
+    for value in ("", "0", "no", "false"):
+        monkeypatch.setenv("RETRO_AI_LAB_PRACTICE_CONSOLE", value)
+        assert default_registry().describe()[0].name == "bizhawk", value

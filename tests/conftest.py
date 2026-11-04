@@ -28,3 +28,9 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             + " (see TESTING_STRATEGY.md §2.4)"
         )
         item.add_marker(pytest.mark.skip(reason=reason))
+
+
+@pytest.fixture(autouse=True)
+def _practice_console_listed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests play on the practice console, which the built app hides (T-892)."""
+    monkeypatch.setenv("RETRO_AI_LAB_PRACTICE_CONSOLE", "1")
