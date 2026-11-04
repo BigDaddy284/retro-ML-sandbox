@@ -118,7 +118,21 @@ def test_memory_view_lists_names_and_filters(dialog: ResearchDialog, context: Ap
     assert dialog.note_text.startswith("Track position:")
     rows = {r[0]: r for r in dialog.memory_rows()}
     assert rows[lane][4] == "Track position" and "(confirmed)" in rows[lane][3]
-    bare = next(r[0] for r in dialog.memory_rows() if r[3] == "")
+    # A state byte the AI has no guess at. Which bytes it has guessed after two
+    # random steps varies from run to run, so when it guessed them all, take one
+    # guess away: the address is then exactly as it is before the AI proposes it.
+    bare_rows = [r[0] for r in dialog.memory_rows() if r[3] == ""]
+    if not bare_rows:
+        knowledge = context.discovery.knowledge
+        assert knowledge is not None
+        state = set(context.observation.tracker.classify()["state"])
+        spare = next(
+            v for v in knowledge if (v.region, v.offset) in state and v.offset != LAYOUT.lane
+        )
+        knowledge.remove(spare.id)
+        dialog.refresh()
+        bare_rows = [r[0] for r in dialog.memory_rows() if r[3] == ""]
+    bare = bare_rows[0]
     dialog.select_memory(bare)
     assert not dialog.name_memory("   ") and "needs a name" in dialog.note_text
     assert dialog.name_memory("Mystery")

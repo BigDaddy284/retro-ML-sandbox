@@ -96,9 +96,14 @@ def test_handshake_hold_mode_and_reconnect() -> None:
         for _ in range(3):
             adapter.ping()
         assert host.frames == frames_before
+        mark = len(host.calls)
         adapter.disconnect()
-        wait_until(lambda: not host.paused)
-        assert host.calls[-2:] == ["unpause", "displaymessages"]  # hands the emulator back
+        # Hands the emulator back: unpause, then the messages come back (T-863: the
+        # host thread records those two calls one after the other, and the pad is
+        # read just before them, so the list is only checked once both are in).
+        wait_until(lambda: "displaymessages" in host.calls[mark:])
+        handed = [c for c in host.calls[mark:] if c in ("unpause", "displaymessages")]
+        assert handed == ["unpause", "displaymessages"] and not host.paused
         # the emulator runs again, and the script takes a new connection
         wait_until(lambda: host.frames > frames_before)
         adapter.connect(timeout_s=5.0)
