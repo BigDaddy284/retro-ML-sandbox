@@ -77,8 +77,9 @@ CHECKPOINT_SLOT = "training"
 # button that gets the game going (T-844).
 IDENTICAL_GO_STEPS = 8
 # Goes ended by a reset this early, this many times in a row, blaming the same values,
-# mean those values cycle back to their start on their own (T-845).
-RESET_SUSPECT_STEPS = 3
+# mean those values cycle back to their start on their own (T-845; the window was 3
+# steps until T-867, when two flags ended 88 goes of 7 to 80 steps in a row).
+RESET_SUSPECT_STEPS = 120
 RESET_SUSPECT_GOES = 3
 log = logging.getLogger(__name__)
 

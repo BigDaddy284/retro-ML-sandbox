@@ -204,7 +204,9 @@ class EventDetector:
                 events.extend(self._judge(watch, value, snapshot.frame))
                 if value == watch.first and value != watch.last and not _cycles(var):
                     returned_home.append(watch)
-                    if value < watch.last:
+                    # A flag switching back is what flags do; a restart is a number
+                    # (score, lives, progress) going back down to its start (T-867).
+                    if value < watch.last and var.kind is not VariableKind.FLAG:
                         dropped = True
             watch.last = value
         sure = any(w.variable.confidence >= RESET_SURE for w in returned_home)

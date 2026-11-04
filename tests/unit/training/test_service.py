@@ -1011,10 +1011,11 @@ def test_goes_look_identical() -> None:
 # ------------------------------------------------------------ T-845
 
 
-def _end_go_by_reset(lab: Lab, ids: tuple[str, ...]) -> None:
+def _end_go_by_reset(lab: Lab, ids: tuple[str, ...], steps: int = 1) -> None:
     t = lab.training
     before = t.episodes
-    assert t.step()  # a go is running after this
+    for _ in range(steps):
+        assert t.step()  # a go is running after this
     reset = GameEvent(EventKind.RESET, 5, None, "went home", variables=ids)
     lab.bus.publish(DiscoveryUpdated((), (), (reset,), ()))
     t.step()
@@ -1028,11 +1029,14 @@ def test_three_short_resets_from_the_same_values_teach_the_ai_they_cycle(
     t = lab.training
     caplog.set_level(logging.INFO)
     t.start(Mode.INDEPENDENT)
+    from retro_ai_lab.training.service import RESET_SUSPECT_GOES, RESET_SUSPECT_STEPS
+
+    assert RESET_SUSPECT_STEPS == 120 and RESET_SUSPECT_GOES == 3  # T-867: goes up to 120 steps
     ids = ("v3", "v4")
-    for _ in range(2):
-        _end_go_by_reset(lab, ids)
-    assert not any(e.kind == CYCLES for e in k.get("v3").evidence)
     _end_go_by_reset(lab, ids)
+    _end_go_by_reset(lab, ids, steps=40)  # T-867: a go this long (the lab caps at 50) counts
+    assert not any(e.kind == CYCLES for e in k.get("v3").evidence)
+    _end_go_by_reset(lab, ids, steps=20)
     assert all(any(e.kind == CYCLES for e in k.get(v).evidence) for v in ids)
     assert "cycle back to their start; no longer reading that as a restart" in caplog.text
     # The next go is not cut short by those values: the detector ignores their return.
