@@ -18,8 +18,8 @@ from retro_ai_lab.services import (
     DiscoveryUpdated,
     ObservationService,
 )
-from retro_ai_lab.services.discovery import BOUNCES, BUSY, MOVES_ALONE, game_id_for
-from retro_ai_lab.understanding import EventKind, Variable, VariableKind
+from retro_ai_lab.services.discovery import BOUNCES, BUSY, MOVES_ALONE, PLAYED, game_id_for
+from retro_ai_lab.understanding import EventKind, Evidence, Variable, VariableKind
 from retro_ai_lab.understanding.events import CYCLES
 
 BY_NAME = {b.name: b for b in BUTTONS}
@@ -581,3 +581,43 @@ def test_memory_from_several_threads_is_observed_one_at_a_time(
         sys.setswitchinterval(interval)
     assert not any(t.is_alive() for t in threads) and failures == []
     assert discovery.reviews == before + 400 // 50  # every snapshot counted, none lost
+
+
+def test_a_value_that_moves_while_the_ai_plays_earns_its_seat(
+    connection: ConnectionService, observation: ObservationService, bus: EventBus
+) -> None:
+    """T-870: among look-alike guesses, the one that moved during a go gets the seat."""
+    discovery = DiscoveryService(
+        connection, observation, bus, review_every=10**6, experiment_every=None
+    )
+    assert discovery.credit_played() == ()  # nothing connected, no go begun
+    connection.connect("fake", seed=2)
+    k = discovery.knowledge
+    assert k is not None
+    discovery.begin_go()
+    assert discovery.credit_played() == ()  # nothing guessed yet
+    weight = lambda w: (Evidence("test", "Planted.", w),)  # noqa: E731
+    dead = [
+        k.propose("ram", o, kind=VariableKind.PROGRESS, evidence=weight(2.5))
+        for o in (LAYOUT.header, LAYOUT.header + 1, LAYOUT.header + 2)  # constant bytes
+    ]
+    moving = k.propose("ram", LAYOUT.position, kind=VariableKind.PROGRESS, evidence=weight(2.0))
+    assert moving.id not in {v.id for v in k.offered()}  # the weaker guess has no seat
+    seen: list[DiscoveryUpdated] = []
+    bus.subscribe(DiscoveryUpdated, seen.append)
+    discovery.begin_go()
+    play(connection, observation, 300)
+    credited = discovery.credit_played(frame=7)
+    assert [v.id for v in credited] == [moving.id]
+    last = k.get(moving.id).evidence[-1]
+    assert last.kind == PLAYED and last.weight == 0.5 and last.frame == 7
+    assert moving.id in {v.id for v in k.offered()}  # a tie now, and it moved
+    assert not any(e.kind == PLAYED for d in dead for e in k.get(d.id).evidence)
+    assert [u for u in seen if u.changed] == [DiscoveryUpdated((), credited, (), ())]
+    # Credit is given once; and nothing is credited without a go begun.
+    discovery.begin_go()
+    play(connection, observation, 300)
+    assert moving.id not in {v.id for v in discovery.credit_played()}
+    play(connection, observation, 10)
+    assert discovery.credit_played() == ()
+    assert sum(e.kind == PLAYED for e in k.get(moving.id).evidence) == 1

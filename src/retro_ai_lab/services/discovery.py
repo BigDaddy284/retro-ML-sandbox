@@ -73,6 +73,8 @@ BUSY = "busy"  # evidence kind: a "lives" byte changing more than once in ten st
 NOT_LIVES = frozenset({BOUNCES, BUSY})
 # Kinds re-checked at every review against the byte's fresh statistics (T-864 to T-866, T-869):
 # the doubt function says why the byte is not that kind, the words name the kind.
+PLAYED = "played"  # evidence kind: the byte moved during a go, so it is worth a seat (T-870)
+PLAYED_WEIGHT = 0.5
 KIND_DOUBTS: dict[VariableKind, tuple[Callable[[ByteStats], str | None], str]] = {
     VariableKind.LIVES: (lives_doubt, "a life count"),
     VariableKind.PROGRESS: (progress_doubt, "progress"),
@@ -151,6 +153,7 @@ class DiscoveryService:
         self._buttons: tuple[str, ...] = ()
         self._since_review = 0
         self._since_experiment = 0
+        self._go_changes: dict[tuple[str, int], int] | None = None  # at the go's start (T-870)
         self._experiments = 0
         self._reviews = 0
         self._stage = "idle"
@@ -386,6 +389,56 @@ class DiscoveryService:
                 )
                 self._announce(DiscoveryUpdated((), changed, (), ()))
             return changed
+
+    def begin_go(self) -> None:
+        """A go starts: remember how often every byte had changed so far (T-870)."""
+        with self._lock:
+            tracker = self._observation.tracker
+            self._go_changes = {loc: st.changes for loc, st in tracker.all_stats().items()}
+
+    def credit_played(self, *, frame: int | None = None) -> tuple[Variable, ...]:
+        """The go is over: credit every guess whose bytes moved during it (T-870).
+
+        Seats in the Rewards panel go by evidence, and every "progress" guess the
+        classifier makes carries the same evidence, so ties went to the lowest
+        address: a coin count at a high address lost its seat to junk that never
+        moved while anyone played. A guess that moved during a go now gets
+        ``PLAYED`` evidence once, which outranks a guess that never has. Called
+        only for a go the game listened to; returns the variables credited.
+        """
+        with self._lock:
+            before = self._go_changes
+            self._go_changes = None
+            k = self._knowledge
+            if k is None or before is None:
+                return ()
+            tracker = self._observation.tracker
+            credited: list[Variable] = []
+            for v in k:
+                if v.rejected or v.confirmed or any(e.kind == PLAYED for e in v.evidence):
+                    continue
+                moved = False
+                for offset in range(v.offset, v.offset + v.width):
+                    try:
+                        now = tracker.stats(v.region, offset).changes
+                    except ConfigurationError:
+                        continue
+                    if now > before.get((v.region, offset), 0):
+                        moved = True
+                        break
+                if moved:
+                    credited.append(
+                        k.support(
+                            v.id,
+                            Evidence(PLAYED, "Moved while the AI played.", PLAYED_WEIGHT, frame),
+                        )
+                    )
+            if credited:
+                log.info(
+                    "%d guesses moved while the AI played: %s.", len(credited), _names(credited)
+                )
+                self._announce(DiscoveryUpdated((), tuple(credited), (), ()))
+            return tuple(credited)
 
     def summary(self) -> str:
         """One line for the status bar / panel header."""
