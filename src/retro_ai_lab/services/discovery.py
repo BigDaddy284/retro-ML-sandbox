@@ -123,6 +123,7 @@ class DiscoveryService:
         self._saves = 0
         self._knowledge: Knowledge | None = None
         self._detector: EventDetector | None = None
+        self._asked: frozenset[str] = frozenset()  # values a person rewards up/down (T-860)
         self._look: LongLook | None = None
         self._finder: RelationshipFinder | None = None
         self._events = EventLog()
@@ -353,10 +354,22 @@ class DiscoveryService:
         self._announce(DiscoveryUpdated(tuple(imported), (), (), imported.relationships()))
         return imported
 
+    def ask_for(self, var_ids: Iterable[str]) -> None:
+        """Have the detector report every move of these values as UP or DOWN (T-860)."""
+        with self._lock:
+            self._asked = frozenset(str(i) for i in var_ids)
+            if self._detector is not None:
+                self._detector.ask(self._asked)
+
+    @property
+    def asked(self) -> frozenset[str]:
+        return self._asked
+
     def _adopt(self, knowledge: Knowledge) -> None:
         with self._lock:
             self._knowledge = knowledge
             self._detector = EventDetector(knowledge)
+            self._detector.ask(self._asked)
             self._finder = RelationshipFinder(knowledge, window=self._event_window)
             self._look = LongLook(knowledge)
 

@@ -17,6 +17,7 @@ from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.rewards.exploitation import ExploitDetector, ExploitWarning
 from retro_ai_lab.rewards.model import Behaviour, RewardProfile
+from retro_ai_lab.rewards.own import is_own, own_behaviour, own_id
 from retro_ai_lab.rewards.personalities import Personality, apply_personality
 from retro_ai_lab.rewards.suggestions import RelationshipWatch, SuggestionReport, apply_suggestions
 from retro_ai_lab.rewards.tally import RewardTally
@@ -27,7 +28,8 @@ from retro_ai_lab.services.connection import (
 )
 from retro_ai_lab.services.discovery import DiscoveryService, DiscoveryUpdated, game_id_for
 from retro_ai_lab.storage.rewards import RewardStore
-from retro_ai_lab.understanding.events import GameEvent
+from retro_ai_lab.understanding.events import EventKind, GameEvent
+from retro_ai_lab.understanding.knowledge import plain_names
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +149,52 @@ class RewardService:
         ids = (behaviour_id,) if behaviour_id is not None else profile.ids()
         self._announce(RewardProfileChanged((), ids, (), "control"))
 
+    def own(self) -> tuple[Behaviour, ...]:
+        """The rewards a person added themselves (T-860)."""
+        profile = self._profile
+        if profile is None:
+            return ()
+        return tuple(b for b in profile if is_own(b.id))
+
+    def add_own(
+        self, variable_id: str, *, goes_up: bool, value: float, name: str | None = None
+    ) -> Behaviour:
+        """Reward ``variable_id`` going up (or down) by ``value`` every step it does (T-860)."""
+        profile = self._require()
+        knowledge = self._discovery.knowledge
+        if knowledge is None or variable_id not in knowledge:
+            raise ConfigurationError("The AI does not know that value.")
+        var = knowledge.get(variable_id)
+        if profile.find(own_id(variable_id, goes_up)) is not None:
+            raise ConfigurationError("That reward is already there.")
+        if name is None:
+            offered = knowledge.offered()
+            name = plain_names(offered).get(variable_id, var.display_name)
+        behaviour = own_behaviour(var, name, goes_up, value)
+        profile.add(behaviour)
+        self._ask_for_own()
+        self._announce(RewardProfileChanged((behaviour.id,), (), (), "control"))
+        return behaviour
+
+    def remove_own(self, behaviour_id: str) -> None:
+        """Take out a reward a person added (only those)."""
+        profile = self._require()
+        if not is_own(behaviour_id):
+            raise ConfigurationError("Only a reward you added can be removed.")
+        profile.remove(behaviour_id)
+        self._ask_for_own()
+        self._announce(RewardProfileChanged((), (), (behaviour_id,), "control"))
+
+    def _ask_for_own(self) -> None:
+        """Tell the detector which values the person's own rewards watch."""
+        profile = self._profile
+        ids: set[str] = set()
+        if profile is not None:
+            for b in profile:
+                if b.trigger.kind in (EventKind.UP, EventKind.DOWN) and b.trigger.variable_id:
+                    ids.add(b.trigger.variable_id)
+        self._discovery.ask_for(ids)
+
     def choose_personality(self, which: str | Personality) -> Personality:
         profile = self._require()
         chosen = apply_personality(profile, which)
@@ -182,6 +230,7 @@ class RewardService:
         )
         self._warnings.clear()
         self._current = None
+        self._ask_for_own()
         self._announce(RewardProfileChanged((), profile.ids(), (), "loaded"))
 
     def save(self) -> Path | None:
@@ -217,6 +266,7 @@ class RewardService:
         self._warnings.clear()
         self._current = None
         self._watch.reset()
+        self._ask_for_own()
         self._bus.publish(RewardProfileChanged((), self._profile.ids(), (), "loaded"))
         self.refresh_suggestions()
 

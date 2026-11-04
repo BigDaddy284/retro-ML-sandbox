@@ -13,7 +13,7 @@ confident about and never invents a variable itself.
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from enum import Enum
 
@@ -50,6 +50,8 @@ class EventKind(Enum):
     FLAG_ON = "flag_on"  # a flag switched on (game over, menu, pause)
     FLAG_OFF = "flag_off"
     RESET = "reset"  # several values jumped back to their starting values
+    UP = "up"  # a value a person asked about went up, by any amount (T-860)
+    DOWN = "down"  # ... or down
 
     @property
     def label(self) -> str:
@@ -123,8 +125,9 @@ class EventDetector:
         # (T-841): rebuilding it from 1,600 variables on every snapshot cost more than
         # the step itself, and a variable whose region the snapshot does not carry is
         # left out here instead of failing to decode every time.
-        self._tracked_for: tuple[int, tuple[str, ...]] | None = None
+        self._tracked_for: tuple[int, tuple[str, ...], frozenset[str]] | None = None
         self._tracked_list: list[Variable] = []
+        self._asked: frozenset[str] = frozenset()  # values a person wants UP/DOWN for (T-860)
 
     @property
     def observed(self) -> int:
@@ -139,19 +142,34 @@ class EventDetector:
         """How many watched values have ever left their first value."""
         return self._moved
 
+    @property
+    def asked(self) -> frozenset[str]:
+        return self._asked
+
+    def ask(self, var_ids: Iterable[str]) -> None:
+        """Report every move of these values as UP or DOWN, whatever their kind (T-860)."""
+        self._asked = frozenset(str(i) for i in var_ids)
+
     def reset(self) -> None:
         self._watches.clear()
         self._observed = 0
         self._moved = 0
 
     def _tracked(self, regions: tuple[str, ...]) -> list[Variable]:
-        key = (self._knowledge.version, regions)
+        key = (self._knowledge.version, regions, self._asked)
         if key != self._tracked_for:
             self._tracked_list = [
                 v
                 for v in self._knowledge.believed(self._at_least, regions=regions)
-                if v.kind in TRACKED_KINDS
+                if v.kind in TRACKED_KINDS or v.id in self._asked
             ]
+            seen = {v.id for v in self._tracked_list}
+            for var_id in sorted(self._asked - seen):
+                if var_id not in self._knowledge:
+                    continue
+                var = self._knowledge.get(var_id)
+                if not var.rejected and var.region in regions:
+                    self._tracked_list.append(var)
             self._tracked_for = key
             # A value that lost its seat (T-850) or its belief is no longer watched.
             keep = {v.id for v in self._tracked_list}
@@ -210,6 +228,20 @@ class EventDetector:
         name = var.display_name
         kind = var.kind
         out: list[GameEvent] = []
+        if var.id in self._asked:
+            up = value > before
+            out.append(
+                GameEvent(
+                    EventKind.UP if up else EventKind.DOWN,
+                    frame,
+                    var.id,
+                    f"{name} went {'up' if up else 'down'} to {value}.",
+                    before,
+                    value,
+                )
+            )
+        if kind not in TRACKED_KINDS:
+            return out
         if kind is VariableKind.PROGRESS and value > before:
             out.append(
                 GameEvent(
