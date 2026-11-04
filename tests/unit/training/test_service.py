@@ -1171,6 +1171,19 @@ def test_a_deaf_game_doubts_nothing(lab: Lab, monkeypatch: pytest.MonkeyPatch) -
     assert any(e.kind == MOVES_ALONE for e in k.get(junk.id).evidence)
 
 
+def test_a_go_credits_the_values_that_moved(lab: Lab) -> None:
+    """T-870: after a go the game listened to, every guess that moved during it is credited."""
+    from retro_ai_lab.services.discovery import PLAYED
+
+    k = lab.connect()
+    moving = k.propose(RAM, LAYOUT.position, kind=VariableKind.PROGRESS, name="Position")
+    dead = k.propose(RAM, LAYOUT.header, kind=VariableKind.PROGRESS, name="Header")
+    t = lab.training
+    t.train(1)
+    assert any(e.kind == PLAYED for e in k.get(moving.id).evidence)
+    assert not any(e.kind == PLAYED for e in k.get(dead.id).evidence)
+
+
 def test_the_search_runs_flat_out_and_puts_the_speed_back(
     lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -895,6 +895,7 @@ class TrainingService:
                 if not woken:
                     return None  # training stopped: no go on a game that ignores the AI
             self._runner.begin(restore=self._mode.ai_plays)
+            self._discovery.begin_go()  # what moves from here on was moved by play (T-870)
         except EmulatorError:
             return None
         finally:
@@ -1047,6 +1048,8 @@ class TrainingService:
         )
         self._history.append(record)
         self._note_listening(result)
+        if not self._needs_wake:  # a go the game ignored says nothing about play (T-870)
+            self._discovery.credit_played(frame=self._observation.frame)
         self._note_short_reset(result)
         if result.ended_by in ("stuck", "reset"):
             self._probe_listening = True  # ask the game directly next time (T-848)
