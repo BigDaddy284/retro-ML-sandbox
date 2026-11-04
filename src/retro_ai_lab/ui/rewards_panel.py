@@ -17,7 +17,6 @@ from PySide6.QtCore import QModelIndex, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QPushButton,
     QTreeWidget,
@@ -37,6 +36,7 @@ from retro_ai_lab.services import (
 )
 from retro_ai_lab.ui.coalesce import Coalescer
 from retro_ai_lab.ui.context import AppContext
+from retro_ai_lab.ui.panels import name_column
 
 IDLE_TEXT = "Connect to a game to choose what the AI gets points for."
 CUSTOM_LABEL = "Custom"
@@ -89,7 +89,7 @@ class RewardsPanel(QWidget):
         self._tree.setObjectName("rewards_tree")
         self._tree.setColumnCount(len(COLUMNS))
         self._tree.setHeaderLabels(list(COLUMNS))
-        self._tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        name_column(self._tree)
         self._tree.setRootIsDecorated(True)
         self._tree.currentItemChanged.connect(self._on_current_changed)
         self._tree.itemChanged.connect(self._on_item_changed)

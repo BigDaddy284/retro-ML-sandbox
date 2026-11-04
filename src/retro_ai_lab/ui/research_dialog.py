@@ -39,6 +39,7 @@ from retro_ai_lab.training import (
     TrainingStateChanged,
 )
 from retro_ai_lab.ui.context import AppContext
+from retro_ai_lab.ui.panels import name_column
 
 REFRESH_MS = 500
 MAX_ROWS = 200
@@ -118,7 +119,7 @@ class ResearchDialog(QDialog):
         self._values.setObjectName("situation_table")
         self._values.setColumnCount(len(SITUATION_COLUMNS))
         self._values.setHeaderLabels(list(SITUATION_COLUMNS))
-        self._values.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        name_column(self._values)
         self._values.setRootIsDecorated(False)
         situation_layout = QVBoxLayout(situation_box)
         situation_layout.addWidget(self._situation)

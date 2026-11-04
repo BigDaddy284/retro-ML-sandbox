@@ -7,7 +7,6 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -35,6 +34,7 @@ from retro_ai_lab.training import LearningCurve, Status, TrainingStateChanged
 from retro_ai_lab.training.records import EpisodeRecord
 from retro_ai_lab.ui.comparison_graph import ComparisonGraph
 from retro_ai_lab.ui.context import AppContext
+from retro_ai_lab.ui.panels import name_column
 
 IDLE_TEXT = "Connect to a game the AI can learn, then save your AI here by name."
 NO_SAVED_TEXT = "No saved AIs for this game yet. Train one, give it a name and press Save."
@@ -82,7 +82,7 @@ class ComparePanel(QWidget):
         self._table.setObjectName("comparison_table")
         self._table.setColumnCount(len(COLUMNS))
         self._table.setHeaderLabels(list(COLUMNS))
-        self._table.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        name_column(self._table)
         self._table.setRootIsDecorated(False)
         self._table.currentItemChanged.connect(lambda *_: self._update_buttons())
 

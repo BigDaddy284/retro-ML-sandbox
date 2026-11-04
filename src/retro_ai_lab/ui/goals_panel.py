@@ -15,7 +15,6 @@ from PySide6.QtCore import QModelIndex, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -38,6 +37,7 @@ from retro_ai_lab.training import EpisodeFinished, LearningCurve, TrainingStateC
 from retro_ai_lab.training.curve import IMPROVING, SLIPPING, STEADY
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.discovery_panel import BADGES
+from retro_ai_lab.ui.panels import name_column
 
 IDLE_TEXT = "Connect to a game to set a goal for the AI."
 BY_HAND = "I'll tick it myself"
@@ -115,7 +115,7 @@ class GoalsPanel(QWidget):
         self._tree.setObjectName("goals_tree")
         self._tree.setColumnCount(len(COLUMNS))
         self._tree.setHeaderLabels(list(COLUMNS))
-        self._tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        name_column(self._tree)
         self._tree.setRootIsDecorated(False)
         self._tree.currentItemChanged.connect(self._on_current_changed)
         self._tree.itemChanged.connect(self._on_item_changed)
