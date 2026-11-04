@@ -267,3 +267,16 @@ def test_call_stats_describe_rounds_to_milliseconds() -> None:
     stats.add(0.0334)
     stats.add(0.0616)
     assert stats.describe("screenshot") == "screenshot \u00d72 avg 48 ms max 62 ms"
+
+
+def test_link_notes_timings_the_emulator_reports() -> None:
+    """T-890: a timing from the script is kept under its own name, in window and lifetime."""
+    link, theirs, _clock = _timed_link()
+    _answer(theirs, 1)
+    link.call("step", frames=1)
+    link.note("step:latch", 0.016)
+    link.note("step:latch", 0.018)
+    assert link.stats["step:latch"].count == 2
+    assert link.stats["step:latch"].average_s == pytest.approx(0.017)
+    assert "step:latch \u00d72 avg 17 ms max 18 ms" in link.summary()
+    assert link.totals["step:latch"].count == 2

@@ -11,9 +11,11 @@ the script over genuine TCP.
 
 from __future__ import annotations
 
+import select
 import socket
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +40,7 @@ return function(py, chunk, lua_port)
   RETRO_AI_LAB_PORT = lua_port
   local function wrap_client(h)
     return {
+      _h = h,
       settimeout = function(self, t) py.client_settimeout(h, t) end,
       receive = function(self, pattern)
         local r = py.client_receive(h)
@@ -60,6 +63,14 @@ return function(py, chunk, lua_port)
       getsockname = function(self) return host, py.server_port(h) end,
       close = function(self) py.server_close(h) end,
     }
+  end
+  function socket.gettime() return py.gettime() end
+  function socket.select(recvt, sendt, timeout)
+    local ready = {}
+    for _, c in ipairs(recvt or {}) do
+      if py.select(c._h, timeout) then ready[#ready + 1] = c end
+    end
+    return ready, {}
   end
   package.preload["socket"] = function() return socket end
 
@@ -131,6 +142,9 @@ class LuaScriptHost:
         self._overridden = False
         self.last_pad: tuple[dict[bytes, bool], int | None] | None = None
         self.frames = 0
+        self.turns = 0  # turns of the emulator loop so far (T-890)
+        self.answered_at: list[int] = []  # the turn each line to the app was sent on
+        self.on_select: Callable[[], None] | None = None  # runs as the script waits for a request
         self._frame_waiting = False
         self.log: list[bytes] = []
         self.calls: list[str] = []
@@ -148,6 +162,8 @@ class LuaScriptHost:
             "server_port": self._server_port,
             "server_close": self._server_close,
             "client_settimeout": self._client_settimeout,
+            "select": self._select,
+            "gettime": time.perf_counter,
             "client_receive": self._client_receive,
             "client_send": self._client_send,
             "client_close": self._client_close,
@@ -232,6 +248,7 @@ class LuaScriptHost:
         every waiting script is resumed, those in ``emu.frameadvance()``
         included. A paused emulator never wakes a frame-waiting script.
         """
+        self.turns += 1
         # InputManager.RunControllerChain: the person's pad, unless a script overrode it
         latched = self.pressed if self._overridden else self.real_pad
         if not self._frame_waiting and not self._resume():  # ResumeScripts(false)
@@ -335,10 +352,25 @@ class LuaScriptHost:
         # Lua strings are bytes on this runtime, keys included.
         return self._runtime.table_from({name.encode(): value for name, value in fields.items()})
 
+    def _select(self, handle: int, timeout: float | None) -> bool:
+        """LuaSocket ``select`` on one client: is a line waiting within ``timeout``?"""
+        self._record("select")
+        client = self._clients.get(handle)
+        if client is None:
+            return False
+        if self.on_select is not None:
+            hook, self.on_select = self.on_select, None
+            hook()
+        if self._buffers[handle].find(b"\n") >= 0:
+            return True
+        ready, _, _ = select.select([client], [], [], timeout)
+        return bool(ready)
+
     def _client_send(self, handle: int, data: bytes) -> int:
         client = self._clients.get(handle)
         if client is None:
             return 0
+        self.answered_at.append(self.turns)
         try:
             client.sendall(data)
         except OSError:

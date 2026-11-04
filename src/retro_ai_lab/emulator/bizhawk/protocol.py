@@ -270,6 +270,11 @@ class Link:
         finally:
             self._record(cmd, self._clock() - started)
 
+    def note(self, name: str, elapsed_s: float) -> None:
+        """Record a timing the emulator reported about a call, under its own name (T-890)."""
+        self._stats.setdefault(name, CallStats()).add(elapsed_s)
+        self._totals.setdefault(name, CallStats()).add(elapsed_s)
+
     def _record(self, cmd: str, elapsed_s: float) -> None:
         self._stats.setdefault(cmd, CallStats()).add(elapsed_s)
         self._totals.setdefault(cmd, CallStats()).add(elapsed_s)

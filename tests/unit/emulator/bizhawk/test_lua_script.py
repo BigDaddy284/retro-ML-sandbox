@@ -623,3 +623,59 @@ def test_a_watched_step_leaves_the_pad_to_the_person() -> None:
         assert host.game.snapshot() == reference.snapshot()
         adapter.disconnect()
         assert host.error is None
+
+
+def test_a_step_costs_its_frames_in_turns_and_requests_share_a_turn() -> None:
+    """T-890: the next request is served in the turn that answered the last.
+
+    The user's log showed every step at 37 ms in both speeds: the turn of
+    EmuHawk's loop that serves a request is a paused, throttled one, about a
+    frame long, whatever the speed. A request already waiting, or arriving
+    within a few milliseconds of the answer, is now served without one.
+    """
+    import socket as sockets
+
+    from retro_ai_lab.emulator.bizhawk.protocol import LineChannel, encode_request
+
+    with LuaScriptHost() as host:
+        raw = sockets.create_connection(("127.0.0.1", host.port), timeout=5.0)
+        channel = LineChannel(raw)
+        channel.send_line(encode_request(1, "hello"))
+        assert json.loads(channel.receive_line(5.0))["ok"] is True
+        wait_until(lambda: host.paused)
+        before = host.frames
+        # two steps on the wire at once: the second is read in the turn that answered the first;
+        # a third, arriving while the turn then waits for one, is served in that turn too
+        host.on_select = lambda: channel.send_line(encode_request(4, "step", frames=4))
+        channel.send_line(encode_request(2, "step", frames=4) + encode_request(3, "step", frames=4))
+        first = json.loads(channel.receive_line(5.0))
+        second = json.loads(channel.receive_line(5.0))
+        assert first["ok"] and second["ok"] and host.frames == before + 8
+        assert host.answered_at[-1] - host.answered_at[-2] == 4  # only its frames
+        assert set(second["took"]) == {"latch", "frames"} and second["took"]["frames"] >= 0
+        assert json.loads(channel.receive_line(5.0))["ok"] is True  # the third
+        assert host.on_select is None  # it was sent from inside the wait
+        assert host.answered_at[-1] - host.answered_at[-2] == 4
+        assert host.frames == before + 12 and host.paused
+        # a turn with nothing served does not wait
+        selects = host.calls.count("select")
+        time.sleep(0.05)
+        assert host.calls.count("select") == selects
+        channel.send_line(encode_request(5, "bye"))
+        assert json.loads(channel.receive_line(5.0))["ok"] is True
+        raw.close()
+        assert host.error is None
+
+
+def test_the_link_log_keeps_the_scripts_step_timing() -> None:
+    """T-890: a step's answer says what the latch turn and the frames cost."""
+    with LuaScriptHost() as host:
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
+        adapter.connect(timeout_s=5.0)
+        adapter.step(2)
+        adapter.step(3)
+        summary = adapter.link_summary
+        assert "step \u00d72" in summary
+        assert "step:latch \u00d72" in summary and "step:frames \u00d72" in summary
+        adapter.disconnect()
+        assert host.error is None

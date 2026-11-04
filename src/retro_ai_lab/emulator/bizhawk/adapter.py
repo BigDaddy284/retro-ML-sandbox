@@ -356,12 +356,29 @@ class BizHawkAdapter(EmulatorAdapter):
         if watch:
             fields["watch"] = True
         answer = self._call("step", **fields)
+        self._note_took(answer)
         if pressed is not None:
             self._held = pressed
         data = tuple(self._reads_from(answer, len(reads))) if reads else ()
         frame = self._frame_from(answer) if screenshot else None
         held = self._pressed_from(answer) if watch else None
         return StepResult(frames, data, frame, held)
+
+    def _note_took(self, answer: dict[str, Any]) -> None:
+        """Keep the script's own timing of a step in the link log (T-890).
+
+        ``step:latch`` is the wait for the turn that latches the pad and
+        ``step:frames`` the frames themselves, so the log says which part of
+        EmuHawk's loop a step pays for.
+        """
+        took = answer.get("took")
+        link = self._link
+        if not isinstance(took, dict) or link is None:
+            return
+        for part in ("latch", "frames"):
+            seconds = took.get(part)
+            if isinstance(seconds, int | float) and not isinstance(seconds, bool) and seconds >= 0:
+                link.note(f"step:{part}", float(seconds))
 
     def _pressed_from(self, answer: dict[str, Any]) -> frozenset[str] | None:
         """The buttons a watched step saw the person hold, as our names (T-887)."""
