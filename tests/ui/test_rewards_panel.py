@@ -218,3 +218,29 @@ def test_many_profile_changes_rebuild_the_tree_once(
     bid = panel.behaviour_ids()[0]
     context.rewards.set_value(bid, 7.0)
     assert len(rebuilds) == 3 and not panel.refresher.pending
+
+
+def test_the_name_column_can_be_dragged_wider(qtbot: QtBot, context: AppContext) -> None:
+    """T-856: the first column of every table is wide and Interactive, the last stretches."""
+    from PySide6.QtWidgets import QHeaderView, QTreeWidget
+
+    from retro_ai_lab.ui.compare_panel import ComparePanel
+    from retro_ai_lab.ui.goals_panel import GoalsPanel
+    from retro_ai_lab.ui.panels import NAME_COLUMN_WIDTH
+    from retro_ai_lab.ui.research_dialog import ResearchDialog
+
+    widgets = [
+        RewardsPanel(context),
+        GoalsPanel(context),
+        ComparePanel(context),
+        ResearchDialog(context),
+    ]
+    names = ["rewards_tree", "goals_tree", "comparison_table", "situation_table"]
+    for widget, name in zip(widgets, names, strict=True):
+        qtbot.addWidget(widget)
+        tree = widget.findChild(QTreeWidget, name)
+        assert tree is not None, name
+        header = tree.header()
+        assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Interactive, name
+        assert header.sectionSize(0) >= NAME_COLUMN_WIDTH, name
+        assert header.stretchLastSection(), name

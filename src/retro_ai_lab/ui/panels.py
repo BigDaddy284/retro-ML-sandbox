@@ -14,12 +14,28 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QSizePolicy,
     QToolButton,
+    QTreeWidget,
     QVBoxLayout,
     QWidget,
 )
+
+NAME_COLUMN_WIDTH = 280  # the first column holds the words a person reads (T-856)
+
+
+def name_column(tree: QTreeWidget, width: int = NAME_COLUMN_WIDTH) -> None:
+    """Make a table's first column wide and draggable, with the last taking the rest.
+
+    A ``Stretch`` first column cannot be dragged and shares the spare width with
+    the stretched last column, so it came out narrow and cut the names short.
+    """
+    header = tree.header()
+    header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+    header.resizeSection(0, width)
+    header.setStretchLastSection(True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,4 +175,4 @@ class Panel(QFrame):
         self.set_expanded(checked)
 
 
-__all__ = ["PANELS", "WHATS_THIS", "Panel", "PanelSpec"]
+__all__ = ["NAME_COLUMN_WIDTH", "PANELS", "WHATS_THIS", "Panel", "PanelSpec", "name_column"]
