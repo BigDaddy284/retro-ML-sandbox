@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTreeWidget
 from pytestqt.qtbot import QtBot
 
 from retro_ai_lab.core import Capabilities
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
-from retro_ai_lab.rewards import ExploitWarning
+from retro_ai_lab.rewards import Category, ExploitWarning
 from retro_ai_lab.services import DiscoveryUpdated, ExploitSuspected
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.main_window import MainWindow
@@ -219,6 +219,34 @@ def test_many_profile_changes_rebuild_the_tree_once(
     bid = panel.behaviour_ids()[0]
     context.rewards.set_value(bid, 7.0)
     assert len(rebuilds) == 3 and not panel.refresher.pending
+
+
+def test_picking_a_reward_explains_it(panel: RewardsPanel, context: AppContext) -> None:
+    """T-859: a sentence under the table says what the picked reward means and is worth."""
+    from retro_ai_lab.rewards import PICK_ONE, describe_category
+
+    assert panel.explain_text == PICK_ONE
+    context.connection.connect("fake", seed=2)
+    k = teach(context)
+    panel.refresher.flush()
+    lives = k.at(RAM, LAYOUT.lives)
+    assert lives
+    bid = f"setback:{lives.id}"
+    assert panel.explain_text == PICK_ONE
+    panel.select(bid)
+    assert panel.explain_text == "Losing Lives: the AI loses 10 points each time."
+    panel.increase_selected()  # the sentence follows the value
+    assert panel.explain_text.startswith("Losing Lives: the AI loses 9 points each time.")
+    assert "You set the value; the AI suggested -10." in panel.explain_text
+    panel.set_selected_enabled(False)
+    assert panel.explain_text.endswith("It is switched off, so it counts for nothing right now.")
+    panel.select(None)
+    assert panel.explain_text == PICK_ONE
+    tree = panel.findChild(QTreeWidget, "rewards_tree")
+    assert tree is not None
+    tops = [tree.topLevelItem(i) for i in range(tree.topLevelItemCount())]
+    assert any(t is not None and t.toolTip(0) == describe_category(Category.SURVIVAL) for t in tops)
+    assert panel._items[bid].toolTip(0).startswith("Losing Lives: the AI loses 9 points each time.")
 
 
 def test_the_name_column_can_be_dragged_wider(qtbot: QtBot, context: AppContext) -> None:

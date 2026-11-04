@@ -26,7 +26,15 @@ from PySide6.QtWidgets import (
 )
 
 from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
-from retro_ai_lab.rewards import PERSONALITIES, Behaviour, Category, RewardProfile
+from retro_ai_lab.rewards import (
+    PERSONALITIES,
+    PICK_ONE,
+    Behaviour,
+    Category,
+    RewardProfile,
+    describe_category,
+    explain_behaviour,
+)
 from retro_ai_lab.services import (
     EmulatorConnected,
     EmulatorDisconnected,
@@ -106,6 +114,10 @@ class RewardsPanel(QWidget):
         self._minus.clicked.connect(self.decrease_selected)
         self._suggested.clicked.connect(self.use_suggested_selected)
 
+        self._explain = QLabel(PICK_ONE, self)
+        self._explain.setObjectName("rewards_explain")
+        self._explain.setWordWrap(True)
+
         self._warning = QLabel("", self)
         self._warning.setObjectName("rewards_warning")
         self._warning.setWordWrap(True)
@@ -127,6 +139,7 @@ class RewardsPanel(QWidget):
         layout.addLayout(picker)
         layout.addWidget(self._summary)
         layout.addWidget(self._tree, 1)
+        layout.addWidget(self._explain)
         layout.addLayout(controls)
         layout.addWidget(self._warning)
         layout.addWidget(self._note)
@@ -164,6 +177,11 @@ class RewardsPanel(QWidget):
     @property
     def note_text(self) -> str:
         return self._note.text()
+
+    @property
+    def explain_text(self) -> str:
+        """What the picked reward means, in a sentence (T-859)."""
+        return self._explain.text()
 
     @property
     def personality_id(self) -> str:
@@ -226,6 +244,7 @@ class RewardsPanel(QWidget):
                     continue
                 top = QTreeWidgetItem([category_text(category, len(behaviours))])
                 top.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                top.setToolTip(0, describe_category(category))
                 self._tree.addTopLevelItem(top)
                 for b in behaviours:
                     self._items[b.id] = self._add_row(top, b, enabled)
@@ -245,6 +264,7 @@ class RewardsPanel(QWidget):
         else:
             self._selected = None
         self._set_controls_enabled(self._selected is not None and enabled)
+        self._show_explanation()
 
     # ----------------------------------------------------------- internals
 
@@ -257,7 +277,7 @@ class RewardsPanel(QWidget):
             flags |= Qt.ItemFlag.ItemIsEnabled
         row.setFlags(flags)
         row.setCheckState(3, Qt.CheckState.Checked if b.enabled else Qt.CheckState.Unchecked)
-        row.setToolTip(0, b.notes or b.trigger.describe())
+        row.setToolTip(0, explain_behaviour(b))
         if not b.enabled:
             row.setForeground(0, Qt.GlobalColor.gray)
         return row
@@ -298,7 +318,13 @@ class RewardsPanel(QWidget):
         bid = current.data(0, Qt.ItemDataRole.UserRole) if current is not None else None
         self._selected = str(bid) if bid is not None else None
         self._set_controls_enabled(self._selected is not None and self._context.rewards.enabled)
+        self._show_explanation()
         self.selection_changed.emit(self._selected)
+
+    def _show_explanation(self) -> None:
+        profile = self.profile
+        b = profile.find(self._selected) if profile is not None and self._selected else None
+        self._explain.setText(explain_behaviour(b) if b is not None else PICK_ONE)
 
     def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if column != 3:
