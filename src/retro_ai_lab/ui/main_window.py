@@ -14,6 +14,7 @@ from pathlib import Path
 from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QDockWidget,
     QMainWindow,
     QMenu,
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
 from retro_ai_lab import __version__
 from retro_ai_lab.education import PANEL_TIP
 from retro_ai_lab.services import ConnectionFailed, EmulatorConnected, EmulatorDisconnected
+from retro_ai_lab.ui import theme
 from retro_ai_lab.ui.compare_panel import ComparePanel
 from retro_ai_lab.ui.connect_bar import ConnectBar
 from retro_ai_lab.ui.context import AppContext
@@ -38,7 +40,7 @@ from retro_ai_lab.ui.link_watchdog import LinkWatchdog
 from retro_ai_lab.ui.panels import PANELS, Panel
 from retro_ai_lab.ui.research_dialog import ResearchDialog
 from retro_ai_lab.ui.rewards_panel import RewardsPanel
-from retro_ai_lab.ui.theme import polish_views
+from retro_ai_lab.ui.theme import MODE_LABELS, polish_views
 from retro_ai_lab.ui.tips import TipDialog
 
 WINDOW_TITLE = "Retro AI Lab"
@@ -57,14 +59,19 @@ class MainWindow(QMainWindow):
         parent: QWidget | None = None,
         *,
         layout_path: Path | None = None,
+        theme_path: Path | None = None,
     ) -> None:
-        """``layout_path`` is where the dock arrangement is kept; None forgets it."""
+        """``layout_path`` keeps the dock arrangement and ``theme_path`` the look; None forgets."""
         super().__init__(parent)
         self.setObjectName("main_window")
         self.setWindowTitle(WINDOW_TITLE)
         self.resize(1200, 800)
         self._context = context if context is not None else AppContext()
         self._layout_path = layout_path
+        self._theme_path = theme_path
+        app = QApplication.instance()
+        if theme_path is not None and isinstance(app, QApplication):
+            theme.apply_theme(app, theme.load_mode(theme_path))  # T-886: the saved choice
 
         self._panels: dict[str, Panel] = {spec.key: Panel(spec) for spec in PANELS}
         self._tips = TipDialog(self)
@@ -142,6 +149,12 @@ class MainWindow(QMainWindow):
         panels_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         panels_button.setMenu(self._panels_menu)
         toolbar.addWidget(panels_button)
+        self._theme_button = QToolButton(self)
+        self._theme_button.setObjectName("theme_button")
+        self._theme_button.setToolTip("Change the look: dark, light, or the same as Windows.")
+        self._theme_button.setText(MODE_LABELS[theme.current_mode()])
+        self._theme_button.clicked.connect(self.next_theme)
+        toolbar.addWidget(self._theme_button)
         self.addToolBar(toolbar)
         self._default_layout()
         self._restore_layout()
@@ -216,6 +229,16 @@ class MainWindow(QMainWindow):
     @property
     def layout_path(self) -> Path | None:
         return self._layout_path
+
+    def next_theme(self) -> theme.ThemeMode:
+        """Dark, then light, then Match Windows (T-886); the choice is saved."""
+        mode = theme.next_mode(theme.current_mode())
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            theme.apply_theme(app, mode)
+        theme.save_mode(self._theme_path, mode)
+        self._theme_button.setText(MODE_LABELS[mode])
+        return mode
 
     def reset_layout(self) -> None:
         """Put every panel back where it started, docked and visible."""

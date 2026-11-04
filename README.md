@@ -149,6 +149,11 @@ The Controls group lists every button of the connected game ("Pressing A")
 and "Pressing the same button again"; all start at 0, so they change nothing
 until you give one points (below zero to put the AI off hammering a button).
 
+The app uses the same look as Stills & Reels and StackSpace: dark by default,
+with the blue-to-purple accent. The button at the right of the toolbar switches
+between "Dark mode", "Light mode" and "Match Windows", and the app remembers
+the choice.
+
 Grown-ups can open the Research window (toolbar) for a Memory table: each
 address the AI is watching, its value now, how often it changes, what the AI
 thinks it is and how sure, and any name given to it. Filter by address

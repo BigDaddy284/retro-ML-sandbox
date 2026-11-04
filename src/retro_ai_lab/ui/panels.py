@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -46,6 +47,9 @@ def section_heading(text: str, parent: QWidget | None = None) -> QLabel:
     """A bold heading over a part of a panel (the stylesheet styles ``heading``)."""
     label = QLabel(text, parent)
     label.setProperty("heading", True)
+    font = label.font()
+    font.setCapitalization(QFont.Capitalization.AllUppercase)  # Stills & Reels' section labels
+    label.setFont(font)
     return label
 
 

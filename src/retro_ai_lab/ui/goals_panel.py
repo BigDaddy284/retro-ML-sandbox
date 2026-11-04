@@ -12,6 +12,7 @@ is saved and announced.
 from __future__ import annotations
 
 from PySide6.QtCore import QModelIndex, Qt, QTimer, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -35,6 +36,7 @@ from retro_ai_lab.services import (
 )
 from retro_ai_lab.training import EpisodeFinished, LearningCurve, TrainingStateChanged
 from retro_ai_lab.training.curve import IMPROVING, SLIPPING, STEADY
+from retro_ai_lab.ui import theme
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.discovery_panel import BADGES
 from retro_ai_lab.ui.panels import name_column
@@ -366,7 +368,7 @@ class GoalsPanel(QWidget):
         row.setCheckState(4, Qt.CheckState.Checked if o.enabled else Qt.CheckState.Unchecked)
         row.setToolTip(0, o.notes)
         if o.completed:
-            row.setForeground(0, Qt.GlobalColor.darkGreen)
+            row.setForeground(0, QColor(theme.current().success))  # T-886
         elif not o.enabled:
             row.setForeground(0, Qt.GlobalColor.gray)
         self._tree.addTopLevelItem(row)

@@ -10,14 +10,14 @@ from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from retro_ai_lab.training.curve import LearningCurve
 from retro_ai_lab.ui.learning_graph import (
-    BACKGROUND,
-    INK,
     MARGIN,
     MIN_HEIGHT,
-    ZERO,
     PlotLayout,
+    background,
+    ink,
     plot_points,
     value_range,
+    zero_line,
 )
 
 EMPTY_CAPTION = "Save two AIs and their learning curves will appear here together."
@@ -84,10 +84,10 @@ class ComparisonGraph(QWidget):
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt API
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.fillRect(self.rect(), BACKGROUND)
+        painter.fillRect(self.rect(), background())
         band = self.fontMetrics().height() * 2 + 6
         layouts = self.layouts()
-        painter.setPen(INK)
+        painter.setPen(ink())
         painter.drawText(
             QRectF(MARGIN, self.height() - band, self.width() - 2 * MARGIN, band),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
@@ -95,7 +95,7 @@ class ComparisonGraph(QWidget):
         )
         zero = next((p.zero_y for _, p in layouts if p.zero_y is not None), None)
         if zero is not None:
-            painter.setPen(QPen(ZERO, 1, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(zero_line(), 1, Qt.PenStyle.DashLine))
             painter.drawLine(QPointF(MARGIN, zero), QPointF(self.width() - MARGIN, zero))
         for i, (_, plot) in enumerate(layouts):
             colour = colour_for(i)

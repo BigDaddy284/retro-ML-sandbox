@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication
 from retro_ai_lab import __version__
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.main_window import LAYOUT_FILE, MainWindow
-from retro_ai_lab.ui.theme import apply_theme
+from retro_ai_lab.ui.theme import THEME_FILE, apply_theme, install_watcher
 
 APP_NAME = "Retro AI Lab"
 ORGANISATION = "RetroAILab"
@@ -27,7 +27,8 @@ def create_app(argv: Sequence[str] | None = None) -> QApplication:
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(ORGANISATION)
     app.setApplicationVersion(__version__)
-    apply_theme(app)  # T-882
+    apply_theme(app)  # T-886: dark until the window reads the saved choice
+    install_watcher(app)
     return app
 
 
@@ -48,7 +49,11 @@ def run_app(
     log.info("Qt application created (platform %s)", app.platformName())
     if context is None:
         context = AppContext()
-    window = MainWindow(context, layout_path=context.data_dir / LAYOUT_FILE)
+    window = MainWindow(
+        context,
+        layout_path=context.data_dir / LAYOUT_FILE,
+        theme_path=context.data_dir / THEME_FILE,
+    )
     window.show()
     log.info("Main window shown")
     if before_exec is not None:
