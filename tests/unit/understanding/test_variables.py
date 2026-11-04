@@ -26,6 +26,7 @@ from retro_ai_lab.understanding.variables import (
     lives_bounce,
     lives_busy,
     lives_doubt,
+    progress_doubt,
 )
 
 
@@ -217,3 +218,16 @@ def test_a_life_count_changes_rarely() -> None:
     cands = by_offset(find_candidates(track(rows)))
     assert cands[1].kind is VariableKind.LIVES
     assert 0 not in cands or cands[0].kind is not VariableKind.LIVES
+
+
+def test_progress_changes_rarely_too() -> None:
+    """T-866: a level, lap or checkpoint steps up rarely and only comes down on a restart."""
+    from retro_ai_lab.observation.diff import ByteStats
+
+    assert progress_doubt(ByteStats(samples=600, changes=36, ups=27, downs=9)) is None  # checkpoint
+    assert progress_doubt(ByteStats(samples=600, changes=7, ups=4, downs=3)) is None  # lap
+    assert (
+        progress_doubt(ByteStats(samples=600, changes=124, ups=117, downs=7)) == "busy"
+    )  # the log
+    assert progress_doubt(ByteStats(samples=600, changes=12, ups=5, downs=7)) == "bounces"
+    assert progress_doubt(ByteStats(samples=60, changes=50, ups=49, downs=1)) is None  # too early

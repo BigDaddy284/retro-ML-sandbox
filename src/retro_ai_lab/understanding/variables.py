@@ -116,6 +116,20 @@ def lives_doubt(st: ByteStats) -> str | None:
     return None
 
 
+def progress_doubt(st: ByteStats) -> str | None:
+    """Why this byte is not progress ("busy" or "bounces"), or None when it may be (T-866).
+
+    Progress (a level, lap or checkpoint) steps up rarely and only comes down
+    on a restart, so a byte that changes more than once in ten steps, or has
+    gone down at least as often as up, is not progress.
+    """
+    if lives_busy(st):
+        return "busy"
+    if st.ups >= BOUNCE_UPS and st.downs >= st.ups:
+        return "bounces"
+    return None
+
+
 def _classify_single(st: ByteStats) -> tuple[VariableKind, tuple[Evidence, ...]] | None:
     """Kind and evidence for one 8-bit byte, or None to skip it."""
     if st.constant or _is_noise(st):
@@ -267,5 +281,6 @@ __all__ = [
     "lives_bounce",
     "lives_busy",
     "lives_doubt",
+    "progress_doubt",
     "propose_candidates",
 ]
