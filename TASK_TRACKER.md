@@ -2375,7 +2375,7 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Test plan:** `tests/unit/emulator/bizhawk/test_adapter.py::test_wrong_version_and_garbage_are_protocol_errors` (reworded), `::test_an_older_script_is_named_as_older_with_its_replacement`; the Lua host suites; full suite.
 - **Results:** 3/3 quality gates passed. Full suite see PR; ruff and mypy clean.
 - **Commit:** see PR. **PR:** pending.
-- **Completion report:** An old script is refused with the file to open. The log line the user saw ("Backend stepped without reporting the pad it watched") cannot recur from a version mismatch.
+- **Completion report:** An old script is refused with the file to open. CI (ubuntu 3.12) failed once in `tests/ui/test_profile_play.py` with 31 steps against 30 frames: the report counted a step still on the worker, whose frames land later; it now counts landed steps only, read on the GUI thread together with the frames. The log line the user saw ("Backend stepped without reporting the pad it watched") cannot recur from a version mismatch.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
