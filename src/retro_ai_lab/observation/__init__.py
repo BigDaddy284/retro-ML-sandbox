@@ -10,6 +10,7 @@ from retro_ai_lab.observation.diff import (
 from retro_ai_lab.observation.inputs import HeldSpan, InputEvent, InputLog
 from retro_ai_lab.observation.memory import MemoryCapture, MemorySnapshot, SnapshotRing
 from retro_ai_lab.observation.screen import FrameDiff, ScreenTracker, diff_frames
+from retro_ai_lab.observation.search import Match, ScanKind, ValueSearch, parse_number
 
 __all__ = [
     "ByteChange",
@@ -19,11 +20,15 @@ __all__ = [
     "HeldSpan",
     "InputEvent",
     "InputLog",
+    "Match",
     "MemoryCapture",
     "MemorySnapshot",
+    "ScanKind",
     "ScreenTracker",
     "SnapshotDiff",
     "SnapshotRing",
+    "ValueSearch",
     "diff_frames",
     "diff_snapshots",
+    "parse_number",
 ]

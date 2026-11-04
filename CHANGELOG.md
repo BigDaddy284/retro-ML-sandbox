@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- Added: a value search over all of the game's memory, like a cheat finder: start from every byte or a number (12, 0x0C, $0C), then keep the bytes that are exactly a number, went up, went down, changed or stayed the same since the last scan (T-884).
 - Changed: the "What the AI is doing" panel no longer shows the "Watching N values…" line twice, its three lists have bold headings, and "Try the buttons", "Share what it learned…" and "Load shared knowledge…" sit on one row (T-883).
 - Changed: a brighter, calmer look across the app: white panels on a soft background, each panel's header in its own colour (Game blue, What the AI is doing purple, Rewards amber, Progress green, Learning pink, Compare AIs teal), slightly bigger text, rounded buttons that clearly look greyed out when they can't be pressed, and tables with bold headers and striped rows; the Research window's step log gives the situation column the room (T-882).
 - Changed: every panel shows its name once: the panel's own header (collapse, "What's this?") is now the dock's title bar, with a pop-out button and a hide button beside it; a hidden panel comes back from the Panels menu as before (T-881).

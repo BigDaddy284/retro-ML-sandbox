@@ -163,6 +163,8 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-881 | One title per panel: the panel's header (collapse, "What's this?") becomes its dock's title bar, with pop-out and hide buttons, instead of a second title under the dock's | 8 | Done | 4/4 | see PR |
 | T-882 | A colourful, calm app-wide look: card panels with a coloured header per panel, bigger text, clear buttons and tables, applied to the main window and the Research window | 8 | Done | 5/5 | see PR |
 | T-883 | The "What the AI is doing" panel is grouped under bold headings and no longer shows the same "Watching …" line twice | 8 | Done | 3/3 | see PR |
+| T-884 | A value search over all of the game's memory, like a cheat finder: start from every byte or an exact number (decimal or hex), then narrow by exact value, went up, went down, changed or stayed the same | 8 | Done | 26/26 | see PR |
+| T-885 | A "Search values" tab in the Research window runs that search and turns a found value into a reward for it going up or down | 8 | Ready | – | – |
 
 The **first working demonstration** (DESIGN.md §17) is reached at the end of E-5 plus the minimum of E-6, first on the Fake Emulator and then on a real game via BizHawk.
 
@@ -2178,6 +2180,40 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 3 new tests pass; existing discovery tests unchanged; full suite 1204 passed, 10 skipped (opt-in real-emulator); ruff and mypy clean.
 - **Commit:** see the PR. **PR:** see the PR.
 - **Completion report:** the repeated "Watching N values…" line is gone (the live summary stays); the three headings are bold; Try the buttons, Share and Load sit on one row. Checked by screenshot on the practice console.
+
+### T-884 – A value search over all memory
+- **Status:** Done
+- **Phase:** 8 (the user, 4 Nov: "add like a Cheat Engine into this so we can also see and search for values in hex and then add that as a reward for making the value go up or down")
+- **Objective:** Let a grown-up find the byte that holds a value (coins, lives, a position) the way a cheat finder does: take every byte the game shares, then narrow the list scan by scan as the game changes.
+- **Scope:** new `observation/search.py`: `parse_number` (decimal, `0x0C`, `$0C`, `0Ch`), `ScanKind` (exact, up, down, changed, unchanged), `ValueSearch` with `start(snapshot, value=None)`, `refine(snapshot, kind, value=None)`, `count`, `matches(limit)` giving (region, offset, now, before) and `reset()`; one byte per value, compared with the snapshot of the previous scan; NumPy so a 128 KB region scans quickly. **Out of scope:** two-byte values, searching outside the regions the emulator shares, writing memory (the app never changes the game's memory).
+- **Acceptance criteria:**
+  1. `start` with no value keeps every byte of every region; with a value keeps the bytes equal to it.
+  2. Each scan kind keeps exactly the right bytes against the previous scan, and the next scan compares with this one.
+  3. `parse_number` reads decimal and the three hex forms, and refuses empty text, words, negatives and numbers over 255 in plain words.
+  4. Refining before a start, an exact scan without a value, or a snapshot whose regions changed size raises `ConfigurationError` in plain words and leaves the search as it was.
+  5. Scanning 128 KB takes under 50 ms.
+- **Expected changes:** `src/retro_ai_lab/observation/search.py`, `src/retro_ai_lab/observation/__init__.py`, `tests/unit/observation/test_search.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `tests/unit/observation/test_search.py`: start all / start exact; each scan kind on a crafted pair of snapshots; chained scans narrowing to one byte; matches sorted by region and offset with now and before, and limited; parse_number valid and invalid (empty, "abc", "-1", "256", "0x100", "0x"); errors leave state unchanged; region size change refused; reset; timing on 128 KB.
+- **Results:** 26 test cases in `test_search.py` pass (128 KB scan well under 50 ms); ruff and mypy clean; full suite run with T-885.
+- **Commit:** see the PR. **PR:** see the PR.
+- **Completion report:** `ValueSearch` keeps candidate offsets and their bytes at the last scan and the one before (so the table shows Now and Before), per region, as NumPy arrays; a failed scan changes nothing.
+
+### T-885 – A "Search values" tab with rewards
+- **Status:** Ready
+- **Phase:** 8 (same request)
+- **Objective:** Put the search in the Research window with every value shown in decimal and hex, and let a person turn a found byte into a reward for it going up or down.
+- **Scope:** `ui/research_dialog.py`: a fifth tab "Search values" with a number box, "New search", "Is exactly", "Went up", "Went down", "Changed", "Didn't change", "Start over"; a line saying how many bytes match and at which frame; a table (Address, Offset in hex, Now, Before, each value as `12 (0x0C)`), first 500 rows; a name box, a Points box (typed, two decimals) and "Reward going up" / "Reward going down", which name the byte (`DiscoveryService.name_value`, so it is confirmed and watched) and add the person's own reward (`RewardService.add_own`). **Out of scope:** the Rewards panel (the new row appears there by itself, as with "Add a reward").
+- **Acceptance criteria:**
+  1. With no game or no memory snapshot, the buttons are off and the line says why.
+  2. A new search then scans narrow the table; every row shows decimal and hex; the tab title shows the match count.
+  3. A bad number is refused in the note, and the search is unchanged.
+  4. Picking a row and pressing "Reward going up" with a name and points adds an own reward "Name goes up" worth the points, with the byte named and confirmed; pressing it again says the reward is already there; no row picked or no name says so.
+  5. Disconnecting clears the search.
+- **Expected changes:** `src/retro_ai_lab/ui/research_dialog.py`, `tests/ui/test_research_dialog.py`, `TASK_TRACKER.md`, `CHANGELOG.md`, `README.md`.
+- **Test plan:** UI tests on the practice console: idle state; new search then "Went up" after the score rises finds the score byte among the matches; exact value in hex narrows to the matching bytes; bad number note; reward added up and down with the right name, value and trigger, duplicates refused, missing row/name refused; disconnect clears; tab order now five tabs (T-880 test updated for the new tab); full suite.
+- **Results:** –
+- **Commit:** –. **PR:** –.
+- **Completion report:** –
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
