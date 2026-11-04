@@ -19,7 +19,7 @@ from retro_ai_lab.understanding import (
     find_candidates,
     propose_candidates,
 )
-from retro_ai_lab.understanding.variables import MIN_TRANSITIONS
+from retro_ai_lab.understanding.variables import BOUNCE_UPS, MIN_TRANSITIONS, lives_bounce
 
 
 def track(rows: Iterable[bytes]) -> ChangeTracker:
@@ -178,3 +178,16 @@ def test_proposals_land_in_knowledge_at_modest_confidence() -> None:
     assert k.best(VariableKind.SCORE) is not None
     assert k.best(VariableKind.SCORE).offset == LAYOUT.score  # type: ignore[union-attr]
     assert MIN_TRANSITIONS <= 900
+
+
+def test_a_life_count_restored_by_restarts_does_not_bounce() -> None:
+    """T-864: lives are lost one at a time and restored on a restart; a bouncer is not lives."""
+    from retro_ai_lab.observation.diff import ByteStats
+
+    assert BOUNCE_UPS == 4
+    assert not lives_bounce(ByteStats(samples=600, changes=20, ups=0, downs=20))
+    assert not lives_bounce(ByteStats(samples=600, changes=5, ups=3, downs=2))  # too few ups
+    assert not lives_bounce(ByteStats(samples=600, changes=26, ups=6, downs=20))  # Toy Racer
+    assert not lives_bounce(ByteStats(samples=600, changes=12, ups=4, downs=8))  # two lives
+    assert lives_bounce(ByteStats(samples=600, changes=11, ups=4, downs=7))
+    assert lives_bounce(ByteStats(samples=600, changes=217, ups=101, downs=116))  # the log
