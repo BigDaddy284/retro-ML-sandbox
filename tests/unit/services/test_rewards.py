@@ -16,6 +16,7 @@ from retro_ai_lab.services import (
     ConnectionService,
     DiscoveryService,
     DiscoveryUpdated,
+    GoStarted,
     ObservationService,
     RewardEarned,
     RewardProfileChanged,
@@ -203,6 +204,50 @@ def test_events_earn_rewards_into_the_tally(
     bus.publish(DiscoveryUpdated((), (), (step,), ()))
     assert len(earned) == 2 and rewards.tally.count == 2
     assert "+" in rewards.summary() or "-" in rewards.summary()
+
+
+def test_progress_and_score_pay_only_past_the_best_of_the_go(
+    rewards: RewardService,
+    connection: ConnectionService,
+    discovery: DiscoveryService,
+    bus: EventBus,
+    earned: list[RewardEarned],
+) -> None:
+    """T-878: a step back and forward again, or a value that resets on death, is not progress."""
+    connection.connect("fake", seed=3)
+    k = teach(discovery, bus)
+    checkpoint = k.at(RAM, LAYOUT.checkpoint)
+    score = k.at(RAM, LAYOUT.score)
+    assert checkpoint and score
+    bus.publish(GoStarted(0))
+
+    def progress(frame: int, value: int) -> None:
+        step = GameEvent(EventKind.PROGRESS, frame, checkpoint.id, "", 0, value)
+        bus.publish(DiscoveryUpdated((), (), (step,), ()))
+
+    for frame, value in ((10, 1), (20, 2), (30, 1), (40, 2), (50, 3)):
+        progress(frame, value)
+    assert [(e.frame, e.amount) for e in earned] == [(10, 10.0), (20, 10.0), (50, 10.0)]
+    assert rewards.tally.count == 3  # the two capped steps are not tallied either
+    jump = GameEvent(EventKind.SCORE_GAIN, 60, score.id, "", 0, 100)
+    back = GameEvent(EventKind.SCORE_GAIN, 70, score.id, "", 20, 50)
+    bus.publish(DiscoveryUpdated((), (), (jump, back), ()))
+    assert [e.frame for e in earned[3:]] == [60]
+    # A new go earns from scratch.
+    bus.publish(GoStarted(100))
+    progress(110, 1)
+    assert earned[-1].frame == 110
+    # A person's own "goes up" row is not capped: every step right pays.
+    lane = k.propose(RAM, LAYOUT.lane, kind=VariableKind.POSITION, evidence=SURE)
+    up = rewards.add_own(lane.id, goes_up=True, value=2.0)
+    for frame in (120, 130):
+        step_right = GameEvent(EventKind.UP, frame, lane.id, "", 1, 2)
+        bus.publish(DiscoveryUpdated((), (), (step_right,), ()))
+    assert [e.frame for e in earned if up.id in e.behaviour_ids] == [120, 130]
+    # Without a value there is nothing to compare: it pays.
+    bare = GameEvent(EventKind.PROGRESS, 140, checkpoint.id, "")
+    bus.publish(DiscoveryUpdated((), (), (bare,), ()))
+    assert earned[-1].frame == 140
 
 
 def test_buttons_held_earn_their_points(

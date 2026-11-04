@@ -140,6 +140,9 @@ The AI offers first the values that moved a few times while it played, go
 after go: after some goes in which you collected something, the counter
 appears as a new "Progress" or "Your score" row, and the Memory table in the Research window shows its value now,
 so the row reading the same number as the screen is the one to name.
+"Progress goes up" and "Your score jumps up" only pay when the value beats
+its best so far in the go: dying and covering the same ground again earns
+nothing until the AI gets further. Your own "goes up" rows pay every time.
 To reward something the AI did not think of, use "Add a reward" under the
 table: pick a value ("Your position"), "goes up" or "goes down", and the
 points (below zero takes points away), then press Add. "Going right is good,

@@ -45,6 +45,18 @@ class RewardEarned:
 
 
 @dataclass(frozen=True, slots=True)
+class GoStarted:
+    """A go began (T-878): progress and score start earning from scratch."""
+
+    frame: int
+
+
+# Events that pay only past the go's best so far (T-878): a step back and forward
+# again is not progress, and a value that resets on death is not progress either.
+PAST_BEST_KINDS = frozenset({EventKind.PROGRESS, EventKind.SCORE_GAIN})
+
+
+@dataclass(frozen=True, slots=True)
 class RewardProfileChanged:
     """The profile changed: new suggestions, or a person used a control."""
 
@@ -89,9 +101,11 @@ class RewardService:
         self._watch = RelationshipWatch()
         self._current: ExploitSuspected | None = None
         self._held: frozenset[str] = frozenset()  # the step before's buttons (T-874)
+        self._best: dict[str, int] = {}  # per go: the best each progress/score reached
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
         bus.subscribe(ButtonsHeld, self._on_buttons_held)
+        bus.subscribe(GoStarted, self._on_go_started)
         bus.subscribe(DiscoveryUpdated, self._on_discovery)
 
     # ------------------------------------------------------------ queries
@@ -250,6 +264,7 @@ class RewardService:
         info = event.game_info
         game_id = game_id_for(info.system, info.title, info.rom_hash)
         self._tally.reset()
+        self._best.clear()
         self._enabled = event.capabilities.memory_read
         if not self._enabled:
             self._profile = None
@@ -300,8 +315,24 @@ class RewardService:
             return False
         return self._watch.changed(knowledge)
 
+    def _on_go_started(self, event: GoStarted) -> None:
+        self._best.clear()
+
+    def _beats_best(self, game_event: GameEvent) -> bool:
+        """Remember the value and say whether it is the go's best so far (T-878)."""
+        key, value = game_event.variable_id, game_event.after
+        if key is None or value is None:
+            return True
+        best = self._best.get(key)
+        if best is None or value > best:
+            self._best[key] = value
+            return True
+        return False
+
     def _score(self, game_event: GameEvent) -> None:
         assert self._profile is not None
+        if game_event.kind in PAST_BEST_KINDS and not self._beats_best(game_event):
+            return
         matched = self._profile.matching(game_event)
         if not matched:
             return
