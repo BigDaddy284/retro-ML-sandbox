@@ -3,6 +3,8 @@
 from retro_ai_lab.training.brain import Brain
 from retro_ai_lab.training.curve import CurvePoint, LearningCurve
 from retro_ai_lab.training.episode import (
+    DEFAULT_MAX_STEPS,
+    DEFAULT_UNSTICK_AFTER,
     Earning,
     EpisodeResult,
     EpisodeRunner,
@@ -29,6 +31,8 @@ from retro_ai_lab.training.service import (
 
 __all__ = [
     "COLUMNS",
+    "DEFAULT_MAX_STEPS",
+    "DEFAULT_UNSTICK_AFTER",
     "NOT_LISTENING",
     "ActionValue",
     "BehaviourChange",

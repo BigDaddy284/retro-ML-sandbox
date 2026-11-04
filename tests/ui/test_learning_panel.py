@@ -361,3 +361,32 @@ def test_the_note_says_when_the_game_ignores_the_ai(
     assert context.training.status is Status.IDLE and not panel.ticking
     assert "no button gets it going" in panel.note_text
     assert panel.findChild(object, "start_button").isEnabled()  # type: ignore[union-attr]
+
+
+def test_the_go_timers_are_editable_in_seconds(panel: LearningPanel, context: AppContext) -> None:
+    """T-873: how long a go lasts, and how long before it gives up, in seconds a kid can type."""
+    from retro_ai_lab.training import DEFAULT_MAX_STEPS, DEFAULT_UNSTICK_AFTER
+    from retro_ai_lab.ui.learning_panel import seconds_to_steps, steps_to_seconds
+
+    assert seconds_to_steps(40, 4) == 600 and steps_to_seconds(600, 4) == 40.0
+    assert seconds_to_steps(0.01, 4) == 1
+    go = panel.findChild(object, "go_seconds_spin")
+    give_up = panel.findChild(object, "give_up_seconds_spin")
+    assert go is not None and give_up is not None
+    assert not go.isEnabled() and not give_up.isEnabled()  # type: ignore[attr-defined]
+    connect(context)
+    t = context.training
+    fps = t.frames_per_step
+    assert go.isEnabled() and panel.go_seconds == steps_to_seconds(DEFAULT_MAX_STEPS, fps)  # type: ignore[attr-defined]
+    assert panel.give_up_seconds == round(steps_to_seconds(DEFAULT_UNSTICK_AFTER, fps), 1)
+    go.setValue(30)  # type: ignore[attr-defined]
+    assert t.max_steps == seconds_to_steps(30, fps) and "30 seconds" in panel.note_text
+    give_up.setValue(3.0)  # type: ignore[attr-defined]
+    assert t.unstick_after == seconds_to_steps(3.0, fps) and "3 seconds" in panel.note_text
+    panel.choose_mode(Mode.INDEPENDENT)
+    panel.start()
+    assert not go.isEnabled() and not give_up.isEnabled()  # type: ignore[attr-defined]
+    panel.choose_go_seconds(10)  # refused while training, and explained
+    assert "Stop training" in panel.note_text and t.max_steps == seconds_to_steps(30, fps)
+    panel.stop()
+    assert go.isEnabled() and panel.go_seconds == 30.0  # type: ignore[attr-defined]
