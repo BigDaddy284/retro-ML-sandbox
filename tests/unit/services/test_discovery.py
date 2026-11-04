@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 import pytest
 
@@ -586,7 +587,7 @@ def test_memory_from_several_threads_is_observed_one_at_a_time(
 def test_a_value_that_moves_while_the_ai_plays_earns_its_seat(
     connection: ConnectionService, observation: ObservationService, bus: EventBus
 ) -> None:
-    """T-870: among look-alike guesses, the one that moved during a go gets the seat."""
+    """T-870/T-871: among look-alike guesses, the one that moved a few times a go gets the seat."""
     discovery = DiscoveryService(
         connection, observation, bus, review_every=10**6, experiment_every=None
     )
@@ -595,29 +596,33 @@ def test_a_value_that_moves_while_the_ai_plays_earns_its_seat(
     k = discovery.knowledge
     assert k is not None
     discovery.begin_go()
-    assert discovery.credit_played() == ()  # nothing guessed yet
+    assert discovery.credit_played() == ()  # no step taken: nothing to credit
     weight = lambda w: (Evidence("test", "Planted.", w),)  # noqa: E731
     dead = [
         k.propose("ram", o, kind=VariableKind.PROGRESS, evidence=weight(2.5))
         for o in (LAYOUT.header, LAYOUT.header + 1, LAYOUT.header + 2)  # constant bytes
     ]
-    moving = k.propose("ram", LAYOUT.position, kind=VariableKind.PROGRESS, evidence=weight(2.0))
+    moving = k.propose("ram", LAYOUT.checkpoint, kind=VariableKind.PROGRESS, evidence=weight(2.0))
+    busy = k.propose("ram", LAYOUT.position, kind=VariableKind.PROGRESS, evidence=weight(2.0))
     assert moving.id not in {v.id for v in k.offered()}  # the weaker guess has no seat
     seen: list[DiscoveryUpdated] = []
     bus.subscribe(DiscoveryUpdated, seen.append)
     discovery.begin_go()
-    play(connection, observation, 300)
+    play(connection, observation, 300)  # the checkpoint moves ~18 times, the position 300
     credited = discovery.credit_played(frame=7)
     assert [v.id for v in credited] == [moving.id]
     last = k.get(moving.id).evidence[-1]
     assert last.kind == PLAYED and last.weight == 0.5 and last.frame == 7
+    assert re.fullmatch(r"Moved \d+ times in a go of (299|300) steps\.", last.detail)
     assert moving.id in {v.id for v in k.offered()}  # a tie now, and it moved
-    assert not any(e.kind == PLAYED for d in dead for e in k.get(d.id).evidence)
+    for other in (*dead, busy):
+        assert not any(e.kind == PLAYED for e in k.get(other.id).evidence)
     assert [u for u in seen if u.changed] == [DiscoveryUpdated((), credited, (), ())]
-    # Credit is given once; and nothing is credited without a go begun.
-    discovery.begin_go()
-    play(connection, observation, 300)
-    assert moving.id not in {v.id for v in discovery.credit_played()}
+    # Credit comes once a go, three goes at most; and never without a go begun.
+    for _ in range(3):
+        discovery.begin_go()
+        play(connection, observation, 300)
+        discovery.credit_played()
+    assert sum(e.kind == PLAYED for e in k.get(moving.id).evidence) == 3
     play(connection, observation, 10)
     assert discovery.credit_played() == ()
-    assert sum(e.kind == PLAYED for e in k.get(moving.id).evidence) == 1
