@@ -18,6 +18,7 @@ from retro_ai_lab.understanding.relationships import RelationshipFinder, describ
 from retro_ai_lab.understanding.variables import (
     Candidate,
     find_candidates,
+    flag_doubt,
     lives_bounce,
     lives_busy,
     lives_doubt,
@@ -49,6 +50,7 @@ __all__ = [
     "find_candidates",
     "find_input_links",
     "find_wake_button",
+    "flag_doubt",
     "inputs_matter",
     "lives_bounce",
     "lives_busy",

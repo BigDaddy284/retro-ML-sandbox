@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-869: a flag guess that switches more than once in ten steps is doubted at one review and dropped at the next, like a busy life count; the classifier no longer proposes a flag for such a byte.
 - Fixed: the "changed while nobody pressed anything" doubt is no longer issued while the game is not listening (a title demo), where everything moves by itself and the real score was being dropped at every Start; after a long run on an older build, press "Start from scratch" in the Learning panel so the AI can find the real values again (T-868).
 - Fixed: two flags switching back to their first value no longer count as the game starting over (the user's log: 88 goes in six minutes, each ended by a reset after 7 to 80 steps, blaming the same two flags); a restart needs a score, lives or progress number dropping back to its start, and goes cut short by the same values within 120 steps, three in a row, teach the AI those values cycle (T-867).
 - Fixed: a "progress" guess whose byte changes more than once in ten steps, or goes down as often as up (the user's log: "Progress goes up" paying 117 times in one go once the lives guesses were gone), is doubted at one review and dropped at the next, like a lives guess; a real level, lap or checkpoint keeps its reward (T-866).

@@ -23,6 +23,7 @@ from retro_ai_lab.understanding.variables import (
     BOUNCE_UPS,
     LIVES_SAMPLES,
     MIN_TRANSITIONS,
+    flag_doubt,
     lives_bounce,
     lives_busy,
     lives_doubt,
@@ -218,6 +219,24 @@ def test_a_life_count_changes_rarely() -> None:
     cands = by_offset(find_candidates(track(rows)))
     assert cands[1].kind is VariableKind.LIVES
     assert 0 not in cands or cands[0].kind is not VariableKind.LIVES
+
+
+def test_a_flag_switches_rarely() -> None:
+    """T-869: a two-value byte toggling every few steps is an animation bit, not a flag."""
+    from retro_ai_lab.observation.diff import ByteStats
+
+    assert flag_doubt(ByteStats(samples=600, changes=140, ups=70, downs=70)) == "busy"  # the log
+    assert flag_doubt(ByteStats(samples=600, changes=4, ups=2, downs=2)) is None  # game over
+    assert flag_doubt(ByteStats(samples=60, changes=20, ups=10, downs=10)) is None  # too early
+    # The classifier proposes nothing for a bit that blinks every eight steps, whichever way
+    # it leans, and still a flag for one that switches twice in 400 steps.
+    rows = [
+        bytes([(i // 8) % 2, 1 if i % 16 == 0 else 0, 1 if 200 <= i < 380 else 0])
+        for i in range(400)
+    ]
+    cands = by_offset(find_candidates(track(rows)))
+    assert 0 not in cands and 1 not in cands
+    assert cands[2].kind is VariableKind.FLAG
 
 
 def test_progress_changes_rarely_too() -> None:

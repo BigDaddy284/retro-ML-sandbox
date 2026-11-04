@@ -102,9 +102,19 @@ def lives_busy(st: ByteStats) -> bool:
     """A life count changes rarely: more than one change in ten steps is no life count (T-865).
 
     Judged only after ``LIVES_SAMPLES`` observed steps, so a lively first few
-    seconds do not condemn a byte.
+    seconds do not condemn a byte. Progress (T-866) and flags (T-869) are held
+    to the same rule.
     """
     return st.samples >= LIVES_SAMPLES and st.change_rate > RARE_RATE
+
+
+def flag_doubt(st: ByteStats) -> str | None:
+    """Why this byte is not a flag ("busy"), or None when it may be (T-869).
+
+    A flag worth an event (game over, a menu, a pause) switches rarely; a
+    two-value byte toggling every few steps is an animation or a "jumping" bit.
+    """
+    return "busy" if lives_busy(st) else None
 
 
 def lives_doubt(st: ByteStats) -> str | None:
@@ -144,6 +154,8 @@ def _classify_single(st: ByteStats) -> tuple[VariableKind, tuple[Evidence, ...]]
                 Evidence("unit-steps", "Always by exactly one.", 1.0),
             )
         if values == 2:
+            if not rare:  # a blinking bit is no flag (T-869), and nothing else fits
+                return None
             return VariableKind.FLAG, (
                 Evidence("two-values", "Only ever two different values.", 1.5),
                 Evidence("rare", "Hardly ever changes.", 0.5),
@@ -165,9 +177,11 @@ def _classify_single(st: ByteStats) -> tuple[VariableKind, tuple[Evidence, ...]]
             Evidence("irregular", "Goes up by different amounts.", 1.0),
         )
     if values == 2:
+        if not rare:  # a blinking bit is no flag (T-869), and nothing else fits
+            return None
         return VariableKind.FLAG, (
             Evidence("two-values", "Only ever two different values.", 1.5),
-            Evidence("rare" if rare else "sometimes", "Switches now and then.", 0.5),
+            Evidence("rare", "Switches now and then.", 0.5),
         )
     if st.downs > 0 and st.downs >= 2 * st.ups and values <= FEW_VALUES and rare:
         return VariableKind.LIVES, (
@@ -278,6 +292,7 @@ __all__ = [
     "RARE_RATE",
     "Candidate",
     "find_candidates",
+    "flag_doubt",
     "lives_bounce",
     "lives_busy",
     "lives_doubt",
