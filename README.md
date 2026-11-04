@@ -149,6 +149,11 @@ The Controls group lists every button of the connected game ("Pressing A")
 and "Pressing the same button again"; all start at 0, so they change nothing
 until you give one points (below zero to put the AI off hammering a button).
 
+The app uses the same look as Stills & Reels and StackSpace: dark by default,
+with the blue-to-purple accent. The button at the right of the toolbar switches
+between "Dark mode", "Light mode" and "Match Windows", and the app remembers
+the choice.
+
 Grown-ups can open the Research window (toolbar) for a Memory table: each
 address the AI is watching, its value now, how often it changes, what the AI
 thinks it is and how sure, and any name given to it. Filter by address
@@ -158,6 +163,17 @@ table only shows what it worked out and lets you name it. Its Learning
 settings box has the learning numbers for researchers; "Exploring steps" is
 how many learned steps it takes the AI to go from trying random moves to
 mostly choosing (6,000, about ten 40-second goes).
+
+To find a value yourself, like a cheat finder, use the Research window's
+"Search values" tab. Type the number you see on the screen (12, or hex like
+0x0C or $0C) and press New search, or leave the box empty to start from every
+byte. Play a little, then press the scan that fits: "Is exactly" (with the new
+number), "Went up", "Went down", "Changed" or "Didn't change"; each compares
+with the scan before. Every value is shown in decimal and hex, and "Now" keeps
+up with the game. When a few bytes are left, pick one, give it a name and
+points, and press "Reward going up" or "Reward going down": the byte is named
+for the AI and the reward appears in the Rewards panel under Progression. The
+app only reads the game's memory; it never changes it.
 
 After a long run on an older build, the AI may have dropped the real score or
 lives for reasons a newer build no longer has. Press "Start from scratch" in

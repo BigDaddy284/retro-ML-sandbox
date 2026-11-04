@@ -209,3 +209,180 @@ def test_toolbar_button_opens_the_window_and_logging_outlives_it(
     assert len(context.step_log) > 0
     window.open_research()
     assert dialog.isVisible() and dialog.log_rows()
+
+
+# --------------------------------------------------------------- T-880: tabs
+
+
+def _tabs(dialog: ResearchDialog):  # type: ignore[no-untyped-def]
+    from PySide6.QtWidgets import QTabWidget
+
+    tabs = dialog.findChild(QTabWidget, "research_tabs")
+    assert tabs is not None
+    return tabs
+
+
+def test_research_sections_are_tabs(dialog: ResearchDialog) -> None:
+    from retro_ai_lab.ui.research_dialog import TAB_TITLES
+
+    tabs = _tabs(dialog)
+    assert TAB_TITLES == (
+        "Learning settings",
+        "The situation now",
+        "Memory",
+        "Step log",
+        "Search values",
+    )
+    assert [tabs.tabText(i) for i in range(tabs.count())] == list(TAB_TITLES)
+    for i, box in enumerate(("settings_box", "situation_box", "memory_box", "log_box")):
+        widget = dialog.findChild(object, box)
+        assert widget is not None and tabs.widget(i).isAncestorOf(widget)  # type: ignore[arg-type]
+    # The intro and the note sit outside the tabs, so they show whatever tab is picked.
+    for name in ("research_intro", "research_note"):
+        widget = dialog.findChild(object, name)
+        assert widget is not None and not tabs.isAncestorOf(widget)  # type: ignore[arg-type]
+    assert tabs.currentIndex() == 0
+
+
+def test_settings_explain_themselves(dialog: ResearchDialog) -> None:
+    from PySide6.QtWidgets import QLabel
+
+    _tabs(dialog).setCurrentIndex(0)
+    for key, _label, tip in SETTING_FIELDS:
+        hint = dialog.findChild(QLabel, f"setting_{key}_hint")
+        assert hint is not None and hint.text() == tip and hint.isVisible()
+
+
+def test_tab_titles_count_rows(dialog: ResearchDialog, context: AppContext) -> None:
+    tabs = _tabs(dialog)
+    assert tabs.tabText(2) == "Memory" and tabs.tabText(3) == "Step log"
+    connect(context)
+    context.training.train(2)
+    dialog.refresh()
+    steps = len(context.step_log)
+    assert steps > 0 and tabs.tabText(3) == f"Step log ({steps:,})"
+    memory = tabs.tabText(2)
+    assert memory.startswith("Memory (") and memory.endswith(")")
+    assert int(memory[len("Memory (") : -1].replace(",", "")) >= len(dialog.memory_rows()) > 0
+    dialog.clear_log()
+    assert tabs.tabText(3) == "Step log"
+    context.connection.disconnect()
+    dialog.refresh()
+    assert tabs.tabText(2) == "Memory"
+
+
+def test_picked_tab_stays_across_refresh(dialog: ResearchDialog, context: AppContext) -> None:
+    tabs = _tabs(dialog)
+    tabs.setCurrentIndex(3)
+    connect(context)
+    context.training.train(1)
+    dialog.refresh()
+    assert tabs.currentIndex() == 3
+
+
+# ------------------------------------------- T-885: search values, then reward
+
+
+def _poke(context: AppContext, offset: int, value: int) -> None:
+    """Set a byte of the practice console's memory and take a snapshot."""
+    from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
+
+    adapter = context.connection.adapter
+    assert isinstance(adapter, FakeEmulatorAdapter)
+    adapter.game._ram[offset] = value
+    assert context.observation.observe() is not None
+
+
+def test_search_is_off_without_a_game(dialog: ResearchDialog) -> None:
+    from retro_ai_lab.ui.research_dialog import SEARCH_IDLE_TEXT
+
+    assert dialog.search_summary == SEARCH_IDLE_TEXT and dialog.search_rows() == ()
+    for name in ("search_new_button", "search_up_button", "reward_up_button"):
+        assert not dialog.findChild(object, name).isEnabled()  # type: ignore[union-attr]
+    assert not dialog.search_start()
+    assert dialog.tabs.tabText(4) == "Search values"
+
+
+def test_search_narrows_and_shows_hex(dialog: ResearchDialog, context: AppContext) -> None:
+    from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
+    from retro_ai_lab.observation import ScanKind
+
+    connect(context)
+    _poke(context, LAYOUT.lives, 3)
+    dialog.refresh()
+    assert dialog.findChild(object, "search_new_button").isEnabled()  # type: ignore[union-attr]
+    assert dialog.search_start()  # every byte
+    everything = dialog.search_count
+    assert everything > 10 and dialog.tabs.tabText(4) == f"Search values ({everything:,})"
+    assert "match" in dialog.search_summary and "frame" in dialog.search_summary
+    assert dialog.search_refine(ScanKind.EXACT, "0x03")  # hex: 3
+    lives = f"ram[{LAYOUT.lives}]"
+    rows = {r[0]: r for r in dialog.search_rows()}
+    assert lives in rows and all(r[2] == "3 (0x03)" for r in rows.values())
+    assert rows[lives][1] == f"0x{LAYOUT.lives:04X}"
+    _poke(context, LAYOUT.lives, 2)
+    assert dialog.search_refine(ScanKind.DOWN)
+    rows = {r[0]: r for r in dialog.search_rows()}
+    assert lives in rows and rows[lives][2:] == ("2 (0x02)", "2 (0x02)", "3 (0x03)")
+    # The Now column follows the game between scans; the scans stay as they were.
+    _poke(context, LAYOUT.lives, 9)
+    dialog.refresh()
+    rows = {r[0]: r for r in dialog.search_rows()}
+    assert rows[lives][2:] == ("9 (0x09)", "2 (0x02)", "3 (0x03)")
+    _poke(context, LAYOUT.lives, 2)
+    assert all(int(r[3].split()[0]) < 3 for r in rows.values())
+    # A bad number is refused and the search stays.
+    count = dialog.search_count
+    assert not dialog.search_refine(ScanKind.EXACT, "lots")
+    assert "not a number" in dialog.note_text and dialog.search_count == count
+    assert not dialog.search_start("300") and dialog.search_count == count
+    # Start over empties it; disconnecting does too.
+    dialog.search_reset()
+    assert dialog.search_count == 0 and dialog.tabs.tabText(4) == "Search values"
+    assert dialog.search_start("$02")
+    assert dialog.search_count > 0
+    context.connection.disconnect()
+    dialog.refresh()
+    assert dialog.search_count == 0 and dialog.search_rows() == ()
+
+
+def test_a_found_value_becomes_a_reward(dialog: ResearchDialog, context: AppContext) -> None:
+    from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
+    from retro_ai_lab.rewards.model import Category
+    from retro_ai_lab.rewards.own import own_id
+    from retro_ai_lab.understanding.events import EventKind
+
+    connect(context)
+    _poke(context, LAYOUT.lives, 7)
+    dialog.refresh()
+    assert dialog.search_start("7")
+    lives = f"ram[{LAYOUT.lives}]"
+    assert not dialog.reward_search(goes_up=True, name="Lives", points=1.0)
+    assert "Pick a value" in dialog.note_text
+    dialog.select_search(lives)
+    assert not dialog.reward_search(goes_up=True, name="  ", points=1.0)
+    assert "name" in dialog.note_text
+    assert dialog.reward_search(goes_up=False, name="My lives", points=-2.5)
+    knowledge = context.discovery.knowledge
+    assert knowledge is not None
+    var = knowledge.at("ram", LAYOUT.lives)
+    assert var is not None and var.confirmed and var.name == "My lives"
+    profile = context.rewards.profile
+    assert profile is not None
+    row = profile.find(own_id(var.id, False))
+    assert row is not None and row.value == -2.5 and row.name == "My lives goes down"
+    assert row.trigger.kind is EventKind.DOWN and row.category is Category.PROGRESSION
+    assert "My lives goes down" in dialog.note_text and "-2.5" in dialog.note_text
+    assert dialog.reward_search(goes_up=True, name="My lives", points=0.65)
+    up = profile.find(own_id(var.id, True))
+    assert up is not None and up.value == 0.65
+    assert not dialog.reward_search(goes_up=True, name="My lives", points=1.0)
+    assert "already" in dialog.note_text
+    # The buttons use the boxes.
+    dialog.findChild(object, "search_name_edit").setText("Spare")  # type: ignore[union-attr]
+    dialog.findChild(object, "search_points").setValue(3.25)  # type: ignore[union-attr]
+    assert dialog.search_start()  # every byte again, so there is another to pick
+    other = next(r[0] for r in dialog.search_rows() if r[0] != lives)
+    dialog.select_search(other)
+    dialog.findChild(object, "reward_up_button").click()  # type: ignore[union-attr]
+    assert "Spare goes up" in dialog.note_text

@@ -14,17 +14,30 @@ from PySide6.QtGui import QColor, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from retro_ai_lab.training.curve import LearningCurve
+from retro_ai_lab.ui import theme
 
 EMPTY_CAPTION = "No goes yet. Press Start and the graph will grow here."
 LEGEND = "Dots: points each go.  Line: average of recent goes.  Ring: the best go."
 MARGIN = 12
 MIN_HEIGHT = 120
+
+
+def background() -> QColor:
+    """The graph's ground: the theme's Canvas colour (T-886)."""
+    return QColor(theme.current().canvas)
+
+
+def ink() -> QColor:
+    return QColor(theme.current().text)
+
+
+def zero_line() -> QColor:
+    return QColor(theme.current().muted)
+
+
 GAIN = QColor("#2e8b57")
 LOSS = QColor("#d2691e")
 AVERAGE = QColor("#1e6fd9")
-ZERO = QColor("#9a9a9a")
-BACKGROUND = QColor("#fbfbf7")
-INK = QColor("#333333")
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,11 +134,11 @@ class LearningGraph(QWidget):
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt API
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.fillRect(self.rect(), BACKGROUND)
+        painter.fillRect(self.rect(), background())
         metrics = self.fontMetrics()
         band = metrics.height() * 2 + 6
         plot = self.layout_points()
-        painter.setPen(INK)
+        painter.setPen(ink())
         caption_rect = QRectF(MARGIN, self.height() - band, self.width() - 2 * MARGIN, band)
         painter.drawText(
             caption_rect,
@@ -136,7 +149,7 @@ class LearningGraph(QWidget):
             painter.end()
             return
         if plot.zero_y is not None:
-            painter.setPen(QPen(ZERO, 1, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(zero_line(), 1, Qt.PenStyle.DashLine))
             painter.drawLine(
                 QPointF(MARGIN, plot.zero_y), QPointF(self.width() - MARGIN, plot.zero_y)
             )
@@ -151,7 +164,7 @@ class LearningGraph(QWidget):
             painter.drawEllipse(QPointF(x, y), 3.5, 3.5)
             if i == plot.best:
                 painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.setPen(QPen(INK, 1.5))
+                painter.setPen(QPen(ink(), 1.5))
                 painter.drawEllipse(QPointF(x, y), 7.0, 7.0)
         painter.end()
 

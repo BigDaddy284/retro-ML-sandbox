@@ -159,6 +159,13 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-871 | The "played" credit goes only to a guess that moved rarely during the go (at most once in ten steps), once per go and three goes at most, so a value that moves go after go outranks a one-off and timers and positions get nothing | 8 | Done | 2/2 | see PR #132 |
 | T-872 | A Points box in the Rewards panel: type any number for the picked reward (0.65, -3), since + and - move by whole steps and a suggested decimal could not be changed | 8 | Done | 1/1 | see PR #133 |
 | T-873 | The Learning panel has two boxes in seconds: how long each go lasts and how long nothing may change before a go gives up; a person's choice is kept per game | 8 | Done | 2/2 | see PR #134 |
+| T-880 | The Research window is split into four tabs (Learning settings, The situation now, Memory, Step log), each table with the whole window's height, and each setting's explanation shown under it | 8 | Done | 4/4 | see PR |
+| T-881 | One title per panel: the panel's header (collapse, "What's this?") becomes its dock's title bar, with pop-out and hide buttons, instead of a second title under the dock's | 8 | Done | 4/4 | see PR |
+| T-882 | A colourful, calm app-wide look: card panels with a coloured header per panel, bigger text, clear buttons and tables, applied to the main window and the Research window | 8 | Done | 5/5 | see PR |
+| T-883 | The "What the AI is doing" panel is grouped under bold headings and no longer shows the same "Watching …" line twice | 8 | Done | 3/3 | see PR |
+| T-884 | A value search over all of the game's memory, like a cheat finder: start from every byte or an exact number (decimal or hex), then narrow by exact value, went up, went down, changed or stayed the same | 8 | Done | 26/26 | see PR |
+| T-885 | A "Search values" tab in the Research window runs that search and turns a found value into a reward for it going up or down | 8 | Done | 3/3 | see PR |
+| T-886 | The look of Stills & Reels and StackSpace: their dark and light palettes value for value, blue-to-purple accent, Segoe UI Variable, pill tabs, dark scroll bars and a matching Windows title bar; a toolbar button picks Dark, Light or Match Windows and is remembered | 8 | Done | 18/18 | see PR |
 | T-874 | Button rewards: every button of the connected game gets a "Pressing A" row and there is one for "Pressing the same button again", each worth 0 until a person sets points above or below zero, scored every step | 8 | Done | 3/3 | see PR #136 |
 | T-875 | Exploring falls with the steps learned: on top of the per-go decay, the chance of a random move falls in a straight line from its start to its floor over `explore_steps` learned steps (6,000, about ten 40-second goes), so a 40-second go no longer needs hundreds of goes to settle; the Research window shows the number | 8 | Done | 3/3 | see PR #137 |
 
@@ -2113,6 +2120,103 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** both new tests pass; full suite 1191 passed, 10 skipped; ruff and mypy clean.
 - **Commit:** see PR #134. **PR:** #134.
 - **Completion report:** the go length and the give-up time are two boxes in seconds in the Learning panel, kept per game in the brain file.
+### T-880 – The Research window in tabs
+- **Status:** Done
+- **Phase:** 8 (the user, 4 Nov: "research easy to use UI but without losing the detail it just needs presenting clearer")
+- **Objective:** The Research window stacked four sections in one column, so each table showed about three rows; put each section on its own tab so every table gets the window's height, and show each learning setting's explanation in the window instead of only on hover.
+- **Scope:** `ui/research_dialog.py` layout only: a `QTabWidget` (`research_tabs`) with tabs "Learning settings", "The situation now", "Memory" and "Step log"; the intro line above and the note line below stay outside the tabs; each setting row gets its plain explanation as a grey line; tab titles carry counts ("Memory (10)", "Step log (51)"). **Out of scope:** any change to what is shown, the settings, the memory naming or the log; the main window.
+- **Acceptance criteria:**
+  1. The dialog has a tab widget with exactly those four tabs in that order, and each section's group (settings, situation, memory, log) is on its own tab.
+  2. Every widget the window had is still there under the same object name and works as before (existing T-809/T-862 tests pass unchanged).
+  3. Each setting in `SETTING_FIELDS` shows its explanation as visible text in the settings tab.
+  4. The Memory and Step log tab titles show their row counts and follow refreshes; with nothing to show they carry no count.
+  5. The dialog opens on the settings tab and remembers the tab picked while it is open.
+- **Expected changes:** `src/retro_ai_lab/ui/research_dialog.py`, `tests/ui/test_research_dialog.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** new `test_research_sections_are_tabs` (tab order, each group on its tab, intro and note outside); `test_settings_explain_themselves` (every hint visible on the settings tab, matching `SETTING_FIELDS`); `test_tab_titles_count_rows` (no count when idle; counts after training steps; clear drops the log count); `test_picked_tab_stays_across_refresh` (pick Step log, refresh, still Step log); all existing Research tests unchanged; full suite, ruff, mypy.
+- **Results:** 4 new tests pass, 5 existing Research tests unchanged and passing; full suite 1192 passed, 10 skipped (the opt-in real-emulator tests, as before); ruff and mypy clean.
+- **Commit:** see the PR. **PR:** see the PR.
+- **Completion report:** the four sections are tabs; the settings tab shows each explanation under its box and stays compact at the top; the Memory and Step log tabs carry their counts; the group boxes lost their titles (the tab names them); the situation sentence can be selected and copied; the Memory table's columns start wide enough for "Score (fairly sure)". Checked by screenshots on the practice console.
+
+### T-881 – One title per panel
+- **Status:** Done
+- **Phase:** 8 (same request)
+- **Objective:** Every panel showed its name twice (the dock's title bar, then the panel's own collapse button); make the panel header the dock's title bar so each panel has one header row.
+- **Scope:** `ui/panels.py` gives the header its own widget (`Panel.header`), with pop-out and hide buttons a dock can wire; `ui/main_window.py` sets it as each dock's title bar widget and wires pop-out (float/re-dock) and hide (close). **Out of scope:** the panels' contents; the saved-layout format (the docks and their names are unchanged, so `LAYOUT_VERSION` stays).
+- **Acceptance criteria:**
+  1. Each dock's `titleBarWidget()` is its panel's header, which holds the collapse button (panel title), "What's this?", pop out and hide.
+  2. Pop out floats the dock and pressing it again docks it back; hide hides the dock and the Panels menu brings it back.
+  3. Collapse, "What's this?", the Panels menu, Reset layout and the saved layout work as before (existing tests pass).
+- **Expected changes:** `src/retro_ai_lab/ui/panels.py`, `src/retro_ai_lab/ui/main_window.py`, `tests/ui/test_main_window.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** new `test_each_dock_has_one_header` (title bar widget is the header, holds the four buttons, no second title in the panel body); `test_pop_out_and_back` (floating toggles, button text/tooltip follows); `test_hide_button_hides_and_menu_restores`; a standalone `Panel` without a dock still shows its header; existing layout tests; full suite, ruff, mypy.
+- **Results:** 4 new tests pass; the existing window, layout, Panels menu and collapse tests pass unchanged; full suite 1196 passed, 10 skipped (opt-in real-emulator); ruff and mypy clean.
+- **Commit:** see the PR. **PR:** see the PR.
+- **Completion report:** each panel has one header row (collapse arrow and title, "What's this?", pop out ⧉ / dock back ⇲, hide ✕) which is also the dock's drag handle; the pop-out tooltip follows the dock however it was floated. A floating panel uses the same header as its window title bar, so it is dragged by the header. Verified by screenshots; a real Windows check of dragging a floated panel is part of the user's next build check.
+
+### T-882 – A colourful, calm look
+- **Status:** Done
+- **Phase:** 8 (same request; DESIGN.md §10 "colourful, modern and approachable")
+- **Objective:** The app used the plain platform grey, so panels, headings and disabled buttons blurred together; give it one stylesheet with white card panels on a soft background, a coloured header strip per panel, larger text, rounded buttons whose disabled state is obvious, and tables with alternating rows and clear headers.
+- **Scope:** new `ui/theme.py` (`PANEL_COLOURS`, `stylesheet()`, `apply_theme(app)`), called from `create_app`; each `Panel` carries its key as a property the stylesheet colours by; the Research window inherits the same look. **Out of scope:** dark mode; per-widget restyling inside panels beyond what the stylesheet selects.
+- **Acceptance criteria:**
+  1. `create_app` sets the Fusion style and the theme stylesheet; calling it twice does not stack the stylesheet.
+  2. Every panel key in `PANELS` has a colour, the stylesheet names each, and each `Panel` exposes its key as the `panel` property.
+  3. The stylesheet parses (Qt reports no warnings when it is applied to the main window and the Research window).
+  4. The tables in the panels and the Research window use alternating row colours.
+- **Expected changes:** `src/retro_ai_lab/ui/theme.py`, `src/retro_ai_lab/ui/app.py`, `src/retro_ai_lab/ui/panels.py`, `src/retro_ai_lab/ui/research_dialog.py`, `tests/ui/test_theme.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `tests/ui/test_theme.py`: colours for every panel; the stylesheet mentions every key's colour; `apply_theme` twice leaves one copy; no Qt stylesheet warning is logged when the window and Research window are shown with the theme (message handler); tables alternate rows; `create_app` uses Fusion; full suite and the packaging smoke test.
+- **Results:** 5 new tests pass; full suite 1201 passed, 10 skipped (opt-in real-emulator); ruff and mypy clean.
+- **Commit:** see the PR. **PR:** see the PR.
+- **Completion report:** `ui/theme.py` sets Fusion, a 10 pt minimum font, a palette and the stylesheet (between start and end markers, so re-applying replaces it and leaves other rules); each panel header has its own tint, accent strip and bold coloured title; the Research button stands out; tabs, group boxes, tables and buttons are restyled; `polish_views` gives the tables alternating rows. Combo and spin boxes are left to Fusion's own drawing plus the palette, because a stylesheet border makes Qt drop their arrows (seen in screenshots, and CSS triangles do not render in Qt). Also in this task: the Research step log's number columns start narrow so the situation column is readable, and its cell shows the whole situation on hover. The theme's colours are a first pass; the user may want them changed.
+
+### T-883 – The "What the AI is doing" panel grouped and without repeats
+- **Status:** Done
+- **Phase:** 8 (same request)
+- **Objective:** The panel was a column of plain labels and lists, and while the AI watched it showed "Watching 10 values, …" twice: when the engine is watching, its stage line is a copy of the summary taken at that moment (which then goes stale while the summary keeps updating). Group the panel under bold headings, put its three "do something" buttons on one row, and hide the stage line while it is only a copy of the summary.
+- **Scope:** `ui/discovery_panel.py` layout: the headings "What the AI thinks it has found", "What just happened" and "What leads to what" (same words) use a shared `section_heading()` from `ui/panels.py`; "Try the buttons", "Share what it learned…" and "Load shared knowledge…" share a row; the stage label hides while its text was the summary when it arrived, and shows again for any other stage text. **Out of scope:** what the discovery service says.
+- **Acceptance criteria:**
+  1. A stage event whose detail equals the summary at that moment hides the stage line, and it stays hidden as the summary changes; a stage event with other words (experimenting, "Watching Toy Racer to learn how it works.", idle) shows it again.
+  2. `stage_text` and `summary_text` still return the two texts.
+  3. The three section headings are `QLabel`s with the `heading` property and the same words as before.
+  4. The three action buttons sit in one row.
+- **Expected changes:** `src/retro_ai_lab/ui/discovery_panel.py`, `src/retro_ai_lab/ui/panels.py`, `tests/ui/test_discovery_panel.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_the_watching_line_is_not_shown_twice` (publish a `DiscoveryProgress` whose detail is the summary: stage hidden, summary shown; drive frames so the summary changes: still hidden; publish an experimenting stage: shown; disconnect: shown with the idle text); `test_sections_have_headings` (heading property, words); `test_action_buttons_share_a_row`; existing discovery tests; full suite.
+- **Results:** 3 new tests pass; existing discovery tests unchanged; full suite 1204 passed, 10 skipped (opt-in real-emulator); ruff and mypy clean.
+- **Commit:** see the PR. **PR:** see the PR.
+- **Completion report:** the repeated "Watching N values…" line is gone (the live summary stays); the three headings are bold; Try the buttons, Share and Load sit on one row. Checked by screenshot on the practice console.
+
+### T-884 – A value search over all memory
+- **Status:** Done
+- **Phase:** 8 (the user, 4 Nov: "add like a Cheat Engine into this so we can also see and search for values in hex and then add that as a reward for making the value go up or down")
+- **Objective:** Let a grown-up find the byte that holds a value (coins, lives, a position) the way a cheat finder does: take every byte the game shares, then narrow the list scan by scan as the game changes.
+- **Scope:** new `observation/search.py`: `parse_number` (decimal, `0x0C`, `$0C`, `0Ch`), `ScanKind` (exact, up, down, changed, unchanged), `ValueSearch` with `start(snapshot, value=None)`, `refine(snapshot, kind, value=None)`, `count`, `matches(limit)` giving (region, offset, now, before) and `reset()`; one byte per value, compared with the snapshot of the previous scan; NumPy so a 128 KB region scans quickly. **Out of scope:** two-byte values, searching outside the regions the emulator shares, writing memory (the app never changes the game's memory).
+- **Acceptance criteria:**
+  1. `start` with no value keeps every byte of every region; with a value keeps the bytes equal to it.
+  2. Each scan kind keeps exactly the right bytes against the previous scan, and the next scan compares with this one.
+  3. `parse_number` reads decimal and the three hex forms, and refuses empty text, words, negatives and numbers over 255 in plain words.
+  4. Refining before a start, an exact scan without a value, or a snapshot whose regions changed size raises `ConfigurationError` in plain words and leaves the search as it was.
+  5. Scanning 128 KB takes under 50 ms.
+- **Expected changes:** `src/retro_ai_lab/observation/search.py`, `src/retro_ai_lab/observation/__init__.py`, `tests/unit/observation/test_search.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `tests/unit/observation/test_search.py`: start all / start exact; each scan kind on a crafted pair of snapshots; chained scans narrowing to one byte; matches sorted by region and offset with now and before, and limited; parse_number valid and invalid (empty, "abc", "-1", "256", "0x100", "0x"); errors leave state unchanged; region size change refused; reset; timing on 128 KB.
+- **Results:** 26 test cases in `test_search.py` pass (128 KB scan well under 50 ms); ruff and mypy clean; full suite run with T-885.
+- **Commit:** see the PR. **PR:** see the PR.
+- **Completion report:** `ValueSearch` keeps candidate offsets and their bytes at the last scan and the one before (so the table shows Now and Before), per region, as NumPy arrays; a failed scan changes nothing.
+
+### T-885 – A "Search values" tab with rewards
+- **Status:** Done
+- **Phase:** 8 (same request)
+- **Objective:** Put the search in the Research window with every value shown in decimal and hex, and let a person turn a found byte into a reward for it going up or down.
+- **Scope:** `ui/research_dialog.py`: a fifth tab "Search values" with a number box, "New search", "Is exactly", "Went up", "Went down", "Changed", "Didn't change", "Start over"; a line saying how many bytes match and at which frame; a table (Address, Offset in hex, Now (live, updated with the window), Last scan, Scan before; each value as `12 (0x0C)`), first 500 rows; a name box, a Points box (typed, two decimals) and "Reward going up" / "Reward going down", which name the byte (`DiscoveryService.name_value`, so it is confirmed and watched) and add the person's own reward (`RewardService.add_own`). **Out of scope:** the Rewards panel (the new row appears there by itself, as with "Add a reward").
+- **Acceptance criteria:**
+  1. With no game or no memory snapshot, the buttons are off and the line says why.
+  2. A new search then scans narrow the table; every row shows decimal and hex; the tab title shows the match count.
+  3. A bad number is refused in the note, and the search is unchanged.
+  4. Picking a row and pressing "Reward going up" with a name and points adds an own reward "Name goes up" worth the points, with the byte named and confirmed; pressing it again says the reward is already there; no row picked or no name says so.
+  5. Disconnecting clears the search.
+- **Expected changes:** `src/retro_ai_lab/ui/research_dialog.py`, `tests/ui/test_research_dialog.py`, `TASK_TRACKER.md`, `CHANGELOG.md`, `README.md`.
+- **Test plan:** UI tests on the practice console: idle state; new search then "Went up" after the score rises finds the score byte among the matches; exact value in hex narrows to the matching bytes; bad number note; reward added up and down with the right name, value and trigger, duplicates refused, missing row/name refused; disconnect clears; tab order now five tabs (T-880 test updated for the new tab); full suite.
+- **Results:** 3 new UI tests pass (the T-880 tab test updated for the fifth tab); full suite 1236 passed, 10 skipped (opt-in real-emulator); ruff and mypy clean.
+- **Commit:** see the PR. **PR:** see the PR.
+- **Completion report:** the Search values tab searches every byte the emulator shares, shows decimal and hex, keeps Now live, and "Reward going up/down" names and confirms the byte (so the AI watches it) and adds the person's own reward with typed points (decimals allowed). A search uses the latest snapshot the app took, which is fresh while the game plays through the app (the play clock or training); the summary line says which frame it used. One byte per value (no two-byte scores yet). Checked by screenshot on the practice console.
 
 ### T-874 – A reward row for every button
 - **Status:** Done
@@ -2126,6 +2230,24 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #136. **PR:** #136.
 - **Completion report:** Every connected game gets a Controls group in the Rewards panel: a row per button and one for pressing the same button again, each at 0 until a person sets it. The rows are kept per game with the rest of the profile and follow the controller on connect. The runner publishes `ButtonsHeld` every step before the reward is settled, so a point set on a button lands in the step that pressed it. Nothing is announced or tallied while the rows are at 0.
 
+### T-886 – The Stills & Reels look
+- **Status:** Done
+- **Phase:** 8 (the user, 4 Nov: "a theme that matches my Stills&Reels, and StackSpace Apps, they should be using exactly the same theme and i want this to have the same"; and, on keeping a thin coloured strip per panel for the children: "yep that sounds fine")
+- **Objective:** Replace T-882's light theme with the one both apps share, taken value for value from Stills & Reels' `src/Theme.cs` (StackSpace's `lib/app/theme.dart` copies it): dark by default, a light mode, and following Windows as StackSpace does.
+- **Scope:** `ui/theme.py` rewritten: `Palette`, `DARK` and `LIGHT` (every Stills & Reels colour, plus StackSpace's error and success), `ThemeMode` (dark, light, system), `stylesheet(palette)`, `apply_theme(app, mode)`, `current()`, `load_mode` / `save_mode` (a small JSON file in the data folder), `set_title_bar` (DWM caption, text and border colours and the dark title bar on Windows; nothing elsewhere) and a `ThemeWatcher` that colours each window's title bar as it opens and follows Windows when the mode is "system". Controls as in `UiControls.cs`: 8 px rounded buttons on the Control fill with Hover and Pressed, the primary button (Research) on the AccentA→AccentB gradient with white text, checked buttons on the faint gradient with an accent border, the Muted colour for disabled controls; section headings small, bold and in capitals; tabs as the mode pill (Pill background, the selected tab on the gradient); the toolbar and status bar on the Bar colour with BarBorder hairlines; dark scroll bars; menus and tooltips on Panel. Like StackSpace, small text uses SubText, not Muted, to keep 4.5:1. Each panel header keeps a 4 px strip in its own colour so children can still tell the panels apart. A "theme_button" in the toolbar cycles Dark → Light → Match Windows and saves the choice. The learning and comparison graphs and the goal list's "done" colour follow the palette. **Out of scope:** Stills & Reels' custom-drawn controls (sliders, the glowing empty state); the Rewards panel's own warning colour (that file belongs to another thread; it is asked to use the `warning` property this task styles).
+- **Acceptance criteria:**
+  1. `DARK` and `LIGHT` hold exactly the Stills & Reels values (pinned by a test).
+  2. Text on Window, Bar, Panel and Control, and SubText on Panel, Bar and Window, reach 4.5:1 in both modes; white on AccentA reaches 4.5:1; Warning is kept exactly as Stills & Reels has it (3.98:1 on the light Panel, the large-text level) and Success reaches 4.5:1.
+  3. `apply_theme` sets the stylesheet once (repeat-safe), the Qt palette (Window, Base, Text, Highlight; Muted for disabled text) and the mode; "system" picks dark or light from Windows' colour scheme.
+  4. The stylesheet parses without Qt warnings on the main window and the Research window in both modes.
+  5. The toolbar button cycles the three modes, its text says which is on, the choice is saved and the next window starts with it; a missing or broken file means dark.
+  6. `set_title_bar` returns False and does nothing off Windows or before the window has a handle.
+  7. The graphs paint their background in the palette's Canvas colour.
+- **Expected changes:** `src/retro_ai_lab/ui/theme.py`, `src/retro_ai_lab/ui/app.py`, `src/retro_ai_lab/ui/main_window.py`, `src/retro_ai_lab/ui/panels.py`, `src/retro_ai_lab/ui/learning_graph.py`, `src/retro_ai_lab/ui/comparison_graph.py`, `src/retro_ai_lab/ui/goals_panel.py`, `tests/ui/test_theme.py`, `TASK_TRACKER.md`, `CHANGELOG.md`, `README.md`.
+- **Test plan:** `tests/ui/test_theme.py` rewritten: palettes pinned; contrast pairs; stylesheet names the palette's colours and the gradient; apply twice keeps one copy and other rules; Qt palette roles; system mode follows a faked colour scheme; no stylesheet warnings in either mode on both windows; tables alternate rows; theme button cycles, saves, restores, broken file falls back; title bar no-op off Windows; graph background pixel is Canvas in both modes; `create_app` applies the theme; full suite and the packaging smoke test in CI.
+- **Results:** `test_theme.py` 18 tests pass; full suite 1253 passed, 10 skipped (opt-in real-emulator); ruff and mypy clean.
+- **Commit:** see the PR. **PR:** see the PR.
+- **Completion report:** both palettes are Stills & Reels' values; buttons, the Research button's gradient, pill tabs, capital section headings, bars, dark scroll bars, menus and tooltips follow `UiControls.cs`; the title bar is coloured through DWM on Windows (verified only that it is skipped elsewhere; the user's Windows build check covers it). The toolbar button cycles Dark → Light → Match Windows and saves `theme.json` in the data folder; Windows' own switch is followed while on Match Windows. Graphs paint on Canvas; a finished goal step uses Success. Combo and spin boxes stay Fusion-drawn with the palette. The Rewards panel's warning line keeps its own inline colour until its owner switches to the `warning` property. Screenshots checked in both modes.
 ### T-875 – Exploring falls with the steps learned
 - **Status:** Done
 - **Phase:** 8 (the user's 14:55 log: after 16 full-length goes with "Pressing Left" at -5 and "Pressing Right" at +4, Left was still pressed on a fifth of the steps and the totals got worse; the AI was choosing at random 92% of the time, because exploring only fell by 0.5% per go and a 40-second go gives it 600 steps to learn from)

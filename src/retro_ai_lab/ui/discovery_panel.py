@@ -35,6 +35,7 @@ from retro_ai_lab.services import (
 from retro_ai_lab.ui.activity_strip import ActivityStrip
 from retro_ai_lab.ui.coalesce import Coalescer
 from retro_ai_lab.ui.context import AppContext
+from retro_ai_lab.ui.panels import section_heading
 from retro_ai_lab.understanding import Confidence, Knowledge, Variable, describe_key
 
 IDLE_TEXT = "Connect to a game and the AI will start watching it."
@@ -131,20 +132,20 @@ class DiscoveryPanel(QWidget):
         layout.addWidget(self._activity)
         layout.addWidget(self._stage)
         layout.addWidget(self._summary)
-        layout.addWidget(QLabel("What the AI thinks it has found", self))
+        layout.addWidget(section_heading("What the AI thinks it has found", self))
         layout.addWidget(self._list, 2)
         layout.addWidget(self._evidence)
         layout.addLayout(verdict)
         layout.addLayout(rename)
-        layout.addWidget(self._experiment)
-        files = QHBoxLayout()
-        files.addWidget(self._export)
-        files.addWidget(self._import)
-        layout.addLayout(files)
+        actions = QHBoxLayout()  # T-883: the three "do something" buttons on one row
+        actions.addWidget(self._experiment)
+        actions.addWidget(self._export)
+        actions.addWidget(self._import)
+        layout.addLayout(actions)
         layout.addWidget(self._note)
-        layout.addWidget(QLabel("What just happened", self))
+        layout.addWidget(section_heading("What just happened", self))
         layout.addWidget(self._events, 1)
-        layout.addWidget(QLabel("What leads to what", self))
+        layout.addWidget(section_heading("What leads to what", self))
         layout.addWidget(self._relationships, 1)
 
         # Updates arrive on most training steps; the list is rebuilt a few times a
@@ -274,7 +275,7 @@ class DiscoveryPanel(QWidget):
         try:
             self._context.discovery.experiment()
         except UnsupportedCapabilityError as exc:
-            self._stage.setText(str(exc))
+            self._set_stage(str(exc))
         except EmulatorError:
             pass  # the connection service reports link loss
         self.refresh(keep=self._selected)
@@ -387,8 +388,18 @@ class DiscoveryPanel(QWidget):
     # -------------------------------------------------------------- events
 
     def _on_progress(self, event: DiscoveryProgress) -> None:
-        self._stage.setText(event.detail)
-        self._summary.setText(self._context.discovery.summary())
+        summary = self._context.discovery.summary()
+        self._set_stage(event.detail, repeats_summary=event.detail == summary)
+        self._summary.setText(summary)
+
+    def _set_stage(self, text: str, *, repeats_summary: bool = False) -> None:
+        """Show the stage line, unless it is only a copy of the summary (T-883).
+
+        While watching, the engine puts its summary in the stage line; the summary
+        line under it keeps updating, so the copy would only repeat it, then go stale.
+        """
+        self._stage.setText(text)
+        self._stage.setVisible(not repeats_summary)
 
     def _on_updated(self, event: DiscoveryUpdated) -> None:
         if event.added or event.changed:
@@ -414,7 +425,7 @@ class DiscoveryPanel(QWidget):
 
     def _on_disconnected(self, event: EmulatorDisconnected) -> None:
         self._set_enabled(False)
-        self._stage.setText(IDLE_TEXT)
+        self._set_stage(IDLE_TEXT)
         self.refresh()
 
 

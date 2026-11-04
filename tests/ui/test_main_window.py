@@ -317,3 +317,61 @@ def test_real_entry_point_launches_headless_and_exits_zero(tmp_path: Path) -> No
     text = (tmp_path / "logs" / "retro-ai-lab.log").read_text(encoding="utf-8")
     for line in ("starting", "Qt application created", "Main window shown", "Event loop finished"):
         assert line in text
+
+
+# ------------------------------------------------- T-881: one title per panel
+
+
+def test_each_dock_has_one_header(qtbot: QtBot) -> None:
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.show()
+    for p in w.panels:
+        header = w.dock(p.key).titleBarWidget()
+        assert header is p.header and header.objectName() == f"panel_{p.key}_header"
+        for button in (p.toggle_button, p.help_button, p.pop_out_button, p.hide_button):
+            assert header.isAncestorOf(button) and button.isVisible()
+        # Nothing in the panel itself repeats the title.
+        assert not p.isAncestorOf(p.toggle_button)
+        assert p.toggle_button.text() == p.title == w.dock(p.key).windowTitle()
+
+
+def test_pop_out_and_back(qtbot: QtBot) -> None:
+    from retro_ai_lab.ui.panels import DOCK_BACK, POP_OUT
+
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.show()
+    dock, panel = w.dock("learning"), w.panel("learning")
+    assert not dock.isFloating() and panel.pop_out_button.toolTip() == POP_OUT
+    panel.pop_out_button.click()
+    assert dock.isFloating() and panel.pop_out_button.toolTip() == DOCK_BACK
+    panel.pop_out_button.click()
+    assert not dock.isFloating() and panel.pop_out_button.toolTip() == POP_OUT
+    # Floated some other way (a drag, a saved layout), the button still follows.
+    dock.setFloating(True)
+    assert panel.pop_out_button.toolTip() == DOCK_BACK
+    w.reset_layout()
+    assert panel.pop_out_button.toolTip() == POP_OUT
+
+
+def test_hide_button_hides_and_the_menu_restores(qtbot: QtBot) -> None:
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.show()
+    w.panel("compare").hide_button.click()
+    assert not w.dock("compare").isVisible()
+    tick = next(a for a in w.panels_menu.actions() if a.text() == w.panel("compare").title)
+    assert not tick.isChecked()
+    tick.trigger()
+    assert w.dock("compare").isVisible() and w.panel("compare").header.isVisible()
+
+
+def test_a_panel_without_a_dock_keeps_its_header(qtbot: QtBot) -> None:
+    panel = Panel(PanelSpec("x", "X", "Blurb."))
+    qtbot.addWidget(panel)
+    panel.show()
+    assert panel.isAncestorOf(panel.header) and panel.toggle_button.isVisible()
+    assert panel.help_button.isVisible()
+    # The dock-only buttons stay out of the way until a dock wires them.
+    assert not panel.pop_out_button.isVisible() and not panel.hide_button.isVisible()

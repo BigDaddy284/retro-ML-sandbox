@@ -1,9 +1,12 @@
-"""The Research window: learning settings, the situation now, the step log.
+"""The Research window: learning settings, the situation now, memory, the step log.
 
 DESIGN.md §16 Phase 8 "Advanced research mode". It is one window off the toolbar,
 so the six panels stay as they are for the child; a grown-up or an older child
 opens it to change how the AI learns, to see what the AI thinks every move is
 worth right now, and to take the step log away as a CSV file.
+
+Each of the four sections is a tab (T-880), so every table has the window's
+height instead of a few rows each; the intro and the note sit outside the tabs.
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QModelIndex, QTimer
+from PySide6.QtCore import QModelIndex, Qt, QTimer
 from PySide6.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
@@ -23,6 +26,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -31,6 +35,7 @@ from PySide6.QtWidgets import (
 
 from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.learning import Settings
+from retro_ai_lab.observation import MemorySnapshot, ScanKind, ValueSearch, parse_number
 from retro_ai_lab.services import EmulatorConnected, EmulatorDisconnected
 from retro_ai_lab.training import (
     COLUMNS,
@@ -42,6 +47,7 @@ from retro_ai_lab.training import (
 )
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.panels import name_column
+from retro_ai_lab.ui.theme import polish_views
 from retro_ai_lab.understanding import Confidence, Variable
 
 REFRESH_MS = 500
@@ -50,6 +56,8 @@ IDLE_TEXT = "Connect to a game the AI can learn to see what it is thinking."
 NO_SITUATION_TEXT = "Nothing observed yet. Play or train a little first."
 SITUATION_COLUMNS: tuple[str, ...] = ("Move", "Value", "Best")
 MEMORY_COLUMNS: tuple[str, ...] = ("Address", "Now", "Changes", "The AI thinks", "Name")
+MEMORY_WIDTHS: tuple[int, ...] = (90, 110, 110, 240)  # the last column takes the rest
+LOG_WIDTHS: dict[int, int] = {0: 50, 1: 60, 2: 70, 4: 110, 5: 75, 6: 80, 7: 80}
 MAX_MEMORY_ROWS = 400
 NO_MEMORY_TEXT = "Connect to a game that shares its memory to see it here."
 MEMORY_WAITING_TEXT = "Watching the memory; play or train a little and the values appear."
@@ -68,6 +76,29 @@ SETTING_FIELDS: tuple[tuple[str, str, str], ...] = (
     ("epsilon_min", "Exploring floor", "Exploring never drops below this."),
     ("epsilon_decay", "Exploring decay", "Exploring is multiplied by this after every go."),
     ("explore_steps", "Exploring steps", "Learned steps over which exploring falls to the floor."),
+)
+TAB_TITLES: tuple[str, ...] = (
+    "Learning settings",
+    "The situation now",
+    "Memory",
+    "Step log",
+    "Search values",
+)
+SEARCH_COLUMNS: tuple[str, ...] = ("Address", "Offset (hex)", "Now", "Last scan", "Scan before")
+MAX_SEARCH_ROWS = 500
+SEARCH_IDLE_TEXT = "Connect to a game that shares its memory to search it."
+SEARCH_READY_TEXT = (
+    "Find the byte that holds a number on the screen: type it (12, or hex like 0x0C) and "
+    "press New search, or press it with the box empty to start from every byte. Play a "
+    "little, then press the scan that fits: Is exactly, Went up, Went down, Changed or "
+    "Didn't change. Each scan compares with the one before."
+)
+SCAN_BUTTONS: tuple[tuple[str, str, ScanKind], ...] = (
+    ("search_exact_button", "Is exactly", ScanKind.EXACT),
+    ("search_up_button", "Went up", ScanKind.UP),
+    ("search_down_button", "Went down", ScanKind.DOWN),
+    ("search_changed_button", "Changed", ScanKind.CHANGED),
+    ("search_same_button", "Didn't change", ScanKind.UNCHANGED),
 )
 WHOLE_NUMBER_FIELDS: dict[str, tuple[int, int]] = {"explore_steps": (1, 1_000_000)}
 WHAT_IS_THIS = (
@@ -90,7 +121,7 @@ class ResearchDialog(QDialog):
         self.setObjectName("research_dialog")
         self.setWindowTitle("Research")
         self.setModal(False)
-        self.resize(760, 640)
+        self.resize(900, 680)
         self._context = context
         self._training = context.training
         self._log = context.step_log
@@ -100,7 +131,7 @@ class ResearchDialog(QDialog):
         intro.setWordWrap(True)
 
         # --- learning settings
-        settings_box = QGroupBox("Learning settings", self)
+        settings_box = QGroupBox(self)  # the tab says what it is
         settings_box.setObjectName("settings_box")
         form = QFormLayout(settings_box)
         self._spins: dict[str, QDoubleSpinBox] = {}
@@ -117,7 +148,15 @@ class ResearchDialog(QDialog):
                 spin.setDecimals(3)
                 spin.setSingleStep(0.01)
             spin.setToolTip(tip)
-            form.addRow(label, spin)
+            hint = QLabel(tip, settings_box)
+            hint.setObjectName(f"setting_{key}_hint")
+            hint.setProperty("hint", True)
+            hint.setWordWrap(True)
+            row = QVBoxLayout()
+            row.setSpacing(2)
+            row.addWidget(spin)
+            row.addWidget(hint)
+            form.addRow(label, row)
             self._spins[key] = spin
         self._apply = QPushButton("Apply", settings_box)
         self._apply.setObjectName("apply_settings_button")
@@ -132,11 +171,12 @@ class ResearchDialog(QDialog):
         form.addRow(buttons)
 
         # --- the situation now
-        situation_box = QGroupBox("The situation now", self)
+        situation_box = QGroupBox(self)  # the tab says what it is
         situation_box.setObjectName("situation_box")
         self._situation = QLabel(IDLE_TEXT, situation_box)
         self._situation.setObjectName("situation_text")
         self._situation.setWordWrap(True)
+        self._situation.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._values = QTreeWidget(situation_box)
         self._values.setObjectName("situation_table")
         self._values.setColumnCount(len(SITUATION_COLUMNS))
@@ -148,7 +188,7 @@ class ResearchDialog(QDialog):
         situation_layout.addWidget(self._values, 1)
 
         # --- the memory (T-862)
-        memory_box = QGroupBox("Memory", self)
+        memory_box = QGroupBox(self)  # the tab says what it is
         memory_box.setObjectName("memory_box")
         self._memory_summary = QLabel(NO_MEMORY_TEXT, memory_box)
         self._memory_summary.setObjectName("memory_summary")
@@ -165,6 +205,8 @@ class ResearchDialog(QDialog):
         self._memory_table.header().setSectionResizeMode(
             len(MEMORY_COLUMNS) - 1, QHeaderView.ResizeMode.Stretch
         )
+        for column, width in enumerate(MEMORY_WIDTHS):
+            self._memory_table.header().resizeSection(column, width)
         self._memory_table.currentItemChanged.connect(self._on_memory_current_changed)
         self._memory_selected: str | None = None  # "region[offset]"
         self._memory_name = QLineEdit(memory_box)
@@ -184,7 +226,7 @@ class ResearchDialog(QDialog):
         memory_layout.addLayout(naming)
 
         # --- the step log
-        log_box = QGroupBox("Step log", self)
+        log_box = QGroupBox(self)  # the tab says what it is
         log_box.setObjectName("log_box")
         self._log_summary = QLabel("", log_box)
         self._log_summary.setObjectName("log_summary")
@@ -193,6 +235,9 @@ class ResearchDialog(QDialog):
         self._log_table.setColumnCount(len(LOG_COLUMNS))
         self._log_table.setHeaderLabels(list(LOG_COLUMNS))
         self._log_table.header().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self._log_table.header().setStretchLastSection(False)
+        for column, width in LOG_WIDTHS.items():  # narrow numbers, so the situation fits
+            self._log_table.header().resizeSection(column, width)
         self._log_table.setRootIsDecorated(False)
         self._export = QPushButton("Save as CSV…", log_box)
         self._export.setObjectName("export_log_button")
@@ -208,16 +253,31 @@ class ResearchDialog(QDialog):
         log_layout.addLayout(log_buttons)
         log_layout.addWidget(self._log_table, 1)
 
+        self._search_selected: str | None = None  # "region[offset]"
+        search_box = self._build_search()
+
         self._note = QLabel("", self)
         self._note.setObjectName("research_note")
         self._note.setWordWrap(True)
 
+        self._tabs = QTabWidget(self)
+        self._tabs.setObjectName("research_tabs")
+        self._tabs.setDocumentMode(True)
+        for title, box in zip(
+            TAB_TITLES, (settings_box, situation_box, memory_box, log_box, search_box), strict=True
+        ):
+            page = QWidget(self._tabs)
+            page_layout = QVBoxLayout(page)
+            if box is settings_box:  # a short form: keep it at the top
+                page_layout.addWidget(box)
+                page_layout.addStretch(1)
+            else:  # a table: give it the whole page
+                page_layout.addWidget(box, 1)
+            self._tabs.addTab(page, title)
+
         layout = QVBoxLayout(self)
         layout.addWidget(intro)
-        layout.addWidget(settings_box)
-        layout.addWidget(situation_box, 1)
-        layout.addWidget(memory_box, 2)
-        layout.addWidget(log_box, 2)
+        layout.addWidget(self._tabs, 1)
         layout.addWidget(self._note)
 
         self._ticker = QTimer(self)
@@ -240,6 +300,7 @@ class ResearchDialog(QDialog):
                 off()
 
         self.destroyed.connect(release)
+        polish_views(self)
         self.refresh()
 
     # ------------------------------------------------------------- API
@@ -360,6 +421,104 @@ class ResearchDialog(QDialog):
         self._log.clear()
         self._show_log()
 
+    @property
+    def tabs(self) -> QTabWidget:
+        return self._tabs
+
+    # ------------------------------------------------ search values (T-885)
+
+    @property
+    def search_summary(self) -> str:
+        return self._search_summary.text()
+
+    @property
+    def search_count(self) -> int:
+        return self._search.count
+
+    def search_rows(self) -> tuple[tuple[str, ...], ...]:
+        """(address, offset in hex, now, last scan, scan before) per row shown."""
+        table = self._search_table
+        return tuple(
+            tuple(item.text(c) for c in range(len(SEARCH_COLUMNS)))
+            for item in (table.topLevelItem(i) for i in range(table.topLevelItemCount()))
+            if item is not None
+        )
+
+    def search_start(self, value_text: str | None = None) -> bool:
+        """New search: every byte, or those equal to the number typed."""
+        text = self._search_value.text() if value_text is None else value_text
+        snapshot = self._search_snapshot()
+        if snapshot is None:
+            return False
+        try:
+            value = parse_number(text) if text.strip() else None
+            self._search.start(snapshot, value)
+        except ConfigurationError as exc:
+            self._note.setText(str(exc))
+            return False
+        self._note.setText("")
+        self._show_search()
+        return True
+
+    def search_refine(self, kind: ScanKind, value_text: str | None = None) -> bool:
+        """Keep the bytes that pass ``kind`` since the last scan."""
+        text = self._search_value.text() if value_text is None else value_text
+        snapshot = self._search_snapshot()
+        if snapshot is None:
+            return False
+        try:
+            value = parse_number(text) if kind is ScanKind.EXACT else None
+            self._search.refine(snapshot, kind, value)
+        except ConfigurationError as exc:
+            self._note.setText(str(exc))
+            return False
+        self._note.setText("")
+        self._show_search()
+        return True
+
+    def search_reset(self) -> None:
+        self._search.reset()
+        self._show_search()
+
+    def select_search(self, address: str | None) -> None:
+        """Pick a search row by its address text, such as "ram[12]"."""
+        table = self._search_table
+        if address is None:
+            table.setCurrentIndex(QModelIndex())
+            self._search_selected = None
+            return
+        for i in range(table.topLevelItemCount()):
+            item = table.topLevelItem(i)
+            if item is not None and item.text(0) == address:
+                table.setCurrentItem(item)
+                return
+        raise ConfigurationError(f"No row at {address}.")
+
+    def reward_search(self, *, goes_up: bool, name: str, points: float) -> bool:
+        """Name the picked byte and reward it going up (or down) by ``points``."""
+        address = self._search_selected
+        if address is None:
+            self._note.setText("Pick a value in the search table first.")
+            return False
+        if not name.strip():
+            self._note.setText("Give the value a name first, like Coins.")
+            return False
+        region, _, rest = address.partition("[")
+        try:
+            var = self._context.discovery.name_value(region, int(rest.rstrip("]")), name)
+            row = self._context.rewards.add_own(
+                var.id, goes_up=goes_up, value=float(points), name=var.display_name
+            )
+        except (UnsupportedCapabilityError, ConfigurationError, ValueError) as exc:
+            self._note.setText(str(exc))
+            return False
+        self._note.setText(
+            f'Added the reward "{row.name}": {row.value:+g} points each step it does. '
+            "It is in the Rewards panel under Progression."
+        )
+        self._show_memory()
+        return True
+
     def refresh(self) -> None:
         self._show_settings()
         self._refresh_live()
@@ -392,6 +551,176 @@ class ResearchDialog(QDialog):
         self._show_situation()
         self._show_memory()
         self._show_log()
+        self._refresh_search_state()
+        self._show_search_now()
+
+    def _show_search_now(self) -> None:
+        """Keep the Now column live, so a person can watch a value move (T-885)."""
+        snapshot = self._context.observation.latest
+        if snapshot is None or not self._search.started:
+            return
+        table = self._search_table
+        for i in range(table.topLevelItemCount()):
+            item = table.topLevelItem(i)
+            if item is None:
+                continue
+            region, _, rest = item.text(0).partition("[")
+            try:
+                now = _dec_hex(snapshot.byte(region, int(rest.rstrip("]"))))
+            except (ConfigurationError, ValueError, IndexError):
+                continue
+            if item.text(2) != now:
+                item.setText(2, now)
+
+    def _build_search(self) -> QGroupBox:
+        box = QGroupBox(self)
+        box.setObjectName("search_box")
+        self._search = ValueSearch()
+        self._search_summary = QLabel(SEARCH_IDLE_TEXT, box)
+        self._search_summary.setObjectName("search_summary")
+        self._search_summary.setWordWrap(True)
+        self._search_value = QLineEdit(box)
+        self._search_value.setObjectName("search_value_edit")
+        self._search_value.setPlaceholderText("A number, like 12 or 0x0C")
+        self._search_new = QPushButton("New search", box)
+        self._search_new.setObjectName("search_new_button")
+        self._search_new.clicked.connect(lambda _=False: self.search_start())
+        self._search_value.returnPressed.connect(self._on_search_return)
+        self._search_scans: list[QPushButton] = []
+        scans = QHBoxLayout()
+        scans.addWidget(QLabel("Value", box))
+        scans.addWidget(self._search_value, 1)
+        scans.addWidget(self._search_new)
+        for name, text, kind in SCAN_BUTTONS:
+            button = QPushButton(text, box)
+            button.setObjectName(name)
+            button.clicked.connect(lambda _=False, k=kind: self.search_refine(k))
+            scans.addWidget(button)
+            self._search_scans.append(button)
+        self._search_reset = QPushButton("Start over", box)
+        self._search_reset.setObjectName("search_reset_button")
+        self._search_reset.clicked.connect(self.search_reset)
+        scans.addWidget(self._search_reset)
+
+        self._search_table: QTreeWidget = QTreeWidget(box)
+        self._search_table.setObjectName("search_table")
+        self._search_table.setColumnCount(len(SEARCH_COLUMNS))
+        self._search_table.setHeaderLabels(list(SEARCH_COLUMNS))
+        self._search_table.setRootIsDecorated(False)
+        for column, width in enumerate((110, 110, 110, 110)):
+            self._search_table.header().resizeSection(column, width)
+        self._search_table.currentItemChanged.connect(self._on_search_current_changed)
+
+        self._search_name = QLineEdit(box)
+        self._search_name.setObjectName("search_name_edit")
+        self._search_name.setPlaceholderText("Name the picked value, like Coins")
+        self._search_points = QDoubleSpinBox(box)
+        self._search_points.setObjectName("search_points")
+        self._search_points.setRange(-1000.0, 1000.0)
+        self._search_points.setDecimals(2)
+        self._search_points.setSingleStep(0.5)
+        self._search_points.setValue(1.0)
+        self._search_points.setToolTip(
+            "Points each step the value moves that way; type any number."
+        )
+        self._reward_up = QPushButton("Reward going up", box)
+        self._reward_up.setObjectName("reward_up_button")
+        self._reward_up.clicked.connect(lambda _=False: self._on_reward_clicked(True))
+        self._reward_down = QPushButton("Reward going down", box)
+        self._reward_down.setObjectName("reward_down_button")
+        self._reward_down.clicked.connect(lambda _=False: self._on_reward_clicked(False))
+        reward = QHBoxLayout()
+        reward.addWidget(self._search_name, 1)
+        reward.addWidget(QLabel("Points", box))
+        reward.addWidget(self._search_points)
+        reward.addWidget(self._reward_up)
+        reward.addWidget(self._reward_down)
+
+        layout = QVBoxLayout(box)
+        layout.addWidget(self._search_summary)
+        layout.addLayout(scans)
+        layout.addWidget(self._search_table, 1)
+        layout.addLayout(reward)
+        return box
+
+    def _search_snapshot(self) -> MemorySnapshot | None:
+        snapshot = self._context.observation.latest
+        if not self._context.connection.is_connected or snapshot is None:
+            self._note.setText(SEARCH_IDLE_TEXT)
+            return None
+        return snapshot
+
+    def _refresh_search_state(self) -> None:
+        """Turn the search off without a game, and forget it when the game goes."""
+        ready = (
+            self._context.connection.is_connected and self._context.observation.latest is not None
+        )
+        if not ready and self._search.started:
+            self._search.reset()
+            self._show_search()
+        self._search_new.setEnabled(ready)
+        self._search_value.setEnabled(ready)
+        self._search_reset.setEnabled(ready and self._search.started)
+        for button in self._search_scans:
+            button.setEnabled(ready and self._search.started)
+        can_reward = ready and self._search_selected is not None
+        self._reward_up.setEnabled(can_reward)
+        self._reward_down.setEnabled(can_reward)
+        if not ready:
+            self._search_summary.setText(SEARCH_IDLE_TEXT)
+        elif not self._search.started:
+            self._search_summary.setText(SEARCH_READY_TEXT)
+
+    def _show_search(self) -> None:
+        keep = self._search_selected
+        table = self._search_table
+        table.blockSignals(True)
+        table.clear()
+        chosen: QTreeWidgetItem | None = None
+        for m in self._search.matches(limit=MAX_SEARCH_ROWS):
+            address = f"{m.region}[{m.offset}]"
+            item = QTreeWidgetItem(
+                [
+                    address,
+                    f"0x{m.offset:04X}",
+                    _dec_hex(m.now),
+                    _dec_hex(m.now),
+                    _dec_hex(m.before),
+                ]
+            )
+            table.addTopLevelItem(item)
+            if address == keep:
+                chosen = item
+        table.blockSignals(False)
+        if chosen is not None:
+            table.setCurrentItem(chosen)
+        else:
+            self._search_selected = None
+        count = self._search.count
+        self._count_tab(4, count)
+        if self._search.started:
+            text = f"{count:,} bytes match at frame {self._search.frame:,}."
+            if count > MAX_SEARCH_ROWS:
+                text += f" Showing the first {MAX_SEARCH_ROWS:,}; scan again to narrow it."
+            elif count == 0:
+                text += " Nothing is left: press New search to try again."
+            self._search_summary.setText(text)
+        self._refresh_search_state()
+
+    def _on_search_current_changed(self, current: QTreeWidgetItem | None, _p: object) -> None:
+        self._search_selected = current.text(0) if current is not None else None
+        self._refresh_search_state()
+
+    def _on_search_return(self) -> None:
+        if self._search.started:
+            self.search_refine(ScanKind.EXACT)
+        else:
+            self.search_start()
+
+    def _on_reward_clicked(self, goes_up: bool) -> None:
+        self.reward_search(
+            goes_up=goes_up, name=self._search_name.text(), points=self._search_points.value()
+        )
 
     def _memory_addresses(self) -> tuple[tuple[str, int], ...]:
         """Bytes that behave like game state, plus every address the AI has a guess at."""
@@ -413,6 +742,7 @@ class ResearchDialog(QDialog):
         enabled = self._context.discovery.enabled and snapshot is not None
         if not enabled or snapshot is None:
             self._memory_summary.setText(NO_MEMORY_TEXT)
+            self._count_tab(2, 0)
             table.blockSignals(False)
             self._memory_selected = None
             self._memory_name_button.setEnabled(False)
@@ -421,6 +751,7 @@ class ResearchDialog(QDialog):
         tracker = self._context.observation.tracker
         wanted = self._memory_filter.text().strip().lower()
         addresses = self._memory_addresses()
+        self._count_tab(2, len(addresses))
         shown = 0
         named = 0
         chosen: QTreeWidgetItem | None = None
@@ -497,12 +828,20 @@ class ResearchDialog(QDialog):
 
     def _show_log(self) -> None:
         self._log_summary.setText(settings_summary(len(self._log), self._log.dropped))
+        self._count_tab(3, len(self._log))
         self._export.setEnabled(len(self._log) > 0)
         self._clear.setEnabled(len(self._log) > 0)
         records = self._log.records[-MAX_ROWS:]
         self._log_table.clear()
         for record in reversed(records):  # newest first
-            self._log_table.addTopLevelItem(QTreeWidgetItem(list(_cells(record))))
+            item = QTreeWidgetItem(list(_cells(record)))
+            item.setToolTip(3, item.text(3))  # the whole situation, when it is cut short
+            self._log_table.addTopLevelItem(item)
+
+    def _count_tab(self, index: int, count: int) -> None:
+        """Put ``count`` in the tab's title, or leave the bare title when there is none."""
+        title = TAB_TITLES[index]
+        self._tabs.setTabText(index, f"{title} ({count:,})" if count else title)
 
     def _ask_export(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -513,6 +852,10 @@ class ResearchDialog(QDialog):
 
     def _on_changed(self, event: object) -> None:
         self.refresh()
+
+
+def _dec_hex(value: int) -> str:
+    return f"{value} (0x{value:02X})"
 
 
 def _thinks(var: Variable | None) -> str:
@@ -551,8 +894,11 @@ __all__ = [
     "MEMORY_COLUMNS",
     "NO_SITUATION_TEXT",
     "REFRESH_MS",
+    "SEARCH_COLUMNS",
+    "SEARCH_IDLE_TEXT",
     "SETTING_FIELDS",
     "SITUATION_COLUMNS",
+    "TAB_TITLES",
     "ResearchDialog",
     "settings_summary",
 ]

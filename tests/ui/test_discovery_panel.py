@@ -233,3 +233,50 @@ def test_many_updates_rebuild_the_list_once(
     context.bus.publish(DiscoveryUpdated((), (), (event,), ()))
     qtbot.waitUntil(lambda: not panel.refresher.pending, timeout=2000)
     assert rebuilds == [1, 1] and any("P1 went up" in t for t in panel.event_texts())
+
+
+# ------------------------------------------- T-883: grouped, without repeats
+
+
+def test_the_watching_line_is_not_shown_twice(panel: DiscoveryPanel, context: AppContext) -> None:
+    from retro_ai_lab.services import DiscoveryProgress
+
+    stage = panel.findChild(object, "discovery_stage")
+    summary = panel.findChild(object, "discovery_summary")
+    assert stage is not None and summary is not None
+    assert stage.isVisible() and summary.isVisible()  # type: ignore[attr-defined]
+    context.connection.connect("fake")
+    assert "Toy Racer" in panel.stage_text and stage.isVisible()  # type: ignore[attr-defined]
+    # The engine copies its summary into the stage line while it watches.
+    copy = context.discovery.summary()
+    context.bus.publish(DiscoveryProgress("watching", copy))
+    assert panel.stage_text == copy == panel.summary_text
+    assert not stage.isVisible() and summary.isVisible()  # type: ignore[attr-defined]
+    drive(context, 200)
+    panel.refresher.flush()
+    assert not stage.isVisible()  # type: ignore[attr-defined]
+    context.bus.publish(DiscoveryProgress("experimenting", "Trying each button."))
+    assert panel.stage_text == "Trying each button." and stage.isVisible()  # type: ignore[attr-defined]
+    context.connection.disconnect()
+    assert panel.stage_text == IDLE_TEXT and stage.isVisible()  # type: ignore[attr-defined]
+
+
+def test_sections_have_headings(panel: DiscoveryPanel) -> None:
+    from PySide6.QtWidgets import QLabel
+
+    headings = [
+        label.text() for label in panel.findChildren(QLabel) if label.property("heading") is True
+    ]
+    assert headings == [
+        "What the AI thinks it has found",
+        "What just happened",
+        "What leads to what",
+    ]
+
+
+def test_action_buttons_share_a_row(panel: DiscoveryPanel) -> None:
+    names = ("experiment_button", "export_button", "import_button")
+    buttons = [panel.findChild(object, n) for n in names]
+    assert all(b is not None for b in buttons)
+    tops = {b.geometry().top() for b in buttons}  # type: ignore[union-attr]
+    assert len(tops) == 1
