@@ -44,6 +44,7 @@ MIN_TRANSITIONS = 30
 NOISE_RATE = 0.9
 RARE_RATE = 0.1
 FEW_VALUES = 16
+BOUNCE_UPS = 4  # a "lives" byte restored this often is judged on its ups against its downs
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +85,16 @@ def _is_pair(low: ByteStats, high: ByteStats) -> bool:
         return False
     stray = high.changes - high.carry_ins
     return high.carry_ins >= 0.6 * high.changes and stray <= high.resets
+
+
+def lives_bounce(st: ByteStats) -> bool:
+    """A life count does not bounce: it is lost one at a time and restored on a restart.
+
+    True when the byte has gone up at least ``BOUNCE_UPS`` times and down fewer
+    than twice that often (T-864); such a byte is not a life count whatever it
+    looked like when first proposed.
+    """
+    return st.ups >= BOUNCE_UPS and st.downs < 2 * st.ups
 
 
 def _classify_single(st: ByteStats) -> tuple[VariableKind, tuple[Evidence, ...]] | None:
@@ -226,11 +237,13 @@ def _overlaps(v: Variable, c: Candidate) -> bool:
 
 
 __all__ = [
+    "BOUNCE_UPS",
     "FEW_VALUES",
     "MIN_TRANSITIONS",
     "NOISE_RATE",
     "RARE_RATE",
     "Candidate",
     "find_candidates",
+    "lives_bounce",
     "propose_candidates",
 ]

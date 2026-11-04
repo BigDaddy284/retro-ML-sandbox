@@ -49,7 +49,7 @@ from retro_ai_lab.understanding.knowledge import (
 from retro_ai_lab.understanding.linking import apply_input_links, find_input_links
 from retro_ai_lab.understanding.longlook import LongLook
 from retro_ai_lab.understanding.relationships import RelationshipFinder
-from retro_ai_lab.understanding.variables import find_candidates, propose_candidates
+from retro_ai_lab.understanding.variables import find_candidates, lives_bounce, propose_candidates
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +61,7 @@ MOVES_ALONE = "moves-alone"  # evidence kind: changed while nobody pressed anyth
 # The kinds a player earns by playing; one that moves by itself is not one. Lives and
 # health are left out: standing still is a fine way to lose them.
 DOUBTED_KINDS = frozenset({VariableKind.SCORE, VariableKind.PROGRESS})
+BOUNCES = "bounces"  # evidence kind: a "lives" byte going up nearly as often as down (T-864)
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,6 +305,69 @@ class DiscoveryService:
                 self._announce(DiscoveryUpdated((), changed, (), ()))
             return changed
 
+    def doubt_bouncing(self, *, frame: int | None = None) -> tuple[Variable, ...]:
+        """A "lives" guess that goes up nearly as often as down is not a life count (T-864).
+
+        Read off the change tracker's fresh statistics: such a guess is doubted the
+        first time and rejected by the AI the next; confirmed and already rejected
+        guesses are left alone. Returns the variables changed.
+        """
+        with self._lock:
+            k = self._knowledge
+            if k is None:
+                return ()
+            tracker = self._observation.tracker
+            doubted: list[Variable] = []
+            dropped: list[Variable] = []
+            for v in k:
+                if v.confirmed or v.rejected or v.kind is not VariableKind.LIVES:
+                    continue
+                try:
+                    stats = tracker.stats(v.region, v.offset)
+                except ConfigurationError:
+                    continue
+                if not lives_bounce(stats):
+                    continue
+                if any(e.kind == BOUNCES for e in v.evidence):
+                    k.support(
+                        v.id,
+                        Evidence(
+                            BOUNCES,
+                            f"Still going up ({stats.ups} times) nearly as often as down "
+                            f"({stats.downs}); a life count does not bounce.",
+                            0.0,
+                            frame,
+                        ),
+                    )
+                    dropped.append(k.reject(v.id, by="the AI"))
+                else:
+                    doubted.append(
+                        k.support(
+                            v.id,
+                            Evidence(
+                                BOUNCES,
+                                f"Went up {stats.ups} times and down {stats.downs}; a life "
+                                "count does not bounce. Once is a doubt; twice and the AI "
+                                "drops it.",
+                                0.0,
+                                frame,
+                            ),
+                        )
+                    )
+            changed = (*doubted, *dropped)
+            if changed:
+                log.info(
+                    "%d life guesses go up nearly as often as down: %d doubted (%s), "
+                    "%d dropped (%s).",
+                    len(changed),
+                    len(doubted),
+                    _names(doubted),
+                    len(dropped),
+                    _names(dropped),
+                )
+                self._announce(DiscoveryUpdated((), changed, (), ()))
+            return changed
+
     def summary(self) -> str:
         """One line for the status bar / panel header."""
         k = self._knowledge
@@ -409,7 +473,8 @@ class DiscoveryService:
                 "thinking", "Looking for values that behave like scores, lives or counters."
             )
             added = propose_candidates(k, find_candidates(self._observation.tracker))
-            changed = self._look.review() if self._look is not None else ()
+            bounced = self.doubt_bouncing()
+            changed = (*bounced, *(self._look.review() if self._look is not None else ()))
             self._reviews += 1
             self._since_review = 0
             update = DiscoveryUpdated(added, changed, (), ())

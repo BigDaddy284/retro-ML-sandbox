@@ -15,7 +15,12 @@ from retro_ai_lab.understanding.knowledge import (
 from retro_ai_lab.understanding.linking import InputLinks, apply_input_links, find_input_links
 from retro_ai_lab.understanding.longlook import LongLook
 from retro_ai_lab.understanding.relationships import RelationshipFinder, describe_key, event_key
-from retro_ai_lab.understanding.variables import Candidate, find_candidates, propose_candidates
+from retro_ai_lab.understanding.variables import (
+    Candidate,
+    find_candidates,
+    lives_bounce,
+    propose_candidates,
+)
 from retro_ai_lab.understanding.wakeup import find_wake_button, inputs_matter, probe_inputs
 
 __all__ = [
@@ -42,6 +47,7 @@ __all__ = [
     "find_input_links",
     "find_wake_button",
     "inputs_matter",
+    "lives_bounce",
     "plain_names",
     "probe_inputs",
     "propose_candidates",

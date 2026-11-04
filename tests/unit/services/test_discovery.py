@@ -18,8 +18,8 @@ from retro_ai_lab.services import (
     DiscoveryUpdated,
     ObservationService,
 )
-from retro_ai_lab.services.discovery import MOVES_ALONE, game_id_for
-from retro_ai_lab.understanding import EventKind, VariableKind
+from retro_ai_lab.services.discovery import BOUNCES, MOVES_ALONE, game_id_for
+from retro_ai_lab.understanding import EventKind, Variable, VariableKind
 from retro_ai_lab.understanding.events import CYCLES
 
 BY_NAME = {b.name: b for b in BUTTONS}
@@ -420,6 +420,51 @@ def test_self_moving_guesses_are_doubted_then_rejected(
     assert "0 doubted (none), 2 dropped (Timer as score, Frame as progress)." in caplog.text
     assert discovery.doubt_self_moving(moved) == () and discovery.doubt_self_moving(()) == ()
     assert len(seen) == 2
+
+
+def test_a_lives_guess_that_bounces_is_doubted_then_dropped(
+    discovery: DiscoveryService,
+    connection: ConnectionService,
+    observation: ObservationService,
+    bus: EventBus,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """T-864: a "lives" byte that goes up nearly as often as down is not a life count."""
+    assert discovery.doubt_bouncing() == ()  # nothing connected: nothing to doubt
+    connection.connect("fake", seed=2)
+    k = discovery.knowledge
+    assert k is not None
+    play(connection, observation, 600)  # the lane weaves left and right alike; lives go down
+
+    def plant(offset: int, name: str) -> Variable:
+        found = k.at("ram", offset)  # the reviews may have proposed the byte already
+        if found is None:
+            found = k.propose("ram", offset, kind=VariableKind.LIVES, name=name)
+        return k.update(found.id, kind=VariableKind.LIVES, name=name)
+
+    bogus = plant(LAYOUT.lane, "Lane as lives")
+    real = plant(LAYOUT.lives, "Lives")
+    sure = plant(LAYOUT.lap, "Sworn lives")  # the lap also bounces, but a person swore to it
+    k.confirm(sure.id)
+    seen: list[DiscoveryUpdated] = []
+    bus.subscribe(DiscoveryUpdated, seen.append)
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
+    changed = discovery.doubt_bouncing(frame=9)
+    assert [v.id for v in changed] == [bogus.id] and not k.get(bogus.id).rejected
+    last = k.get(bogus.id).evidence[-1]
+    assert last.kind == BOUNCES and last.frame == 9 and "does not bounce" in last.detail
+    assert len(seen) == 1 and seen[0].changed == changed
+    assert "1 doubted (Lane as lives), 0 dropped (none)." in caplog.text
+    # The next review drops it; the real and the confirmed guesses are untouched.
+    update = discovery.review()
+    assert [v.id for v in update.changed if v.kind is VariableKind.LIVES] == [bogus.id]
+    assert k.get(bogus.id).rejected and "Rejected by the AI." in k.get(bogus.id).evidence[-1].detail
+    assert "0 doubted (none), 1 dropped (Lane as lives)." in caplog.text
+    for other in (real, sure):
+        got = k.get(other.id)
+        assert not got.rejected and not any(e.kind == BOUNCES for e in got.evidence)
+    assert k.get(sure.id).confirmed
+    assert discovery.doubt_bouncing() == ()
 
 
 def test_a_person_names_a_value_by_address(
