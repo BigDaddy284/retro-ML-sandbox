@@ -943,11 +943,15 @@ class TrainingService:
         except ConfigurationError as exc:
             log.info("Could not check whether the game listens: %s", exc)
             return True
+        if not probe.matters:
+            # A title demo moves everything by itself and ignores the pad, the real
+            # score included: nothing the probe saw says anything about play (T-868).
+            return False
         try:  # the same probe shows what moves by itself: doubt those guesses (T-855)
             self._discovery.doubt_self_moving(probe.self_moving, frame=self._observation.frame)
         except (ConfigurationError, UnsupportedCapabilityError) as exc:
             log.info("Could not note the values that move by themselves: %s", exc)
-        return probe.matters
+        return True
 
     def _playing_buttons(self) -> tuple[str, ...]:
         """The buttons the AI plays with (its action space), else all of them."""

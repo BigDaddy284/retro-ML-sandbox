@@ -142,6 +142,11 @@ thinks it is and how sure, and any name given to it. Filter by address
 every panel then uses that name. The AI still learns everything itself; the
 table only shows what it worked out and lets you name it.
 
+After a long run on an older build, the AI may have dropped the real score or
+lives for reasons a newer build no longer has. Press "Start from scratch" in
+the Learning panel once so it forgets that game and can find the real values
+again.
+
 ## Arranging the panels
 
 Every panel can be dragged by its title bar to another edge of the window,
