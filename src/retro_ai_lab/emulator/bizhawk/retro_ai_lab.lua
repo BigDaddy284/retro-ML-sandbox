@@ -8,7 +8,7 @@
 -- Nothing here changes your game, saves or settings. Close the script (or
 -- EmuHawk) to stop it.
 
-local SCRIPT_VERSION = 1
+local SCRIPT_VERSION = 2  -- T-887: watched steps; bumped whenever the script's answers change
 local HOST = "127.0.0.1"
 local PORT = tonumber(RETRO_AI_LAB_PORT) or 43110
 

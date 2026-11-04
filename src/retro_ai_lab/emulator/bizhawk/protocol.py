@@ -27,7 +27,7 @@ from typing import Any
 
 from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError, ProtocolError
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2  # bumped with the bridge scripts whenever their answers change (T-891)
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 43110
 MAX_LINE = 16 * 1024 * 1024  # a screenshot in base64 is well under this

@@ -114,8 +114,11 @@ def test_no_bridge_and_silent_bridge() -> None:
 def test_wrong_version_and_garbage_are_protocol_errors() -> None:
     with BizHawkSimulator(script_version=PROTOCOL_VERSION + 1) as sim:
         adapter = BizHawkAdapter(port=sim.port)
-        with pytest.raises(ProtocolError, match="speaks protocol 2 but this app needs 1"):
+        with pytest.raises(ProtocolError, match="a different bridge script") as caught:
             adapter.connect(timeout_s=1.0)
+        message = str(caught.value)
+        assert f"version {PROTOCOL_VERSION + 1}; this app needs {PROTOCOL_VERSION}" in message
+        assert str(BizHawkAdapter.script_path) in message and "remove that script" in message
         assert not adapter.is_connected
     with BizHawkSimulator(garbage=True) as sim:
         adapter = BizHawkAdapter(port=sim.port)
@@ -588,3 +591,13 @@ def test_link_summary_covers_every_call_since_connect() -> None:
         summary = adapter.link_summary
         assert "step \u00d72" in summary and "hello \u00d71" in summary
         adapter.disconnect()
+
+
+def test_an_older_script_is_named_as_older_with_its_replacement() -> None:
+    """T-891: the user's new build still talked to the old script in BizHawk."""
+    with BizHawkSimulator(script_version=PROTOCOL_VERSION - 1) as sim:
+        adapter = BizHawkAdapter(port=sim.port)
+        with pytest.raises(ProtocolError, match="an older bridge script") as caught:
+            adapter.connect(timeout_s=1.0)
+        assert "open the one that came with this app" in str(caught.value)
+        assert not adapter.is_connected

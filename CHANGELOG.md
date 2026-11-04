@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-891: the bridge scripts are version 2 (watched steps), and an emulator still running an older script is refused at Connect with a message naming the file to open in its Lua console and how; `docs/BIZHAWK.md` says to reopen the script after every new build.
 - T-890: the BizHawk script serves a request that is waiting, or arrives within 4 ms of its last answer, in the same turn of EmuHawk's loop instead of after a paused one (about a frame), so training steps no longer pay ~18 ms each for being served; each step answer reports how long the pad-latching turn and the frames took, kept in the link log as `step:latch` and `step:frames`.
 - T-889: the advice under the Learning graph names at most four values of a situation ("and 12 more") and sits in a scrolling box of at most five lines, so a compact panel keeps its graph and the text stays readable.
 - T-888: playing keeps real time (the play clock sends the frames the wall clock owes, six at most per request, and forgives a longer stall) and, when the on-screen pad holds nothing, watches the emulator's real controller and records what the person pressed, so "You play" and "With your help" run at full speed from a real controller.

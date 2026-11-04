@@ -184,6 +184,10 @@ def profile(
         loop.exec()
         elapsed = time.perf_counter() - started
         heartbeat.stop()
+        # A step still on the worker has started but delivered no frames yet,
+        # so the report counts only landed steps against the frames (both read
+        # here on the GUI thread, between which nothing can land).
+        landed = clock.steps - (1 if clock.in_flight else 0)
 
         live = context.connection.adapter
         summary = live.link_summary if isinstance(live, BizHawkAdapter) else "not a bridge link"
@@ -191,7 +195,7 @@ def profile(
             adapter=adapter,
             seconds=elapsed,
             interval_ms=clock.interval_ms,
-            steps=clock.steps,
+            steps=landed,
             wanted=int(elapsed * 1000 / clock.interval_ms),
             pictures=clock.frames_captured,
             skipped=clock.skipped,
