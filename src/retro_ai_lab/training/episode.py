@@ -23,7 +23,7 @@ from retro_ai_lab.services.connection import ConnectionService
 from retro_ai_lab.services.discovery import DiscoveryUpdated
 from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.goals import ObjectiveCompleted, ObjectiveSetback
-from retro_ai_lab.services.observer import ObservationService
+from retro_ai_lab.services.observer import ButtonsHeld, ObservationService
 from retro_ai_lab.services.rewards import RewardEarned
 from retro_ai_lab.understanding.events import EventKind
 
@@ -256,6 +256,7 @@ class EpisodeRunner:
         self._last_action: int | None = None
         self._last_state: State | None = None
         self._last_reward = 0.0
+        self._bus = bus
         self._signals = EpisodeSignals(bus)
         self._buttons: dict[str, Button] = {}
         self._state: State | None = None
@@ -422,6 +423,7 @@ class EpisodeRunner:
             # One request per step (T-824): the buttons, the frames and the
             # memory snapshot after them travel together.
             self._observation.record_input(names, "ai")
+            self._bus.publish(ButtonsHeld(self._observation.frame, frozenset(names), "ai"))
             frames = self._frames_per_step
             reads = self._observation.snapshot_reads()
             pressed = frozenset(held)
@@ -449,6 +451,7 @@ class EpisodeRunner:
         action = self._agent.space.matches(buttons).index
         self._last_buttons = self._agent.space.buttons_for(action)
         self._last_action = action
+        self._bus.publish(ButtonsHeld(self._observation.frame, self._last_buttons, "child"))
         return self._settle(self._state, action, frames, "child")
 
     def _settle(self, state: State, action: int | None, frames: int, source: str) -> bool:

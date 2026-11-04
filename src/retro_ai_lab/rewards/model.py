@@ -42,6 +42,7 @@ class Category(Enum):
     QUESTS = "quests"
     EFFICIENCY = "efficiency"
     COMPLETION = "completion"
+    CONTROLS = "controls"  # how the buttons are used (T-874; added to the design's eight)
 
     @property
     def label(self) -> str:
@@ -245,6 +246,10 @@ class RewardProfile:
 
     def enabled_count(self) -> int:
         return sum(1 for b in self._items.values() if b.enabled)
+
+    def active_count(self) -> int:
+        """Enabled rows worth something: a row at 0 points changes nothing (T-874)."""
+        return sum(1 for b in self._items.values() if b.enabled and b.value != 0.0)
 
     # ------------------------------------------------------------ weights
 

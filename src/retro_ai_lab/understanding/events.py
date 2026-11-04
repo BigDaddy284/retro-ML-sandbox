@@ -52,6 +52,8 @@ class EventKind(Enum):
     RESET = "reset"  # several values jumped back to their starting values
     UP = "up"  # a value a person asked about went up, by any amount (T-860)
     DOWN = "down"  # ... or down
+    PRESS = "press"  # a button was held this step; variable_id is the button's name (T-874)
+    REPEAT = "repeat"  # ... and was held the step before as well
 
     @property
     def label(self) -> str:

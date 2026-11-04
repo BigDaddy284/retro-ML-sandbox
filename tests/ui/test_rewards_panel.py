@@ -74,16 +74,39 @@ def test_idle_panel(panel: RewardsPanel) -> None:
     assert panel.personality_id == "custom"
 
 
+def test_the_controls_group_lists_every_button(panel: RewardsPanel, context: AppContext) -> None:
+    """T-874: a row per button and one for repeats, in a Controls group, worth 0 to start."""
+    from retro_ai_lab.rewards import AGAIN_ID, press_id
+
+    context.connection.connect("fake", seed=2)
+    panel.refresher.flush()
+    names = [b.name for b in context.connection.adapter.buttons()]  # type: ignore[union-attr]
+    assert f"Controls ({len(names) + 1})" in panel.category_texts()
+    assert panel.row_text(press_id("up"))[:2] == ("Pressing Up", "+0")
+    assert panel.row_text(AGAIN_ID)[:2] == ("Pressing the same button again", "+0")
+    panel.select(press_id("up"))
+    assert "Each step the button is held" in panel.explain_text
+    panel.set_selected_value(-2)
+    assert panel.row_text(press_id("up"))[1] == f"-2  ({YOU_SET_THIS})"
+
+
 def test_rows_appear_under_their_categories(panel: RewardsPanel, context: AppContext) -> None:
     context.connection.connect("fake", seed=2)
-    assert panel.behaviour_ids() == ("reset:*",)
-    assert panel.category_texts() == ("Survival (1)",)
-    assert panel.summary_text == "1 reward switched on; +0.0 earned."
+    ids = panel.behaviour_ids()
+    assert ids[0] == "reset:*" and all(i.startswith("button:") for i in ids[1:])  # T-874
+    buttons = len(ids) - 1
+    assert panel.category_texts() == ("Survival (1)", f"Controls ({buttons})")
+    assert panel.summary_text == "1 reward switched on; +0.0 earned."  # button rows sit at 0
     panel.select("reset:*")
     teach(context)
     panel.refresher.flush()  # suggestions may wait for the refresh window (T-843)
     assert panel.selected_id == "reset:*"  # kept across the update
-    assert panel.category_texts() == ("Collection (1)", "Survival (3)", "Progression (1)")
+    assert panel.category_texts() == (
+        "Collection (1)",
+        "Survival (3)",
+        "Progression (1)",
+        f"Controls ({buttons})",
+    )
     k = context.discovery.knowledge
     assert k is not None
     lives = k.at(RAM, LAYOUT.lives)

@@ -20,6 +20,7 @@ from retro_ai_lab.services.goals import (
     TriggerOption,
 )
 from retro_ai_lab.services.observer import (
+    ButtonsHeld,
     InputRecorded,
     MemoryObserved,
     ObservationService,
@@ -34,6 +35,7 @@ from retro_ai_lab.services.rewards import (
 
 __all__ = [
     "LINK_LOST",
+    "ButtonsHeld",
     "Comparison",
     "ConnectionFailed",
     "ConnectionService",

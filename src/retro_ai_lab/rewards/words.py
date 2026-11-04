@@ -13,6 +13,7 @@ CATEGORY_WORDS: dict[Category, str] = {
     Category.QUESTS: "finishing tasks",
     Category.EFFICIENCY: "doing it quickly",
     Category.COMPLETION: "finishing the game",
+    Category.CONTROLS: "how the buttons are used",
 }
 
 PICK_ONE = "Pick a reward to see what it means."
