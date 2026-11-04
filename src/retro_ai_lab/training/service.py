@@ -154,6 +154,8 @@ class TrainingService:
         self._bus = bus
         self._frames_per_step = frames_per_step
         self._max_steps = max_steps
+        self._default_max_steps = max_steps  # a game with no choice of its own uses these (T-873)
+        self._default_unstick_after = unstick_after
         self._use_checkpoint = checkpoint
         self._unstick_after = unstick_after
         self._settings = settings or Settings()
@@ -280,6 +282,33 @@ class TrainingService:
         return self._max_steps
 
     @property
+    def unstick_after(self) -> int | None:
+        """Steps with nothing changing before a go gives up (None: never)."""
+        return self._unstick_after
+
+    def set_go_length(self, steps: int) -> None:
+        """How many steps a go lasts at most, for this game from now on; idle only (T-873)."""
+        if not isinstance(steps, int) or steps < 1:
+            raise ConfigurationError("A go must last at least one step.")
+        self._change_go_settings(max_steps=steps)
+
+    def set_give_up_after(self, steps: int | None) -> None:
+        """Steps with nothing changing before a go gives up (None: never); idle only (T-873)."""
+        if steps is not None and (not isinstance(steps, int) or steps < 1):
+            raise ConfigurationError("Giving up takes at least one step, or never.")
+        self._change_go_settings(unstick_after=steps)
+
+    def _change_go_settings(self, **changes: int | None) -> None:
+        if self._status is not Status.IDLE:
+            raise ConfigurationError("Stop training before changing how long a go lasts.")
+        for name, value in changes.items():
+            setattr(self, f"_{name}", value)
+        self._runner = None  # the next go is built with the new settings
+        if self.brain() is not None:
+            self.save()
+        self._announce("go settings")
+
+    @property
     def harness(self) -> ExperimentHarness | None:
         """The checkpoint harness for the connected game (None without save states)."""
         return self._harness
@@ -323,6 +352,8 @@ class TrainingService:
             self._episodes,
             self._total_steps,
             self._demonstrations,
+            self._max_steps if self._max_steps != self._default_max_steps else None,
+            self._unstick_after if self._unstick_after != self._default_unstick_after else None,
         )
 
     def curve(self, window: int = DEFAULT_WINDOW) -> LearningCurve:
@@ -593,6 +624,10 @@ class TrainingService:
         self._history.extend(brain.goes)
         self._episodes = brain.episodes
         self._total_steps = brain.total_steps
+        if brain.go_length is not None:
+            self._max_steps = brain.go_length
+        if brain.give_up_after is not None:
+            self._unstick_after = brain.give_up_after
 
     def forget(self) -> None:
         """Start the AI from scratch for this game and delete what was saved."""
@@ -752,6 +787,8 @@ class TrainingService:
         space = ActionSpace.from_buttons(event.buttons)
         self._agent = self._new_agent(space)
         self._demonstrations = Demonstrations(seed=self._seed)
+        self._max_steps = self._default_max_steps  # a saved brain may bring its own (T-873)
+        self._unstick_after = self._default_unstick_after
         self._fresh_start = ""
         self._last_change = ""
         if self._store is not None and self._store.exists(self._game_id):

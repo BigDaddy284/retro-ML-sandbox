@@ -27,12 +27,19 @@ class Brain:
     episodes: int = 0  # all goes ever, even those no longer in ``goes``
     total_steps: int = 0
     demonstrations: Demonstrations | None = None  # the child's moves, if any were shown
+    # The go settings a person chose for this game (T-873); None means the app's default.
+    go_length: int | None = None  # steps a go lasts at most
+    give_up_after: int | None = None  # steps with nothing changing before a go gives up
 
     def __post_init__(self) -> None:
         if not self.game_id or not isinstance(self.game_id, str):
             raise ConfigurationError("A brain needs a game id.")
         if self.episodes < len(self.goes) or self.total_steps < 0:
             raise ConfigurationError("A brain's counts can't be smaller than its goes.")
+        for name in ("go_length", "give_up_after"):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, int) or value < 1):
+                raise ConfigurationError(f"A brain's {name} must be a whole number of steps.")
 
     @property
     def algorithm(self) -> str:
@@ -49,6 +56,10 @@ class Brain:
         }
         if self.demonstrations is not None:
             data["demonstrations"] = self.demonstrations.to_dict()
+        if self.go_length is not None:
+            data["go_length"] = self.go_length
+        if self.give_up_after is not None:
+            data["give_up_after"] = self.give_up_after
         return data
 
     @classmethod
@@ -68,9 +79,15 @@ class Brain:
                 int(data.get("episodes", len(goes))),
                 int(data.get("total_steps", 0)),
                 Demonstrations.from_dict(demos) if demos is not None else None,
+                _steps_or_none(data.get("go_length")),
+                _steps_or_none(data.get("give_up_after")),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"Bad brain data: {exc}") from exc
+
+
+def _steps_or_none(value: Any) -> int | None:
+    return None if value is None else int(value)
 
 
 __all__ = ["SCHEMA_VERSION", "Brain"]

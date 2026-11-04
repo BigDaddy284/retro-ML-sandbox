@@ -29,6 +29,8 @@ from retro_ai_lab.services import (
 )
 from retro_ai_lab.storage import BrainStore, GoalStore, RewardStore
 from retro_ai_lab.training import (
+    DEFAULT_MAX_STEPS,
+    DEFAULT_UNSTICK_AFTER,
     Brain,
     EpisodeFinished,
     Mode,
@@ -1191,6 +1193,43 @@ def test_a_go_credits_the_values_that_moved(lab: Lab, monkeypatch: pytest.Monkey
     t.train(2)
     assert [c.split("@")[0] for c in calls] == ["begin", "credit", "begin", "credit"]
     assert all(int(c.split("@")[1]) > 0 for c in calls if c.startswith("credit"))
+
+
+def test_go_settings_are_a_persons_choice_per_game(lab: Lab) -> None:
+    """T-873: how long a go lasts and when it gives up can be set, idle only, and are kept."""
+    k = lab.connect()
+    t = lab.training
+    assert DEFAULT_MAX_STEPS == 600 and t.max_steps == 50  # the lab's own default
+    assert t.unstick_after == DEFAULT_UNSTICK_AFTER
+    for bad in (0, -1, 2.5):
+        with pytest.raises(ConfigurationError):
+            t.set_go_length(bad)  # type: ignore[arg-type]
+    with pytest.raises(ConfigurationError):
+        t.set_give_up_after(0)
+    t.set_go_length(20)
+    t.set_give_up_after(None)
+    assert t.max_steps == 20 and t.unstick_after is None
+    assert lab.changes[-1].reason == "go settings"
+    brain = t.brain()
+    assert brain is not None and brain.go_length == 20 and brain.give_up_after is None
+    assert t.saves >= 1  # written to disk at once
+    t.start(Mode.INDEPENDENT)
+    with pytest.raises(ConfigurationError):
+        t.set_go_length(30)  # not while training
+    t.step()
+    t.stop()
+    t.train(1)
+    assert t.last is not None and t.last.result.steps == 20
+    t.set_give_up_after(7)
+    assert t.unstick_after == 7
+    # Reconnecting brings the same game's choices back; another game gets the defaults.
+    lab.connection.disconnect()
+    assert t.max_steps == 20  # untouched until a game is connected
+    lab.connect()
+    assert t.max_steps == 20 and t.unstick_after == 7 and k.game_id == t.game_id
+    lab.connection.disconnect()
+    lab.connection.connect("fake", seed=9)
+    assert t.max_steps == 50 and t.unstick_after == DEFAULT_UNSTICK_AFTER
 
 
 def test_the_search_runs_flat_out_and_puts_the_speed_back(

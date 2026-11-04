@@ -14,6 +14,7 @@ from __future__ import annotations
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -50,6 +51,20 @@ SPOT_LINE = "Every go starts from the spot you picked."
 COLUMNS = ("Go", "How", "Steps", "Points", "Ended by")
 MAX_ROWS = 30
 FRAME_MS = 1000 / 60
+FRAMES_PER_SECOND = 60  # the console's frame rate: the go timers are shown in seconds (T-873)
+GO_SECONDS_RANGE = (1.0, 600.0)
+GIVE_UP_SECONDS_RANGE = (0.5, 120.0)
+
+
+def seconds_to_steps(seconds: float, frames_per_step: int) -> int:
+    """Seconds of console time as a whole number of steps, at least one."""
+    return max(1, round(seconds * FRAMES_PER_SECOND / frames_per_step))
+
+
+def steps_to_seconds(steps: int, frames_per_step: int) -> float:
+    return steps * frames_per_step / FRAMES_PER_SECOND
+
+
 FAST_SLICE_SECONDS = 0.02  # how long each fast tick may hog the GUI
 FAST_TICK_MS = 1
 ENDED_BY = {
@@ -121,6 +136,28 @@ class LearningPanel(QWidget):
         self._spot.setToolTip("Practise this part of the game: every go starts from here.")
         self._spot.clicked.connect(self.toggle_spot)
 
+        # How long a go runs before the next try, in seconds (T-873).
+        self._go_seconds = QDoubleSpinBox(self)
+        self._go_seconds.setObjectName("go_seconds_spin")
+        self._go_seconds.setRange(*GO_SECONDS_RANGE)
+        self._go_seconds.setDecimals(0)
+        self._go_seconds.setSingleStep(5.0)
+        self._go_seconds.setSuffix(" s")
+        self._go_seconds.setKeyboardTracking(False)
+        self._go_seconds.setToolTip("How long each go lasts before the AI starts the next one")
+        self._go_seconds.valueChanged.connect(self._on_go_seconds_changed)
+        self._give_up_seconds = QDoubleSpinBox(self)
+        self._give_up_seconds.setObjectName("give_up_seconds_spin")
+        self._give_up_seconds.setRange(*GIVE_UP_SECONDS_RANGE)
+        self._give_up_seconds.setDecimals(1)
+        self._give_up_seconds.setSingleStep(0.5)
+        self._give_up_seconds.setSuffix(" s")
+        self._give_up_seconds.setKeyboardTracking(False)
+        self._give_up_seconds.setToolTip(
+            "How long nothing may change on screen before the go gives up and starts again"
+        )
+        self._give_up_seconds.valueChanged.connect(self._on_give_up_seconds_changed)
+
         self._status = QLabel(IDLE_TEXT, self)
         self._status.setObjectName("learning_status")
         self._status.setWordWrap(True)
@@ -157,10 +194,18 @@ class LearningPanel(QWidget):
         buttons.addWidget(self._rehearse)
         buttons.addWidget(self._forget)
 
+        timers = QHBoxLayout()
+        timers.addWidget(QLabel("Each go lasts", self))
+        timers.addWidget(self._go_seconds)
+        timers.addWidget(QLabel("Give up when nothing changes for", self))
+        timers.addWidget(self._give_up_seconds)
+        timers.addStretch(1)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(pickers)
         layout.addLayout(buttons)
+        layout.addLayout(timers)
         layout.addWidget(self._status)
         layout.addWidget(self._graph, 2)
         layout.addWidget(self._insights)
@@ -280,6 +325,30 @@ class LearningPanel(QWidget):
             self._note.setText(PINNED_NOTE)
         self.refresh()
 
+    @property
+    def go_seconds(self) -> float:
+        """What the "Each go lasts" box shows."""
+        return float(self._go_seconds.value())
+
+    @property
+    def give_up_seconds(self) -> float:
+        """What the "Give up when nothing changes for" box shows."""
+        return float(self._give_up_seconds.value())
+
+    def choose_go_seconds(self, seconds: float) -> None:
+        """Make each go last this long (T-873)."""
+        steps = seconds_to_steps(seconds, self._training.frames_per_step)
+        if self._call(lambda: self._training.set_go_length(steps)):
+            self._note.setText(f"Each go now lasts {seconds:g} seconds.")
+        self.refresh()
+
+    def choose_give_up_seconds(self, seconds: float) -> None:
+        """Make a go give up after this long with nothing changing (T-873)."""
+        steps = seconds_to_steps(seconds, self._training.frames_per_step)
+        if self._call(lambda: self._training.set_give_up_after(steps)):
+            self._note.setText(f"A go now gives up after {seconds:g} seconds of nothing changing.")
+        self.refresh()
+
     def forget(self) -> None:
         if self._call(self._training.forget):
             self._note.setText("The AI has forgotten this game and will start fresh.")
@@ -329,6 +398,7 @@ class LearningPanel(QWidget):
         self._spot.setText(UNPIN_TEXT if t.spot_pinned else PIN_TEXT)
         harness = t.harness
         self._spot.setEnabled(enabled and idle and harness is not None and harness.available())
+        self._show_timers(enabled and idle)
         self._show_status()
         self._show_goes()
         self._arm_ticker()
@@ -342,6 +412,28 @@ class LearningPanel(QWidget):
             self._note.setText(str(exc))
             return False
         return True
+
+    def _show_timers(self, editable: bool) -> None:
+        t = self._training
+        fps = t.frames_per_step
+        give_up = t.unstick_after
+        for box, value in (
+            (self._go_seconds, steps_to_seconds(t.max_steps, fps)),
+            (self._give_up_seconds, steps_to_seconds(give_up, fps) if give_up else 0.0),
+        ):
+            box.blockSignals(True)
+            box.setValue(value)
+            box.blockSignals(False)
+            box.setEnabled(editable)
+
+    def _on_go_seconds_changed(self, seconds: float) -> None:
+        if seconds_to_steps(seconds, self._training.frames_per_step) != self._training.max_steps:
+            self.choose_go_seconds(seconds)
+
+    def _on_give_up_seconds_changed(self, seconds: float) -> None:
+        steps = seconds_to_steps(seconds, self._training.frames_per_step)
+        if steps != self._training.unstick_after:
+            self.choose_give_up_seconds(seconds)
 
     def _set_combo(self, combo: QComboBox, value: str) -> None:
         index = combo.findData(value)

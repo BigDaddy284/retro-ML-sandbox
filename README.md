@@ -117,6 +117,11 @@ presses anything and ignore the controller (timers, enemies, a demo) and, after
 two such checks, drops any "score" or "progress" guess among them. The Discovery
 panel still lists a dropped guess, and you can put it back.
 
+Two boxes in the Learning panel set the go timers: "Each go lasts" (40
+seconds unless you change it) and "Give up when nothing changes for" (about
+two seconds), both in seconds and remembered for that game. Change them while
+training is stopped.
+
 ## Reading the rewards
 
 The AI keeps every guess it makes about the game's memory, but the Rewards
