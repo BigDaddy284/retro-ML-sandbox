@@ -126,6 +126,32 @@ def test_plus_minus_suggested_and_tick(panel: RewardsPanel, context: AppContext)
     assert context.rewards.store is not None and context.rewards.store.exists("toyracer-2")
 
 
+def test_the_points_box_takes_any_number(panel: RewardsPanel, context: AppContext) -> None:
+    """T-872: a suggestion of 0.65 could not be got rid of with + and -; type the points instead."""
+    context.connection.connect("fake", seed=2)
+    k = teach(context)
+    panel.refresher.flush()
+    checkpoint = k.at(RAM, LAYOUT.checkpoint)
+    assert checkpoint
+    bid = f"progress:{checkpoint.id}"
+    box = button(panel, "points_spin")
+    assert not box.isEnabled() and panel.points_value == 0.0  # type: ignore[attr-defined]
+    panel.select(bid)
+    assert box.isEnabled() and panel.points_value == 10.0  # type: ignore[attr-defined]
+    box.setValue(0.65)  # type: ignore[attr-defined]
+    assert panel.row_text(bid)[1] == f"+0.65  ({YOU_SET_THIS})"
+    assert panel.note_text == "Remembered for next time."
+    panel.set_selected_value(-3)
+    assert panel.row_text(bid)[1] == f"-3  ({YOU_SET_THIS})"
+    assert panel.points_value == -3.0
+    panel.increase_selected()  # + and - still work from the typed number
+    assert panel.row_text(bid)[1] == f"-2  ({YOU_SET_THIS})" and panel.points_value == -2.0
+    box.setValue(1000)  # type: ignore[attr-defined]  # clamped by the box itself
+    assert panel.points_value == 100.0 and panel.row_text(bid)[1] == f"+100  ({YOU_SET_THIS})"
+    panel.select(None)
+    assert not box.isEnabled() and panel.points_value == 0.0  # type: ignore[attr-defined]
+
+
 def test_personality_picker(panel: RewardsPanel, context: AppContext) -> None:
     context.connection.connect("fake", seed=2)
     k = teach(context)

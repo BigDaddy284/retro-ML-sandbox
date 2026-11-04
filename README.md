@@ -129,6 +129,8 @@ name and press Rename; every list follows. The Discovery panel and the log
 still show the memory address for grown-ups. Pick a reward and the line under
 the table says what it means and what it is worth ("Losing a life: the AI
 loses 7.5 points each time."); hover a group's name for what the group is.
+The Points box next to + and − takes any number you type (0.65, -3); press
+Enter or click elsewhere to apply it.
 The AI offers first the values that moved a few times while it played, go
 after go: after some goes in which you collected something, the counter
 appears as a new "Progress" or "Your score" row, and the Memory table in the Research window shows its value now,

@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.rewards import (
+    MAX_VALUE,
     PERSONALITIES,
     PICK_ONE,
     Behaviour,
@@ -107,6 +108,18 @@ class RewardsPanel(QWidget):
         self._tree.currentItemChanged.connect(self._on_current_changed)
         self._tree.itemChanged.connect(self._on_item_changed)
 
+        # Type the points straight in (T-872): the suggestion may be 0.65 and the
+        # +/- buttons move by whole steps, so a kid could never get rid of a decimal.
+        self._points = QDoubleSpinBox(self)
+        self._points.setObjectName("points_spin")
+        self._points.setRange(-MAX_VALUE, MAX_VALUE)
+        self._points.setDecimals(2)
+        self._points.setSingleStep(1.0)
+        self._points.setKeyboardTracking(False)  # applies on Enter or leaving the box
+        self._points.setToolTip(
+            "Type the points for the picked reward; below zero takes points away"
+        )
+        self._points.valueChanged.connect(self._on_points_edited)
         self._plus = QPushButton("+", self)
         self._plus.setObjectName("plus_button")
         self._plus.setToolTip("Worth a bit more")
@@ -157,6 +170,8 @@ class RewardsPanel(QWidget):
         picker.addWidget(QLabel("Personality", self))
         picker.addWidget(self._personality, 1)
         controls = QHBoxLayout()
+        controls.addWidget(QLabel("Points", self))
+        controls.addWidget(self._points)
         controls.addWidget(self._minus)
         controls.addWidget(self._plus)
         controls.addWidget(self._suggested)
@@ -250,6 +265,15 @@ class RewardsPanel(QWidget):
 
     def decrease_selected(self) -> None:
         self._control(lambda bid: self._context.rewards.decrease(bid))
+
+    def set_selected_value(self, value: float) -> None:
+        """Give the picked reward exactly these points (the Points box, T-872)."""
+        self._control(lambda bid: self._context.rewards.set_value(bid, value))
+
+    @property
+    def points_value(self) -> float:
+        """What the Points box shows."""
+        return float(self._points.value())
 
     def use_suggested_selected(self) -> None:
         if self._selected is not None:
@@ -362,8 +386,9 @@ class RewardsPanel(QWidget):
         self._note.setText("Remembered for next time.")
 
     def _set_controls_enabled(self, on: bool) -> None:
-        for w in (self._plus, self._minus, self._suggested):
+        for w in (self._plus, self._minus, self._suggested, self._points):
             w.setEnabled(on)
+        self._show_points()
         self._remove_own.setEnabled(on and self._selected is not None and is_own(self._selected))
 
     def _fill_own_choices(self) -> None:
@@ -415,6 +440,20 @@ class RewardsPanel(QWidget):
         self._set_controls_enabled(self._selected is not None and self._context.rewards.enabled)
         self._show_explanation()
         self.selection_changed.emit(self._selected)
+
+    def _show_points(self) -> None:
+        profile = self.profile
+        b = profile.find(self._selected) if profile is not None and self._selected else None
+        self._points.blockSignals(True)
+        self._points.setValue(float(b.value) if b is not None else 0.0)
+        self._points.blockSignals(False)
+
+    def _on_points_edited(self, value: float) -> None:
+        profile = self.profile
+        b = profile.find(self._selected) if profile is not None and self._selected else None
+        if b is None or float(b.value) == float(value):
+            return
+        self.set_selected_value(float(value))
 
     def _show_explanation(self) -> None:
         profile = self.profile
