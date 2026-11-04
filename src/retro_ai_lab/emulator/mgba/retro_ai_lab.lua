@@ -329,7 +329,8 @@ local key_mask = 0        -- what is held, as mGBA wants it
 local domain_sizes = {}   -- memory domain key -> size, from the handshake
 local domain_bases = {}   -- memory domain key -> bus address of its first byte
 local states = {}         -- slot name -> state buffer
-local waiting = nil       -- a `step` in progress: { id, req, remaining }
+local waiting = nil       -- a `step` in progress: { id, req, remaining, seen }
+local watching = false    -- a watched step leaves the pad to the person (T-887)
 
 local function platform_name()
   local ok, platform = pcall(function() return emu:platform() end)
@@ -443,6 +444,18 @@ end
 
 local function apply_held()
   emu:setKeys(key_mask)
+end
+
+-- The names of the buttons a key mask holds, sorted.
+local function mask_names(mask)
+  local names = {}
+  for name, index in pairs(key_ids) do
+    if mask & (1 << index) ~= 0 then
+      names[#names + 1] = name
+    end
+  end
+  table.sort(names)
+  return json.array(names)
 end
 
 local function screenshot_path()
@@ -601,8 +614,18 @@ function handlers.step(req)
   if req.screenshot ~= nil and type(req.screenshot) ~= "boolean" then
     error("'screenshot' must be true or false.", 0)
   end
+  if req.watch ~= nil and type(req.watch) ~= "boolean" then
+    error("'watch' must be true or false.", 0)
+  end
+  if req.watch and req.buttons ~= nil then
+    error("A step cannot hold the pad and watch it at once.", 0)
+  end
   image_file(req)  -- refuse a bad path now, not after the frames have passed
-  waiting = { id = req.id, req = req, remaining = frames }
+  watching = req.watch == true
+  if watching then
+    key_mask = 0
+  end
+  waiting = { id = req.id, req = req, remaining = frames, seen = watching and 0 or nil }
   return nil  -- answered later
 end
 
@@ -658,6 +681,7 @@ local function drop_app()
   pending = ""
   closing = false
   waiting = nil
+  watching = false
   key_mask = 0
   if next(key_ids) ~= nil then
     apply_held()
@@ -674,6 +698,9 @@ local function finish_step()
     end
     if step.req.screenshot then
       screenshot_body(step.req, out)
+    end
+    if step.seen ~= nil then
+      out.pressed = mask_names(step.seen)
     end
     return out
   end)
@@ -757,8 +784,9 @@ local function on_accept()
   console:log("Retro AI Lab connected.")
 end
 
+-- While watching, the keys are left to the person's controller (T-887).
 local function on_keys_read()
-  if app then
+  if app and not watching then
     apply_held()
   end
 end
@@ -766,6 +794,9 @@ end
 local function on_frame()
   if waiting == nil then
     return
+  end
+  if waiting.seen ~= nil then
+    waiting.seen = waiting.seen | emu:getKeys()
   end
   waiting.remaining = waiting.remaining - 1
   if waiting.remaining <= 0 then

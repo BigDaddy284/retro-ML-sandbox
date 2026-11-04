@@ -337,6 +337,7 @@ local pad = {}       -- button name -> true, from the handshake
 local domain_sizes = {}  -- memory domain name -> size, from the handshake
 local prefixed = false  -- true when the core names buttons "P1 A" rather than "A"
 local held = {}      -- the full pad table joypad.set gets before every frame
+local watching = false  -- a watched step leaves the pad to the person (T-887)
 
 local function unpause()
   if client and client.unpause then
@@ -491,6 +492,24 @@ local function release_all()
   end
 end
 
+-- What the person's controller holds right now, as pad names, OR-ed into
+-- `seen`. `joypad.getimmediate` reads the controller itself; `joypad.get`
+-- is the fallback for a core without it.
+local function sample_pad(seen)
+  local ok, table_ = pcall(joypad.getimmediate)
+  if not ok or type(table_) ~= "table" then
+    ok, table_ = pcall(joypad.get, 1)
+    if not ok or type(table_) ~= "table" then
+      return
+    end
+  end
+  for name in pairs(pad) do
+    if table_[name] == true or table_["P1 " .. name] == true then
+      seen[name] = true
+    end
+  end
+end
+
 local handlers = {}
 
 local function command_names()
@@ -636,24 +655,47 @@ local MAX_STEP_FRAMES = 3600
 -- top of each turn of EmuHawk's loop and the overrides are cleared before
 -- the frame runs, so a pad set from the paused loop must be followed by one
 -- emu.yield() before the first frame, and set again between frames.
-local function run_frames(frames)
+-- While watching, the pad is never set, so the person's controller reaches
+-- the game, and it is sampled around every frame into `seen`.
+local function run_frames(frames, seen)
+  local function hold()
+    if seen then
+      sample_pad(seen)
+    else
+      apply_held()
+    end
+  end
   if free_run then
     for _ = 1, frames do
-      apply_held()
+      hold()
       emu.frameadvance()
+    end
+    if seen then
+      sample_pad(seen)
     end
     return
   end
-  apply_held()
+  hold()
   emu.yield()
   unpause()
   for i = 1, frames do
     emu.frameadvance()
     if i < frames then
-      apply_held()
+      hold()
+    elseif seen then
+      sample_pad(seen)
     end
   end
   pause()
+end
+
+local function pressed_names(seen)
+  local names = {}
+  for name in pairs(seen) do
+    names[#names + 1] = name
+  end
+  table.sort(names)
+  return json.array(names)
 end
 
 -- Advance the game: hold the pad, run the frames, then report what was asked.
@@ -671,13 +713,28 @@ function handlers.step(req)
   if req.screenshot ~= nil and type(req.screenshot) ~= "boolean" then
     error("'screenshot' must be true or false.", 0)
   end
-  run_frames(frames)
+  if req.watch ~= nil and type(req.watch) ~= "boolean" then
+    error("'watch' must be true or false.", 0)
+  end
+  if req.watch and req.buttons ~= nil then
+    error("A step cannot hold the pad and watch it at once.", 0)
+  end
+  watching = req.watch == true
+  local seen = nil
+  if watching then
+    release_all()
+    seen = {}
+  end
+  run_frames(frames, seen)
   local body = {}
   if req.reads ~= nil then
     body.reads = serve_reads(req.reads)
   end
   if req.screenshot then
     screenshot_body(req, body)
+  end
+  if seen then
+    body.pressed = pressed_names(seen)
   end
   return body
 end
@@ -735,6 +792,7 @@ local function drop_app()
   pending = ""
   free_run = false
   closing = false
+  watching = false
   release_all()
   if speed_changed then
     client.speedmode(100)

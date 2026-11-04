@@ -89,6 +89,7 @@ return function(py, chunk, lua_port)
   }
   joypad = {
     get = function(controller) return py.joypad_get(controller) end,
+    getimmediate = function() return py.joypad_getimmediate() end,
     set = function(buttons, controller) py.joypad_set(buttons, controller) end,
   }
   savestate = {
@@ -126,6 +127,8 @@ class LuaScriptHost:
         self.paused = False
         self.speed: float | None = None
         self.pressed: tuple[str, ...] = ()
+        self.real_pad: tuple[str, ...] = ()  # what the host's person holds (T-887)
+        self._overridden = False
         self.last_pad: tuple[dict[bytes, bool], int | None] | None = None
         self.frames = 0
         self._frame_waiting = False
@@ -163,6 +166,7 @@ class LuaScriptHost:
             "domainsize": self._domainsize,
             "readbytes": self._readbytes,
             "joypad_get": self._joypad_get,
+            "joypad_getimmediate": self._joypad_getimmediate,
             "joypad_set": self._joypad_set,
             "save": self._save,
             "load": self._load,
@@ -228,12 +232,14 @@ class LuaScriptHost:
         every waiting script is resumed, those in ``emu.frameadvance()``
         included. A paused emulator never wakes a frame-waiting script.
         """
-        latched = self.pressed  # InputManager.RunControllerChain
+        # InputManager.RunControllerChain: the person's pad, unless a script overrode it
+        latched = self.pressed if self._overridden else self.real_pad
         if not self._frame_waiting and not self._resume():  # ResumeScripts(false)
             return False
         if self.paused:
             return True
         self.pressed = ()  # ButtonOverrideAdapter.FrameTick
+        self._overridden = False
         self._game.step(latched)
         self.frames += 1
         return self._resume()  # UpdateToolsAfter -> ResumeScripts(true)
@@ -381,16 +387,30 @@ class LuaScriptHost:
         data = ram[addr : addr + length] if domain == b"RAM" else bytes(length)
         return self._runtime.table_from(list(data))
 
+    def _real_labels(self) -> dict[bytes, bool]:
+        down = {b.label.encode() for b in BUTTONS if b.name in self.real_pad}
+        return {label: label in down for label in PAD_BUTTONS}
+
     def _joypad_get(self, controller: int | None) -> Any:
         self._record("joypad_get")
         if controller == 1:
-            pad: dict[bytes, Any] = dict.fromkeys(PAD_BUTTONS, False)
+            pad: dict[bytes, Any] = dict(self._real_labels())
             pad[b"X Axis"] = 0  # an analog stick is not a button
             return self._runtime.table_from(pad)
-        return self._runtime.table_from({b"P1 " + name: False for name in PAD_BUTTONS})
+        return self._runtime.table_from(
+            {b"P1 " + name: down for name, down in self._real_labels().items()}
+        )
+
+    def _joypad_getimmediate(self) -> Any:
+        """The person's controller right now, keyed like ``joypad.getimmediate``."""
+        self._record("joypad_getimmediate")
+        return self._runtime.table_from(
+            {b"P1 " + name: down for name, down in self._real_labels().items()}
+        )
 
     def _joypad_set(self, buttons: Any, controller: int | None) -> None:
         self._record("joypad_set")
+        self._overridden = True
         labels = {b.label.encode(): b.name for b in BUTTONS}
         table = {bytes(name): bool(value) for name, value in buttons.items()}
         self.last_pad = (table, controller)

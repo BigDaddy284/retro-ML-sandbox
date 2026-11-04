@@ -181,12 +181,15 @@ class EmulatorAdapter(ABC):
         pressed: Iterable[Button] | None = None,
         reads: Sequence[tuple[str, int, int]] = (),
         screenshot: bool = False,
+        watch: bool = False,
     ) -> StepResult:
         """Hold ``pressed`` (if given), advance ``frames``, then read and look.
 
         One round trip on a socket backend (T-822). Each part is checked only
         when it is used: a step with no screenshot works on an emulator that
-        cannot capture its screen.
+        cannot capture its screen. With ``watch`` the backend leaves the pad
+        to the person for those frames and names the buttons they held in
+        ``StepResult.pressed`` (T-887); ``pressed`` cannot be given as well.
         """
         with self._lock:
             self._require_connected()
@@ -196,13 +199,17 @@ class EmulatorAdapter(ABC):
             if pressed is not None:
                 self._require("input")
                 held = self._check_buttons(pressed)
+            if watch:
+                self._require("input")
+                if held is not None:
+                    raise ConfigurationError("A step cannot hold the pad and watch it at once.")
             wanted: tuple[tuple[str, int, int], ...] = ()
             if reads:
                 self._require("memory_read")
                 wanted = self._check_reads(reads)
             if screenshot:
                 self._require("screen_capture")
-            result = self._do_step(frames, held, wanted, screenshot)
+            result = self._do_step(frames, held, wanted, screenshot, watch)
             if len(result.reads) != len(wanted):
                 raise ConfigurationError(
                     f"Backend answered {len(result.reads)} reads for {len(wanted)} requested."
@@ -211,6 +218,8 @@ class EmulatorAdapter(ABC):
                 _check_read_length(chunk, length)
             if screenshot and result.frame is None:
                 raise ConfigurationError("Backend stepped without the screenshot asked for.")
+            if watch and result.pressed is None:
+                raise ConfigurationError("Backend stepped without reporting the pad it watched.")
             return result
 
     @final
@@ -362,6 +371,7 @@ class EmulatorAdapter(ABC):
         pressed: frozenset[Button] | None,
         reads: Sequence[tuple[str, int, int]],
         screenshot: bool,
+        watch: bool = False,
     ) -> StepResult:
         """Hook: the bundled step. The default composes the primitive hooks.
 
@@ -372,7 +382,15 @@ class EmulatorAdapter(ABC):
         self._do_advance_frames(frames)
         data = tuple(self._do_read_many(reads)) if reads else ()
         frame = self._do_capture_frame() if screenshot else None
-        return StepResult(frames, data, frame)
+        held = self._do_watch_pad() if watch else None
+        return StepResult(frames, data, frame, held)
+
+    def _do_watch_pad(self) -> frozenset[str]:
+        """Hook: the names of the buttons the person's controller holds now (T-887).
+
+        Only a backend that can leave the pad to the person supports this.
+        """
+        raise UnsupportedCapabilityError("The emulator cannot watch the controller.")
 
 
 def _check_read_length(data: bytes, length: int) -> None:

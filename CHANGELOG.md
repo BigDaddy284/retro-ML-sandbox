@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-887: a step can `watch` the pad: the emulator leaves the controller to the person for those frames and answers with the buttons they held, on BizHawk, mGBA and the fake game, so manual play can use a real controller (the play clock uses it in T-888).
 - T-879: the Rewards table has an Address column at the end with the memory address behind each row.
 - T-878: "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows still pay every time.
 - T-877: the go's log line names every reward that paid instead of three and "and N more".
