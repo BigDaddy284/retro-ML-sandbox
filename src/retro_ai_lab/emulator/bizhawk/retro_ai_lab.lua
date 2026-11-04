@@ -338,14 +338,19 @@ local domain_sizes = {}  -- memory domain name -> size, from the handshake
 local prefixed = false  -- true when the core names buttons "P1 A" rather than "A"
 local held = {}      -- the full pad table joypad.set gets before every frame
 local watching = false  -- a watched step leaves the pad to the person (T-887)
+-- After a step the emulator is left running while the turn waits for the
+-- app's next request; it is paused only when none comes (T-893).
+local running_on = false
 
 local function unpause()
+  running_on = false
   if client and client.unpause then
     client.unpause()
   end
 end
 
 local function pause()
+  running_on = false
   if client and client.pause then
     client.pause()
   end
@@ -651,6 +656,12 @@ local MAX_STEP_FRAMES = 3600
 local SERVE_WAIT_S = 0.004
 local SERVE_MOST = 8
 local served_since_yield = 0
+-- After a step, how long the turn waits for the app's next request before
+-- pausing EmuHawk. Pausing and unpausing around every step made the status
+-- bar flicker at the step rate while the person played (T-893); a request
+-- within this wait keeps the emulator running, and no frame runs meanwhile
+-- because the script holds the loop.
+local PAUSE_AFTER_S = 0.05
 
 -- Wall-clock seconds, for saying where a step's time went (T-890).
 local function now()
@@ -671,6 +682,10 @@ end
 -- emu.yield() before the first frame, and set again between frames.
 -- While watching, the pad is never set, so the person's controller reaches
 -- the game, and it is sampled around every frame into `seen`.
+-- The emulator is left running afterwards (`running_on`); the main loop
+-- pauses it when no request follows within PAUSE_AFTER_S. A step that
+-- follows one needs no latch turn: the pad set just before emu.frameadvance()
+-- is latched at the top of the turn that runs the frame, as between frames.
 local function run_frames(frames, seen, took)
   local function hold()
     if seen then
@@ -693,9 +708,13 @@ local function run_frames(frames, seen, took)
   end
   hold()
   local started = now()
-  emu.yield()
-  took.latch = now() - started
-  unpause()
+  if running_on then
+    took.latch = 0
+  else
+    emu.yield()
+    took.latch = now() - started
+    unpause()
+  end
   started = now()
   for i = 1, frames do
     emu.frameadvance()
@@ -705,7 +724,7 @@ local function run_frames(frames, seen, took)
       sample_pad(seen)
     end
   end
-  pause()
+  running_on = true
   took.frames = now() - started
   served_since_yield = 0
 end
@@ -859,7 +878,11 @@ local function wait_for_request()
   if free_run or served_since_yield >= SERVE_MOST or type(socket.select) ~= "function" then
     return false
   end
-  local ok, ready = pcall(socket.select, { app }, nil, SERVE_WAIT_S)
+  local wait = SERVE_WAIT_S
+  if running_on then
+    wait = PAUSE_AFTER_S
+  end
+  local ok, ready = pcall(socket.select, { app }, nil, wait)
   return ok and type(ready) == "table" and ready[1] ~= nil
 end
 
@@ -887,7 +910,7 @@ local function service()
       if partial and partial ~= "" then
         pending = pending .. partial
       end
-      if served == 0 or not app or not wait_for_request() then
+      if (served == 0 and not running_on) or not app or not wait_for_request() then
         return
       end
     else
@@ -921,6 +944,9 @@ local function main()
     service()
     served_since_yield = 0
     if app and not free_run then
+      if running_on then
+        pause()  -- no request followed the last step: stop the game (T-893)
+      end
       emu.yield()
     else
       if app then
