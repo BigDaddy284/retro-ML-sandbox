@@ -40,6 +40,7 @@ from retro_ai_lab.ui.link_watchdog import LinkWatchdog
 from retro_ai_lab.ui.panels import PANELS, Panel
 from retro_ai_lab.ui.research_dialog import ResearchDialog
 from retro_ai_lab.ui.rewards_panel import RewardsPanel
+from retro_ai_lab.ui.stall_watch import StallWatch
 from retro_ai_lab.ui.theme import MODE_LABELS, polish_views
 from retro_ai_lab.ui.tips import TipDialog
 
@@ -168,6 +169,8 @@ class MainWindow(QMainWindow):
 
         self._watchdog = LinkWatchdog(self._context.connection, parent=self)
         self._watchdog.start()
+        self._stall_watch = StallWatch(parent=self)
+        self._stall_watch.start()
         bridge = self._context.bridge
         unsubscribe = (
             bridge.subscribe(EmulatorConnected, self._on_connected),
@@ -314,6 +317,10 @@ class MainWindow(QMainWindow):
     @property
     def watchdog(self) -> LinkWatchdog:
         return self._watchdog
+
+    @property
+    def stall_watch(self) -> StallWatch:
+        return self._stall_watch
 
     def set_status(self, text: str) -> None:
         bar = self.statusBar()

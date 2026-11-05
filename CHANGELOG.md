@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-894: the log says where the app's own time goes: every 5 s an "App work" line next to the emulator link's reports the AI step, learning from the person's play, picture display, and GUI stalls over 50 ms (count and longest), so a freeze can be pinned down from a log.
 - T-893: a BizHawk step leaves the emulator running and the script waits up to 50 ms for the next request before pausing, so steps that follow each other no longer pause and unpause EmuHawk (the status bar flickered at the step rate while the user played).
 - T-892: the Console list offers only real emulators; the practice console (Toy Racer) is listed only with `RETRO_AI_LAB_PRACTICE_CONSOLE=1` and stays reachable by name for tests and tools.
 - T-891: the bridge scripts are version 2 (watched steps), and an emulator still running an older script is refused at Connect with a message naming the file to open in its Lua console and how; `docs/BIZHAWK.md` says to reopen the script after every new build.

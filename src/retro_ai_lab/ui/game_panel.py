@@ -21,6 +21,7 @@ from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Sign
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from retro_ai_lab.core import EmulatorDisconnectedError, Frame
+from retro_ai_lab.core.worklog import app_work
 from retro_ai_lab.services import ConnectionService, EmulatorConnected, EmulatorDisconnected
 from retro_ai_lab.training import Speed, Status, TrainingStateChanged
 from retro_ai_lab.ui.context import AppContext
@@ -362,8 +363,9 @@ class GamePanel(QWidget):
         self._on_frame(frame)
 
     def _on_frame(self, frame: Frame) -> None:
-        self._view.set_frame(frame)
-        self._status.setText(f"{self._status_prefix()} Frame {frame.number}.")
+        with app_work.timed("picture"):
+            self._view.set_frame(frame)
+            self._status.setText(f"{self._status_prefix()} Frame {frame.number}.")
 
     def _status_prefix(self) -> str:
         session = self._context.connection.session

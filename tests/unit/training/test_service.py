@@ -16,6 +16,7 @@ from retro_ai_lab.core import (
     EmulatorError,
 )
 from retro_ai_lab.core.events import EventBus
+from retro_ai_lab.core.worklog import CallStats, app_work
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
 from retro_ai_lab.emulator.registry import default_registry
@@ -195,10 +196,12 @@ def test_bad_settings_and_misuse_are_refused(lab: Lab) -> None:
 def test_independent_run_records_goes_and_stops_cleanly(lab: Lab) -> None:
     lab.connect()
     t = lab.training
+    stepped = app_work.stats.get("ai step", CallStats()).count
     t.start(Mode.INDEPENDENT)
     assert t.status is Status.RUNNING and t.mode is Mode.INDEPENDENT and t.ai_in_control
     assert not t.mode.allows_guidance and Mode.GUIDED.allows_guidance
     assert t.step() and t.episode is not None and t.episode.steps == 1
+    assert app_work.stats["ai step"].count == stepped + 1  # T-894: timed for the log
     assert "Go 1: playing, step 1" in t.summary()
     while t.episodes < 2:
         assert t.step()
@@ -501,8 +504,10 @@ def test_manual_mode_learns_from_the_childs_play(lab: Lab) -> None:
     assert t.episode is None  # begins on the first frame the child plays
     lab.play(["up"], 3)
     assert t.episode is not None and agent.updates == 0  # not a full step yet
+    learned = app_work.stats.get("learn", CallStats()).count
     lab.play(["up"], 1)
     assert agent.updates == 1 and t.total_steps == 1 and t.episode.steps == 1
+    assert app_work.stats["learn"].count == learned + 1  # T-894: timed for the log
     space = t.space
     assert space is not None and space.matches(["up"]).buttons == frozenset({"up"})
     assert len(agent.table) >= 1  # the situation the child was in is now known

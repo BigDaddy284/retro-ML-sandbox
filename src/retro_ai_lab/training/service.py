@@ -21,6 +21,7 @@ from typing import Any
 
 from retro_ai_lab.core import ConfigurationError, EmulatorError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
+from retro_ai_lab.core.worklog import app_work
 from retro_ai_lab.learning.actions import ActionSpace
 from retro_ai_lab.learning.demonstrations import CHILD, Demonstrations
 from retro_ai_lab.learning.greedy import GreedyPlayer
@@ -659,7 +660,8 @@ class TrainingService:
             return False
         self._pick_skill()
         before = runner.steps
-        went_on = runner.step()
+        with app_work.timed("ai step"):  # the emulator's share is in the link log (T-894)
+            went_on = runner.step()
         if runner.steps > before:
             self._total_steps += 1
             decision = self._agent.last_decision if self._agent is not None else None
@@ -850,7 +852,8 @@ class TrainingService:
         held = self._observation.inputs.held_at(frame)
         frames, self._manual_frames = self._manual_frames, 0
         self._pick_skill()
-        went_on = runner.observe_step(held, frames)
+        with app_work.timed("learn"):
+            went_on = runner.observe_step(held, frames)
         self._total_steps += 1
         self._bus.publish(_stepped(frame, runner, None))
         if not went_on and runner.state is not None:
