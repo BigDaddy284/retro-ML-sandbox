@@ -735,6 +735,15 @@ def test_behaviour_changes_and_experiments_follow_the_goes(lab: Lab) -> None:
     assert goes_ago == 3
     titles = [e.title for e in t.experiments(goal=lab.goals.goal, profile=lab.rewards.profile)]
     assert "Practise fast" in titles  # four goes: too early to see a trend
+    # T-895: a confirmed guess whose byte behaves unlike its kind is something to check.
+    k = lab.discovery.knowledge
+    assert k is not None
+    sworn = k.at("ram", LAYOUT.position) or k.propose("ram", LAYOUT.position, name="Position")
+    k.confirm(k.update(sworn.id, kind=VariableKind.LIVES, name="Sworn lives").id)
+    lab.discovery.review()  # the position changes nearly every step: no life count does
+    assert [q.name for q in lab.discovery.questions] == ["Sworn lives"]
+    assert t.experiments()[0].title == 'Check "Sworn lives"'
+    assert "changes rarely" in t.experiments()[0].why
     t.forget()
     assert t.behaviour_changes() == ((), 0, 0)
 

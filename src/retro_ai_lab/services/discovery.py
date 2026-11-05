@@ -22,6 +22,7 @@ so the UI can show what the AI is doing.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from collections.abc import Callable, Iterable
@@ -93,6 +94,20 @@ class DiscoveryProgress:
 
 
 @dataclass(frozen=True, slots=True)
+class Question:
+    """A confirmed guess whose byte behaves unlike its kind (T-895).
+
+    A person's word is kept, so the AI never drops a confirmed guess; it
+    asks instead, in the Learning panel's insights and the log.
+    """
+
+    var_id: str
+    name: str
+    reason: str  # BOUNCES or BUSY
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
 class DiscoveryUpdated:
     """Something in the knowledge changed."""
 
@@ -159,6 +174,7 @@ class DiscoveryService:
         self._go_transitions = 0  # the tracker's count when the go began (T-871)
         self._experiments = 0
         self._reviews = 0
+        self._questions: dict[str, Question] = {}  # confirmed guesses to check (T-895)
         self._stage = "idle"
         self._enabled = False
         self._experiments_allowed = True  # the training service holds them back (T-839)
@@ -327,14 +343,22 @@ class DiscoveryService:
                 self._announce(DiscoveryUpdated((), changed, (), ()))
             return changed
 
+    @property
+    def questions(self) -> tuple[Question, ...]:
+        """Confirmed guesses whose bytes behave unlike their kind, for the person (T-895)."""
+        with self._lock:
+            return tuple(self._questions.values())
+
     def doubt_bouncing(self, *, frame: int | None = None) -> tuple[Variable, ...]:
         """A lives or progress guess that changes like no such value does is dropped.
 
         Read off the change tracker's fresh statistics (T-864 to T-866, T-869): a byte
         that goes up nearly as often as down ("bounces") or changes more than
         once in ten steps ("busy") is doubted the first time and rejected by the
-        AI the next; confirmed and already rejected guesses are left alone.
-        Returns the variables changed.
+        AI the next; already rejected guesses are left alone. A confirmed guess
+        is a person's word, so it is kept and questioned instead (T-895): the
+        question stays in :attr:`questions` while the byte behaves that way.
+        Returns the variables doubted or dropped.
         """
         with self._lock:
             k = self._knowledge
@@ -343,8 +367,10 @@ class DiscoveryService:
             tracker = self._observation.tracker
             doubted: list[Variable] = []
             dropped: list[Variable] = []
+            questioned: list[Variable] = []
+            still: set[str] = set()
             for v in k:
-                if v.confirmed or v.rejected or v.kind not in KIND_DOUBTS:
+                if v.rejected or v.kind not in KIND_DOUBTS:
                     continue
                 try:
                     stats = tracker.stats(v.region, v.offset)
@@ -363,6 +389,18 @@ class DiscoveryService:
                         f"changed {stats.changes} times in {stats.samples} steps; {words} "
                         "changes rarely"
                     )
+                if v.confirmed:
+                    still.add(v.id)
+                    text = (
+                        f'You confirmed "{v.name}", but it {what}. The AI keeps your word; '
+                        f"if it is not {words}, reject it in Discoveries."
+                    )
+                    question = Question(v.id, v.name, reason, text)
+                    if self._questions.get(v.id) != question:
+                        self._questions[v.id] = question
+                        questioned.append(v)
+                        log.info("%s", text)
+                    continue
                 if any(e.kind in NOT_LIVES for e in v.evidence):
                     k.support(v.id, Evidence(reason, f"Still {what}.", 0.0, frame))
                     dropped.append(k.reject(v.id, by="the AI"))
@@ -379,6 +417,11 @@ class DiscoveryService:
                             ),
                         )
                     )
+            for var_id in [i for i in self._questions if i not in still]:
+                gone = self._questions.pop(var_id)
+                log.info('"%s" behaves like its kind again; nothing to check.', gone.name)
+                with contextlib.suppress(ConfigurationError):  # forgotten meanwhile
+                    questioned.append(k.get(var_id))
             changed = (*doubted, *dropped)
             if changed:
                 log.info(
@@ -390,7 +433,8 @@ class DiscoveryService:
                     len(dropped),
                     _names(dropped),
                 )
-                self._announce(DiscoveryUpdated((), changed, (), ()))
+            if changed or questioned:
+                self._announce(DiscoveryUpdated((), (*changed, *questioned), (), ()))
             return changed
 
     def begin_go(self) -> None:
@@ -619,6 +663,7 @@ class DiscoveryService:
         self._since_experiment = 0
         self._experiments = 0
         self._reviews = 0
+        self._questions = {}
         self._enabled = event.capabilities.memory_read
         if self._enabled:
             self._set_stage("watching", f"Watching {info.title} to learn how it works.")
@@ -694,5 +739,6 @@ __all__ = [
     "DiscoveryProgress",
     "DiscoveryService",
     "DiscoveryUpdated",
+    "Question",
     "game_id_for",
 ]

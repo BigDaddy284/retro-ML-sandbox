@@ -9,7 +9,7 @@ exploit detector and the goal.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from retro_ai_lab.learning.actions import ActionSpace
@@ -18,6 +18,7 @@ from retro_ai_lab.learning.state import State
 from retro_ai_lab.rewards.exploitation import ExploitWarning
 from retro_ai_lab.rewards.goals import Goal
 from retro_ai_lab.rewards.model import RewardProfile
+from retro_ai_lab.services.discovery import Question
 from retro_ai_lab.training.curve import IMPROVING, SLIPPING, STEADY, TOO_EARLY, LearningCurve
 from retro_ai_lab.understanding.knowledge import Knowledge
 
@@ -93,11 +94,14 @@ def suggest_experiments(
     warning: ExploitWarning | None,
     goal: Goal | None,
     profile: RewardProfile | None,
+    questions: Sequence[Question] = (),
 ) -> tuple[Experiment, ...]:
     """Up to three things worth trying, most useful first."""
     out: list[Experiment] = []
     if warning is not None:
         out.append(Experiment("Lower a reward it is farming", warning.suggestion))
+    for question in questions:  # a confirmed guess that behaves unlike its kind (T-895)
+        out.append(Experiment(f'Check "{question.name}"', question.text))
     if agent is not None and agent.epsilon > MOSTLY_EXPLORING:
         out.append(
             Experiment(

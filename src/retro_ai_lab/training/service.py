@@ -382,8 +382,14 @@ class TrainingService:
         goal: Goal | None = None,
         profile: RewardProfile | None = None,
     ) -> tuple[Experiment, ...]:
-        """Things worth trying next, from the curve, the agent and what the caller knows."""
-        return suggest_experiments(self.curve(), self._agent, warning, goal, profile)
+        """Things worth trying next, from the curve, the agent and what the caller knows.
+
+        A confirmed guess the discovery service questions (T-895) is first after
+        a farming warning.
+        """
+        return suggest_experiments(
+            self.curve(), self._agent, warning, goal, profile, self._discovery.questions
+        )
 
     def summary(self) -> str:
         if not self._enabled:

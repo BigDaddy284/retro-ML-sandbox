@@ -5,6 +5,7 @@ from __future__ import annotations
 from retro_ai_lab.emulator.fake.toy_racer import BUTTONS
 from retro_ai_lab.learning import ActionSpace, QLearningAgent, Settings, State
 from retro_ai_lab.rewards import ExploitWarning, Goal, Objective, RewardProfile
+from retro_ai_lab.services.discovery import Question
 from retro_ai_lab.training import EpisodeRecord, EpisodeResult, LearningCurve, Mode
 from retro_ai_lab.training.insights import (
     BehaviourChange,
@@ -68,6 +69,15 @@ def test_suggestion_rules() -> None:
     # A warning comes first; a still-exploring agent says keep going; too early says practise.
     titles = [e.title for e in suggest_experiments(curve(1, 2), explorer, warning, None, None)]
     assert titles == ["Lower a reward it is farming", "Keep going", "Practise fast"]
+    # T-895: a confirmed guess that behaves unlike its kind is checked right after a warning.
+    question = Question("v1", "Lifes", "busy", 'You confirmed "Lifes", but it changed a lot.')
+    checks = suggest_experiments(curve(1, 2), explorer, warning, None, None, [question])
+    assert [e.title for e in checks] == [
+        "Lower a reward it is farming",
+        'Check "Lifes"',
+        "Keep going",
+    ]
+    assert checks[1].why == question.text
     # Never more than three, even when more rules fire.
     many = suggest_experiments(curve(1, 2, 3), explorer, warning, goal, None)
     assert len(many) == 3

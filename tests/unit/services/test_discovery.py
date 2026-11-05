@@ -461,8 +461,16 @@ def test_a_lives_guess_that_bounces_is_doubted_then_dropped(
     assert last.kind == BOUNCES and last.frame == 9 and "does not bounce" in last.detail
     last = k.get(busy.id).evidence[-1]
     assert last.kind == BUSY and "changes rarely" in last.detail
-    assert len(seen) == 1 and seen[0].changed == changed
+    # T-895: the confirmed guess is kept and questioned, in the same announcement
+    assert len(seen) == 1 and seen[0].changed == (*changed, k.get(sure.id))
     assert "3 guesses change like no life count, progress or flag does: 3 doubted (" in caplog.text
+    (question,) = discovery.questions
+    assert question.var_id == sure.id and question.name == "Sworn lives"
+    assert question.reason == BOUNCES and question.text.startswith('You confirmed "Sworn lives"')
+    assert "does not bounce. The AI keeps your word; if it is not a life count, reject it" in (
+        question.text
+    )
+    assert question.text in caplog.text
     # The next review drops all three; the real and the confirmed guesses are untouched.
     update = discovery.review()
     assert {
@@ -480,7 +488,15 @@ def test_a_lives_guess_that_bounces_is_doubted_then_dropped(
         got = k.get(other.id)
         assert not got.rejected and not any(e.kind in (BOUNCES, BUSY) for e in got.evidence)
     assert k.get(sure.id).confirmed
+    announced = len(seen)
     assert discovery.doubt_bouncing() == ()
+    assert len(seen) == announced and discovery.questions == (question,)  # asked once, kept
+    # Rejecting the sworn guess ends the question; the change is announced once.
+    k.reject(sure.id)
+    before = len(seen)
+    assert discovery.doubt_bouncing() == () and discovery.questions == ()
+    assert len(seen) == before + 1 and seen[-1].changed == (k.get(sure.id),)
+    assert '"Sworn lives" behaves like its kind again' in caplog.text
 
 
 def test_a_busy_flag_guess_is_doubted_then_dropped(
