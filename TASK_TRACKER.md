@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-914 | A value changing every step by small hops (a walking enemy) is no longer noise; it is proposed as something moving whichever way it goes, a timer ticking down every frame is a counter, and every-hop-one bytes are not movers | 8 | Done | 1/1 | see PR |
 | T-913 | After every go the log names the brain in use, its situations known and exploring rate, and what the state sees (positions, moving things, distances, life counts, switches) | 8 | Done | 1/1 | see PR #168 |
 | T-912 | The state holds each moving thing's distance from the player's own position, exact up close and rough far away, with eight seats kept for distances whenever anything moves | 8 | Done | 1/1 | see PR #167 |
 | T-911 | A memory value that wanders both ways in small steps, often, is proposed as the position of something that moves, named "Something moving" until a button moves it, and kept out of the long look's drivers and steppers | 8 | Done | 1/1 | see PR #166 |
@@ -2705,6 +2706,22 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; learning + training + integration 154 passed; full suite 1329 passed, 10 skipped in 234.16s (0:03:54).
 - **Commit:** see PR #168. **PR:** #168.
 - **Completion report:** The line is one `log.info` per go with no new work on the GUI thread (the service already holds the agent and the encoder). What the 16:47 log did show is recorded here for the next one: 34 goes, 0 to 6 lives lost a go (about 2 on average), points 2 to 26 times a go, no trend; that log predates T-911 and T-912, so the next log, on the build with distances, is the first that can say whether the memory eyes are enough.
+
+### T-914 – A thing moving every step in small hops is not noise
+- **Status:** Done
+- **Phase:** 8 (the user's 18:01 log: "It sees … 10 positions" with no moving thing after 54 goes)
+- **Objective:** The noise rule (change rate ≥ 0.9, not mostly up) ran before the mover rule and threw away a walking enemy's position, which changes every step. Let smooth movement through, whichever way it goes, without letting random bytes or timers in.
+- **Scope:** `ByteStats.small_hops`, `unit_hops`, `smooth`; `SMALL_HOP` moves to `observation/diff.py`; `_is_noise`, `_is_mover`, `_is_counter` and a downward COUNTER branch in `understanding/variables.py`. **Out of scope:** which own position distances are measured from (T-915); 16-bit movers.
+- **Acceptance criteria:**
+  1. A byte walking left 2 or 3 every step and respawning at the right is a POSITION with MOVER evidence.
+  2. A random byte every frame is still not proposed; a byte going down by one every frame is a COUNTER; a byte going down by one every six steps is not a POSITION.
+  3. `small_hops` and `unit_hops` count as named (a roll-over read as one step) and are in `to_dict`.
+  4. Every T-911 mover test, the kinds test and the toy racer tests pass unchanged.
+- **Expected changes:** `src/retro_ai_lab/observation/diff.py`, `src/retro_ai_lab/understanding/variables.py`, `tests/unit/observation/test_diff.py`, `tests/unit/understanding/test_variables.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_tracker_counts_small_and_unit_hops`; `test_a_thing_moving_every_step_in_small_hops_is_not_noise`, `test_random_every_step_is_still_noise_and_a_countdown_is_a_counter`, `test_a_slow_steady_countdown_is_not_a_mover_either`; observation, understanding, learning, services and integration suites; full suite.
+- **Results:** 4 new tests pass; observation + understanding + learning + services + integration 405 passed; full suite 1333 passed, 10 skipped in 259.55s (0:04:19).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The log also showed lives lost per go rising from 0.8 to 2.3 as exploring fell from 81% to 5%: with no enemy in view the network settled on grabbing points and taking hits. A thing that moves exactly one every step in one direction is still not a mover (it reads as a timer); that is the price of keeping countdowns out, and the climbing-position rule has paid it since T-302.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
