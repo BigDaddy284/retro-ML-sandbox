@@ -81,10 +81,14 @@ def test_validation_and_overflow() -> None:
             FeatureMap(**bad)  # type: ignore[arg-type]
     fm = FeatureMap(width=2)
     fm.vector(C)  # lane, lives
+    # lives is absent from this state, so score takes its slot (T-908); timer finds
+    # both holders present and is dropped.
     v = fm.vector(State((("lane", 1), ("score", 9), ("timer", 1))))
-    assert fm.ids == ("lane", "lives") and fm.dropped == 2
-    assert v.tolist() == pytest.approx([1, 1 / 8, 1 / 24, 0, 0, 0])
-    assert fm.vector(State((("score", 3),))).tolist() == [0.0] * 6 and fm.dropped == 2
+    assert fm.ids == ("lane", "score") and fm.dropped == 1 and fm.evicted == 1
+    assert fm.slot_of("score") == 1
+    assert v.tolist() == pytest.approx([1, 1 / 8, 1 / 24, 1, 1, 9 / 24])
+    assert fm.vector(State((("score", 3),))).tolist() == pytest.approx([0, 0, 0, 1, 3 / 8, 3 / 24])
+    assert fm.dropped == 1
 
 
 def test_json_round_trip_and_bad_data() -> None:
@@ -92,13 +96,15 @@ def test_json_round_trip_and_bad_data() -> None:
     fm.vector(C)
     fm.vector(State((("a", 1), ("b", 1), ("c", 1))))
     data = fm.to_dict()
-    assert data["schema"] == SCHEMA_VERSION and data["ids"] == ["lane", "lives", "a"]
+    # a took the free slot; lane and lives were absent, so b and c took theirs (T-908).
+    assert data["schema"] == SCHEMA_VERSION and data["ids"] == ["b", "c", "a"]
+    assert fm.evicted == 2 and fm.dropped == 0
     again = FeatureMap.from_dict(data)
-    assert again.ids == fm.ids and again.width == 3 and again.bins == 4 and again.dropped == 2
+    assert again.ids == fm.ids and again.width == 3 and again.bins == 4 and again.dropped == 0
     assert again.to_dict() == data
-    for state in (A, B, C):  # A and B bring "speed", dropped by both maps alike
+    for state in (A, B, C):  # both maps hand the absent holders' slots over alike
         assert np.array_equal(again.vector(state), fm.vector(state))
-    assert again.to_dict() == fm.to_dict() and again.dropped == 3
+    assert again.to_dict() == fm.to_dict() and again.ids == ("lane", "speed", "lives")
     for bad in (
         "nope",
         {**data, "ids": ["lane", "lane"]},
@@ -108,3 +114,28 @@ def test_json_round_trip_and_bad_data() -> None:
     ):
         with pytest.raises(ConfigurationError):
             FeatureMap.from_dict(bad)  # type: ignore[arg-type]
+
+
+def test_a_full_map_gives_an_absent_slot_to_a_newcomer() -> None:
+    """T-908: the user's brain never saw a position found after its slots had filled."""
+    fm = FeatureMap(width=3)
+    fm.vector(State((("flag1", 1), ("flag2", 0), ("flag3", 1))))
+    assert fm.ids == ("flag1", "flag2", "flag3")
+    fm.vector(State((("flag1", 1), ("flag3", 1))))  # flag2 unseen since fill 1
+    fm.vector(State((("flag1", 1),)))  # flag3 unseen since fill 2
+    # A position arrives with flag1 only: flag2, unseen longest, gives up its slot.
+    fm.vector(State((("flag1", 1), ("position", 5))))
+    assert fm.slot_of("position") == 1 and fm.evicted == 1 and fm.dropped == 0
+    assert set(fm.ids) == {"flag1", "flag3", "position"}
+    with pytest.raises(ConfigurationError):
+        fm.slot_of("flag2")
+    # Every holder present: the newcomer is dropped, and taken in when a holder is away.
+    fm.vector(State((("flag1", 1), ("flag3", 1), ("position", 5), ("lives", 2))))
+    assert fm.dropped == 1 and "lives" not in fm.ids
+    fm.vector(State((("flag1", 1), ("position", 5), ("lives", 2))))
+    assert "lives" in fm.ids and fm.dropped == 0 and fm.evicted == 2
+    # The map round-trips with its new holders.
+    again = FeatureMap.from_dict(fm.to_dict())
+    assert again.ids == fm.ids and [again.slot_of(i) for i in fm.ids] == [
+        fm.slot_of(i) for i in fm.ids
+    ]

@@ -9,6 +9,14 @@ scaled over the whole range a 16-bit value can reach (coarse: positions and
 scores still differ), and keeps the slots for good, so a variable that is
 missing from a state reads as absent rather than as bucket 0, and a network
 saved with the map keeps seeing the game the same way next session.
+
+A full map used to drop every newcomer for good (T-908): the user's brain
+had its slots taken by the first flags it met and never saw a position
+value found later. Now a newcomer takes the slot of a variable that is
+absent from the state being encoded, the one unseen longest; the slot's
+old meaning is forgotten and the network relearns it, which beats never
+seeing the newcomer. Only when every slot's holder is present in the state
+is the newcomer dropped (counted in :attr:`dropped`).
 """
 
 from __future__ import annotations
@@ -38,6 +46,9 @@ class FeatureMap:
         self._span = float(bins + 16)  # the largest bucket a 16-bit value can reach
         self._slots: dict[str, int] = {}
         self._dropped: set[str] = set()
+        self._seen: dict[str, int] = {}  # id -> the fill it was last present in (T-908)
+        self._fills = 0
+        self._evicted = 0
 
     # ------------------------------------------------------------ queries
 
@@ -56,13 +67,18 @@ class FeatureMap:
 
     @property
     def ids(self) -> tuple[str, ...]:
-        """Variables with a slot, in the order they were first seen."""
-        return tuple(self._slots)
+        """Variables with a slot, in slot order (first seen first, until a slot changes hands)."""
+        return tuple(sorted(self._slots, key=self._slots.__getitem__))
 
     @property
     def dropped(self) -> int:
-        """Variables seen after the map was full; they are left out of every vector."""
+        """Variables that found the map full with every holder present; left out."""
         return len(self._dropped)
+
+    @property
+    def evicted(self) -> int:
+        """Slots that changed hands to a newcomer (T-908)."""
+        return self._evicted
 
     def slot_of(self, variable_id: str) -> int:
         try:
@@ -85,17 +101,37 @@ class FeatureMap:
         return out
 
     def _fill(self, row: NDArray[np.float32], state: State) -> None:
+        self._fills += 1
+        present = {vid for vid, _ in state.parts}
         for vid, b in state.parts:
+            self._seen[vid] = self._fills
             slot = self._slots.get(vid)
             if slot is None:
-                if len(self._slots) >= self._width:
+                slot = self._place(vid, present)
+                if slot is None:
                     self._dropped.add(vid)
                     continue
-                slot = self._slots[vid] = len(self._slots)
+                self._dropped.discard(vid)
             base = SLOTS_PER_VARIABLE * slot
             row[base] = 1.0
             row[base + 1] = max(-1.0, min(1.0, b / self._bins))  # fine: exact small values
             row[base + 2] = max(-1.0, min(1.0, b / self._span))  # coarse: the whole range
+
+    def _place(self, vid: str, present: set[str]) -> int | None:
+        """A slot for a newcomer: a free one, else an absent holder's; None when none."""
+        if len(self._slots) < self._width:
+            slot = self._slots[vid] = len(self._slots)
+            return slot
+        absent = [old for old in self._slots if old not in present]
+        if not absent:
+            return None
+        # Unseen longest; the lowest slot on a tie, so a map loaded from disk (where
+        # nothing has been seen yet) hands slots over the same way as the live one did.
+        old = min(absent, key=lambda o: (self._seen.get(o, 0), self._slots[o]))
+        slot = self._slots.pop(old)
+        self._slots[vid] = slot
+        self._evicted += 1
+        return slot
 
     # ------------------------------------------------------------ persistence
 
@@ -104,7 +140,7 @@ class FeatureMap:
             "schema": SCHEMA_VERSION,
             "width": self._width,
             "bins": self._bins,
-            "ids": list(self._slots),
+            "ids": list(self.ids),
             "dropped": sorted(self._dropped),
         }
 

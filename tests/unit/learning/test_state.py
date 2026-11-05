@@ -10,6 +10,8 @@ from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.emulator.fake import ToyRacer
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
 from retro_ai_lab.learning import State, StateEncoder, bucket
+from retro_ai_lab.learning.features import DEFAULT_WIDTH
+from retro_ai_lab.learning.state import DEFAULT_MOST, KIND_RANK
 from retro_ai_lab.observation import MemorySnapshot
 from retro_ai_lab.understanding import Confidence, Encoding, Evidence, Knowledge, VariableKind
 
@@ -140,3 +142,25 @@ def test_encoder_uses_the_best_few_of_a_kind() -> None:
     ids = [v.id for v in enc.variables]
     assert len(ids) == 17 and best.id in ids and lives.id in ids
     assert [v.offset for v in enc.variables] == sorted(v.offset for v in enc.variables)
+
+
+def test_the_state_takes_the_useful_kinds_first() -> None:
+    """T-908: the user's slots filled with low-address flags before any position got one."""
+    assert DEFAULT_MOST == DEFAULT_WIDTH and KIND_RANK[0] is VariableKind.POSITION
+    k = Knowledge("g")
+    flags = [k.propose(RAM, i, kind=VariableKind.FLAG, evidence=SURE) for i in range(30)]
+    confirmed = k.confirm(flags[20].id)
+    position = k.propose(RAM, 516, kind=VariableKind.POSITION, evidence=MAYBE)
+    lives = k.propose(RAM, 600, kind=VariableKind.LIVES, evidence=MAYBE)
+    score = k.propose(RAM, 700, kind=VariableKind.SCORE, evidence=MAYBE)
+    enc = StateEncoder(k, most=8)
+    assert enc.most == 8
+    ids = [v.id for v in enc.variables]
+    assert len(ids) == 8 and {position.id, lives.id, score.id} <= set(ids)
+    assert confirmed.id in ids  # the best flag is the confirmed one
+    assert [v.offset for v in enc.variables] == sorted(v.offset for v in enc.variables)
+    assert sum(v.kind is VariableKind.FLAG for v in enc.variables) == 5
+    # No cap: everything believed, as before.
+    assert len(StateEncoder(k, most=None).variables) == 16 + 3  # 16 flags (T-850) + 3
+    with pytest.raises(ConfigurationError):
+        StateEncoder(k, most=0)

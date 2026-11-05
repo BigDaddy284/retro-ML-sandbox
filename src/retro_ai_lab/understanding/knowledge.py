@@ -54,6 +54,22 @@ THRESHOLDS: tuple[tuple[float, Confidence], ...] = (
 )
 
 
+def belief_rank(v: Variable) -> tuple[bool, int, float, str, int]:
+    """Sort key for the guesses the AI acts on: the most trusted first (T-850, T-908).
+
+    Confirmed first, then by confidence, then by evidence weight, then by
+    address. :meth:`Knowledge.believed` seats guesses in this order and the
+    state encoder fills the brain's slots in it.
+    """
+    return (
+        not v.confirmed,
+        -v.confidence.value,
+        -sum(e.weight for e in v.evidence),
+        v.region,
+        v.offset,
+    )
+
+
 def confidence_from_evidence(weights: Iterable[float]) -> Confidence:
     """Map accumulated evidence weight to a confidence level (never CONFIRMED)."""
     total = 0.0
@@ -469,15 +485,7 @@ class Knowledge:
                 and at_least <= v.confidence
                 and (wanted is None or v.region in wanted)
             ]
-        candidates.sort(
-            key=lambda item: (
-                not item[1].confirmed,
-                -item[1].confidence.value,
-                -sum(e.weight for e in item[1].evidence),
-                item[1].region,
-                item[1].offset,
-            )
-        )
+        candidates.sort(key=lambda item: belief_rank(item[1]))
         seats: dict[VariableKind, int] = {}
         chosen: list[tuple[int, Variable]] = []
         for item in candidates:
@@ -707,6 +715,7 @@ __all__ = [
     "Relationship",
     "Variable",
     "VariableKind",
+    "belief_rank",
     "confidence_from_evidence",
     "decode",
     "plain_names",

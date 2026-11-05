@@ -216,6 +216,20 @@ lives for reasons a newer build no longer has. Press "Start from scratch" in
 the Learning panel once so it forgets that game and can find the real values
 again.
 
+## What the AI sees
+
+The AI does not look at the picture. Its eyes are the values it believes in:
+each go, it reads its best guesses (a position, the lives, the score, a
+checkpoint, a few switches) and learns which button helps from how they
+change. Its brain has room for 32 of them at a time, and they are handed
+out kind by kind, the most trusted first: where things are, how it is
+doing, then the switches, so a position the AI finds late still gets a
+seat before the twentieth flag. If an enemy's position is in memory and
+the AI has found it, the AI can learn to avoid the enemy; if it has not,
+the enemy is invisible to it. The "What the AI is doing" list shows what
+it has found, and the Research window's memory table lets you name a value
+for it.
+
 ## Arranging the panels
 
 Every panel can be dragged by its title bar to another edge of the window,
