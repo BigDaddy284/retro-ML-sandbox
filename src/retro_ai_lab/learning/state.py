@@ -16,6 +16,16 @@ The better the engine's beliefs, the more the learner can see. Nothing
 believed yet means an empty state, and the learner still works, just
 blindly.
 
+Where things are relative to the player matters more than where they are
+(T-912): the user's AI died to the first enemy because, in doubling bins, an
+enemy 60 pixels off and one touching the player looked the same. So for
+every position that moves on its own (a mover, T-911) the state also holds
+its distance from each position of the player's own (a position that is not
+a mover), as ``mover - mine`` under the same doubling rule: exact within
+``bins``, then "near", "a bit off", "far", negative when it is behind. A
+distance part's id is ``distance_id(mover, mine)``. When any mover is
+believed, ``MOST_DISTANCES`` of the ``most`` seats are kept for distances.
+
 Which beliefs get in matters as much (T-908): the brain's feature map has
 ``most`` slots, and the user's game had hundreds of flag guesses at low
 addresses taking every one of them before a position value got a look in.
@@ -37,10 +47,13 @@ from retro_ai_lab.understanding.knowledge import (
     Variable,
     VariableKind,
     belief_rank,
+    is_mover,
 )
 
 DEFAULT_BINS = 8
 DEFAULT_MOST = 32  # the feature map's width (learning/features.py); kept in step by a test
+MOST_DISTANCES = 8  # seats kept for mover-to-player distances when anything moves (T-912)
+DISTANCE_SEP = "~"  # a distance part's id is "<mover id>~<my position's id>"
 IGNORED_KINDS = frozenset({VariableKind.UNKNOWN, VariableKind.INPUT, VariableKind.COUNTER})
 # The kinds a brain needs first: where things are, how it is doing, then the switches.
 KIND_RANK = (
@@ -63,6 +76,19 @@ def bucket(value: int, kind: VariableKind, bins: int = DEFAULT_BINS) -> int:
     if value < bins:
         return value
     return bins + (value // bins).bit_length() - 1
+
+
+def distance_id(mover: str, mine: str) -> str:
+    """The id of the state part holding how far ``mover`` is from ``mine`` (T-912)."""
+    if not mover or not mine or DISTANCE_SEP in mover or DISTANCE_SEP in mine:
+        raise ConfigurationError("distance_id needs two plain variable ids.")
+    return f"{mover}{DISTANCE_SEP}{mine}"
+
+
+def split_distance(vid: str) -> tuple[str, str] | None:
+    """``(mover id, my position's id)`` for a distance part's id, else None."""
+    mover, sep, mine = vid.partition(DISTANCE_SEP)
+    return (mover, mine) if sep and mover and mine else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,12 +119,19 @@ class State:
             raise ConfigurationError("most must be at least 1 (or None).")
         words = []
         for vid, b in self.parts:
-            name = knowledge.get(vid).display_name if knowledge and vid in knowledge else vid
-            words.append(f"{name}={b}")
+            words.append(f"{_part_name(vid, knowledge)}={b}")
         if most is not None and len(words) > most:
             left = len(words) - most
             return ", ".join(words[:most]) + f" and {left} more"
         return ", ".join(words)
+
+
+def _part_name(vid: str, knowledge: Knowledge | None) -> str:
+    pair = split_distance(vid)
+    if pair is not None:
+        mover, mine = (_part_name(x, knowledge) for x in pair)
+        return f"{mover} from {mine}"
+    return knowledge.get(vid).display_name if knowledge and vid in knowledge else vid
 
 
 class StateEncoder:
@@ -119,6 +152,7 @@ class StateEncoder:
         self._bins = bins
         self._most = most
         self._variables: tuple[Variable, ...] = ()
+        self._pairs: tuple[tuple[Variable, Variable], ...] = ()
         self.refresh()
 
     @property
@@ -135,25 +169,57 @@ class StateEncoder:
         """The believed variables the state is built from, lowest address first."""
         return self._variables
 
+    @property
+    def pairs(self) -> tuple[tuple[Variable, Variable], ...]:
+        """``(mover, mine)`` pairs whose distance the state holds (T-912)."""
+        return self._pairs
+
     def refresh(self) -> tuple[Variable, ...]:
         """Re-read the knowledge; call after discoveries change."""
         believed = [
             v for v in self._knowledge.believed(self._at_least) if v.kind not in IGNORED_KINDS
         ]
-        self._variables = tuple(
-            sorted(_choose(believed, self._most), key=lambda v: (v.region, v.offset))
-        )
+        most = self._most
+        if most is not None and any(is_mover(v) for v in believed):
+            most = max(1, most - MOST_DISTANCES)
+        self._variables = tuple(sorted(_choose(believed, most), key=lambda v: (v.region, v.offset)))
+        self._pairs = _pair_up(self._variables)
         return self._variables
 
     def encode(self, snapshot: MemorySnapshot) -> State:
         parts: list[tuple[str, int]] = []
+        values: dict[str, int] = {}
         for v in self._variables:
             try:
                 value = v.decode(snapshot)
             except ConfigurationError:
                 continue  # the snapshot does not cover this variable
+            values[v.id] = value
             parts.append((v.id, bucket(value, v.kind, self._bins)))
+        for mover, mine in self._pairs:
+            if mover.id in values and mine.id in values:
+                apart = values[mover.id] - values[mine.id]
+                parts.append(
+                    (distance_id(mover.id, mine.id), bucket(apart, mover.kind, self._bins))
+                )
         return State(tuple(parts))
+
+
+def _pair_up(variables: tuple[Variable, ...]) -> tuple[tuple[Variable, Variable], ...]:
+    """Each mover with each of the player's own positions of the same size and region.
+
+    The best-believed own position's pairs come first, then the next's, so the
+    ``MOST_DISTANCES`` kept are the ones most likely to matter.
+    """
+    movers = sorted((v for v in variables if is_mover(v)), key=belief_rank)
+    mine = sorted(
+        (v for v in variables if v.kind is VariableKind.POSITION and not is_mover(v)),
+        key=belief_rank,
+    )
+    pairs = [
+        (m, p) for p in mine for m in movers if m.region == p.region and m.encoding is p.encoding
+    ]
+    return tuple(pairs[:MOST_DISTANCES])
 
 
 def _choose(believed: list[Variable], most: int | None) -> list[Variable]:
@@ -189,9 +255,13 @@ def _choose(believed: list[Variable], most: int | None) -> list[Variable]:
 __all__ = [
     "DEFAULT_BINS",
     "DEFAULT_MOST",
+    "DISTANCE_SEP",
     "IGNORED_KINDS",
     "KIND_RANK",
+    "MOST_DISTANCES",
     "State",
     "StateEncoder",
     "bucket",
+    "distance_id",
+    "split_distance",
 ]
