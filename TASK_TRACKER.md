@@ -169,7 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
-| T-907 | The discovery summary line is computed once per change: one pass over the variables, remembered by the knowledge's version (and wake button), so the two progress events a review publishes and the panel's refreshes cost the window's thread nothing | 8 | Done | 2/2 | see PR |
+| T-907 | The discovery summary line is computed once per change: one pass over the variables, remembered by the knowledge's version (and wake button), so the two progress events a review publishes and the panel's refreshes cost the window's thread nothing | 8 | Done | 1/1 | see PR |
 | T-906 | The stall line names the GUI work behind a stall: every event handed to the window is timed by its name (`on DiscoveryUpdated`), a panel's coalesced refresh and the game picture's paint are timed too, and the line leaves out work that never took a millisecond | 8 | Done | 5/5 | see PR #161 |
 | T-905 | A "Tell the AI" press (and the restart watch) counts a byte only if it moved steadily: a life counter changes once in the window, down by one; score and progress never go down inside it; a byte the person confirmed as something else gets no vote | 8 | Done | 2/2 | see PR #160 |
 | T-904 | At every restart the AI presses "I just lost a life" for itself: it votes for the bytes that went down by one just before the restart, and a byte that did so before most restarts, alone, becomes its lives guess with evidence strong enough to take the seat; nothing is dropped, and a guess the person confirmed is kept | 8 | Done | 3/3 | see PR #159 |
@@ -2605,9 +2605,9 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
   2. The line's words are unchanged (the existing summary tests pass as they are).
 - **Expected changes:** `src/retro_ai_lab/services/discovery.py`, `tests/unit/services/test_discovery.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
 - **Test plan:** `test_the_summary_is_computed_once_per_change` (walks counted through the knowledge's `__iter__`); discovery and panel suites; full suite.
-- **Results:** pending.
+- **Results:** 1 new test passes; discovery + panel suites 43 passed; full suite 1311 passed, 10 skipped (3.13).
 - **Commit:** see PR. **PR:** pending.
-- **Completion report:** pending.
+- **Completion report:** The first cut of the test expected the first `summary()` after a review to walk the variables; the review had built the line already, which is the point. On the fake console `on DiscoveryProgress` fell from 3 ms avg, 5 ms max to 1 ms avg, 2 ms max a delivery.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
