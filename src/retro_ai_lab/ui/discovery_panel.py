@@ -338,7 +338,7 @@ class DiscoveryPanel(QWidget):
         k, var_id = self._selection()
         if k is None or var_id is None:
             return
-        k.confirm(var_id)
+        self._context.discovery.confirm(var_id)
         self._saved()
         self.refresh(keep=var_id)
 
@@ -346,7 +346,7 @@ class DiscoveryPanel(QWidget):
         k, var_id = self._selection()
         if k is None or var_id is None:
             return
-        k.reject(var_id)
+        self._context.discovery.reject(var_id)
         self._saved()
         self.refresh(keep=var_id)
 
@@ -374,7 +374,7 @@ class DiscoveryPanel(QWidget):
         k, var_id = self._selection()
         if k is None or var_id is None or not name.strip():
             return
-        k.correct(var_id, name=name.strip())
+        self._context.discovery.rename(var_id, name)
         self._name.clear()
         self._saved()
         self.refresh(keep=var_id)

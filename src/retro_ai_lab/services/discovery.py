@@ -592,6 +592,33 @@ class DiscoveryService:
         self._announce(DiscoveryUpdated(added, changed, (), ()))
         return k.get(var.id)
 
+    def confirm(self, var_id: str) -> Variable:
+        """A person says a guess is right; everything listening hears it (T-902)."""
+        with self._lock:
+            k = self._require()
+            var = k.confirm(var_id)
+        self._announce(DiscoveryUpdated((), (var,), (), ()))
+        return var
+
+    def reject(self, var_id: str) -> Variable:
+        """A person says a guess is wrong; the rewards and steps built on it go too (T-902)."""
+        with self._lock:
+            k = self._require()
+            var = k.reject(var_id)
+        self._announce(DiscoveryUpdated((), (var,), (), ()))
+        return var
+
+    def rename(self, var_id: str, name: str) -> Variable:
+        """A person names a guess, which also confirms it; every list follows (T-902)."""
+        name = name.strip()
+        if not name:
+            raise ConfigurationError("The value needs a name.")
+        with self._lock:
+            k = self._require()
+            var = k.correct(var_id, name=name)
+        self._announce(DiscoveryUpdated((), (var,), (), ()))
+        return var
+
     def tell(self, moment: Moment) -> Narrowing:
         """A person says what just happened; the byte that shows it is narrowed down (T-901).
 

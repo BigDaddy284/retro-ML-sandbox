@@ -131,6 +131,33 @@ def test_new_beliefs_add_suggested_objectives(
     assert labels[-1] == "Starting over" and len(labels) == 6
 
 
+def test_a_rejected_guess_leaves_the_steps_at_once(
+    goals: GoalService,
+    connection: ConnectionService,
+    discovery: DiscoveryService,
+    bus: EventBus,
+    changes: list[GoalChanged],
+) -> None:
+    """The user's "No, that's wrong" left "Get further in Lifes" on the Progress panel (T-902)."""
+    connection.connect("fake", seed=3)
+    k = teach(discovery, bus)
+    goal = goals.goal
+    assert goal is not None
+    lap = k.at(RAM, LAYOUT.lap)
+    assert lap is not None
+    before = len(changes)
+    discovery.reject(lap.id)  # the panel's No button
+    assert [o.description for o in goal] == ["Get further in Checkpoint"]
+    assert len(changes) == before + 1 and changes[-1].reason == "suggestions"
+    assert goals.refresh_suggestions() == () and len(changes) == before + 1
+    # A rename reaches the steps the same way.
+    cp = k.at(RAM, LAYOUT.checkpoint)
+    assert cp is not None
+    discovery.rename(cp.id, "Flag")
+    assert [o.description for o in goal] == ["Get further in Flag"]
+    assert changes[-1].reason == "suggestions"
+
+
 def test_trigger_options_are_plain_words(
     goals: GoalService,
     connection: ConnectionService,
