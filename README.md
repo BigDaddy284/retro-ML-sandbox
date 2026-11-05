@@ -226,9 +226,12 @@ out kind by kind, the most trusted first: where things are, how it is
 doing, then the switches, so a position the AI finds late still gets a
 seat before the twentieth flag. If an enemy's position is in memory and
 the AI has found it, the AI can learn to avoid the enemy; if it has not,
-the enemy is invisible to it. The "What the AI is doing" list shows what
-it has found, and the Research window's memory table lets you name a value
-for it.
+the enemy is invisible to it. A value that wanders both ways in small
+steps, often, is taken for the position of something that moves (an enemy,
+a platform, a ball) and listed as "Something moving" until the AI finds a
+button that moves it. The "What the AI is doing" list shows what it has
+found, and the Research window's memory table lets you name a value for
+it.
 
 ## Arranging the panels
 
