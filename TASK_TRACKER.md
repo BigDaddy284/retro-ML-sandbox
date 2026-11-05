@@ -2426,7 +2426,7 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Test plan:** `tests/unit/services/test_discovery.py::test_a_lives_guess_that_bounces_is_doubted_then_dropped` (extended), `tests/unit/training/test_insights.py::test_suggestion_rules` (extended), `tests/unit/training/test_service.py::test_behaviour_changes_and_experiments_follow_the_goes` (extended); full suite.
 - **Results:** 3/3 quality gates passed. Full suite see PR; ruff and mypy clean.
 - **Commit:** see PR. **PR:** pending.
-- **Completion report:** The person is told when a guess they confirmed does not behave like its kind, and how to fix it; the AI never overrides them.
+- **Completion report:** The person is told when a guess they confirmed does not behave like its kind, and how to fix it; the AI never overrides them. CI (ubuntu 3.11) failed once in `tests/ui/test_research_dialog.py::test_memory_view_lists_names_and_filters`: the Research window shows a guess the AI rejected as a bare address, but naming that address revived the rejected guess with its old kind ("Progress (confirmed)"); `name_value` now brings a rejected guess back as a named value of unknown kind.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

@@ -556,6 +556,14 @@ def test_a_person_names_a_value_by_address(
     assert updates[-1].added == (fresh,) and updates[-1].changed == ()
     with pytest.raises(ConfigurationError):
         discovery.name_value("ram", LAYOUT.lane, "   ")
+    # T-895: a guess the AI rejected comes back under the person's name, its kind unknown
+    # (the Research window shows a rejected guess as a bare address).
+    wrong = k.propose("ram", LAYOUT.speed, kind=VariableKind.PROGRESS)
+    k.reject(wrong.id, by="the AI")
+    mystery = discovery.name_value("ram", LAYOUT.speed, "Mystery")
+    assert mystery.id == wrong.id and mystery.name == "Mystery" and mystery.confirmed
+    assert not mystery.rejected and mystery.kind is VariableKind.UNKNOWN
+    assert updates[-1].changed == (mystery,) and updates[-1].added == ()
 
 
 def test_memory_from_several_threads_is_observed_one_at_a_time(

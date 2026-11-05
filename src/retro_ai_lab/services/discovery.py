@@ -558,6 +558,8 @@ class DiscoveryService:
 
         The AI's guess there is confirmed under that name; where it had none, a
         named value of unknown kind is made and confirmed, so the lists use the name.
+        A guess the AI had rejected comes back as a named value of unknown kind:
+        the name is the person's, the old kind was wrong (T-895).
         """
         name = name.strip()
         if not name:
@@ -575,6 +577,9 @@ class DiscoveryService:
                 k.correct(var.id, name=name)
                 added: tuple[Variable, ...] = (k.get(var.id),)
                 changed: tuple[Variable, ...] = ()
+            elif var.rejected:
+                k.correct(var.id, name=name, kind=VariableKind.UNKNOWN)
+                added, changed = (), (k.get(var.id),)
             else:
                 k.correct(var.id, name=name)
                 added, changed = (), (k.get(var.id),)
