@@ -1415,3 +1415,29 @@ def test_a_listening_game_is_probed_only_after_a_go_that_went_wrong(
     t2.start(Mode.INDEPENDENT)
     assert t2.step() and probes == []
     t2.stop()
+
+
+def test_behaviour_changes_do_not_ask_the_brain_again(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-910: the panel asks at every go's end; a fresh policy pass cost the window a second."""
+    from retro_ai_lab.training import service as service_module
+
+    calls = 0
+    original = service_module.policy_of
+
+    def counted(learner: object) -> dict[str, int]:
+        nonlocal calls
+        calls += 1
+        return original(learner)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(service_module, "policy_of", counted)
+    lab.connect()
+    t = lab.training
+    t.train(2)
+    assert calls == 2  # one snapshot per go, taken as the go ends
+    _, goes_ago, known = t.behaviour_changes(window=1)
+    assert goes_ago == 1 and known > 0 and calls == 2  # read from the snapshot, not the brain
+    for _ in range(5):
+        t.behaviour_changes()
+    assert calls == 2

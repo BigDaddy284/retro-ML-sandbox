@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-910 | The Learning panel's behaviour changes read the policy snapshot taken as the last go ended instead of running the brain over every remembered situation on the GUI thread at each go's end | 8 | Done | 1/1 | see PR |
 | T-909 | "What the AI is doing" refills its events list only when the event log grew and its relationships list only when an update carried relationships and the confident ones differ, instead of rebuilding both on every update | 8 | Done | 1/1 | see PR #164 |
 | T-908 | The brain's slots go to the useful values: the state takes its variables kind by kind in rank order (positions, lives, health, speed, score, progress, then flags), the best of each kind first, up to the feature map's width; a full feature map gives the slot of a value absent from the state to a newcomer instead of dropping it | 8 | Done | 3/3 | see PR #163 |
 | T-907 | The discovery summary line is computed once per change: one pass over the variables, remembered by the knowledge's version (and wake button), so the two progress events a review publishes and the panel's refreshes cost the window's thread nothing | 8 | Done | 1/1 | see PR #162 |
@@ -2639,6 +2640,20 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 1 new test passes; discovery panel suite 18 passed; full suite 1312 passed, 10 skipped (3.13, before the rebase onto T-908; the change touches only the panel).
 - **Commit:** see PR #164. **PR:** #164.
 - **Completion report:** The events list still rebuilds its eight rows when the log grew, which is cheap; what cost the time was sorting every confident relationship and describing sixteen of them on every update, and clearing two list widgets while they were being painted.
+
+### T-910 – The go-end freeze: behaviour changes read the last snapshot
+- **Status:** Done
+- **Phase:** 8 (the user's 15:41 log: `on EpisodeFinished ×1 avg 940 ms` and `on TrainingStateChanged ×1 avg 294 ms` at a go's end, the window's longest stalls)
+- **Objective:** At every go's end the Learning panel shows its insights, and `TrainingService.behaviour_changes` compared a *fresh* `policy_of(agent)` with a snapshot: for a DQN that is a feature-vector pass over every remembered situation (10,000 at capacity; 160 ms here, close to a second on the user's PC), on the GUI thread, and again when `TrainingStateChanged` refreshed the panel. The service already takes a policy snapshot on the worker as each go ends; "now" is that snapshot, so the GUI does a dictionary comparison and nothing more.
+- **Scope:** `TrainingService.behaviour_changes`. **Out of scope:** the worker's own snapshot cost at a go's end (one pass per go, off the GUI thread), a faster `FeatureMap.batch`.
+- **Acceptance criteria:**
+  1. Two goes take two policy snapshots; `behaviour_changes` (any number of calls) takes none more and still reports the goes compared and the situations known.
+  2. The existing behaviour-changes and experiments test passes unchanged.
+- **Expected changes:** `src/retro_ai_lab/training/service.py`, `tests/unit/training/test_service.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_behaviour_changes_do_not_ask_the_brain_again`; training, insights and Learning panel suites; full suite.
+- **Results:** 1 new test passes; training + insights + Learning panel suites 65 passed; full suite 1315 passed, 10 skipped (3.13).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** `FeatureMap.batch` over 10,000 states of 32 parts costs 160 ms here in pure Python per part; it still runs once per go on the worker for the snapshot, which is 0.5% of a 36 s go. Vectorising it is worth a task only if the go-end line on the worker ever shows.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

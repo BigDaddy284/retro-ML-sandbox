@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-910: the freeze at the end of each go is gone: the Learning panel's "what the AI does differently" reads the snapshot the AI took as the go ended instead of running the brain over every remembered situation on the window's thread.
 - T-909: the "What just happened" and "What leads to what" lists in "What the AI is doing" are refilled only when they changed, so the panel no longer costs the window 20–140 ms several times a second while the AI plays.
 - T-908: the brain's slots go to the useful values. The AI's state now takes its values kind by kind (positions, lives, health, speed, score, progress, then flags), the most trusted of each kind first, so a position found late is seen before the twentieth switch; and a full brain gives a newcomer the slot of a value that is absent instead of never seeing it.
 - T-907: the "Watching N values…" line is built once per change and remembered, instead of three walks over every value each time a review or a panel asks for it.
