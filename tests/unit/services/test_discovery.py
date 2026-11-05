@@ -21,6 +21,8 @@ from retro_ai_lab.services import (
 )
 from retro_ai_lab.services.discovery import BOUNCES, BUSY, MOVES_ALONE, PLAYED, game_id_for
 from retro_ai_lab.understanding import (
+    Confidence,
+    Encoding,
     EventKind,
     Evidence,
     Moment,
@@ -774,3 +776,81 @@ def test_telling_about_a_named_guess_keeps_its_name(
     k.correct(mine.id, name="Cars left")
     n = _tell_until_settled(discovery, connection, observation)
     assert n.settled == ("ram", LAYOUT.lives) and k.get(mine.id).name == "Cars left"
+
+
+def _play_until_a_restart(
+    connection: ConnectionService,
+    observation: ObservationService,
+    updates: list[DiscoveryUpdated],
+    most: int = 6000,
+) -> None:
+    """Hold up until the game is over, press Start, and return once a restart was announced."""
+    adapter = connection.adapter
+    assert isinstance(adapter, FakeEmulatorAdapter)
+    seen = sum(1 for u in updates for e in u.events if e.kind is EventKind.RESET)
+    for _ in range(most):
+        held = [BY_NAME["start"]] if adapter.game.state.game_over else [BY_NAME["up"]]
+        connection.call(lambda a, held=held: a.set_input(held))
+        connection.call(lambda a: a.advance_frames(1))
+        observation.advance(1)
+        if sum(1 for u in updates for e in u.events if e.kind is EventKind.RESET) > seen:
+            return
+    raise AssertionError("no restart")
+
+
+def test_the_ai_finds_the_life_counter_from_restarts(
+    connection: ConnectionService,
+    observation: ObservationService,
+    bus: EventBus,
+    updates: list[DiscoveryUpdated],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """T-904: the AI presses "I just lost a life" for itself at each restart."""
+    discovery = DiscoveryService(
+        connection, observation, bus, review_every=10_000, experiment_every=None, moment_window=30
+    )
+    connection.connect("fake", seed=2)
+    k = discovery.knowledge
+    assert k is not None
+    for offset, kind, name in (
+        (LAYOUT.lane, VariableKind.POSITION, "Lane"),
+        (LAYOUT.speed, VariableKind.SPEED, "Speed"),
+        (LAYOUT.checkpoint, VariableKind.PROGRESS, "Checkpoint"),
+        (LAYOUT.game_over, VariableKind.FLAG, "Game over"),
+    ):
+        k.propose("ram", offset, kind=kind, name=name, evidence=SURE_LIVES)
+    k.propose(
+        "ram",
+        LAYOUT.score,
+        encoding=Encoding.U16LE,
+        kind=VariableKind.SCORE,
+        name="Score",
+        evidence=SURE_LIVES,
+    )
+    wrong = k.propose("ram", LAYOUT.noise, kind=VariableKind.LIVES, name="", evidence=SURE_LIVES)
+    bus.publish(DiscoveryUpdated((), tuple(k), (), ()))
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
+    for _ in range(3):
+        _play_until_a_restart(connection, observation, updates)
+    found = k.at("ram", LAYOUT.lives)
+    assert found is not None and found.kind is VariableKind.LIVES and not found.confirmed
+    assert any(e.kind == "restarts" for e in found.evidence)
+    assert found.confidence is Confidence.HIGH
+    assert k.best(VariableKind.LIVES) is not None and k.best(VariableKind.LIVES).id == found.id
+    assert not k.get(wrong.id).rejected  # the AI's finding adds; it never drops on its own
+    assert (
+        f"The AI noticed ram[{LAYOUT.lives}] went down by one before each of the last restarts"
+        in caplog.text
+    )
+    assert any(found.id in {v.id for v in u.added} for u in updates)
+    # The person's word stays above the AI's: a confirmed guess elsewhere is kept.
+    k.reject(found.id)
+    k.correct(wrong.id, name="Lifes", kind=VariableKind.LIVES, by="you")
+    caplog.clear()
+    for _ in range(3):
+        _play_until_a_restart(connection, observation, updates)
+    assert k.get(wrong.id).confirmed and not k.get(wrong.id).rejected
+    assert (
+        'but you confirmed "Lifes"; the AI keeps your word' in caplog.text
+        or k.get(found.id).rejected
+    )

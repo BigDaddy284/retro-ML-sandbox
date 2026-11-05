@@ -14,7 +14,7 @@ from retro_ai_lab.understanding.knowledge import (
 )
 from retro_ai_lab.understanding.linking import InputLinks, apply_input_links, find_input_links
 from retro_ai_lab.understanding.longlook import LongLook
-from retro_ai_lab.understanding.moments import Moment, MomentFinder, Narrowing
+from retro_ai_lab.understanding.moments import Moment, MomentFinder, Narrowing, RestartWatch
 from retro_ai_lab.understanding.relationships import RelationshipFinder, describe_key, event_key
 from retro_ai_lab.understanding.variables import (
     Candidate,
@@ -45,6 +45,7 @@ __all__ = [
     "Narrowing",
     "Relationship",
     "RelationshipFinder",
+    "RestartWatch",
     "Variable",
     "VariableKind",
     "apply_input_links",

@@ -125,7 +125,20 @@ def test_fast_speed_takes_many_steps_per_tick(panel: LearningPanel, context: App
     assert context.training.speed is Speed.FAST and panel.speed is Speed.FAST
     panel.start()
     assert panel.tick_interval_ms == 1
-    assert panel.tick() > 1
+    # A fast tick is a slice of steps, as many as fit its budget; on a slow runner
+    # that can be one, so count the steps the service took rather than the clock.
+    t = context.training
+    before = t.total_steps
+    budgets: list[float] = []
+    real_run_for = t.run_for
+
+    def run_for(seconds: float, **kw: object) -> int:
+        budgets.append(seconds)
+        return real_run_for(seconds, max_steps=5)
+
+    t.run_for = run_for  # type: ignore[method-assign]
+    assert panel.tick() == 5 and t.total_steps == before + 5 and budgets == [0.02]
+    t.run_for = real_run_for  # type: ignore[method-assign]
     panel.choose_speed(Speed.LIVE)
     assert panel.ticking and panel.tick_interval_ms > 1 and panel.tick() == 1
     panel.stop()

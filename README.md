@@ -154,7 +154,7 @@ Press one right after it happens; the AI keeps only the bytes that moved the
 right way in the last five seconds, like a cheat finder, and after two
 presses that agree it takes the one byte left as your word, names it, and
 drops its own guesses of that kind that did not move. The note under the
-buttons says what each press found. The "What the AI is doing" panel, the log and
+buttons says what each press found. The AI presses "I just lost a life" for itself, too: every time the game throws the player back to a start point it looks for the byte that went down by one just before, and after a few restarts that agree it takes that as its lives guess (your own Yes or No still wins). The "What the AI is doing" panel, the log and
 the Rewards table's last column (Address) still show the memory address for
 grown-ups. Pick a reward and the line under
 the table says what it means and what it is worth ("Losing a life: the AI

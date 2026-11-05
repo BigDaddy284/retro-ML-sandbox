@@ -97,3 +97,75 @@ def test_misuse() -> None:
         ],
     )
     assert n.candidates == (("x", 0),)
+
+
+# ------------------------------------------------------------ T-904: restarts
+
+
+def test_restarts_vote_for_the_byte_that_went_down_by_one_before_each() -> None:
+    from retro_ai_lab.understanding import RestartWatch
+    from retro_ai_lab.understanding.moments import RESTARTS_FORGET, RESTARTS_NEEDED
+
+    assert RESTARTS_NEEDED == 3 and RESTARTS_FORGET == 8
+    watch = RestartWatch(window_frames=100)
+
+    def restart(lives_before: int, speed_before: int, n: int) -> tuple[str, int] | None:
+        # 100 frames before the restart, the moment before it, and the restart itself.
+        before = snap(n * 1000, [lives_before, speed_before, 9])
+        death = snap(n * 1000 + 50, [lives_before - 1, 0, 9])
+        home = snap(n * 1000 + 51, [3, 0, 0])
+        return watch.restart([before, death, home])
+
+    assert restart(3, 1, 1) is None and watch.restarts == 1
+    assert watch.votes(("ram", 0)) == 1 and watch.votes(("ram", 1)) == 1
+    assert restart(2, 1, 2) is None  # a tie so far
+    assert restart(1, 0, 3) == ("ram", 0)  # speed was already 0: lives alone has 3 votes
+    assert watch.restarts == 0 and watch.votes(("ram", 0)) == 0  # a winner clears the count
+    # Bytes the caller knows better about get no vote.
+    for n in range(4, 7):
+        got = watch.restart(
+            [
+                snap(n * 1000, [3, 1, 9]),
+                snap(n * 1000 + 50, [2, 0, 9]),
+                snap(n * 1000 + 51, [3, 0, 0]),
+            ],
+            skip={("ram", 1)},
+        )
+    assert got == ("ram", 0)
+    # Too few snapshots: no vote, no count.
+    assert watch.restart([snap(0, [3]), snap(1, [2])]) is None and watch.restarts == 0
+
+
+def test_restarts_with_no_clear_winner_are_forgotten() -> None:
+    from retro_ai_lab.understanding import RestartWatch
+    from retro_ai_lab.understanding.moments import RESTARTS_FORGET
+
+    watch = RestartWatch(window_frames=100)
+    for n in range(RESTARTS_FORGET - 1):
+        # Two bytes always go down by one together: a tie that never breaks.
+        assert (
+            watch.restart(
+                [snap(n * 1000, [3, 3]), snap(n * 1000 + 50, [2, 2]), snap(n * 1000 + 51, [3, 3])]
+            )
+            is None
+        )
+    assert watch.restarts == RESTARTS_FORGET - 1
+    assert watch.restart([snap(9000, [3, 3]), snap(9050, [2, 2]), snap(9051, [3, 3])]) is None
+    assert watch.restarts == 0  # forgotten: a game whose restarts are not deaths
+
+    # A winner needs two thirds of the restarts, not just three votes.
+    def one(n: int, byte: int) -> tuple[str, int] | None:
+        before = [3, 3]
+        after = [3, 3]
+        after[byte] = 2
+        return watch.restart(
+            [snap(n * 100, before), snap(n * 100 + 5, after), snap(n * 100 + 6, [3, 3])]
+        )
+
+    assert [one(n, b) for n, b in enumerate((1, 0, 1, 0, 1))] == [None] * 5
+    assert watch.votes(("ram", 1)) == 3 and watch.votes(("ram", 0)) == 2  # 3 of 5 is not enough
+    assert one(5, 1) == ("ram", 1)  # 4 of 6 is
+    with pytest.raises(ConfigurationError):
+        RestartWatch(needed=0)
+    with pytest.raises(ConfigurationError):
+        RestartWatch(needed=3, forget_after=2)
