@@ -445,3 +445,25 @@ def test_belief_rank_orders_as_believed_does() -> None:
     ranked = sorted((weak, strong, sure), key=belief_rank)
     assert [v.id for v in ranked] == [sure.id, strong.id, weak.id]
     assert [v.id for v in k.believed(per_kind=2)] == [strong.id, sure.id]  # knowledge order
+
+
+def test_a_mover_is_called_something_moving_until_the_stick_moves_it() -> None:
+    """T-911: a position found by its movement is not "Your position" until linked to a button."""
+    from retro_ai_lab.understanding.knowledge import INPUT_LINKED, MOVER, is_mover, plain_names
+
+    k = Knowledge("g")
+    mover = k.propose(
+        "ram", 1, kind=VariableKind.POSITION, evidence=[Evidence(MOVER, "Moves both ways.", 1.5)]
+    )
+    mine = k.propose(
+        "ram", 2, kind=VariableKind.POSITION, evidence=[Evidence("monotonic", "Climbs.", 2.5)]
+    )
+    assert is_mover(mover) and not is_mover(mine)
+    names = plain_names((mine, mover))
+    assert names[mine.id] == "Your position" and names[mover.id] == "Something moving"
+    linked = k.update(
+        mover.id, evidence=(*mover.evidence, Evidence(INPUT_LINKED, "Changes when Left is held."))
+    )
+    assert not is_mover(linked)
+    assert plain_names((linked,))[linked.id] == "Your position"
+    assert plain_names((mover, linked))[linked.id] == "Your position"

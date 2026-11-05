@@ -23,6 +23,7 @@ from retro_ai_lab.understanding.variables import (
     BOUNCE_UPS,
     LIVES_SAMPLES,
     MIN_TRANSITIONS,
+    MOVER,
     flag_doubt,
     lives_bounce,
     lives_busy,
@@ -250,3 +251,64 @@ def test_progress_changes_rarely_too() -> None:
     )  # the log
     assert progress_doubt(ByteStats(samples=600, changes=12, ups=5, downs=7)) == "bounces"
     assert progress_doubt(ByteStats(samples=60, changes=50, ups=49, downs=1)) is None  # too early
+
+
+# ------------------------------------------------------ T-911: things that move
+
+
+def enemy_rows(n: int = 400, *, hop: int = 3, every: int = 1) -> list[bytes]:
+    """A byte like an enemy's x: drifts both ways by up to ``hop`` every ``every`` frames."""
+    import random
+
+    rng = random.Random(911)
+    rows = []
+    x = 120
+    for i in range(n):
+        if i % every == 0:
+            x = max(0, min(255, x + rng.randint(-hop, hop)))
+        rows.append(bytes([x]))
+    return rows
+
+
+def test_something_moving_both_ways_in_small_steps_is_a_position() -> None:
+    (c,) = find_candidates(track(enemy_rows()))
+    assert c.kind is VariableKind.POSITION and c.encoding is Encoding.U8
+    assert any(e.kind == MOVER for e in c.evidence)
+    assert "moves" in c.evidence[0].detail.lower()
+
+
+def test_a_mover_that_jumps_or_hardly_moves_is_not_a_position() -> None:
+    (jumpy,) = find_candidates(track(enemy_rows(hop=40, every=2)))  # every frame would be noise
+    assert jumpy.kind is VariableKind.UNKNOWN
+    (slow,) = find_candidates(track(enemy_rows(every=20)))  # a rare stepper, as before T-911
+    assert slow.kind is not VariableKind.POSITION
+
+
+def test_a_mover_rolling_past_zero_is_still_a_position() -> None:
+    rows = []
+    x = 2
+    for i in range(400):
+        x = (x + (1 if (i // 50) % 2 == 0 else -1) * (i % 3)) & 0xFF  # drifts over the 0/255 edge
+        rows.append(bytes([x]))
+    (c,) = find_candidates(track(rows))
+    assert c.kind is VariableKind.POSITION
+
+
+def test_movers_do_not_steal_the_other_kinds() -> None:
+    """The junk, speed, lives, flag and progress bytes of the kinds test are unchanged."""
+    rows = []
+    for i in range(400):
+        lives = 3 - (i // 150)
+        flag = 1 if i >= 380 else 0
+        level = i // 100
+        speed = (i // 3) % 4
+        junk = (i * 37) % 23 if i % 4 == 0 else 5
+        rows.append(bytes([lives, flag, level, speed, junk]))
+    cands = by_offset(find_candidates(track(rows)))
+    assert [cands[i].kind for i in range(5)] == [
+        VariableKind.LIVES,
+        VariableKind.FLAG,
+        VariableKind.PROGRESS,
+        VariableKind.SPEED,
+        VariableKind.UNKNOWN,
+    ]

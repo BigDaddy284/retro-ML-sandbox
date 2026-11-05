@@ -26,6 +26,7 @@ from retro_ai_lab.understanding.knowledge import (
     Knowledge,
     Variable,
     VariableKind,
+    is_mover,
 )
 
 STEPPER_KINDS = frozenset({VariableKind.FLAG, VariableKind.PROGRESS, VariableKind.POSITION})
@@ -157,7 +158,7 @@ class LongLook:
             found = [
                 v
                 for v in self._knowledge.believed(self._at_least, regions=regions)
-                if v.kind in kinds
+                if v.kind in kinds and not is_mover(v)  # a thing moving on its own (T-911)
             ]
             self._believed_lists[kinds] = found
         return found

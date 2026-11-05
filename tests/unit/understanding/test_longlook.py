@@ -197,3 +197,16 @@ def test_many_fast_values_are_all_unpaired_after_settling() -> None:
         look.observe(MemorySnapshot(i, {RAM: row}))
     # The AI acts on 16 of each kind (T-850): all of them unpaired once settled.
     assert len(look.watching) == 32 and look.tracking == ()
+
+
+def test_a_mover_is_neither_a_driver_nor_a_stepper() -> None:
+    """T-911: something moving on its own is not a place progress happens at, nor progress."""
+    from retro_ai_lab.understanding.knowledge import MOVER
+
+    k = knowledge()
+    mover = k.propose(
+        RAM, 6, kind=VariableKind.POSITION, evidence=[Evidence(MOVER, "Moves both ways.", 6.0)]
+    )
+    look = look_at(k, frames(200))
+    assert mover.id not in look._drivers and mover.id not in look._steppers
+    assert var(k, POSITION).id in look._drivers and var(k, CHECKPOINT).id in look._steppers

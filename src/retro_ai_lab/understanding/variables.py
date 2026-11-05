@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.observation.diff import ByteStats, ChangeTracker
 from retro_ai_lab.understanding.knowledge import (
+    MOVER,
     Encoding,
     Evidence,
     Knowledge,
@@ -44,6 +45,7 @@ MIN_TRANSITIONS = 30
 NOISE_RATE = 0.9
 RARE_RATE = 0.1
 FEW_VALUES = 16
+SMALL_HOP = 8  # a thing on screen moves by at most this many a frame (T-911)
 BOUNCE_UPS = 4  # a "lives" byte restored this often is judged on its ups against its downs
 LIVES_SAMPLES = 100  # a "lives" byte is judged on how often it changes after this many steps
 
@@ -70,6 +72,17 @@ class Candidate:
 
 def _is_noise(st: ByteStats) -> bool:
     return st.change_rate >= NOISE_RATE and not st.mostly_up
+
+
+def _is_mover(st: ByteStats) -> bool:
+    """Wanders both ways by small hops, and often enough to be something on screen."""
+    return (
+        st.ups > 0
+        and st.downs > 0
+        and st.change_rate > RARE_RATE
+        and 0 < st.max_hop <= SMALL_HOP
+        and len(st.distinct) > 2
+    )
 
 
 def _is_counter(st: ByteStats) -> bool:
@@ -201,6 +214,14 @@ def _classify_single(st: ByteStats) -> tuple[VariableKind, tuple[Evidence, ...]]
             Evidence("few-values", f"Only {values} different values seen.", 1.0),
             Evidence("frequent", "Changes often.", 0.5),
         )
+    if _is_mover(st):
+        # An enemy, a platform, a ball: a number that wanders both ways in small steps,
+        # often. It is a position of something, not of the player (T-911): the input
+        # link says whose it is, and until then the brain still gets to watch it.
+        return VariableKind.POSITION, (
+            Evidence(MOVER, "Moves both ways in small steps, often.", 1.5),
+            Evidence("many-values", f"{values} different values seen.", 0.5),
+        )
     return VariableKind.UNKNOWN, (
         Evidence("changes", "Changes sometimes, in no clear pattern yet.", 1.0),
     )
@@ -288,8 +309,10 @@ __all__ = [
     "FEW_VALUES",
     "LIVES_SAMPLES",
     "MIN_TRANSITIONS",
+    "MOVER",
     "NOISE_RATE",
     "RARE_RATE",
+    "SMALL_HOP",
     "Candidate",
     "find_candidates",
     "flag_doubt",
