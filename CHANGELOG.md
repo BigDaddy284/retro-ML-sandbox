@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-909: the "What just happened" and "What leads to what" lists in "What the AI is doing" are refilled only when they changed, so the panel no longer costs the window 20–140 ms several times a second while the AI plays.
 - T-908: the brain's slots go to the useful values. The AI's state now takes its values kind by kind (positions, lives, health, speed, score, progress, then flags), the most trusted of each kind first, so a position found late is seen before the twentieth switch; and a full brain gives a newcomer the slot of a value that is absent instead of never seeing it.
 - T-907: the "Watching N values…" line is built once per change and remembered, instead of three walks over every value each time a review or a panel asks for it.
 - T-906: the "App work" line in the log names the work behind a GUI stall: every event the window handles (`on DiscoveryUpdated`), the panels' refreshes and the picture's paint are timed, and work that never took a millisecond is left off the line.

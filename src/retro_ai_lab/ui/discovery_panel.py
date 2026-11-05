@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from retro_ai_lab.core import ConfigurationError, EmulatorError, UnsupportedCapabilityError
+from retro_ai_lab.rewards.suggestions import RelationshipWatch
 from retro_ai_lab.services import (
     DiscoveryProgress,
     DiscoveryUpdated,
@@ -233,6 +234,10 @@ class DiscoveryPanel(QWidget):
         self._items: dict[str, QListWidgetItem] = {}  # variable id -> its row
         self._keys: list[SortKey] = []  # the sort key of each row, in order
         self._touched: dict[str, Variable] = {}  # added or changed since the last update
+        # The lists under the variables are rebuilt only when what they show moved (T-909).
+        self._events_shown = -1  # the event log's total at the last fill
+        self._relationships_watch = RelationshipWatch()
+        self._relationships_moved = False  # an update since the last refresh had any
 
         bridge = context.bridge
         self._unsubscribe = (
@@ -421,6 +426,7 @@ class DiscoveryPanel(QWidget):
         self._summary.setText(self._context.discovery.summary())
         self._experiment.setEnabled(self._context.discovery.can_experiment())
         self._fill_events()
+        self._relationships_watch.reset()
         self._fill_relationships()
         if keep is not None and keep in self.variable_ids():
             self.select(keep)
@@ -550,9 +556,11 @@ class DiscoveryPanel(QWidget):
             self._experiment.setEnabled(False)
 
     def _fill_events(self) -> None:
+        log = self._context.discovery.events
         self._events.clear()
-        for e in reversed(self._context.discovery.events.recent(MAX_EVENTS)):
+        for e in reversed(log.recent(MAX_EVENTS)):
             self._events.addItem(f"Frame {e.frame}: {e.detail}")
+        self._events_shown = log.total
 
     def _fill_relationships(self) -> None:
         self._relationships.clear()
@@ -609,16 +617,30 @@ class DiscoveryPanel(QWidget):
     def _on_updated(self, event: DiscoveryUpdated) -> None:
         for v in (*event.added, *event.changed):
             self._touched[v.id] = v
+        if event.relationships:
+            self._relationships_moved = True
         self._refresher.request()
 
     def _refresh_from_update(self) -> None:
+        """Bring the panel up to date, touching only what an update moved (T-896, T-909).
+
+        The user's log had this refresh running up to 14 times in every 5 s at
+        20 to 140 ms each: a rebuild of the events and relationships lists on
+        every update, most of which changed neither. The events list is
+        refilled only when the log grew, the relationships list only when an
+        update carried relationships and the confident ones differ.
+        """
         touched, self._touched = self._touched, {}
         if touched:
             self.update_rows(touched.values())
         self._summary.setText(self._context.discovery.summary())
         self._experiment.setEnabled(self._context.discovery.can_experiment())
-        self._fill_events()
-        self._fill_relationships()
+        if self._context.discovery.events.total != self._events_shown:
+            self._fill_events()
+        moved, self._relationships_moved = self._relationships_moved, False
+        k = self.knowledge
+        if moved and k is not None and self._relationships_watch.changed(k):
+            self._fill_relationships()
 
     @property
     def refresher(self) -> Coalescer:
