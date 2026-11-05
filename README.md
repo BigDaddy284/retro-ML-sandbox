@@ -140,7 +140,9 @@ best guess of each role, in plain words: "Your score jumps up", "Losing a
 life", "Progress goes up" (and "Progress (2nd guess) goes up" when it offers
 a second progress value, as a game can have a level and a checkpoint). To
 call something by its real name, pick it in the "What the AI is doing"
-panel, type the name and press Rename; every list follows. That panel's
+panel, type the name and press Rename; every list follows. Picking a line
+shows why the AI thinks so, and the "Yes, that's right", "No, that's wrong"
+and Rename controls, just above the list. That panel's
 list can run to hundreds of guesses: the find box above it keeps only the
 lines containing what you type (a name, an address such as `ram[12]`, or
 "Confirmed by you"), and the box next to it sorts by address, by name or

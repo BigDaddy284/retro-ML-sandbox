@@ -185,10 +185,12 @@ class DiscoveryPanel(QWidget):
         find.addWidget(self._found)
         find.addWidget(self._sort)
         layout.addLayout(find)
-        layout.addWidget(self._list, 2)
+        # T-900: the explanation and the verdict buttons sit above the list, so they
+        # stay in view in a short panel while the list scrolls on its own.
         layout.addWidget(self._evidence)
         layout.addLayout(verdict)
         layout.addLayout(rename)
+        layout.addWidget(self._list, 2)
         actions = QHBoxLayout()  # T-883: the three "do something" buttons on one row
         actions.addWidget(self._experiment)
         actions.addWidget(self._export)
