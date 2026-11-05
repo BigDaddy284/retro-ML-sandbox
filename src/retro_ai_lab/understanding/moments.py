@@ -6,7 +6,11 @@ finder solves this because the *person* says when it happened. "I just lost a
 life" does the same, child-sized: each press keeps only the bytes that moved
 the right way in the last few seconds (down by one for a life, up for score
 or progress), and the presses are intersected. When one byte is left after
-enough presses, the AI takes it as the person's word.
+enough presses, the AI takes it as the person's word. A byte must move
+*steadily* to count (T-905): a life counter changes once in the window, down
+by one, and a score or progress value may step up several times but never
+down, which rules out the flickering bytes a game has hundreds of. Bytes the
+person has confirmed as something else get no vote either.
 
 The AI presses the button for itself, too (T-904): a restart, when several
 values jump back to their start together, usually follows a death, so the
@@ -96,28 +100,50 @@ class Narrowing:
         return len(self.candidates)
 
 
-def _moved(moment: Moment, before: np.ndarray, after: np.ndarray) -> np.ndarray:
-    delta = after.astype(np.int16) - before.astype(np.int16)
-    moved: np.ndarray = delta == -1 if moment is Moment.LOST_LIFE else delta > 0
-    return moved
+def _moved_steadily(moment: Moment, window: list[MemorySnapshot]) -> set[Address]:
+    """The bytes that moved the moment's way over ``window``, and steadily (T-905).
+
+    A lost life: down by exactly one, in exactly one step. Score or progress:
+    up over the window, and never down inside it.
+    """
+    found: set[Address] = set()
+    for region, data in window[-1].regions.items():
+        size = len(data)
+        arrays = [
+            np.frombuffer(s.regions[region], dtype=np.uint8)
+            for s in window
+            if region in s.regions and len(s.regions[region]) == size
+        ]
+        if len(arrays) < 2:
+            continue
+        stack = np.stack(arrays).astype(np.int16)
+        diffs = np.diff(stack, axis=0)
+        total = stack[-1] - stack[0]
+        if moment is Moment.LOST_LIFE:
+            ok = (total == -1) & ((diffs != 0).sum(axis=0) == 1)
+        else:
+            ok = (total > 0) & ~(diffs < 0).any(axis=0)
+        found.update((region, int(o)) for o in np.flatnonzero(ok))
+    return found
 
 
-def _window(snapshots: Iterable[MemorySnapshot], frames: int) -> tuple[MemorySnapshot, ...]:
-    """The oldest and the newest snapshot of the last ``frames`` frames."""
+def _window_items(snapshots: Iterable[MemorySnapshot], frames: int) -> list[MemorySnapshot]:
+    """The snapshots of the last ``frames`` frames, oldest first, at least two."""
     items = list(snapshots)
     if len(items) < 2:
         raise ConfigurationError(
             "Play for a few seconds first, then press this right after it happens."
         )
     latest = items[-1]
-    start = latest
+    kept = [latest]
     for s in reversed(items[:-1]):
         if s.frame > latest.frame or s.frame < latest.frame - frames:
             break  # the counter went backwards (a restore) or the window is full
-        start = s
-    if start is latest:
-        start = items[-2]  # a single step older than the window still counts
-    return start, latest
+        kept.append(s)
+    if len(kept) == 1:
+        kept.append(items[-2])  # a single step older than the window still counts
+    kept.reverse()
+    return kept
 
 
 class MomentFinder:
@@ -146,19 +172,20 @@ class MomentFinder:
             self._candidates.pop(moment, None)
             self._presses.pop(moment, None)
 
-    def tell(self, moment: Moment, snapshots: Iterable[MemorySnapshot]) -> Narrowing:
-        """The person says ``moment`` just happened; narrow its byte down."""
-        start, latest = _window(snapshots, self._window)
-        found: set[Address] = set()
-        for region, data in latest.regions.items():
-            if region not in start.regions or len(start.regions[region]) != len(data):
-                continue
-            moved = _moved(
-                moment,
-                np.frombuffer(start.regions[region], dtype=np.uint8),
-                np.frombuffer(data, dtype=np.uint8),
-            )
-            found.update((region, int(o)) for o in np.flatnonzero(moved))
+    def tell(
+        self,
+        moment: Moment,
+        snapshots: Iterable[MemorySnapshot],
+        *,
+        skip: Collection[Address] = (),
+    ) -> Narrowing:
+        """The person says ``moment`` just happened; narrow its byte down.
+
+        ``skip`` holds bytes that cannot be the answer (confirmed as something
+        else); they are never candidates.
+        """
+        found = _moved_steadily(moment, _window_items(snapshots, self._window))
+        found.difference_update(skip)
         previous = self._candidates.get(moment)
         started_again = False
         if previous is None:
@@ -268,17 +295,7 @@ class RestartWatch:
         items = list(snapshots)
         if len(items) < 3:
             return None  # the restart and at least two snapshots before it
-        start, end = _window(items[:-1], self._window)
-        found: set[Address] = set()
-        for region, data in end.regions.items():
-            if region not in start.regions or len(start.regions[region]) != len(data):
-                continue
-            moved = _moved(
-                Moment.LOST_LIFE,
-                np.frombuffer(start.regions[region], dtype=np.uint8),
-                np.frombuffer(data, dtype=np.uint8),
-            )
-            found.update((region, int(o)) for o in np.flatnonzero(moved))
+        found = _moved_steadily(Moment.LOST_LIFE, _window_items(items[:-1], self._window))
         found.difference_update(skip)
         self._restarts += 1
         for address in found:

@@ -642,7 +642,16 @@ class DiscoveryService:
         """
         with self._lock:
             k = self._require()
-            narrowing = self._moments.tell(moment, self._observation.ring)
+            # A byte the person confirmed as something else cannot be this (T-905):
+            # the score goes up whenever one gets further, but it is not progress.
+            skip = {
+                (v.region, v.offset)
+                for v in k
+                if v.confirmed
+                and not v.rejected
+                and v.kind not in (moment.kind, VariableKind.UNKNOWN)
+            }
+            narrowing = self._moments.tell(moment, self._observation.ring, skip=skip)
             log.info("%s", narrowing.text)
             if narrowing.settled is None:
                 return narrowing

@@ -151,7 +151,8 @@ rejected at the bottom. When the AI cannot find a counter on its own (a life
 count changes too rarely for it to be sure), tell it: the "Tell the AI:" row
 has "I just lost a life", "I just got further" and "My score just went up".
 Press one right after it happens; the AI keeps only the bytes that moved the
-right way in the last five seconds, like a cheat finder, and after two
+right way, and steadily, in the last five seconds (a life counter changes
+once, down by one; a score never goes down), like a cheat finder, and after two
 presses that agree it takes the one byte left as your word, names it, and
 drops its own guesses of that kind that did not move. The note under the
 buttons says what each press found. The AI presses "I just lost a life" for itself, too: every time the game throws the player back to a start point it looks for the byte that went down by one just before, and after a few restarts that agree it takes that as its lives guess (your own Yes or No still wins). The "What the AI is doing" panel, the log and
