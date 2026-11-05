@@ -40,7 +40,13 @@ def test_a_busy_gui_thread_is_a_stall_and_the_window_is_logged(
         assert stall.count == 1 and 0.1 <= stall.max_s < 0.5
         work.note("learn", 0.02)
         qtbot.waitUntil(lambda: watch.reports >= 1, timeout=4000)
-    line = next(r.message for r in caplog.records if r.message.startswith("App work"))
+    # Another watch (a window left by an earlier test) may write its own line here;
+    # this watch's line is the one that carries the "learn" timing noted above.
+    line = next(
+        r.message
+        for r in caplog.records
+        if r.message.startswith("App work") and "learn" in r.message
+    )
     assert f"GUI stall {X}1" in line and f"learn {X}1 avg 20 ms" in line
     assert work.summary() == "nothing"  # a new window
     watch.stop()
@@ -64,3 +70,32 @@ def test_bad_settings_are_refused() -> None:
         StallWatch(WorkLog(), stall_s=0)
     with pytest.raises(ValueError):
         StallWatch(WorkLog(), report_every_s=-1)
+
+
+def test_the_line_leaves_out_work_under_a_millisecond(
+    qtbot: QtBot, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T-906: a 2 ms handler is named; 300 free deliveries are not."""
+    from retro_ai_lab.ui.stall_watch import DEFAULT_QUIET_S
+
+    assert DEFAULT_QUIET_S == 0.001
+    work = WorkLog()
+    watch = StallWatch(work, interval_ms=5, report_every_s=0.05)
+    for _ in range(300):
+        work.note("on MemoryObserved", 0.0001)
+    work.note("on DiscoveryUpdated", 0.002)
+    watch.start()
+    with caplog.at_level(logging.INFO, logger="retro_ai_lab.ui.stall_watch"):
+        qtbot.waitUntil(lambda: watch.reports >= 1, timeout=2000)
+    watch.stop()
+    line = next(r.message for r in caplog.records if r.message.startswith("App work"))
+    assert f"on DiscoveryUpdated {X}1 avg 2 ms" in line and "MemoryObserved" not in line
+    # Only quiet work: no line at all.
+    work.note("on MemoryObserved", 0.0001)
+    watch = StallWatch(work, interval_ms=5, report_every_s=0.05)
+    watch.start()
+    qtbot.wait(150)
+    assert watch.reports == 0
+    watch.stop()
+    with pytest.raises(ValueError):
+        StallWatch(WorkLog(), quiet_under_s=-0.1)

@@ -105,3 +105,28 @@ def test_forwarding_thousands_of_events_leaks_no_references(qapp: QApplication) 
     after = tuple(sys.getrefcount(x) for x in (True, False, None))
     assert len(got) == 3000
     assert after == before, f"reference counts drifted (True, False, None): {before} -> {after}"
+
+
+def test_deliveries_are_timed_by_event_name(qtbot: QtBot) -> None:
+    """T-906: the stall line can name the handler behind a stall."""
+    from retro_ai_lab.core.worklog import WorkLog
+
+    bus = EventBus()
+    work = WorkLog()
+    bridge = EventBridge(bus, worklog=work)
+    bridge.subscribe(Ping, lambda _: None)
+    bus.publish(Ping(1))  # the GUI thread: delivered, and timed, at once
+    assert work.stats["on Ping"].count == 1
+
+    class Worker(QThread):
+        def run(self) -> None:
+            bus.publish(Ping(2))
+
+    worker = Worker()
+    worker.start()
+    qtbot.waitUntil(lambda: work.stats["on Ping"].count == 2)
+    worker.wait()
+    bridge.publish_local(Ping(3))
+    assert work.stats["on Ping"].count == 3
+    bus.publish(object())  # no handler: still timed (and left off the line, costing nothing)
+    assert work.stats["on object"].count == 1

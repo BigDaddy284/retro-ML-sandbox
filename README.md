@@ -107,6 +107,13 @@ prints how many frames the clock managed against how many it wanted, what each
 bridge command cost, what the app's own bookkeeping took per step and per
 picture, and the longest stall of the window's thread.
 
+The app's own log does the same every five seconds while it runs: next to the
+emulator link's line, an "App work" line counts the stalls of the window's
+thread and names what that thread did, event by event (`on DiscoveryUpdated`),
+panel refresh by panel refresh, and the picture's paint, leaving out anything
+that never took a millisecond. When the window stutters, that line says which
+part of the app was busy.
+
 ## Letting the AI start the game
 
 Press Start in the Learning panel wherever the game is, even on its title

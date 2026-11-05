@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-906 | The stall line names the GUI work behind a stall: every event handed to the window is timed by its name (`on DiscoveryUpdated`), a panel's coalesced refresh and the game picture's paint are timed too, and the line leaves out work that never took a millisecond | 8 | Done | 5/5 | see PR |
 | T-905 | A "Tell the AI" press (and the restart watch) counts a byte only if it moved steadily: a life counter changes once in the window, down by one; score and progress never go down inside it; a byte the person confirmed as something else gets no vote | 8 | Done | 2/2 | see PR #160 |
 | T-904 | At every restart the AI presses "I just lost a life" for itself: it votes for the bytes that went down by one just before the restart, and a byte that did so before most restarts, alone, becomes its lives guess with evidence strong enough to take the seat; nothing is dropped, and a guess the person confirmed is kept | 8 | Done | 3/3 | see PR #159 |
 | T-903 | The AI's steps run on a worker thread, not the GUI thread: the Learning panel's timer hands each step (or fast slice) to a worker and skips a pulse while one is running; the training service takes a re-entrant lock so Stop, Pause and a mode change wait for the step in flight | 8 | Done | 3/3 | see PR #158 |
@@ -2576,6 +2577,22 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; moments + discovery + panel 52 passed; full suite 1305 passed, 10 skipped (3.13).
 - **Commit:** see PR #160. **PR:** #160.
 - **Completion report:** The window is now a stack of every snapshot in it (up to 300 × the memory size as 16-bit numbers), which is a few megabytes on a console with 2 KB of RAM and tens on one with 64 KB; a press and a restart are rare enough for that. The stricter rule is what a cheat finder's "decreased by exactly 1" scan does when it is run on every frame rather than once.
+
+### T-906 – The stall line names the GUI work behind a stall
+- **Status:** Done
+- **Phase:** 8 (the user's 13:24 log, "You play" at 13:28–13:31: one to six GUI stalls of 60–150 ms in every 5 s while the picture took 0 ms; no line said what the window's thread was doing)
+- **Objective:** The stall watch (T-894) counts the gaps but the only GUI work it times is the picture, so a stall with "picture ×28 avg 0 ms" beside it names nothing. Every event the bridge delivers to the window is now timed under `on <Event>`, a panel's coalesced refresh under its name (`discoveries refresh`, `rewards refresh`), and the game picture's paint under `paint`; the stall line leaves out names whose longest run was under a millisecond, so hundreds of free deliveries do not bury the one that cost 100 ms. The next log will say which handler the stalls are, instead of a guess. A profile of 20 s of play on the fake console already points at the discovery summary, which is computed three times over 3,400 values for every review and again by two handlers; that is the next task once the log confirms it.
+- **Scope:** `core/worklog.py` (`quiet_under_s`), `ui/stall_watch.py`, `ui/bridge.py`, `ui/coalesce.py` (`name`), the two named coalescers, `ui/frame_view.py`. **Out of scope:** making any handler faster (T-907 when the log names it).
+- **Acceptance criteria:**
+  1. `WorkLog.summary(quiet_under_s=...)` and `take_window` leave out names whose longest run is under the threshold, and say "nothing" when every name is.
+  2. A bridge delivers an event under `on <EventName>` in its work log, whether the handlers are on the same thread or another; a delivery with no handler is timed too (it costs nothing and is left out of the line).
+  3. A named coalescer times each run under its name; an unnamed one times nothing.
+  4. The stall watch's line uses the threshold: a 2 ms handler is named, a 0.1 ms one is not.
+- **Expected changes:** `src/retro_ai_lab/core/worklog.py`, `src/retro_ai_lab/ui/stall_watch.py`, `src/retro_ai_lab/ui/bridge.py`, `src/retro_ai_lab/ui/coalesce.py`, `src/retro_ai_lab/ui/discovery_panel.py`, `src/retro_ai_lab/ui/rewards_panel.py`, `src/retro_ai_lab/ui/frame_view.py`, `tests/unit/core/test_worklog.py`, `tests/ui/test_bridge.py`, `tests/ui/test_coalesce.py`, `tests/ui/test_stall_watch.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_quiet_work_is_left_out_of_the_line` (worklog), `test_deliveries_are_timed_by_event_name` (bridge), `test_a_named_coalescer_times_its_runs` (coalesce), `test_the_line_leaves_out_work_under_a_millisecond` (stall watch); worklog, bridge, coalesce, stall watch, frame view and panel suites; full suite.
+- **Results:** 5 new tests pass (a paint-timing test joined the four planned); worklog, bridge, coalesce, stall watch, frame view and panel suites 60 passed; full suite 1310 passed, 10 skipped (3.13).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** Timing a delivery costs two clock reads, which the fake-console profile puts under 20 µs per event. The first full run showed the stall-watch test reading a line written by another window's watch, now that every window's bridge feeds the shared log; the test picks the line that carries its own timing. On the fake console the line during play reads `on DiscoveryProgress ×6 avg 3 ms max 5 ms; paint ×150 avg 1 ms max 3 ms; picture ×150 avg 0 ms max 1 ms`.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

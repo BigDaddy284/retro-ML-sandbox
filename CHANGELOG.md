@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-906: the "App work" line in the log names the work behind a GUI stall: every event the window handles (`on DiscoveryUpdated`), the panels' refreshes and the picture's paint are timed, and work that never took a millisecond is left off the line.
 - T-905: a "Tell the AI" press counts a byte only if it moved steadily through the last five seconds (a life counter changes once, down by one; score and progress never go down inside the window), and a byte you confirmed as something else is never picked, so your Score cannot become your Progress.
 - T-904: at every restart the AI does the "I just lost a life" narrowing for itself: a byte that went down by one just before most restarts becomes its lives guess and takes the seat in the rewards and steps; nothing is dropped, and a guess you confirmed is kept.
 - T-903: the AI's steps run on a worker thread instead of the thread that draws the window, so the panels no longer freeze for every step; Stop, Pause and a mode change wait for the step in flight.

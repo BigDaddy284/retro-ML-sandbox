@@ -7,8 +7,10 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from retro_ai_lab.core import ConfigurationError, Frame
+from retro_ai_lab.core.worklog import app_work
 
 BACKGROUND = QColor(24, 24, 32)
+PAINT = "paint"  # the work-log name of one paint of the picture (T-906)
 PLACEHOLDER_TEXT = "No game yet"
 
 
@@ -79,15 +81,16 @@ class FrameView(QWidget):
     # ------------------------------------------------------------ painting
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt API
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), BACKGROUND)
-        if self._image is None:
-            painter.setPen(QColor(200, 200, 210))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._placeholder)
-        else:
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
-            painter.drawImage(self.image_rect(), self._image)
-        painter.end()
+        with app_work.timed(PAINT):  # the stall line can name a slow paint (T-906)
+            painter = QPainter(self)
+            painter.fillRect(self.rect(), BACKGROUND)
+            if self._image is None:
+                painter.setPen(QColor(200, 200, 210))
+                painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._placeholder)
+            else:
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+                painter.drawImage(self.image_rect(), self._image)
+            painter.end()
 
 
-__all__ = ["BACKGROUND", "PLACEHOLDER_TEXT", "FrameView", "frame_to_image"]
+__all__ = ["BACKGROUND", "PAINT", "PLACEHOLDER_TEXT", "FrameView", "frame_to_image"]

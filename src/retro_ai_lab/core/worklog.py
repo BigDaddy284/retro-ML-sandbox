@@ -74,18 +74,26 @@ class WorkLog:
         finally:
             self.note(name, self._clock() - started)
 
-    def summary(self) -> str:
-        """One line, the name with the most total time first; "nothing" when empty."""
-        if not self._stats:
+    def summary(self, *, quiet_under_s: float = 0.0) -> str:
+        """One line, the name with the most total time first; "nothing" when empty.
+
+        A name whose longest run stayed under ``quiet_under_s`` is left out
+        (T-906): hundreds of free event deliveries would otherwise bury the
+        one handler that cost 100 ms.
+        """
+        if quiet_under_s < 0:
+            raise ValueError("quiet_under_s cannot be negative")
+        loud = {n: s for n, s in self._stats.items() if s.max_s >= quiet_under_s}
+        if not loud:
             return "nothing"
-        ordered = sorted(self._stats.items(), key=lambda item: item[1].total_s, reverse=True)
+        ordered = sorted(loud.items(), key=lambda item: item[1].total_s, reverse=True)
         return "; ".join(stats.describe(name) for name, stats in ordered)
 
-    def take_window(self) -> tuple[float, str]:
+    def take_window(self, *, quiet_under_s: float = 0.0) -> tuple[float, str]:
         """The window's length and summary, then start a new window."""
         now = self._clock()
         window = now - self._window_started
-        summary = self.summary()
+        summary = self.summary(quiet_under_s=quiet_under_s)
         self._stats = {}
         self._window_started = now
         return window, summary

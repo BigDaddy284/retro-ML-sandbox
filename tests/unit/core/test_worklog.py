@@ -47,3 +47,19 @@ def test_bad_timings_are_refused() -> None:
 
 def test_the_app_shares_one_work_log() -> None:
     assert isinstance(app_work, WorkLog)
+
+
+def test_quiet_work_is_left_out_of_the_line() -> None:
+    """T-906: hundreds of free event deliveries must not bury the one slow handler."""
+    work = WorkLog(Clock())
+    for _ in range(300):
+        work.note("on MemoryObserved", 0.0002)
+    work.note("on DiscoveryUpdated", 0.1)
+    assert work.summary(quiet_under_s=0.001) == f"on DiscoveryUpdated {X}1 avg 100 ms max 100 ms"
+    assert work.summary().startswith(f"on DiscoveryUpdated {X}1")  # the default keeps all
+    assert f"on MemoryObserved {X}300" in work.summary()
+    assert work.summary(quiet_under_s=1.0) == "nothing"
+    _, summary = work.take_window(quiet_under_s=0.001)
+    assert summary == f"on DiscoveryUpdated {X}1 avg 100 ms max 100 ms"
+    with pytest.raises(ValueError, match="cannot be negative"):
+        work.summary(quiet_under_s=-1)

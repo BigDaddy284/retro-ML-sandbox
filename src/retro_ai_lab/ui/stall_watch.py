@@ -4,7 +4,11 @@ A timer on the GUI thread fires every few milliseconds; a gap much longer
 than its interval means the thread was busy (a long step, a slow panel), which
 the person sees as a freeze. Every ``report_every_s`` the watch writes one
 line next to the emulator link's: the app's own timings (:data:`app_work`)
-and how many stalls over ``stall_s`` there were, with the longest.
+and how many stalls over ``stall_s`` there were, with the longest. Since
+T-906 the timings name every event the window's thread handled (``on
+DiscoveryUpdated``), the panels' coalesced refreshes and the picture's
+paint, and the line leaves out work that never took ``quiet_under_s``, so
+the stall's cause is on the line and the free deliveries are not.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ log = logging.getLogger(__name__)
 DEFAULT_INTERVAL_MS = 10
 DEFAULT_STALL_S = 0.05  # a stall this long shows as a stutter
 REPORT_EVERY_S = 5.0
+DEFAULT_QUIET_S = 0.001  # work that never took a millisecond is not worth a word
 STALL = "GUI stall"
 
 
@@ -33,6 +38,7 @@ class StallWatch(QObject):
         interval_ms: int = DEFAULT_INTERVAL_MS,
         stall_s: float = DEFAULT_STALL_S,
         report_every_s: float = REPORT_EVERY_S,
+        quiet_under_s: float = DEFAULT_QUIET_S,
         clock: Callable[[], float] = time.perf_counter,
         parent: QObject | None = None,
     ) -> None:
@@ -41,9 +47,12 @@ class StallWatch(QObject):
             raise ValueError("interval_ms must be positive")
         if stall_s <= 0 or report_every_s <= 0:
             raise ValueError("stall_s and report_every_s must be positive")
+        if quiet_under_s < 0:
+            raise ValueError("quiet_under_s cannot be negative")
         self._worklog = worklog
         self._stall_s = stall_s
         self._report_every_s = report_every_s
+        self._quiet_under_s = quiet_under_s
         self._clock = clock
         self._last: float | None = None
         self._stalls = 0
@@ -88,12 +97,19 @@ class StallWatch(QObject):
             self.report()
 
     def report(self) -> None:
-        """Log the window's summary (nothing when the app did nothing timed)."""
-        window, summary = self._worklog.take_window()
+        """Log the window's summary (nothing when the app did nothing worth a word)."""
+        window, summary = self._worklog.take_window(quiet_under_s=self._quiet_under_s)
         if summary == "nothing":
             return
         self._reports += 1
         log.info("App work, last %.0f s: %s", window, summary)
 
 
-__all__ = ["DEFAULT_INTERVAL_MS", "DEFAULT_STALL_S", "REPORT_EVERY_S", "STALL", "StallWatch"]
+__all__ = [
+    "DEFAULT_INTERVAL_MS",
+    "DEFAULT_QUIET_S",
+    "DEFAULT_STALL_S",
+    "REPORT_EVERY_S",
+    "STALL",
+    "StallWatch",
+]
