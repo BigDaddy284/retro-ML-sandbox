@@ -2513,7 +2513,7 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Expected changes:** `src/retro_ai_lab/understanding/moments.py` (new), `src/retro_ai_lab/understanding/__init__.py`, `src/retro_ai_lab/services/discovery.py`, `src/retro_ai_lab/ui/discovery_panel.py`, `tests/unit/understanding/test_moments.py` (new), `tests/unit/services/test_discovery.py`, `tests/ui/test_discovery_panel.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
 - **Test plan:** `test_moments.py` (7: the window, the moved rule per moment, the intersection, starting again, settling and forgetting, the texts, bad settings); `test_telling_the_ai_about_a_lost_life_finds_the_counter`, `test_telling_about_a_named_guess_keeps_its_name` (service, toy racer); `test_tell_buttons_narrow_the_byte_down` (panel); discovery, panel and understanding suites; full suite.
 - **Results:** 10 new tests pass; discovery + panel + moments 47 passed; full suite 1295 passed, 10 skipped (3.13).
-- **Commit:** see PR. **PR:** pending.
+- **Commit:** see PR #156. **PR:** #156.
 - **Completion report:** The toy racer crashes every 60 frames or so, so with the five-second window two crashes fall in one press and the counter moves by two, failing the "down by one" rule; the service tests therefore use a 30-frame window through the new setting rather than a looser rule, because on a real game "down by exactly one" is what tells a life counter from a timer. The AI's wrong guesses are dropped only when the person's word settles a byte, never on a single press, so a mistimed press costs nothing.
 
 ### T-902 – A rejected guess leaves the rewards and steps at once
@@ -2528,7 +2528,7 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Expected changes:** `src/retro_ai_lab/services/discovery.py`, `src/retro_ai_lab/services/goals.py`, `src/retro_ai_lab/ui/discovery_panel.py`, tests, `TASK_TRACKER.md`, `CHANGELOG.md`, `ARCHITECTURE.md`.
 - **Test plan:** `test_a_rejected_guess_leaves_the_steps_at_once` (goals), `test_a_rejected_guess_loses_its_rewards_at_once` (rewards), the announcement check in `test_confirm_reject_and_rename` (panel); services and UI suites; full suite.
 - **Results:** 3 new or extended tests pass; goals + rewards + panels + discovery 81 passed; full suite 1297 passed, 10 skipped (3.13).
-- **Commit:** see PR. **PR:** pending.
+- **Commit:** see PR #157. **PR:** #157.
 - **Completion report:** This is the generic rule the user asked for: a person's verdict is a change like any the AI makes, heard by everything that builds on the knowledge. It also explains the earlier puzzle of the rejected "Lifes" still paying: the rewards were not wrong about the verdict, they had not been told.
 
 ### T-903 – The AI's steps leave the GUI thread
@@ -2544,7 +2544,7 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Expected changes:** `src/retro_ai_lab/ui/learning_panel.py`, `src/retro_ai_lab/training/service.py`, `tests/ui/test_learning_panel.py`, `tests/unit/training/test_service.py`, `TASK_TRACKER.md`, `CHANGELOG.md`, `ARCHITECTURE.md`.
 - **Test plan:** `test_the_timer_steps_on_a_worker_thread`, `test_a_failing_step_is_shown_not_lost` (panel, with the real timer under `qtbot.waitUntil`); `test_the_gui_buttons_wait_for_a_step_on_another_thread` (service); training and panel suites three times; full suite.
 - **Results:** 3 new tests pass; training + panel suites 62 passed, three runs; full suite 1300 passed, 10 skipped (3.13).
-- **Commit:** see PR. **PR:** pending.
+- **Commit:** see PR #158. **PR:** #158.
 - **Completion report:** The lock covers what the GUI calls, not `_on_disconnected`: a disconnect started on the GUI thread holds the connection's lock while it announces, and a worker mid-step may need that lock to record a dropped link, so locking the handler too could deadlock. The handler therefore keeps today's behaviour of closing the go under a step, which the step already survives. The "App work" log line keeps timing "ai step"; after this change it measures the worker's time and the "GUI stall" count should fall to the panels' own drawing.
 
 ### T-904 – The AI narrows the life counter down at restarts
