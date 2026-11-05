@@ -59,7 +59,12 @@ def test_an_idle_window_writes_no_line(qtbot: QtBot, caplog: pytest.LogCaptureFi
     watch.start()
     with caplog.at_level(logging.INFO, logger="retro_ai_lab.ui.stall_watch"):
         qtbot.wait(150)
-    assert watch.reports == 0 and not [r for r in caplog.records if "App work" in r.message]
+    # A report is a line (StallWatch.report writes one per count), so none was written,
+    # and there was nothing for one to say. A window an earlier test left behind may
+    # write its own "App work" line meanwhile (seen on a slow CI runner); that line is
+    # another watch's, as the busy test above allows for too.
+    assert watch.reports == 0 and not work.stats
+    assert not [r for r in caplog.records if "App work" in r.message and "learn" in r.message]
     watch.stop()
 
 
