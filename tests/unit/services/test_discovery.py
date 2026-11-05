@@ -467,9 +467,10 @@ def test_a_lives_guess_that_bounces_is_doubted_then_dropped(
     (question,) = discovery.questions
     assert question.var_id == sure.id and question.name == "Sworn lives"
     assert question.reason == BOUNCES and question.text.startswith('You confirmed "Sworn lives"')
-    assert "does not bounce. The AI keeps your word; if it is not a life count, reject it" in (
-        question.text
-    )
+    assert (
+        "does not bounce. The AI keeps your word; if it is not a life count, pick it under "
+        '"What the AI is doing" and press "No, that\'s wrong".'
+    ) in question.text  # T-897: the panel's real title, not a name the app never shows
     assert question.text in caplog.text
     # The next review drops all three; the real and the confirmed guesses are untouched.
     update = discovery.review()
