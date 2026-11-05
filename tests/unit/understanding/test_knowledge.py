@@ -143,8 +143,12 @@ def test_variable_round_trip_and_bad_dict() -> None:
         (Evidence("a", "b", 2.0),),
         confirmed=True,
         notes="hi",
+        judged=37,
     )
     assert Variable.from_dict(v.to_dict()) == v
+    assert v.to_dict()["judged"] == 37
+    old = {k: val for k, val in v.to_dict().items() if k != "judged"}  # a file from before T-917
+    assert Variable.from_dict(old).judged == 0
     with pytest.raises(ConfigurationError):
         Variable.from_dict({"id": "x", "region": "ram", "offset": 0, "encoding": "u99"})
     with pytest.raises(ConfigurationError):

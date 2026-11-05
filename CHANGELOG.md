@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-917: the AI rethinks a guess only once the value has changed at least twice as often as when it last judged it, so a value on the edge of a rule no longer flips kind at every review (the user's log had 1,384 flips in an hour, mostly progress to unknown and back); each guess remembers how many changes it was judged on.
 - T-916: the AI rethinks any guess it made itself whenever a review finds its behaviour now says another kind, so an enemy's position that looked like "a speed" after five changes becomes "Something moving" once it has walked; a guess the AI dropped comes back the same way as another kind. Guesses you confirmed, named or rejected, ones placed by your "I just …" or by the restart finding, and positions the controller link found are never rethought. The user's log had run 77 goes on labels given at the first look.
 - T-915: the distances to moving things are measured from the AI's own position, the one the stick moves or one you confirmed, not from a scrolling value that happened to rank higher.
 - T-914: a value that changes every step by small hops, the way a walking enemy's position does, is no longer thrown away as noise; it is listed as "Something moving" whichever way it goes. The user's log showed the AI had never seen a moving thing because of this.

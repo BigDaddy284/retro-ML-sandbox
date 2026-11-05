@@ -58,6 +58,7 @@ class Candidate:
     encoding: Encoding
     kind: VariableKind
     evidence: tuple[Evidence, ...]
+    changes: int = 0  # how many changes of the byte the verdict rests on (T-917)
 
     @property
     def weight(self) -> float:
@@ -279,14 +280,14 @@ def find_candidates(
         upper = stats.get((region, offset + 1))
         if upper is not None and (region, offset + 1) not in taken and _is_pair(st, upper):
             kind, evidence = _classify_pair(st, upper)
-            out.append(Candidate(region, offset, Encoding.U16LE, kind, evidence))
+            out.append(Candidate(region, offset, Encoding.U16LE, kind, evidence, st.changes))
             taken.update({(region, offset), (region, offset + 1)})
             continue
         single = _classify_single(st)
         if single is None:
             continue
         kind, evidence = single
-        out.append(Candidate(region, offset, Encoding.U8, kind, evidence))
+        out.append(Candidate(region, offset, Encoding.U8, kind, evidence, st.changes))
         taken.add((region, offset))
     return tuple(out)
 
@@ -306,7 +307,12 @@ def propose_candidates(
             continue
         added.append(
             knowledge.propose(
-                c.region, c.offset, encoding=c.encoding, kind=c.kind, evidence=c.evidence
+                c.region,
+                c.offset,
+                encoding=c.encoding,
+                kind=c.kind,
+                evidence=c.evidence,
+                judged=c.changes,
             )
         )
     return tuple(added)
@@ -354,7 +360,13 @@ def rethink_candidates(
     confirmed, named or person-rejected guess holds, as does one placed by a
     person's "I just …" or by the restart finding, and a position the input
     link found. A guess the AI dropped stays dropped while the classifier
-    repeats the kind it dropped, and comes back as the other kind.
+    repeats the kind it dropped, and comes back as the other kind. A guess is
+    rethought only once the byte has changed at least twice as often as when it
+    was last judged (T-917): on the user's game a byte on the edge of a rule
+    flipped kind at every review, and with it the brain's seats; doubling bounds
+    the rethinks of a byte to a handful over a session and lets each verdict
+    rest on twice the evidence of the last. A guess with no record (an older
+    file, a planted guess) is rethought on the first differing verdict.
     Returns the variables whose kind changed.
     """
     at: dict[tuple[str, int, Encoding], Variable] = {
@@ -363,11 +375,17 @@ def rethink_candidates(
     changed: list[Variable] = []
     for c in candidates:
         v = at.get((c.region, c.offset, c.encoding))
-        if v is None or v.kind is c.kind or not _rethinkable(v):
+        if v is None or v.kind is c.kind or c.changes < 2 * v.judged or not _rethinkable(v):
             continue
         kept = tuple(e for e in v.evidence if e.kind not in CLASSIFIER_KINDS and e.weight > 0)
         changed.append(
-            knowledge.update(v.id, kind=c.kind, rejected=False, evidence=(*c.evidence, *kept))
+            knowledge.update(
+                v.id,
+                kind=c.kind,
+                rejected=False,
+                evidence=(*c.evidence, *kept),
+                judged=c.changes,
+            )
         )
     return tuple(changed)
 

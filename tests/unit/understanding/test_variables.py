@@ -204,6 +204,37 @@ def test_a_guess_the_ai_dropped_comes_back_as_another_kind() -> None:
     assert propose_candidates(k, (again,)) == ()  # still the same place, never duplicated
 
 
+def test_a_guess_is_rethought_once_the_byte_has_changed_twice_as_often() -> None:
+    """T-917: a byte on the edge of a rule must not flip kind at every review."""
+    k = Knowledge("g")
+    v = k.propose("ram", 3, kind=VariableKind.PROGRESS, judged=20)
+    unknown = Candidate("ram", 3, Encoding.U8, VariableKind.UNKNOWN, (), changes=39)
+    assert rethink_candidates(k, (unknown,)) == () and k.get(v.id).kind is VariableKind.PROGRESS
+    enough = Candidate("ram", 3, Encoding.U8, VariableKind.UNKNOWN, (), changes=40)
+    (changed,) = rethink_candidates(k, (enough,))
+    assert changed.kind is VariableKind.UNKNOWN and changed.judged == 40
+    back = Candidate("ram", 3, Encoding.U8, VariableKind.PROGRESS, (), changes=41)
+    assert rethink_candidates(k, (back,)) == ()  # not until 80 changes
+    # a planted guess, or one from a file before T-917, has no record and is rethought at once
+    planted = k.propose("ram", 5, kind=VariableKind.SPEED)
+    (changed,) = rethink_candidates(
+        k, (Candidate("ram", 5, Encoding.U8, VariableKind.LIVES, (), changes=3),)
+    )
+    assert changed.id == planted.id and changed.kind is VariableKind.LIVES and changed.judged == 3
+
+
+def test_candidates_and_proposals_carry_the_changes_judged_on() -> None:
+    rows = enemy_rows()
+    (c,) = find_candidates(track(rows[:40]))
+    assert c.changes == track(rows[:40]).stats("ram", 0).changes > 0
+    k = Knowledge("g")
+    (v,) = propose_candidates(k, (c,))
+    assert v.judged == c.changes
+    wide = find_candidates(drive(900))
+    pair = next(c for c in wide if c.encoding is Encoding.U16LE)
+    assert pair.changes == drive(900).stats("ram", pair.offset).changes  # the lower byte's
+
+
 def test_a_walking_enemy_judged_early_becomes_a_mover_later() -> None:
     """The user's log: an enemy slot called "a speed" on its first values stayed so."""
     rows = enemy_rows()
