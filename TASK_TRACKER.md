@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-915 | Distances to moving things are measured from the player's own position, one the stick moves or a person confirmed, falling back to any non-mover position only when none is seated | 8 | Done | 1/1 | see PR |
 | T-914 | A value changing every step by small hops (a walking enemy) is no longer noise; it is proposed as something moving whichever way it goes, a timer ticking down every frame is a counter, and every-hop-one bytes are not movers | 8 | Done | 1/1 | see PR #169 |
 | T-913 | After every go the log names the brain in use, its situations known and exploring rate, and what the state sees (positions, moving things, distances, life counts, switches) | 8 | Done | 1/1 | see PR #168 |
 | T-912 | The state holds each moving thing's distance from the player's own position, exact up close and rough far away, with eight seats kept for distances whenever anything moves | 8 | Done | 1/1 | see PR #167 |
@@ -2722,6 +2723,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 4 new tests pass; observation + understanding + learning + services + integration 405 passed; full suite 1333 passed, 10 skipped in 259.55s (0:04:19).
 - **Commit:** see PR #169. **PR:** #169.
 - **Completion report:** The log also showed lives lost per go rising from 0.8 to 2.3 as exploring fell from 81% to 5%: with no enemy in view the network settled on grabbing points and taking hits. A thing that moves exactly one every step in one direction is still not a mover (it reads as a timer); that is the price of keeping countdowns out, and the climbing-position rule has paid it since T-302.
+
+### T-915 – Distances are measured from the position the stick moves
+- **Status:** Done
+- **Phase:** 8 (the user's 18:01 log: ten positions seated, the scrolling one ranked first)
+- **Objective:** `_pair_up` measured distances from the best-believed non-mover position, which on the user's game is a scroll value, not the player. Prefer positions a person confirmed or the input link found.
+- **Scope:** `_pair_up` and `_input_linked` in `learning/state.py`. **Out of scope:** telling x from y; a person naming which position is theirs beyond confirming it.
+- **Acceptance criteria:**
+  1. With a climbing position (weight 6), two input-linked positions and a mover, the pairs use only the linked positions, best first; the climbing one stays seated.
+  2. Confirming the climbing position makes it the first own position.
+  3. With no linked or confirmed position, every non-mover position is paired, as in T-912.
+- **Expected changes:** `src/retro_ai_lab/learning/state.py`, `tests/unit/learning/test_state.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_distances_are_measured_from_the_position_the_stick_moves`; learning, training and integration suites; full suite.
+- **Results:** 1 new test passes; learning + training + integration 155 passed; full suite 1334 passed, 10 skipped in 241.46s (0:04:01).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The input link marks a position as the player's with "Changes when Left is held"; a game whose link experiment has not run yet gets distances from whatever positions it has, which is better than none. The remaining gap is x against y: the player's x and y and each mover's x and y give four pairs, two of them meaningless; they take seats but the brain can learn to ignore them.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

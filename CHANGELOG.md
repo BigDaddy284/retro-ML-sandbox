@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-915: the distances to moving things are measured from the AI's own position, the one the stick moves or one you confirmed, not from a scrolling value that happened to rank higher.
 - T-914: a value that changes every step by small hops, the way a walking enemy's position does, is no longer thrown away as noise; it is listed as "Something moving" whichever way it goes. The user's log showed the AI had never seen a moving thing because of this.
 - T-913: after every go the log says which brain the AI is using, how many situations it knows, how often it still tries moves at random and what it sees (positions, moving things, distances, life counts, switches …), so a log can answer "why does it play the same way every go?".
 - T-912: the brain now sees how far each "Something moving" is from the AI's own position, exact up close and rough far away, so a thing about to touch it and one across the screen are different situations; eight of its seats are kept for these distances whenever anything moves.
