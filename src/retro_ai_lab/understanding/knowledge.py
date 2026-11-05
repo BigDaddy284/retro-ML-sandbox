@@ -342,6 +342,19 @@ class Relationship:
 
 
 OFFERED_MANY_KINDS = frozenset({VariableKind.PROGRESS, VariableKind.FLAG})
+# Evidence tags other modules read back (T-911): a position found by its own movement
+# (an enemy, a platform) is "something moving" until a button is shown to move it.
+INPUT_LINKED = "input-linked"
+MOVER = "moves-both-ways"
+MOVING_WORD = "Something moving"
+
+
+def is_mover(v: Variable) -> bool:
+    """A position believed from its movement alone, not from the controller (T-911)."""
+    kinds = {e.kind for e in v.evidence}
+    return v.kind is VariableKind.POSITION and MOVER in kinds and INPUT_LINKED not in kinds
+
+
 ROLE_WORDS: dict[VariableKind, str] = {
     VariableKind.SCORE: "Your score",
     VariableKind.LIVES: "a life",
@@ -366,14 +379,16 @@ def plain_names(variables: Iterable[Variable]) -> dict[str, str]:
     The order of ``variables`` is the order of the seats.
     """
     out: dict[str, str] = {}
-    seen: dict[VariableKind, int] = {}
+    seen: dict[tuple[VariableKind, bool], int] = {}
     for v in variables:
         if v.name:
             out[v.id] = v.name
             continue
-        n = seen.get(v.kind, 0) + 1
-        seen[v.kind] = n
-        word = ROLE_WORDS.get(v.kind, "Something")
+        mover = is_mover(v)
+        seat = (v.kind, mover)
+        n = seen.get(seat, 0) + 1
+        seen[seat] = n
+        word = MOVING_WORD if mover else ROLE_WORDS.get(v.kind, "Something")
         ordinal = _ORDINALS[n - 1] if n <= len(_ORDINALS) else f"{n}th"
         out[v.id] = word if n == 1 else f"{word} ({ordinal} guess)"
     return out
@@ -703,6 +718,9 @@ class Knowledge:
 
 __all__ = [
     "BELIEVED_PER_KIND",
+    "INPUT_LINKED",
+    "MOVER",
+    "MOVING_WORD",
     "OFFERED_MANY",
     "OFFERED_PER_KIND",
     "ROLE_WORDS",
@@ -718,5 +736,6 @@ __all__ = [
     "belief_rank",
     "confidence_from_evidence",
     "decode",
+    "is_mover",
     "plain_names",
 ]

@@ -19,7 +19,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from retro_ai_lab.core import ConfigurationError
-from retro_ai_lab.understanding.knowledge import Evidence, Knowledge, Variable, VariableKind
+from retro_ai_lab.understanding.knowledge import (
+    INPUT_LINKED,
+    Evidence,
+    Knowledge,
+    Variable,
+    VariableKind,
+)
 from retro_ai_lab.understanding.longlook import LONG_LOOK_KINDS
 
 if TYPE_CHECKING:
@@ -109,7 +115,7 @@ def _describe(buttons: Iterable[str]) -> str:
 
 def _evidence(buttons: tuple[str, ...]) -> Evidence:
     return Evidence(
-        "input-linked",
+        INPUT_LINKED,
         f"Changes when {_describe(buttons)} is held.",
         min(2.0, 0.5 + 0.5 * len(buttons)),
     )

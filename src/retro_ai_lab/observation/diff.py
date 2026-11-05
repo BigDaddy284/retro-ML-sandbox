@@ -97,6 +97,7 @@ class ByteStats:
     carry_ins: int = 0  # changed in the same transition as the byte below wrapped
     unit_steps: int = 0  # changed by exactly +1 (counting a wrap as +1)
     max_step: int = 0  # largest upward step seen
+    max_hop: int = 0  # largest step either way, a roll-over read as the short way round (T-911)
 
     @property
     def change_rate(self) -> float:
@@ -143,6 +144,7 @@ class ByteStats:
             "carry_ins": self.carry_ins,
             "unit_steps": self.unit_steps,
             "max_step": self.max_step,
+            "max_hop": self.max_hop,
         }
 
 
@@ -188,6 +190,7 @@ class ChangeTracker:
                     st.changes += 1
                     assert st.last is not None
                     delta = value - st.last
+                    st.max_hop = max(st.max_hop, min(abs(delta), 256 - abs(delta)))
                     if delta > 0:
                         st.ups += 1
                         st.max_step = max(st.max_step, delta)

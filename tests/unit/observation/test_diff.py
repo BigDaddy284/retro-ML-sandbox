@@ -10,7 +10,13 @@ from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.emulator.fake import ToyRacer
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT, RAM_SIZE
 from retro_ai_lab.observation import MemorySnapshot
-from retro_ai_lab.observation.diff import ByteChange, ChangeTracker, SnapshotDiff, diff_snapshots
+from retro_ai_lab.observation.diff import (
+    ByteChange,
+    ByteStats,
+    ChangeTracker,
+    SnapshotDiff,
+    diff_snapshots,
+)
 
 
 def snap(frame: int, ram: bytes, **more: bytes) -> MemorySnapshot:
@@ -181,3 +187,16 @@ def test_tracker_finds_the_toy_racers_noise_timer_and_state_bytes() -> None:
     # Score only ever goes up in this run; speed goes both ways.
     assert t.stats("ram", LAYOUT.score + 1).monotonic_up or t.stats("ram", LAYOUT.score).ups > 0
     assert not t.stats("ram", LAYOUT.speed).monotonic_up
+
+
+def test_tracker_records_the_largest_hop_either_way() -> None:
+    """T-911: the largest step a byte took, up or down, with roll-overs read as short hops."""
+    t = ChangeTracker()
+    for i, v in enumerate([10, 14, 14, 11, 250, 3, 3, 1]):
+        t.observe(MemorySnapshot(i, {"ram": bytes([v])}))
+    st = t.stats("ram", 0)
+    # 10->14 is 4; 14->11 is 3; 11->250 is a 17 hop down past zero; 250->3 is 9 up; 3->1 is 2.
+    assert st.max_hop == 17
+    assert st.max_step == 239  # unchanged: the plain upward step (T-302 keeps its meaning)
+    assert st.to_dict()["max_hop"] == 17
+    assert ByteStats().max_hop == 0

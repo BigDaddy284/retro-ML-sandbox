@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-911 | A memory value that wanders both ways in small steps, often, is proposed as the position of something that moves, named "Something moving" until a button moves it, and kept out of the long look's drivers and steppers | 8 | Done | 1/1 | see PR |
 | T-910 | The Learning panel's behaviour changes read the policy snapshot taken as the last go ended instead of running the brain over every remembered situation on the GUI thread at each go's end | 8 | Done | 1/1 | see PR #165 |
 | T-909 | "What the AI is doing" refills its events list only when the event log grew and its relationships list only when an update carried relationships and the confident ones differ, instead of rebuilding both on every update | 8 | Done | 1/1 | see PR #164 |
 | T-908 | The brain's slots go to the useful values: the state takes its variables kind by kind in rank order (positions, lives, health, speed, score, progress, then flags), the best of each kind first, up to the feature map's width; a full feature map gives the slot of a value absent from the state to a newcomer instead of dropping it | 8 | Done | 3/3 | see PR #163 |
@@ -2654,6 +2655,23 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 1 new test passes; training + insights + Learning panel suites 65 passed; full suite 1315 passed, 10 skipped (3.13).
 - **Commit:** see PR #165. **PR:** #165.
 - **Completion report:** `FeatureMap.batch` over 10,000 states of 32 parts costs 160 ms here in pure Python per part; it still runs once per go on the worker for the snapshot, which is 0.5% of a 36 s go. Vectorising it is worth a task only if the go-end line on the worker ever shows.
+
+### T-911 – Things that move both ways in memory become positions
+- **Status:** Done
+- **Phase:** 8 (the user's 15:41 log: dying to the same first enemy every go; the user chose "memory eyes only for now")
+- **Objective:** The classifier knew counters, scores, climbing positions, flags, lives, progress and speed. A byte with many values moving both ways and changing often, which is what an enemy's x is, fell through to UNKNOWN, and the brain leaves UNKNOWN out, so the enemy was invisible to it. Propose such a byte as a POSITION with `MOVER` evidence; name it "Something moving" rather than "Your position" until the input link shows a button moves it; keep it out of the long look's drivers and steppers.
+- **Scope:** `ByteStats.max_hop`; `_is_mover` and the new rule after SPEED in `_classify_single`; `INPUT_LINKED`, `MOVER`, `MOVING_WORD`, `is_mover` and `plain_names` in `knowledge.py`; `linking.py` uses the constant; `LongLook._believed` skips movers. **Out of scope:** finer position buckets in the state (next task), telling the player's position from the enemies' before an input experiment, 16-bit movers.
+- **Acceptance criteria:**
+  1. A byte drifting both ways by up to 3 a frame (an enemy's x) is proposed as POSITION with `MOVER` evidence; one that hops by 40 stays UNKNOWN; one that moves every 20 frames is not a POSITION; a mover drifting over the 0/255 edge is still a POSITION.
+  2. The lives, flag, progress, speed and junk bytes of the kinds test keep their kinds; the toy racer's noise is still not proposed.
+  3. `max_hop` reads a roll-over the short way round and is in `to_dict`; `max_step` keeps its meaning.
+  4. `plain_names` calls a mover "Something moving" and a climbing or input-linked position "Your position"; `is_mover` turns false once `INPUT_LINKED` evidence is added.
+  5. A mover is neither a driver nor a stepper in the long look; a plain position still drives.
+- **Expected changes:** `src/retro_ai_lab/observation/diff.py`, `src/retro_ai_lab/understanding/{variables,knowledge,linking,longlook}.py`, tests in `tests/unit/observation/test_diff.py`, `tests/unit/understanding/test_{variables,knowledge,longlook}.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_tracker_records_the_largest_hop_either_way`; `test_something_moving_both_ways_in_small_steps_is_a_position`, `test_a_mover_that_jumps_or_hardly_moves_is_not_a_position`, `test_a_mover_rolling_past_zero_is_still_a_position`, `test_movers_do_not_steal_the_other_kinds`; `test_a_mover_is_called_something_moving_until_the_stick_moves_it`; `test_a_mover_is_neither_a_driver_nor_a_stepper`; observation, understanding, learning, services, rewards and integration suites; full suite.
+- **Results:** 7 new tests pass; observation + understanding + learning + services + rewards + integration 446 passed; full suite 1323 passed, 10 skipped (3:46).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The rule is generic: nothing names a game or an address. Its limit is `SMALL_HOP`: a thing that teleports (a respawn, a screen wrap read as a big hop) stays UNKNOWN until it has been seen moving, and a mover's downs and ups are not told apart, so a lift that only ever rises and drops stays what the older rules make of it. The brain still sees positions in logarithmic buckets, which is too coarse to dodge with; linear bins for positions are the next task.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
