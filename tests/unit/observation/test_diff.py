@@ -11,6 +11,7 @@ from retro_ai_lab.emulator.fake import ToyRacer
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT, RAM_SIZE
 from retro_ai_lab.observation import MemorySnapshot
 from retro_ai_lab.observation.diff import (
+    SMALL_HOP,
     ByteChange,
     ByteStats,
     ChangeTracker,
@@ -200,3 +201,16 @@ def test_tracker_records_the_largest_hop_either_way() -> None:
     assert st.max_step == 239  # unchanged: the plain upward step (T-302 keeps its meaning)
     assert st.to_dict()["max_hop"] == 17
     assert ByteStats().max_hop == 0
+
+
+def test_tracker_counts_small_and_unit_hops() -> None:
+    """T-914: how many changes were small hops (at most SMALL_HOP) and exact ones."""
+    t = ChangeTracker()
+    for i, v in enumerate([10, 11, 11, 14, 60, 61, 0, 255]):
+        t.observe(MemorySnapshot(i, {"ram": bytes([v])}))
+    st = t.stats("ram", 0)
+    # +1, +3, +46, +1, -61, -1 (a roll-over, read as one step down)
+    assert st.changes == 6 and st.small_hops == 4 and st.unit_hops == 3
+    assert st.to_dict()["small_hops"] == 4 and st.to_dict()["unit_hops"] == 3
+    assert ByteStats().small_hops == 0 and ByteStats().unit_hops == 0
+    assert SMALL_HOP == 8
