@@ -147,7 +147,14 @@ list can run to hundreds of guesses: the find box above it keeps only the
 lines containing what you type (a name, an address such as `ram[12]`, or
 "Confirmed by you"), and the box next to it sorts by address, by name or
 "Most sure first", which puts what you confirmed at the top and what you
-rejected at the bottom. The "What the AI is doing" panel, the log and
+rejected at the bottom. When the AI cannot find a counter on its own (a life
+count changes too rarely for it to be sure), tell it: the "Tell the AI:" row
+has "I just lost a life", "I just got further" and "My score just went up".
+Press one right after it happens; the AI keeps only the bytes that moved the
+right way in the last five seconds, like a cheat finder, and after two
+presses that agree it takes the one byte left as your word, names it, and
+drops its own guesses of that kind that did not move. The note under the
+buttons says what each press found. The "What the AI is doing" panel, the log and
 the Rewards table's last column (Address) still show the memory address for
 grown-ups. Pick a reward and the line under
 the table says what it means and what it is worth ("Losing a life: the AI

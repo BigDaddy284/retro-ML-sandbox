@@ -50,6 +50,7 @@ from retro_ai_lab.understanding.knowledge import (
 )
 from retro_ai_lab.understanding.linking import apply_input_links, find_input_links
 from retro_ai_lab.understanding.longlook import LongLook
+from retro_ai_lab.understanding.moments import WINDOW_FRAMES, Moment, MomentFinder, Narrowing
 from retro_ai_lab.understanding.relationships import RelationshipFinder
 from retro_ai_lab.understanding.variables import (
     RARE_RATE,
@@ -144,6 +145,7 @@ class DiscoveryService:
         experiment_every: int | None = DEFAULT_EXPERIMENT_EVERY,
         event_window: int = 5,
         store: KnowledgeStore | None = None,
+        moment_window: int = WINDOW_FRAMES,
     ) -> None:
         if review_every < 1:
             raise ValueError("review_every must be positive")
@@ -175,6 +177,8 @@ class DiscoveryService:
         self._experiments = 0
         self._reviews = 0
         self._questions: dict[str, Question] = {}  # confirmed guesses to check (T-895)
+        # "I just lost a life" narrowing (T-901); the window is a setting for tests
+        self._moments = MomentFinder(window_frames=moment_window)
         self._stage = "idle"
         self._enabled = False
         self._experiments_allowed = True  # the training service holds them back (T-839)
@@ -588,6 +592,64 @@ class DiscoveryService:
         self._announce(DiscoveryUpdated(added, changed, (), ()))
         return k.get(var.id)
 
+    def tell(self, moment: Moment) -> Narrowing:
+        """A person says what just happened; the byte that shows it is narrowed down (T-901).
+
+        Each press keeps the bytes that moved the right way in the last few seconds
+        and intersects them with the presses before. When one byte is left after
+        enough presses it becomes the person's word: the guess there (or a new
+        value) is confirmed with the moment's kind and name, and the AI's own
+        guesses of that kind that did not move are rejected by the AI, so the
+        rewards and the steps follow the right byte.
+        """
+        with self._lock:
+            k = self._require()
+            narrowing = self._moments.tell(moment, self._observation.ring)
+            log.info("%s", narrowing.text)
+            if narrowing.settled is None:
+                return narrowing
+            region, offset = narrowing.settled
+            told = Evidence(
+                "told",
+                f"You said you {moment.words} {narrowing.presses} times and this "
+                f"{moment.movement} each time.",
+                0.0,
+                self._observation.frame,
+            )
+            var = k.at(region, offset)
+            added: tuple[Variable, ...] = ()
+            if var is None:
+                var = k.propose(region, offset, kind=moment.kind, evidence=[told])
+                added = (var,)
+            else:
+                k.support(var.id, told)
+            keep_name = var.name if var.name and not var.rejected else moment.name
+            k.correct(var.id, name=keep_name, kind=moment.kind, by="you")
+            changed: list[Variable] = [] if added else [k.get(var.id)]
+            for other in k.by_kind(moment.kind):
+                if other.id == var.id or other.confirmed:
+                    continue
+                k.support(
+                    other.id,
+                    Evidence(
+                        "told-otherwise",
+                        f"You said you {moment.words}; this did not move like {moment.name} does.",
+                        0.0,
+                        self._observation.frame,
+                    ),
+                )
+                changed.append(k.reject(other.id, by="the AI"))
+            if len(changed) > (0 if added else 1):
+                log.info(
+                    "%d other %s guesses did not move when you %s: dropped (%s).",
+                    len(changed) - (0 if added else 1),
+                    moment.kind.label.lower(),
+                    moment.words,
+                    _names([c for c in changed if c.id != var.id]),
+                )
+            self._announce(DiscoveryUpdated(added, tuple(changed), (), ()))
+            return narrowing
+
     def ask_for(self, var_ids: Iterable[str]) -> None:
         """Have the detector report every move of these values as UP or DOWN (T-860)."""
         with self._lock:
@@ -671,6 +733,7 @@ class DiscoveryService:
         self._experiments = 0
         self._reviews = 0
         self._questions = {}
+        self._moments.forget()
         self._enabled = event.capabilities.memory_read
         if self._enabled:
             self._set_stage("watching", f"Watching {info.title} to learn how it works.")
