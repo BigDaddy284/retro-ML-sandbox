@@ -8,6 +8,9 @@ filled in by later tasks.
 The header is a widget of its own (T-881): the main window makes it the dock's
 title bar, so a panel shows its name once, and wires its "pop out" and "hide"
 buttons to the dock. A panel without a dock keeps the header at its top.
+
+The content sits in a scroll area (T-899), so a panel can be dragged smaller
+than what it holds: the rest scrolls instead of the separator refusing to move.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QScrollArea,
     QSizePolicy,
     QToolButton,
     QTreeWidget,
@@ -60,6 +64,7 @@ class PanelSpec:
     blurb: str  # one plain-English line shown while the panel is empty
 
 
+MIN_CONTENT_HEIGHT = 40  # a panel never needs more than this to exist
 WHATS_THIS = "What's this?"
 POP_OUT = "Pop this panel out into its own window"
 DOCK_BACK = "Put this panel back in the main window"
@@ -143,8 +148,16 @@ class Panel(QFrame):
         header.addWidget(self._pop_out)
         header.addWidget(self._hide)
 
-        self._content = QWidget(self)
+        self._scroll = QScrollArea(self)  # T-899: a panel may be smaller than its content
+        self._scroll.setObjectName(f"panel_{spec.key}_scroll")
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setMinimumHeight(MIN_CONTENT_HEIGHT)
+        self._scroll.viewport().setAutoFillBackground(False)
+        self._content = QWidget(self._scroll)
         self._content.setObjectName(f"panel_{spec.key}_content")
+        self._content.setAutoFillBackground(False)
+        self._scroll.setWidget(self._content)
         content_layout = QVBoxLayout(self._content)
         content_layout.setContentsMargins(4, 4, 4, 4)
         self._placeholder = QLabel(spec.blurb, self._content)
@@ -156,7 +169,7 @@ class Panel(QFrame):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 4, 6, 6)
         outer.addWidget(self._header)
-        outer.addWidget(self._content, 1)
+        outer.addWidget(self._scroll, 1)
 
     # ------------------------------------------------------------- API
 
@@ -181,6 +194,11 @@ class Panel(QFrame):
         """The area later tasks fill with real widgets."""
         return self._content
 
+    @property
+    def scroll_area(self) -> QScrollArea:
+        """The scroll area the content sits in; it sets the panel's smallest height."""
+        return self._scroll
+
     def set_body(self, widget: QWidget) -> None:
         """Replace the placeholder with ``widget``."""
         layout = self._content.layout()
@@ -196,7 +214,7 @@ class Panel(QFrame):
         if expanded == self._expanded:
             return
         self._expanded = expanded
-        self._content.setVisible(expanded)
+        self._scroll.setVisible(expanded)
         self._button.setChecked(expanded)
         self._button.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
         self.setSizePolicy(
