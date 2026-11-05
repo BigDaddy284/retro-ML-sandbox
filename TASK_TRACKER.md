@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-916 | A guess the AI made itself is rethought at every review when its statistics now say another kind, so an enemy slot first seen with five values is not "a speed" for good; a person's confirmed, named or rejected guesses, guesses placed by their word or the restart finding, and input-linked positions are never touched; a guess the AI dropped comes back as another kind | 8 | Done | 1/1 | see PR |
 | T-915 | Distances to moving things are measured from the player's own position, one the stick moves or a person confirmed, falling back to any non-mover position only when none is seated | 8 | Done | 1/1 | see PR #170 |
 | T-914 | A value changing every step by small hops (a walking enemy) is no longer noise; it is proposed as something moving whichever way it goes, a timer ticking down every frame is a counter, and every-hop-one bytes are not movers | 8 | Done | 1/1 | see PR #169 |
 | T-913 | After every go the log names the brain in use, its situations known and exploring rate, and what the state sees (positions, moving things, distances, life counts, switches) | 8 | Done | 1/1 | see PR #168 |
@@ -2738,6 +2739,23 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 1 new test passes; learning + training + integration 155 passed; full suite 1334 passed, 10 skipped in 241.46s (0:04:01).
 - **Commit:** see PR #170. **PR:** #170.
 - **Completion report:** The input link marks a position as the player's with "Changes when Left is held"; a game whose link experiment has not run yet gets distances from whatever positions it has, which is better than none. The remaining gap is x against y: the player's x and y and each mover's x and y give four pairs, two of them meaningless; they take seats but the brain can learn to ignore them.
+
+### T-916 – The AI rethinks a guess it made itself
+- **Status:** Done
+- **Phase:** 8 (the user's 20:49 log: 77 goes on the T-914/T-915 build, still "10 positions" and no moving thing)
+- **Objective:** `propose_candidates` judges a byte once, at the first review after it changes, when it has often changed a handful of times, and never again: an enemy slot became "a speed" or "progress" on five values and stayed so for 77 goes, so T-914's mover rule never ran on it. Re-judge the AI's own guesses at every review when the classifier now says another kind.
+- **Scope:** `rethink_candidates`, `CLASSIFIER_KINDS`, `HELD_KINDS` in `understanding/variables.py`; `AI`, `rejected_by_ai` in `understanding/knowledge.py`; `DiscoveryService.review` calls it and logs the change. **Out of scope:** a change of width (8-bit to 16-bit); refreshing evidence when the kind is unchanged; a guess rejected by a person.
+- **Acceptance criteria:**
+  1. A guess the AI proposed takes the classifier's new kind and evidence; evidence other findings attached (the input link, "played", the long look's) is kept and zero-weight doubts about the old kind are dropped.
+  2. A confirmed, named or person-rejected guess, one with "told" or "restarts" evidence, and an input-linked position are left alone.
+  3. A guess the AI dropped stays dropped while the classifier says the kind it dropped, and comes back un-rejected when it says another.
+  4. A candidate of the same kind changes nothing (idempotent); a walking enemy first judged on its first few changes is a mover after the full stream.
+  5. The discovery review announces rethought guesses as changed and logs one line naming them.
+- **Expected changes:** `src/retro_ai_lab/understanding/variables.py`, `src/retro_ai_lab/understanding/knowledge.py`, `src/retro_ai_lab/understanding/__init__.py`, `src/retro_ai_lab/services/discovery.py`, `tests/unit/understanding/test_variables.py`, `tests/unit/services/test_discovery.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_the_ai_changes_its_mind_about_its_own_guess`, `test_a_persons_word_and_the_links_verdict_are_never_rethought`, `test_a_guess_the_ai_dropped_comes_back_as_another_kind`, `test_a_walking_enemy_judged_early_becomes_a_mover_later`, `test_a_review_rethinks_the_ais_own_guesses`; understanding + services + learning + integration suites; full suite.
+- **Results:** 5 new tests pass; understanding + services + learning + observation + integration 411 passed; full suite 1339 passed, 10 skipped in 292.88s (0:04:52).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The toy racer's second review already rethinks three of its own guesses (the speed, a progress byte, an unknown), which is the rule working, not a fault: a byte's first label is a guess on a handful of changes. A doubt about the old kind goes with the kind, so a rethought lives guess is not dropped a step later for the sins of its past label. Not done here: refreshing stale evidence words when the kind is unchanged, and a byte that should widen to 16 bits.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

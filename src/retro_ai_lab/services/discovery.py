@@ -42,6 +42,7 @@ from retro_ai_lab.services.observer import MemoryObserved, ObservationService
 from retro_ai_lab.storage.knowledge import KnowledgeStore, export, load
 from retro_ai_lab.understanding.events import CYCLES, EventDetector, EventKind, EventLog, GameEvent
 from retro_ai_lab.understanding.knowledge import (
+    AI,
     Confidence,
     Evidence,
     Knowledge,
@@ -66,6 +67,7 @@ from retro_ai_lab.understanding.variables import (
     lives_doubt,
     progress_doubt,
     propose_candidates,
+    rethink_candidates,
 )
 
 log = logging.getLogger(__name__)
@@ -333,7 +335,7 @@ class DiscoveryService:
                             frame,
                         ),
                     )
-                    dropped.append(k.reject(v.id, by="the AI"))
+                    dropped.append(k.reject(v.id, by=AI))
                 else:
                     doubted.append(
                         k.support(
@@ -423,7 +425,7 @@ class DiscoveryService:
                     continue
                 if any(e.kind in NOT_LIVES for e in v.evidence):
                     k.support(v.id, Evidence(reason, f"Still {what}.", 0.0, frame))
-                    dropped.append(k.reject(v.id, by="the AI"))
+                    dropped.append(k.reject(v.id, by=AI))
                 else:
                     doubted.append(
                         k.support(
@@ -703,7 +705,7 @@ class DiscoveryService:
                         self._observation.frame,
                     ),
                 )
-                changed.append(k.reject(other.id, by="the AI"))
+                changed.append(k.reject(other.id, by=AI))
             if len(changed) > (0 if added else 1):
                 log.info(
                     "%d other %s guesses did not move when you %s: dropped (%s).",
@@ -799,9 +801,22 @@ class DiscoveryService:
             self._set_stage(
                 "thinking", "Looking for values that behave like scores, lives or counters."
             )
-            added = propose_candidates(k, find_candidates(self._observation.tracker))
+            candidates = find_candidates(self._observation.tracker)
+            added = propose_candidates(k, candidates)
+            rethought = list(rethink_candidates(k, candidates))
+            if rethought:
+                log.info(
+                    "The AI changed its mind about %d of its own guesses now that it has seen "
+                    "more: %s.",
+                    len(rethought),
+                    _names(rethought),
+                )
             bounced = self.doubt_bouncing()
-            changed = (*bounced, *(self._look.review() if self._look is not None else ()))
+            changed = (
+                *rethought,
+                *bounced,
+                *(self._look.review() if self._look is not None else ()),
+            )
             self._reviews += 1
             self._since_review = 0
             update = DiscoveryUpdated(added, changed, (), ())

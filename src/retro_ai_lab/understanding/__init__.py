@@ -25,6 +25,7 @@ from retro_ai_lab.understanding.variables import (
     lives_doubt,
     progress_doubt,
     propose_candidates,
+    rethink_candidates,
 )
 from retro_ai_lab.understanding.wakeup import find_wake_button, inputs_matter, probe_inputs
 
@@ -64,4 +65,5 @@ __all__ = [
     "probe_inputs",
     "progress_doubt",
     "propose_candidates",
+    "rethink_candidates",
 ]
