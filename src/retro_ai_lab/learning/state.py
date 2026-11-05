@@ -37,6 +37,7 @@ chosen ones are still ordered by address, so a tabular key stays stable.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 
 from retro_ai_lab.core import ConfigurationError
@@ -53,6 +54,15 @@ from retro_ai_lab.understanding.knowledge import (
 DEFAULT_BINS = 8
 DEFAULT_MOST = 32  # the feature map's width (learning/features.py); kept in step by a test
 MOST_DISTANCES = 8  # seats kept for mover-to-player distances when anything moves (T-912)
+SEEN_WORDS: dict[VariableKind, tuple[str, str]] = {  # how describe() counts each kind (T-913)
+    VariableKind.POSITION: ("position", "positions"),
+    VariableKind.LIVES: ("life count", "life counts"),
+    VariableKind.HEALTH: ("health value", "health values"),
+    VariableKind.SPEED: ("speed", "speeds"),
+    VariableKind.SCORE: ("score", "scores"),
+    VariableKind.PROGRESS: ("progress value", "progress values"),
+    VariableKind.FLAG: ("switch", "switches"),
+}
 DISTANCE_SEP = "~"  # a distance part's id is "<mover id>~<my position's id>"
 IGNORED_KINDS = frozenset({VariableKind.UNKNOWN, VariableKind.INPUT, VariableKind.COUNTER})
 # The kinds a brain needs first: where things are, how it is doing, then the switches.
@@ -174,6 +184,33 @@ class StateEncoder:
         """``(mover, mine)`` pairs whose distance the state holds (T-912)."""
         return self._pairs
 
+    def describe(self) -> str:
+        """What the brain sees, in words, for the log (T-913)."""
+        n = len(self._variables)
+        if not n:
+            return "nothing yet"
+        counts = Counter(v.kind for v in self._variables)
+        order = (*KIND_RANK, *(k for k in VariableKind if k not in KIND_RANK))
+        words: list[str] = []
+        for kind in order:
+            c = counts.get(kind, 0)
+            if not c:
+                continue
+            word = _plural(c, *SEEN_WORDS.get(kind, (kind.value, kind.value + "s")))
+            if kind is VariableKind.POSITION:
+                moving = sum(1 for v in self._variables if is_mover(v))
+                if moving:
+                    word += f" ({moving} moving)"
+                words.append(word)
+                if self._pairs:
+                    d = len(self._pairs)
+                    words.append(
+                        _plural(d, "distance to a moving thing", "distances to moving things")
+                    )
+                continue
+            words.append(word)
+        return f"{_plural(n, 'value', 'values')}: {', '.join(words)}"
+
     def refresh(self) -> tuple[Variable, ...]:
         """Re-read the knowledge; call after discoveries change."""
         believed = [
@@ -203,6 +240,10 @@ class StateEncoder:
                     (distance_id(mover.id, mine.id), bucket(apart, mover.kind, self._bins))
                 )
         return State(tuple(parts))
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
 
 
 def _pair_up(variables: tuple[Variable, ...]) -> tuple[tuple[Variable, Variable], ...]:
@@ -259,6 +300,7 @@ __all__ = [
     "IGNORED_KINDS",
     "KIND_RANK",
     "MOST_DISTANCES",
+    "SEEN_WORDS",
     "State",
     "StateEncoder",
     "bucket",

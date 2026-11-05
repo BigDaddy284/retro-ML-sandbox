@@ -1141,6 +1141,16 @@ class TrainingService:
             f", from {earners}" if earners else "",
             f": {why}" if result.ended_by == "reset" and why else "",
         )
+        if self._agent is not None and self._encoder is not None:
+            # Which brain, how much it still guesses and what it sees (T-913): the user's
+            # logs could not say why the AI played the same way go after go.
+            log.info(
+                "The brain after go %d: %s. %s It sees %s.",
+                self._episodes,
+                describe_algorithm(self._agent.algorithm)[0],
+                self._agent.stats(),
+                self._encoder.describe(),
+            )
         self._history.append(record)
         self._note_listening(result)
         if not self._needs_wake:  # a go the game ignored says nothing about play (T-870)
