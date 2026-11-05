@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-909 | "What the AI is doing" refills its events list only when the event log grew and its relationships list only when an update carried relationships and the confident ones differ, instead of rebuilding both on every update | 8 | Done | 1/1 | see PR |
 | T-908 | The brain's slots go to the useful values: the state takes its variables kind by kind in rank order (positions, lives, health, speed, score, progress, then flags), the best of each kind first, up to the feature map's width; a full feature map gives the slot of a value absent from the state to a newcomer instead of dropping it | 8 | Done | 3/3 | see PR #163 |
 | T-907 | The discovery summary line is computed once per change: one pass over the variables, remembered by the knowledge's version (and wake button), so the two progress events a review publishes and the panel's refreshes cost the window's thread nothing | 8 | Done | 1/1 | see PR #162 |
 | T-906 | The stall line names the GUI work behind a stall: every event handed to the window is timed by its name (`on DiscoveryUpdated`), a panel's coalesced refresh and the game picture's paint are timed too, and the line leaves out work that never took a millisecond | 8 | Done | 5/5 | see PR #161 |
@@ -2624,6 +2625,20 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 3 new tests pass (one existing feature-map test updated to the new rule); learning + understanding + training suites 262 passed; full suite 1314 passed, 10 skipped (3.13).
 - **Commit:** see PR #163. **PR:** #163.
 - **Completion report:** The feature map's `ids` were in insertion order, which stopped matching the slots once one changed hands, so `ids` and `to_dict` are now in slot order; and the hand-over tie-break is the lowest slot, so a map loaded from disk (nothing seen yet) hands slots over as the live one did, which the round-trip test checks vector by vector. The user's saved brain keeps its 32-wide map; its flag-filled slots will be handed to the positions as soon as a flag is absent from a state, and the network relearns those inputs over the next goes.
+
+### T-909 – "What the AI is doing" refreshes only what changed
+- **Status:** Done
+- **Phase:** 8 (the user's 15:41 log, with T-906's line: `discoveries refresh ×14 avg 52 ms max 139 ms` in one 5 s window, next to one to five GUI stalls of 70–350 ms in nearly every window of play)
+- **Objective:** T-896 stopped the variables list being rebuilt, but the coalesced refresh still cleared and refilled the "What just happened" and "What leads to what" lists on every update, and the service announces an update on every snapshot with an event. On the user's PC each refill cost 20–140 ms, up to 14 times in 5 s. The refresh now refills the events list only when the event log's `total` moved since the last fill, and the relationships list only when an update carried relationships and a `RelationshipWatch` (T-842's, shared with the goals and rewards services) says the confident set differs; a full `refresh` fills both and resets the watch.
+- **Scope:** `ui/discovery_panel.py`. **Out of scope:** the other handlers the line names (`on EpisodeFinished` 940 ms and `on TrainingStateChanged` 294 ms at a go's end: the Learning panel's goes table and chart; next).
+- **Acceptance criteria:**
+  1. An update with neither events nor relationships refills neither list; a new event refills the events list only; relationships whose confident set is unchanged refill nothing; a new confident relationship refills the relationships list.
+  2. A full refresh fills both lists.
+- **Expected changes:** `src/retro_ai_lab/ui/discovery_panel.py`, `tests/ui/test_discovery_panel.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_the_lists_under_the_variables_refill_only_when_they_moved`; discovery panel suite; full suite.
+- **Results:** 1 new test passes; discovery panel suite 18 passed; full suite 1312 passed, 10 skipped (3.13, before the rebase onto T-908; the change touches only the panel).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The events list still rebuilds its eight rows when the log grew, which is cheap; what cost the time was sorting every confident relationship and describing sixteen of them on every update, and clearing two list widgets while they were being painted.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

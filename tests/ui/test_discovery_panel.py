@@ -467,3 +467,58 @@ def test_tell_buttons_narrow_the_byte_down(panel: DiscoveryPanel, context: AppCo
     assert "went up in the last 5 seconds" in panel.note_text
     context.connection.disconnect()
     assert not buttons[0].isEnabled()  # type: ignore[union-attr]
+
+
+# ------------------------------------ T-909: the lists refill only when they moved
+
+
+def test_the_lists_under_the_variables_refill_only_when_they_moved(
+    panel: DiscoveryPanel, context: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The user's log: this refresh ran 14 times in 5 s at up to 140 ms, rebuilding both lists."""
+    from retro_ai_lab.understanding import Relationship
+
+    context.connection.connect("fake", seed=2)
+    drive(context, 700)
+    panel.refresher.flush()
+    k = context.discovery.knowledge
+    assert k is not None
+    fills: list[str] = []
+    for name in ("_fill_events", "_fill_relationships"):
+        original = getattr(panel, name)
+
+        def counted(original=original, name=name) -> None:  # type: ignore[no-untyped-def]
+            fills.append(name)
+            original()
+
+        monkeypatch.setattr(panel, name, counted)
+    # An update with neither events nor relationships refills nothing.
+    v = next(iter(k))
+    context.bus.publish(DiscoveryUpdated((), (v,), (), ()))
+    panel.refresher.flush()
+    assert fills == []
+    # A new event refills the events list, not the relationships.
+    event = GameEvent(EventKind.PROGRESS, 7, v.id, "Went up to 1.", 0, 1)
+    context.discovery.events.extend((event,))
+    context.bus.publish(DiscoveryUpdated((), (), (event,), ()))
+    panel.refresher.flush()
+    assert fills == ["_fill_events"] and any("Went up to 1." in t for t in panel.event_texts())
+    # Relationships in the update, but the confident set unchanged: no refill.
+    rels = k.confident_relationships()
+    context.bus.publish(DiscoveryUpdated((), (), (), rels[:1]))
+    panel.refresher.flush()
+    assert fills == ["_fill_events"]
+    # A confident relationship that is new: a refill.
+    new = k.set_relationship(
+        Relationship(
+            "progress:*", f"score:{v.id}", support=12, cause_count=12, effect_count=12, window=30
+        )
+    )
+    assert new.confidence >= Confidence.LOW
+    context.bus.publish(DiscoveryUpdated((), (), (), (new,)))
+    panel.refresher.flush()
+    assert fills == ["_fill_events", "_fill_relationships"] and panel.relationship_texts()
+    # A full refresh (a verdict, a reconnect) fills both and starts the watch afresh.
+    fills.clear()
+    panel.refresh()
+    assert fills == ["_fill_events", "_fill_relationships"]
