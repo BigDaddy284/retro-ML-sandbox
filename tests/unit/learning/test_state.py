@@ -308,3 +308,29 @@ def test_the_encoder_says_what_the_brain_sees_in_words() -> None:
     k2.propose(RAM, 6, kind=VariableKind.PROGRESS, evidence=SURE)
     k2.propose(RAM, 7, kind=VariableKind.COUNTER, evidence=SURE)  # ignored kinds are not seen
     assert StateEncoder(k2).describe() == "6 values: 1 life count, 2 progress values, 3 switches"
+
+
+# ------------------------------------------------------------ T-915: my position
+
+
+def test_distances_are_measured_from_the_position_the_stick_moves() -> None:
+    """The user's game had ten positions; the scrolling one outranked Mario's own."""
+    from retro_ai_lab.understanding.knowledge import INPUT_LINKED, MOVER
+
+    k = Knowledge("g")
+    pos = VariableKind.POSITION
+    scroll = k.propose(RAM, 0, kind=pos, evidence=[Evidence("monotonic", "Climbs.", 6.0)])
+    me = k.propose(RAM, 1, kind=pos, evidence=[Evidence(INPUT_LINKED, "Left/Right", 1.5)])
+    me_too = k.propose(RAM, 2, kind=pos, evidence=[Evidence(INPUT_LINKED, "Up/Down", 1.0)])
+    it = k.propose(RAM, 3, kind=pos, evidence=[Evidence(MOVER, "Moves.", 1.5)])
+    enc = StateEncoder(k)
+    assert enc.pairs == ((it, me), (it, me_too))  # the scrolling position is nobody's
+    assert scroll in enc.variables
+    k.confirm(scroll.id)  # a person saying "this is my position" makes it mine
+    k.correct(scroll.id, name="Where I am")
+    enc.refresh()
+    assert [p.id for _, p in enc.pairs] == [scroll.id, me.id, me_too.id]
+    k2 = Knowledge("g")
+    only = k2.propose(RAM, 0, kind=pos, evidence=[Evidence("monotonic", "Climbs.", 6.0)])
+    thing = k2.propose(RAM, 3, kind=pos, evidence=[Evidence(MOVER, "Moves.", 1.5)])
+    assert StateEncoder(k2).pairs == ((thing, only),)  # nothing linked yet: as before

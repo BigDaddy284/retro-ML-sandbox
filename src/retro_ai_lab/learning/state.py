@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.observation.memory import MemorySnapshot
 from retro_ai_lab.understanding.knowledge import (
+    INPUT_LINKED,
     Confidence,
     Knowledge,
     Variable,
@@ -242,6 +243,10 @@ class StateEncoder:
         return State(tuple(parts))
 
 
+def _input_linked(v: Variable) -> bool:
+    return any(e.kind == INPUT_LINKED for e in v.evidence)
+
+
 def _plural(n: int, one: str, many: str) -> str:
     return f"{n} {one if n == 1 else many}"
 
@@ -249,14 +254,19 @@ def _plural(n: int, one: str, many: str) -> str:
 def _pair_up(variables: tuple[Variable, ...]) -> tuple[tuple[Variable, Variable], ...]:
     """Each mover with each of the player's own positions of the same size and region.
 
+    Own means confirmed by a person or moved by the stick (``INPUT_LINKED``), when
+    any such position is seated; otherwise any position that is not a mover.
+
     The best-believed own position's pairs come first, then the next's, so the
     ``MOST_DISTANCES`` kept are the ones most likely to matter.
     """
     movers = sorted((v for v in variables if is_mover(v)), key=belief_rank)
-    mine = sorted(
-        (v for v in variables if v.kind is VariableKind.POSITION and not is_mover(v)),
-        key=belief_rank,
-    )
+    own = [v for v in variables if v.kind is VariableKind.POSITION and not is_mover(v)]
+    # The player's position is the one the stick moves, or one a person confirmed; a
+    # scrolling position outranks it on evidence but is nobody's (T-915). Without any
+    # such position, every position that is not a mover will do, as before.
+    surely = [v for v in own if v.confirmed or _input_linked(v)]
+    mine = sorted(surely or own, key=belief_rank)
     pairs = [
         (m, p) for p in mine for m in movers if m.region == p.region and m.encoding is p.encoding
     ]
