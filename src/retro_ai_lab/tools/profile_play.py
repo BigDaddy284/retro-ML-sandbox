@@ -20,8 +20,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from retro_ai_lab.core import ConfigurationError, EmulatorError
+from retro_ai_lab.core.worklog import CallStats
 from retro_ai_lab.emulator.bizhawk.adapter import BizHawkAdapter
-from retro_ai_lab.emulator.bizhawk.protocol import CallStats
 
 PROG = "python -m retro_ai_lab.tools.profile_play"
 ADAPTERS = ("simulator", "fake", "bizhawk", "mgba")

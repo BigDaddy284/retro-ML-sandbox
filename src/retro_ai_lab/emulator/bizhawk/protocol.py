@@ -22,10 +22,10 @@ import select
 import socket
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 from typing import Any
 
 from retro_ai_lab.core import EmulatorDisconnectedError, EmulatorError, ProtocolError
+from retro_ai_lab.core.worklog import CallStats
 
 PROTOCOL_VERSION = 2  # bumped with the bridge scripts whenever their answers change (T-891)
 DEFAULT_HOST = "127.0.0.1"
@@ -154,30 +154,6 @@ class LineChannel:
 log = logging.getLogger(__name__)
 
 REPORT_EVERY_S = 5.0
-
-
-@dataclass
-class CallStats:
-    """How many times one command ran in the current window, and how long it took."""
-
-    count: int = 0
-    total_s: float = 0.0
-    max_s: float = 0.0
-
-    def add(self, elapsed_s: float) -> None:
-        self.count += 1
-        self.total_s += elapsed_s
-        self.max_s = max(self.max_s, elapsed_s)
-
-    @property
-    def average_s(self) -> float:
-        return self.total_s / self.count if self.count else 0.0
-
-    def describe(self, name: str) -> str:
-        return (
-            f"{name} \u00d7{self.count} avg {self.average_s * 1000:.0f} ms "
-            f"max {self.max_s * 1000:.0f} ms"
-        )
 
 
 class Link:

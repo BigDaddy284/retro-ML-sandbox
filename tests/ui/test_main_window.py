@@ -29,6 +29,14 @@ def test_window_opens_with_title_and_closes(qtbot: QtBot) -> None:
     assert not w.isVisible()
 
 
+def test_the_window_watches_the_link_and_the_gui_thread(qtbot: QtBot) -> None:
+    """T-894: the stall watch logs the app's own work next to the emulator link's."""
+    w = MainWindow()
+    qtbot.addWidget(w)
+    assert w.watchdog.running and w.stall_watch.running
+    w.close()
+
+
 def test_all_six_panels_present_with_child_friendly_titles(qtbot: QtBot) -> None:
     w = MainWindow()
     qtbot.addWidget(w)

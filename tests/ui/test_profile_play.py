@@ -8,7 +8,7 @@ import pytest
 from PySide6.QtWidgets import QApplication
 
 from retro_ai_lab.core import ConfigurationError
-from retro_ai_lab.emulator.bizhawk.protocol import CallStats
+from retro_ai_lab.core.worklog import CallStats
 from retro_ai_lab.tools.profile_play import STUTTER_MS, Report, main, profile
 from retro_ai_lab.ui.play_clock import MAX_FRAMES_PER_STEP
 
