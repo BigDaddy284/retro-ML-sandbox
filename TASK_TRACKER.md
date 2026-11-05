@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-912 | The state holds each moving thing's distance from the player's own position, exact up close and rough far away, with eight seats kept for distances whenever anything moves | 8 | Done | 1/1 | see PR |
 | T-911 | A memory value that wanders both ways in small steps, often, is proposed as the position of something that moves, named "Something moving" until a button moves it, and kept out of the long look's drivers and steppers | 8 | Done | 1/1 | see PR #166 |
 | T-910 | The Learning panel's behaviour changes read the policy snapshot taken as the last go ended instead of running the brain over every remembered situation on the GUI thread at each go's end | 8 | Done | 1/1 | see PR #165 |
 | T-909 | "What the AI is doing" refills its events list only when the event log grew and its relationships list only when an update carried relationships and the confident ones differ, instead of rebuilding both on every update | 8 | Done | 1/1 | see PR #164 |
@@ -2672,6 +2673,23 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 7 new tests pass; observation + understanding + learning + services + rewards + integration 446 passed; full suite 1323 passed, 10 skipped (3:46).
 - **Commit:** see PR #166. **PR:** #166.
 - **Completion report:** The rule is generic: nothing names a game or an address. Its limit is `SMALL_HOP`: a thing that teleports (a respawn, a screen wrap read as a big hop) stays UNKNOWN until it has been seen moving, and a mover's downs and ups are not told apart, so a lift that only ever rises and drops stays what the older rules make of it. The brain still sees positions in logarithmic buckets, which is too coarse to dodge with; linear bins for positions are the next task.
+
+### T-912 – The state holds each moving thing's distance from the player
+- **Status:** Done
+- **Phase:** 8 (follows T-911; the user chose "memory eyes only for now")
+- **Objective:** A mover in the state was still read in doubling bins, where 64 and 127 are one bin, so an enemy a jump away and one touching the player were the same situation. Give the brain what matters: each mover's distance from each of the player's own positions, exact when close and rough when far.
+- **Scope:** `StateEncoder.refresh` pairs movers with own positions (same encoding and region, best-believed first, `MOST_DISTANCES` = 8), keeps 8 seats off `most` whenever a mover is believed, and `encode` appends a part per pair under `distance_id`; `split_distance`, `_part_name` for `State.describe`. **Out of scope:** finer bins for lone positions (tried: 16- and 32-wide bins slowed the practice game's beginner table and failed the first-demonstration test across six seeds; see the architecture note), telling x from y, distances between two movers.
+- **Acceptance criteria:**
+  1. With my position at 100 and a mover at 105, 80 and 230 the state holds a distance part of 5, -10 and 12; touching, a jump away and across the screen are three different buckets; parts are values by address then distances; the key round-trips.
+  2. `describe` names a distance "<mover> from <mine>" with the knowledge and by ids without it; `distance_id` refuses ids holding the separator; `split_distance` returns None for plain ids.
+  3. No pairs without a mover, without an own position, across encodings or regions; a snapshot too short for the mover gives no distance part.
+  4. With a mover believed, `most - 8` variables are seated, positions first; at most 8 pairs, ordered by the own position's rank then the mover's; a state never holds more than `most` parts; `most=1` still seats one.
+  5. The first-demonstration test and every existing state, feature, training and panel test pass unchanged.
+- **Expected changes:** `src/retro_ai_lab/learning/state.py`, `tests/unit/learning/test_state.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_the_distance_from_each_moving_thing_is_part_of_the_state`, `test_distance_parts_are_named_in_words`, `test_no_distances_without_both_a_mover_and_a_position_of_my_own`, `test_seats_are_kept_for_distances_when_anything_moves`; learning, training, services, integration and Learning panel suites; full suite.
+- **Results:** 4 new tests pass; learning + training + services + integration + Learning panel 264 passed; full suite 1327 passed, 10 skipped (3:53).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The even-bin attempt is recorded in `ARCHITECTURE.md` so it is not tried again: a lone position's finer bins cost the beginner table learning time and tell it nothing it can act on. Distances pair every mover with every own position, so a game whose player has an x and a y and whose enemies have both gets x-to-y pairs too; the brain can ignore them, but they take seats, and telling x from y (two values that move with the same button family) is a possible later task. The next thing to learn from the user's log is whether "Something moving" values appear at all on the real game and whether the first enemy stops costing a life.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

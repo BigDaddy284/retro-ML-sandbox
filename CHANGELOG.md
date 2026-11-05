@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-912: the brain now sees how far each "Something moving" is from the AI's own position, exact up close and rough far away, so a thing about to touch it and one across the screen are different situations; eight of its seats are kept for these distances whenever anything moves.
 - T-911: a memory value that wanders both ways in small steps, often, is now taken for the position of something that moves (an enemy, a platform), so the brain can see what it keeps dying to; it is called "Something moving" until a button is shown to move it, and the long look does not read progress off it.
 - T-910: the freeze at the end of each go is gone: the Learning panel's "what the AI does differently" reads the snapshot the AI took as the go ended instead of running the brain over every remembered situation on the window's thread.
 - T-909: the "What just happened" and "What leads to what" lists in "What the AI is doing" are refilled only when they changed, so the panel no longer costs the window 20–140 ms several times a second while the AI plays.
