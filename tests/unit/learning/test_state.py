@@ -289,3 +289,22 @@ def test_seats_are_kept_for_distances_when_anything_moves() -> None:
     big = StateEncoder(k, most=None)
     assert len(big.pairs) == MOST_DISTANCES and [m for m, _ in big.pairs] == movers[:MOST_DISTANCES]
     assert StateEncoder(k, most=1).variables  # the seats never go below one
+
+
+# ------------------------------------------------------------ T-913: what it sees
+
+
+def test_the_encoder_says_what_the_brain_sees_in_words() -> None:
+    k, _me, _it, _score = moving_world()
+    assert StateEncoder(k).describe() == (
+        "3 values: 2 positions (1 moving), 1 distance to a moving thing, 1 score"
+    )
+    assert StateEncoder(Knowledge("empty")).describe() == "nothing yet"
+    k2 = Knowledge("g")
+    k2.propose(RAM, 0, kind=VariableKind.LIVES, evidence=SURE)
+    for i in range(3):
+        k2.propose(RAM, 1 + i, kind=VariableKind.FLAG, evidence=SURE)
+    k2.propose(RAM, 5, kind=VariableKind.PROGRESS, evidence=SURE)
+    k2.propose(RAM, 6, kind=VariableKind.PROGRESS, evidence=SURE)
+    k2.propose(RAM, 7, kind=VariableKind.COUNTER, evidence=SURE)  # ignored kinds are not seen
+    assert StateEncoder(k2).describe() == "6 values: 1 life count, 2 progress values, 3 switches"

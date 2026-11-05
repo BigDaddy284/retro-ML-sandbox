@@ -1441,3 +1441,22 @@ def test_behaviour_changes_do_not_ask_the_brain_again(
     for _ in range(5):
         t.behaviour_changes()
     assert calls == 2
+
+
+def test_each_go_logs_the_brain_and_what_it_sees(
+    lab: Lab, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T-913: the line after a go's says which brain, how much it guesses and what it sees."""
+    lab.connect()
+    t = lab.training
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.training.service")
+    t.start(Mode.INDEPENDENT)
+    while t.episodes < 1:
+        assert t.step()
+    messages = [r.getMessage() for r in caplog.records]
+    go = messages.index(next(m for m in messages if m.startswith("Go 1 ended by")))
+    brain = messages[go + 1]
+    assert brain.startswith("The brain after go 1: Simple table. Knows ")
+    assert "tries something new" in brain and brain.endswith(f"It sees {t.encoder.describe()}.")
+    assert "position" in brain or "value" in brain
+    t.stop()
