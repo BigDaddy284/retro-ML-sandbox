@@ -393,7 +393,8 @@ class DiscoveryService:
                     still.add(v.id)
                     text = (
                         f'You confirmed "{v.name}", but it {what}. The AI keeps your word; '
-                        f"if it is not {words}, reject it in Discoveries."
+                        f'if it is not {words}, pick it under "What the AI is doing" and press '
+                        '"No, that\'s wrong".'
                     )
                     question = Question(v.id, v.name, reason, text)
                     before = self._questions.get(v.id)
