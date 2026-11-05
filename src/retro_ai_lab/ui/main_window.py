@@ -290,6 +290,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (Qt's name)
         self._save_layout()
+        self._stall_watch.stop()  # a closed window has no GUI thread to watch (T-899)
         super().closeEvent(event)
 
     @property

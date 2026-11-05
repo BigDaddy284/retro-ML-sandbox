@@ -35,6 +35,7 @@ def test_the_window_watches_the_link_and_the_gui_thread(qtbot: QtBot) -> None:
     qtbot.addWidget(w)
     assert w.watchdog.running and w.stall_watch.running
     w.close()
+    assert not w.stall_watch.running  # it would otherwise log for a window that is gone
 
 
 def test_all_six_panels_present_with_child_friendly_titles(qtbot: QtBot) -> None:

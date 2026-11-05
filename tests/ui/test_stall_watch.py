@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import gc
 import logging
 import time
 
 import pytest
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QTimer
 from pytestqt.qtbot import QtBot
 
 from retro_ai_lab.core.worklog import WorkLog
@@ -18,8 +19,15 @@ X = "\N{MULTIPLICATION SIGN}"
 def test_a_busy_gui_thread_is_a_stall_and_the_window_is_logged(
     qtbot: QtBot, caplog: pytest.LogCaptureFixture
 ) -> None:
+    # Windows the tests before left behind are deleted and collected on the next turn
+    # of the event loop; that would be a real stall, so it happens before the watch starts.
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    gc.collect()
+    qtbot.wait(20)
     work = WorkLog()
-    watch = StallWatch(work, interval_ms=5, stall_s=0.05, report_every_s=0.3)
+    # A long window: a slow machine must not report (and clear the stats) before the
+    # stall is checked below.
+    watch = StallWatch(work, interval_ms=5, stall_s=0.05, report_every_s=1.0)
     assert not watch.running and watch.stalls == 0 and watch.reports == 0
     watch.start()
     assert watch.running
@@ -31,7 +39,7 @@ def test_a_busy_gui_thread_is_a_stall_and_the_window_is_logged(
         stall = work.stats[STALL]
         assert stall.count == 1 and 0.1 <= stall.max_s < 0.5
         work.note("learn", 0.02)
-        qtbot.waitUntil(lambda: watch.reports >= 1, timeout=2000)
+        qtbot.waitUntil(lambda: watch.reports >= 1, timeout=4000)
     line = next(r.message for r in caplog.records if r.message.startswith("App work"))
     assert f"GUI stall {X}1" in line and f"learn {X}1 avg 20 ms" in line
     assert work.summary() == "nothing"  # a new window
