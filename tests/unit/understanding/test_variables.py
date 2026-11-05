@@ -312,3 +312,40 @@ def test_movers_do_not_steal_the_other_kinds() -> None:
         VariableKind.SPEED,
         VariableKind.UNKNOWN,
     ]
+
+
+# ------------------------------------------------------------ T-914: smooth movers
+
+
+def goomba_rows(n: int = 400) -> list[bytes]:
+    """An enemy's x on screen: walks left 2 or 3 every step and respawns at the right."""
+    rows = []
+    x = 200
+    for i in range(n):
+        x -= 2 + (i % 2)
+        if x < 8:
+            x = 240  # a new enemy takes the slot: one big hop
+        rows.append(bytes([x]))
+    return rows
+
+
+def test_a_thing_moving_every_step_in_small_hops_is_not_noise() -> None:
+    """The user's enemies changed every step, which the noise rule threw away first."""
+    (c,) = find_candidates(track(goomba_rows()))
+    assert c.kind is VariableKind.POSITION and any(e.kind == MOVER for e in c.evidence)
+
+
+def test_random_every_step_is_still_noise_and_a_countdown_is_a_counter() -> None:
+    import random
+
+    rng = random.Random(914)
+    rows = [bytes([rng.randrange(256), (255 - i) & 0xFF]) for i in range(400)]
+    cands = by_offset(find_candidates(track(rows)))
+    assert 0 not in cands  # random every frame: noise, as before
+    assert cands[1].kind is VariableKind.COUNTER  # down by one every frame: a timer, not a mover
+
+
+def test_a_slow_steady_countdown_is_not_a_mover_either() -> None:
+    rows = [bytes([(200 - i // 6) & 0xFF]) for i in range(400)]  # one down every six steps
+    (c,) = find_candidates(track(rows))
+    assert c.kind is not VariableKind.POSITION

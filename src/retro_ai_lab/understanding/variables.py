@@ -31,7 +31,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from retro_ai_lab.core import ConfigurationError
-from retro_ai_lab.observation.diff import ByteStats, ChangeTracker
+from retro_ai_lab.observation.diff import SMALL_HOP, ByteStats, ChangeTracker
 from retro_ai_lab.understanding.knowledge import (
     MOVER,
     Encoding,
@@ -45,7 +45,6 @@ MIN_TRANSITIONS = 30
 NOISE_RATE = 0.9
 RARE_RATE = 0.1
 FEW_VALUES = 16
-SMALL_HOP = 8  # a thing on screen moves by at most this many a frame (T-911)
 BOUNCE_UPS = 4  # a "lives" byte restored this often is judged on its ups against its downs
 LIVES_SAMPLES = 100  # a "lives" byte is judged on how often it changes after this many steps
 
@@ -71,22 +70,29 @@ class Candidate:
 
 
 def _is_noise(st: ByteStats) -> bool:
-    return st.change_rate >= NOISE_RATE and not st.mostly_up
+    # A walking enemy changes every step too, by small hops; noise jumps about (T-914).
+    return st.change_rate >= NOISE_RATE and not st.mostly_up and not st.smooth
 
 
 def _is_mover(st: ByteStats) -> bool:
-    """Wanders both ways by small hops, and often enough to be something on screen."""
+    """Moves by small hops (one way or both), often enough to be something on screen.
+
+    A respawn or a slot taken by a new thing is one big hop; ``smooth`` allows a few.
+    Every hop exactly one is a slow timer, not a thing moving (as the climbing
+    position rule asks for varied steps), so at least one hop must be larger.
+    """
     return (
-        st.ups > 0
-        and st.downs > 0
+        st.smooth
         and st.change_rate > RARE_RATE
-        and 0 < st.max_hop <= SMALL_HOP
         and len(st.distinct) > 2
+        and st.unit_hops < st.changes
     )
 
 
 def _is_counter(st: ByteStats) -> bool:
-    return st.unit_steps >= 0.95 * st.changes and st.change_rate >= 0.95
+    """Ticks by one nearly every observation, up or down (T-914 adds the down)."""
+    ticks = max(st.unit_steps, st.unit_hops)
+    return ticks >= 0.95 * st.changes and st.change_rate >= 0.95
 
 
 def _is_pair(low: ByteStats, high: ByteStats) -> bool:
@@ -214,12 +220,18 @@ def _classify_single(st: ByteStats) -> tuple[VariableKind, tuple[Evidence, ...]]
             Evidence("few-values", f"Only {values} different values seen.", 1.0),
             Evidence("frequent", "Changes often.", 0.5),
         )
+    if _is_counter(st):  # a timer ticking down every frame (T-914)
+        return VariableKind.COUNTER, (
+            Evidence("monotonic", "Only ever goes down.", 2.0),
+            Evidence("every-frame", "Changes every frame.", 1.0),
+            Evidence("unit-steps", "Always by exactly one.", 1.0),
+        )
     if _is_mover(st):
-        # An enemy, a platform, a ball: a number that wanders both ways in small steps,
-        # often. It is a position of something, not of the player (T-911): the input
-        # link says whose it is, and until then the brain still gets to watch it.
+        # An enemy, a platform, a ball: a number that moves in small steps, often. It is
+        # a position of something, not of the player (T-911): the input link says whose
+        # it is, and until then the brain still gets to watch it.
         return VariableKind.POSITION, (
-            Evidence(MOVER, "Moves both ways in small steps, often.", 1.5),
+            Evidence(MOVER, "Moves in small steps, often.", 1.5),
             Evidence("many-values", f"{values} different values seen.", 0.5),
         )
     return VariableKind.UNKNOWN, (

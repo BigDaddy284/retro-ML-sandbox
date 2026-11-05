@@ -81,6 +81,9 @@ def diff_snapshots(before: MemorySnapshot, after: MemorySnapshot) -> SnapshotDif
     return SnapshotDiff(before.frame, after.frame, tuple(changes))
 
 
+SMALL_HOP = 8  # a thing on screen moves by at most this many between observations (T-911)
+
+
 @dataclass(slots=True)
 class ByteStats:
     """How one byte has behaved across every observed transition."""
@@ -98,6 +101,8 @@ class ByteStats:
     unit_steps: int = 0  # changed by exactly +1 (counting a wrap as +1)
     max_step: int = 0  # largest upward step seen
     max_hop: int = 0  # largest step either way, a roll-over read as the short way round (T-911)
+    small_hops: int = 0  # changes by at most SMALL_HOP either way (T-914)
+    unit_hops: int = 0  # changes by exactly one either way, roll-overs included (T-914)
 
     @property
     def change_rate(self) -> float:
@@ -126,6 +131,11 @@ class ByteStats:
         return self.changes > 0 and self.downs == self.wraps
 
     @property
+    def smooth(self) -> bool:
+        """Nearly every change was a small hop: something moving, not noise (T-914)."""
+        return self.changes > 0 and self.small_hops >= 0.95 * self.changes
+
+    @property
     def mostly_up(self) -> bool:
         """Goes up apart from roll-overs and the odd reset (score-like)."""
         return self.ups > 0 and self.resets <= max(2.0, self.ups * 0.15)
@@ -145,6 +155,8 @@ class ByteStats:
             "unit_steps": self.unit_steps,
             "max_step": self.max_step,
             "max_hop": self.max_hop,
+            "small_hops": self.small_hops,
+            "unit_hops": self.unit_hops,
         }
 
 
@@ -190,7 +202,12 @@ class ChangeTracker:
                     st.changes += 1
                     assert st.last is not None
                     delta = value - st.last
-                    st.max_hop = max(st.max_hop, min(abs(delta), 256 - abs(delta)))
+                    hop = min(abs(delta), 256 - abs(delta))
+                    st.max_hop = max(st.max_hop, hop)
+                    if hop <= SMALL_HOP:
+                        st.small_hops += 1
+                    if hop == 1:
+                        st.unit_hops += 1
                     if delta > 0:
                         st.ups += 1
                         st.max_step = max(st.max_step, delta)
@@ -271,4 +288,11 @@ class ChangeTracker:
         return result or set()
 
 
-__all__ = ["ByteChange", "ByteStats", "ChangeTracker", "SnapshotDiff", "diff_snapshots"]
+__all__ = [
+    "SMALL_HOP",
+    "ByteChange",
+    "ByteStats",
+    "ChangeTracker",
+    "SnapshotDiff",
+    "diff_snapshots",
+]
