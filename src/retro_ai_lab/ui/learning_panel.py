@@ -4,6 +4,13 @@ The child picks a mode (the AI on its own, with the child's help, or the
 child playing while the AI watches), whether to watch the AI at game speed
 or let it practise fast, and presses Start. A timer steps the training
 service while the AI plays; in manual mode the play clock drives instead.
+
+The steps run on a worker thread (T-903): a step is the emulator's round
+trip plus the AI's own thinking, 30 to 40 ms on a trained brain, and on the
+GUI thread every one of them froze the panels for that long. A timer pulse
+that finds the previous step still running is skipped, so the rate settles
+to what the link and the brain can do. ``tick()`` stays synchronous for
+tests and tooling that drive time by hand.
 The status line says what the AI is doing and pressing, and the list below
 shows how its recent goes went. Everything goes through
 :class:`TrainingService`; the panel only draws what it holds.
@@ -11,7 +18,10 @@ shows how its recent goes went. Everything goes through
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+import logging
+from collections.abc import Callable
+
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
@@ -43,6 +53,7 @@ from retro_ai_lab.training import (
 from retro_ai_lab.training.insights import describe_changes, describe_experiments
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.learning_graph import LearningGraph
+from retro_ai_lab.ui.worker import report
 
 IDLE_TEXT = "Connect to a game, then press Start to let the AI learn it."
 PIN_TEXT = "Practise from here"
@@ -67,8 +78,35 @@ def steps_to_seconds(steps: int, frames_per_step: int) -> float:
     return steps * frames_per_step / FRAMES_PER_SECOND
 
 
-FAST_SLICE_SECONDS = 0.02  # how long each fast tick may hog the GUI
+FAST_SLICE_SECONDS = 0.02  # how long a synchronous fast tick may hog the GUI
+FAST_WORKER_SLICE_SECONDS = 0.1  # a fast slice on the worker, between two status updates (T-903)
 FAST_TICK_MS = 1
+
+log = logging.getLogger(__name__)
+
+
+class _StepSignals(QObject):
+    done = Signal(int, object)  # the generation, then the steps taken or the exception
+
+
+class _StepTask(QRunnable):
+    """One step (or one fast slice) of the training service, off the GUI thread (T-903)."""
+
+    def __init__(self, action: Callable[[], int], generation: int) -> None:
+        super().__init__()
+        self.signals = _StepSignals()
+        self._action = action
+        self._generation = generation
+
+    def run(self) -> None:
+        try:
+            taken = self._action()
+        except Exception as exc:  # reported to the GUI thread, never lost
+            report(self.signals.done, self._generation, exc)
+        else:
+            report(self.signals.done, self._generation, taken)
+
+
 INSIGHTS_LINES = 5  # the advice under the graph scrolls past this many lines (T-889)
 ENDED_BY = {
     "reset": "the game started over",
@@ -228,7 +266,13 @@ class LearningPanel(QWidget):
 
         self._ticker = QTimer(self)
         self._ticker.setObjectName("learning_ticker")
-        self._ticker.timeout.connect(self.tick)
+        self._ticker.timeout.connect(self._on_timer)
+        self._pool = QThreadPool(self)
+        self._pool.setMaxThreadCount(1)
+        self._in_flight = False
+        self._generation = 0  # bumped when the panel goes: late results are dropped
+        self._skipped = 0
+        self._worker_steps = 0
 
         bridge = context.bridge
         unsubscribe = (
@@ -242,6 +286,7 @@ class LearningPanel(QWidget):
 
         def release(*_: object) -> None:
             ticker.stop()
+            self._generation += 1
             for off in unsubscribe:
                 off()
 
@@ -293,6 +338,21 @@ class LearningPanel(QWidget):
     @property
     def tick_interval_ms(self) -> int:
         return self._ticker.interval()
+
+    @property
+    def in_flight(self) -> bool:
+        """Is a step running on the worker right now (T-903)?"""
+        return self._in_flight
+
+    @property
+    def skipped(self) -> int:
+        """Timer pulses that found the previous step still running."""
+        return self._skipped
+
+    @property
+    def worker_steps(self) -> int:
+        """Steps the worker has taken since the panel was made."""
+        return self._worker_steps
 
     def go_rows(self) -> tuple[tuple[str, ...], ...]:
         out = []
@@ -390,16 +450,53 @@ class LearningPanel(QWidget):
         self.refresh()
 
     def tick(self) -> int:
-        """One timer tick: a step (LIVE) or a slice of steps (FAST). Returns the steps."""
+        """One step (LIVE) or a slice of steps (FAST), here and now. Returns the steps.
+
+        The timer does not call this: it runs the same work on the worker
+        (:meth:`_on_timer`). This stays for tests and tooling that drive time
+        by hand, and takes nothing while the worker holds a step.
+        """
         if self._training.status is not Status.RUNNING or not self._training.mode.ai_plays:
             self._arm_ticker()
             return 0
-        if self._training.speed is Speed.FAST:
-            taken = self._training.run_for(FAST_SLICE_SECONDS)
-        else:
-            taken = 1 if self._training.step() else 0
+        if self._in_flight:
+            return 0
+        taken = self._step_action(FAST_SLICE_SECONDS)()
         self._show_status()
         return taken
+
+    def _step_action(self, fast_slice_s: float) -> Callable[[], int]:
+        t = self._training
+        if t.speed is Speed.FAST:
+            return lambda: t.run_for(fast_slice_s)
+        return lambda: 1 if t.step() else 0
+
+    def _on_timer(self) -> None:
+        """A timer pulse: step on the worker, or skip the pulse while one is running (T-903)."""
+        t = self._training
+        if t.status is not Status.RUNNING or not t.mode.ai_plays:
+            self._arm_ticker()
+            return
+        if self._in_flight:
+            self._skipped += 1
+            return
+        self._in_flight = True
+        task = _StepTask(self._step_action(FAST_WORKER_SLICE_SECONDS), self._generation)
+        task.signals.done.connect(self._on_step_done)
+        self._pool.start(task)
+
+    def _on_step_done(self, generation: int, result: object) -> None:
+        """Back on the GUI thread: show what the step did, and stop ticking once training ends."""
+        self._in_flight = False
+        if generation != self._generation:
+            return  # the panel went away while the step ran
+        if isinstance(result, Exception):
+            log.warning("A training step failed: %s", result)
+            self._note.setText(str(result).strip() or result.__class__.__name__)
+        else:
+            self._worker_steps += int(result)  # type: ignore[call-overload]
+        self._show_status()
+        self._arm_ticker()
 
     def refresh(self) -> None:
         t = self._training

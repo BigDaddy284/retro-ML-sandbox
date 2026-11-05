@@ -131,6 +131,60 @@ def test_fast_speed_takes_many_steps_per_tick(panel: LearningPanel, context: App
     panel.stop()
 
 
+def test_the_timer_steps_on_a_worker_thread(
+    qtbot: QtBot, panel: LearningPanel, context: AppContext
+) -> None:
+    """The AI's steps froze the window for 30 to 40 ms each (T-903)."""
+    import threading
+
+    connect(context)
+    t = context.training
+    threads: set[int] = set()
+    real_step = t.step
+
+    def step_and_note() -> bool:
+        threads.add(threading.get_ident())
+        return real_step()
+
+    t.step = step_and_note  # type: ignore[method-assign]
+    panel.choose_mode(Mode.INDEPENDENT)
+    panel.start()
+    assert panel.ticking and panel.worker_steps == 0 and not panel.in_flight
+    qtbot.waitUntil(lambda: panel.worker_steps >= 3, timeout=5000)
+    assert threads and threading.get_ident() not in threads
+    assert t.episode is not None and t.episode.steps >= 3
+    assert "Go 1: playing" in panel.status_text
+    panel.stop()  # waits for the step in flight, then closes the go
+    assert t.status is Status.IDLE and not panel.ticking
+    qtbot.waitUntil(lambda: not panel.in_flight, timeout=5000)
+    assert len(panel.go_rows()) == 1 and panel.go_rows()[0][4] == ENDED_BY["stopped"]
+    # A fast slice runs on the worker too, many steps at a time.
+    panel.choose_speed(Speed.FAST)
+    panel.start()
+    before = panel.worker_steps
+    qtbot.waitUntil(lambda: panel.worker_steps >= before + 20, timeout=5000)
+    panel.stop()
+    qtbot.waitUntil(lambda: not panel.in_flight, timeout=5000)
+    assert t.status is Status.IDLE and len(panel.go_rows()) >= 2
+
+
+def test_a_failing_step_is_shown_not_lost(
+    qtbot: QtBot, panel: LearningPanel, context: AppContext
+) -> None:
+    connect(context)
+    t = context.training
+
+    def broken() -> bool:
+        raise RuntimeError("the brain tripped")
+
+    t.step = broken  # type: ignore[method-assign]
+    panel.start()
+    qtbot.waitUntil(lambda: panel.note_text == "the brain tripped", timeout=5000)
+    assert panel.ticking  # training itself is still on; the person decides
+    panel.stop()
+    qtbot.waitUntil(lambda: not panel.in_flight, timeout=5000)
+
+
 def test_game_controls_yield_to_the_ai_and_come_back(qtbot: QtBot, context: AppContext) -> None:
     w = MainWindow(context)
     qtbot.addWidget(w)

@@ -282,6 +282,38 @@ def test_run_for_honours_its_budget(lab: Lab) -> None:
     t.stop()
 
 
+def test_the_gui_buttons_wait_for_a_step_on_another_thread(lab: Lab) -> None:
+    """The Learning panel steps on a worker (T-903); Stop must not cut a step in half."""
+    import threading
+
+    lab.connect()
+    t = lab.training
+    t.set_speed(Speed.FAST)
+    t.start(Mode.INDEPENDENT)
+    taken: list[int] = []
+    failures: list[BaseException] = []
+
+    def work() -> None:
+        try:
+            taken.append(t.run_for(0.3))
+        except BaseException as exc:  # the test reports it
+            failures.append(exc)
+
+    worker = threading.Thread(target=work)
+    worker.start()
+    while t.total_steps == 0:  # the worker is mid-slice
+        pass
+    t.stop()  # waits for the slice, then closes the go once
+    worker.join(timeout=5.0)
+    assert not worker.is_alive() and failures == [] and taken and taken[0] >= 1
+    assert t.status is Status.IDLE and t.episode is None
+    # Stop closed the go that was running, or the slice had just ended one: never half a go.
+    assert t.episodes == len(lab.finished)
+    assert lab.finished[-1].record.result.ended_by in ("stopped", "max_steps")
+    assert t.total_steps == sum(f.record.result.steps for f in lab.finished)
+    assert not t.step()  # stopped: the next step takes nothing
+
+
 def test_fast_practice_runs_the_emulator_flat_out(lab: Lab) -> None:
     """T-836: "Practise fast" asks the emulator for its top speed, and only then."""
     from retro_ai_lab.training.service import FAST_SPEED
