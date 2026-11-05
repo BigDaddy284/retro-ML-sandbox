@@ -873,3 +873,49 @@ def test_a_confirmed_score_is_never_the_progress_byte(
     # Said to be a score instead, the score byte is a candidate again.
     m = discovery.tell(Moment.SCORED)
     assert ("ram", LAYOUT.score) in m.candidates
+
+
+# ------------------------------------------------------------ T-907: the summary cache
+
+
+def test_the_summary_is_computed_once_per_change(
+    discovery: DiscoveryService,
+    connection: ConnectionService,
+    observation: ObservationService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The panel asks for the line after every review; a walk over thousands of values each time."""
+    from retro_ai_lab.understanding.knowledge import Knowledge as Kn
+
+    walks = 0
+    original = Kn.__iter__
+
+    def counted(self: Kn) -> object:
+        nonlocal walks
+        walks += 1
+        return original(self)
+
+    monkeypatch.setattr(Kn, "__iter__", counted)
+    connection.connect("fake", seed=2)
+    play(connection, observation, 100)  # one review: guesses proposed
+    k = discovery.knowledge
+    assert k is not None and len(k) >= 5
+    before = walks
+    first = discovery.summary()  # the review built it already: no walk
+    assert first.startswith("Watching") and walks == before
+    assert discovery.summary() == first and walks == before  # remembered
+    # A verdict is a change: a fresh line, one walk.
+    v = next(iter(k))
+    before = walks
+    discovery.reject(v.id)
+    second = discovery.summary()
+    assert second != first and walks == before + 1
+    assert discovery.summary() == second and walks == before + 1
+    # The wake button is in the line but not in the version: it still refreshes.
+    k.wake_button = "start"
+    assert discovery.summary().endswith("Start gets the game going.") and walks == before + 2
+    connection.disconnect()
+    assert discovery.summary() == "Not watching a game." and walks == before + 2
+    connection.connect("fake", seed=2)
+    before = walks
+    assert discovery.summary().startswith("Watching") and walks == before + 1

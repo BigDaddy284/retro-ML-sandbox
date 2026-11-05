@@ -193,6 +193,9 @@ class DiscoveryService:
         self._stage = "idle"
         self._enabled = False
         self._experiments_allowed = True  # the training service holds them back (T-839)
+        # The summary line, remembered with what it was built from (T-907): a review asks
+        # for it on the worker and the panel twice more on the GUI thread.
+        self._summary: tuple[tuple[int, int, str | None], str] | None = None
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
         bus.subscribe(MemoryObserved, self._on_memory)
@@ -521,13 +524,27 @@ class DiscoveryService:
             return tuple(credited)
 
     def summary(self) -> str:
-        """One line for the status bar / panel header."""
+        """One line for the status bar / panel header.
+
+        Built in one pass over the variables and remembered with the
+        knowledge's version and wake button (T-907), so the handlers that ask
+        for it after every review get the string back, not another walk.
+        """
         k = self._knowledge
         if k is None or not self._enabled:
             return "Not watching a game."
-        beliefs = sum(1 for v in k if not v.rejected)
-        confident = len(k.confident())
-        asks = len(k.needs_help())
+        key = (id(k), k.version, k.wake_button)
+        if self._summary is not None and self._summary[0] == key:
+            return self._summary[1]
+        beliefs = confident = asks = 0
+        for v in k:
+            if v.rejected:
+                continue
+            beliefs += 1
+            if v.confidence >= Confidence.MEDIUM:
+                confident += 1
+            if not v.confirmed and v.confidence in (Confidence.LOW, Confidence.MEDIUM):
+                asks += 1
         parts = [f"Watching {beliefs} value{'s' if beliefs != 1 else ''}"]
         if confident:
             parts.append(f"{confident} fairly sure")
@@ -536,6 +553,7 @@ class DiscoveryService:
         line = ", ".join(parts) + "."
         if k.wake_button:
             line += f" {k.wake_button.capitalize()} gets the game going."
+        self._summary = (key, line)
         return line
 
     # ------------------------------------------------------------ actions
