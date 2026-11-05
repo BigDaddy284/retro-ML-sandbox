@@ -169,3 +169,32 @@ def test_restarts_with_no_clear_winner_are_forgotten() -> None:
         RestartWatch(needed=0)
     with pytest.raises(ConfigurationError):
         RestartWatch(needed=3, forget_after=2)
+
+
+# ------------------------------------------------------------ T-905: steadiness
+
+
+def test_a_byte_must_move_steadily_to_count() -> None:
+    """The user's "Lives" settled on a byte that flickers; his "Progress" on his Score."""
+    finder = MomentFinder()
+    window = [
+        snap(0, [3, 10, 5, 7]),
+        snap(20, [2, 10, 9, 7]),
+        snap(40, [3, 11, 8, 6]),
+        snap(60, [2, 12, 9, 6]),
+    ]
+    # byte 0: down by one over the window, but it changed three times: a flicker.
+    # byte 3: down by one, in one step: a life counter.
+    n = finder.tell(Moment.LOST_LIFE, window)
+    assert n.candidates == (("ram", 3),)
+    # byte 1: up steadily. byte 2: up over the window, but it went down inside it.
+    n = finder.tell(Moment.SCORED, window)
+    assert n.candidates == (("ram", 1),)
+    # A byte confirmed as something else gets no vote.
+    n = finder.tell(Moment.GOT_FURTHER, window, skip={("ram", 1)})
+    assert n.candidates == () and "no byte went up" in n.text
+    # The restart watch uses the same rule.
+    from retro_ai_lab.understanding import RestartWatch
+
+    watch = RestartWatch(window_frames=100, needed=1)
+    assert watch.restart([*window, snap(61, [3, 0, 0, 7])]) == ("ram", 3)

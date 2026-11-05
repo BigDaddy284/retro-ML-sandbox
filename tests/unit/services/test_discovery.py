@@ -854,3 +854,22 @@ def test_the_ai_finds_the_life_counter_from_restarts(
         'but you confirmed "Lifes"; the AI keeps your word' in caplog.text
         or k.get(found.id).rejected
     )
+
+
+def test_a_confirmed_score_is_never_the_progress_byte(
+    connection: ConnectionService, observation: ObservationService, bus: EventBus
+) -> None:
+    """T-905: the user's "I just got further" settled on the byte he had confirmed as Score."""
+    discovery = _telling(connection, observation, bus)
+    connection.connect("fake", seed=2)
+    k = discovery.knowledge
+    assert k is not None
+    score = k.propose("ram", LAYOUT.score, kind=VariableKind.SCORE, name="Score")
+    k.correct(score.id, name="Score", kind=VariableKind.SCORE, by="you")
+    play(connection, observation, 200)
+    n = discovery.tell(Moment.GOT_FURTHER)
+    assert ("ram", LAYOUT.score) not in n.candidates
+    assert ("ram", LAYOUT.position) in n.candidates or ("ram", LAYOUT.checkpoint) in n.candidates
+    # Said to be a score instead, the score byte is a candidate again.
+    m = discovery.tell(Moment.SCORED)
+    assert ("ram", LAYOUT.score) in m.candidates
