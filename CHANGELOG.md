@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-908: the brain's slots go to the useful values. The AI's state now takes its values kind by kind (positions, lives, health, speed, score, progress, then flags), the most trusted of each kind first, so a position found late is seen before the twentieth switch; and a full brain gives a newcomer the slot of a value that is absent instead of never seeing it.
 - T-907: the "Watching N values…" line is built once per change and remembered, instead of three walks over every value each time a review or a panel asks for it.
 - T-906: the "App work" line in the log names the work behind a GUI stall: every event the window handles (`on DiscoveryUpdated`), the panels' refreshes and the picture's paint are timed, and work that never took a millisecond is left off the line.
 - T-905: a "Tell the AI" press counts a byte only if it moved steadily through the last five seconds (a life counter changes once, down by one; score and progress never go down inside the window), and a byte you confirmed as something else is never picked, so your Score cannot become your Progress.

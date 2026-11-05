@@ -20,7 +20,7 @@ from retro_ai_lab.understanding import (
     VariableKind,
     confidence_from_evidence,
 )
-from retro_ai_lab.understanding.knowledge import THRESHOLDS, decode
+from retro_ai_lab.understanding.knowledge import THRESHOLDS, belief_rank, decode
 
 # ---------------------------------------------------------- confidence
 
@@ -433,3 +433,15 @@ def test_offered_keeps_one_seat_per_role_and_names_them() -> None:
     ]
     assert [names[v.id] for v in flags] == ["Something", "Something (2nd guess)"]
     assert plain_names(()) == {}
+
+
+def test_belief_rank_orders_as_believed_does() -> None:
+    """T-908: the state encoder fills the brain's slots in the order believed() seats."""
+    k = Knowledge("g")
+    weak = k.propose("ram", 0, kind=VariableKind.FLAG, evidence=[Evidence("t", "", 1.0)])
+    strong = k.propose("ram", 1, kind=VariableKind.FLAG, evidence=[Evidence("t", "", 6.0)])
+    sure = k.propose("ram", 2, kind=VariableKind.FLAG, evidence=[Evidence("t", "", 1.0)])
+    sure = k.confirm(sure.id)
+    ranked = sorted((weak, strong, sure), key=belief_rank)
+    assert [v.id for v in ranked] == [sure.id, strong.id, weak.id]
+    assert [v.id for v in k.believed(per_kind=2)] == [strong.id, sure.id]  # knowledge order
