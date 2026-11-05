@@ -10,6 +10,8 @@ on demand when the emulator supports save states.
 
 from __future__ import annotations
 
+from bisect import bisect_left
+from collections.abc import Iterable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -61,6 +63,14 @@ def badge(variable: Variable) -> str:
 def variable_line(variable: Variable) -> str:
     where = f"{variable.region}[{variable.offset}]"
     return f"{variable.display_name}  ({variable.kind.label}, {where})  —  {badge(variable)}"
+
+
+def _paint(item: QListWidgetItem, variable: Variable) -> None:
+    """A rejected guess is greyed; one taken back keeps the usual colour."""
+    if variable.rejected:
+        item.setForeground(Qt.GlobalColor.gray)
+    else:
+        item.setData(Qt.ItemDataRole.ForegroundRole, None)
 
 
 class DiscoveryPanel(QWidget):
@@ -148,10 +158,12 @@ class DiscoveryPanel(QWidget):
         layout.addWidget(section_heading("What leads to what", self))
         layout.addWidget(self._relationships, 1)
 
-        # Updates arrive on most training steps; the list is rebuilt a few times a
-        # second at most (T-843), and only when a variable changed.
+        # Updates arrive on most training steps; the list follows a few times a
+        # second at most (T-843), touching only the rows that changed (T-896).
         self._refresher = Coalescer(self._refresh_from_update, parent=self)
-        self._full_refresh = False
+        self._items: dict[str, QListWidgetItem] = {}  # variable id -> its row
+        self._keys: list[tuple[str, int]] = []  # (region, offset) of each row, in order
+        self._touched: dict[str, Variable] = {}  # added or changed since the last update
 
         bridge = context.bridge
         self._unsubscribe = (
@@ -285,13 +297,17 @@ class DiscoveryPanel(QWidget):
         k = self.knowledge
         self._list.blockSignals(True)
         self._list.clear()
+        self._items = {}
+        self._keys = []
+        self._touched = {}
         if k is not None:
             for v in sorted(k, key=lambda v: (v.region, v.offset)):
                 item = QListWidgetItem(variable_line(v))
                 item.setData(Qt.ItemDataRole.UserRole, v.id)
-                if v.rejected:
-                    item.setForeground(Qt.GlobalColor.gray)
+                _paint(item, v)
                 self._list.addItem(item)
+                self._items[v.id] = item
+                self._keys.append((v.region, v.offset))
         self._list.blockSignals(False)
         self._summary.setText(self._context.discovery.summary())
         self._experiment.setEnabled(self._context.discovery.can_experiment())
@@ -303,7 +319,47 @@ class DiscoveryPanel(QWidget):
             self._selected = None
             self._show_evidence()
 
+    def update_rows(self, variables: Iterable[Variable]) -> None:
+        """Bring the rows of these variables up to date without rebuilding the list (T-896).
+
+        A variable the knowledge no longer holds loses its row; a new one gets a
+        row in (region, offset) order; a changed one has its line repainted. The
+        selection and the scroll position stay where they are.
+        """
+        k = self.knowledge
+        for v in variables:
+            item = self._items.get(v.id)
+            if k is None or v.id not in k:
+                if item is not None:
+                    self._remove_row(item, v.id)
+                continue
+            current = k.get(v.id)
+            if item is None:
+                item = QListWidgetItem(variable_line(current))
+                item.setData(Qt.ItemDataRole.UserRole, current.id)
+                _paint(item, current)
+                key = (current.region, current.offset)
+                row = bisect_left(self._keys, key)
+                self._list.insertItem(row, item)
+                self._keys.insert(row, key)
+                self._items[current.id] = item
+            else:
+                line = variable_line(current)
+                if item.text() != line:
+                    item.setText(line)
+                _paint(item, current)
+            if current.id == self._selected:
+                self._show_evidence()
+        if k is not None and len(k) != len(self._items):  # a change nobody announced
+            self.refresh(keep=self._selected)
+
     # ----------------------------------------------------------- internals
+
+    def _remove_row(self, item: QListWidgetItem, var_id: str) -> None:
+        row = self._list.row(item)
+        self._list.takeItem(row)
+        del self._keys[row]
+        del self._items[var_id]
 
     def _selection(self) -> tuple[Knowledge | None, str | None]:
         k = self.knowledge
@@ -402,16 +458,16 @@ class DiscoveryPanel(QWidget):
         self._stage.setVisible(not repeats_summary)
 
     def _on_updated(self, event: DiscoveryUpdated) -> None:
-        if event.added or event.changed:
-            self._full_refresh = True
+        for v in (*event.added, *event.changed):
+            self._touched[v.id] = v
         self._refresher.request()
 
     def _refresh_from_update(self) -> None:
-        if self._full_refresh:
-            self._full_refresh = False
-            self.refresh(keep=self._selected)
-            return
+        touched, self._touched = self._touched, {}
+        if touched:
+            self.update_rows(touched.values())
         self._summary.setText(self._context.discovery.summary())
+        self._experiment.setEnabled(self._context.discovery.can_experiment())
         self._fill_events()
         self._fill_relationships()
 

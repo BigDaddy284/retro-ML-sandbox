@@ -396,9 +396,10 @@ class DiscoveryService:
                         f"if it is not {words}, reject it in Discoveries."
                     )
                     question = Question(v.id, v.name, reason, text)
-                    if self._questions.get(v.id) != question:
-                        self._questions[v.id] = question
-                        questioned.append(v)
+                    before = self._questions.get(v.id)
+                    self._questions[v.id] = question
+                    if before is None or (before.name, before.reason) != (v.name, reason):
+                        questioned.append(v)  # a new question; fresh counts are kept quietly
                         log.info("%s", text)
                     continue
                 if any(e.kind in NOT_LIVES for e in v.evidence):

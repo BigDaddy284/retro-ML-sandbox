@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-896: the Discoveries list changes only the rows a review added or changed, in place, instead of being rebuilt from scratch (which froze the game for up to a second every 15 s on a long list); a question about a confirmed guess is logged and announced only when it is new, not every time its counts move.
 - T-895: a confirmed guess whose byte behaves unlike its kind (a "lives" that changes every few steps or bounces) is kept but questioned: the Learning panel's insights say 'Check "<name>"' with what the byte did and how to reject it in Discoveries, and the log says the same once.
 - T-894: the log says where the app's own time goes: every 5 s an "App work" line next to the emulator link's reports the AI step, learning from the person's play, picture display, and GUI stalls over 50 ms (count and longest), so a freeze can be pinned down from a log.
 - T-893: a BizHawk step leaves the emulator running and the script waits up to 50 ms for the next request before pausing, so steps that follow each other no longer pause and unpause EmuHawk (the status bar flickered at the step rate while the user played).
