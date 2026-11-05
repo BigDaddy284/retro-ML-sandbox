@@ -11,11 +11,12 @@ on demand when the emulator supports save states.
 from __future__ import annotations
 
 from bisect import bisect_left
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -44,6 +45,29 @@ IDLE_TEXT = "Connect to a game and the AI will start watching it."
 NO_SELECTION = "Pick a discovery to see why the AI thinks so."
 MAX_EVENTS = 8
 MAX_RELATIONSHIPS = 8
+FIND_PLACEHOLDER = "Find by name or address\u2026"
+
+SortKey = tuple[object, ...]
+
+
+def _by_address(v: Variable) -> SortKey:
+    return (v.region, v.offset)
+
+
+def _by_name(v: Variable) -> SortKey:
+    return (v.display_name.lower(), v.region, v.offset)
+
+
+def _by_sureness(v: Variable) -> SortKey:
+    yours = 0 if v.confirmed else 2 if v.rejected else 1  # your word first, your "no" last
+    return (yours, -v.confidence.value, v.region, v.offset)
+
+
+SORTS: tuple[tuple[str, Callable[[Variable], SortKey]], ...] = (
+    ("By address", _by_address),
+    ("By name", _by_name),
+    ("Most sure first", _by_sureness),
+)
 
 BADGES = {
     Confidence.UNKNOWN: "Not sure",
@@ -87,6 +111,19 @@ class DiscoveryPanel(QWidget):
         self._stage.setWordWrap(True)
         self._summary = QLabel("", self)
         self._summary.setObjectName("discovery_summary")
+
+        self._find = QLineEdit(self)  # T-898: hundreds of guesses need a way in
+        self._find.setObjectName("discovery_find")
+        self._find.setPlaceholderText(FIND_PLACEHOLDER)
+        self._find.setClearButtonEnabled(True)
+        self._find.textChanged.connect(self._apply_filter)
+        self._found = QLabel("", self)
+        self._found.setObjectName("discovery_found")
+        self._sort = QComboBox(self)
+        self._sort.setObjectName("discovery_sort")
+        for label, _ in SORTS:
+            self._sort.addItem(label)
+        self._sort.currentIndexChanged.connect(self._on_sort_changed)
 
         self._list = QListWidget(self)
         self._list.setObjectName("discovery_list")
@@ -143,6 +180,11 @@ class DiscoveryPanel(QWidget):
         layout.addWidget(self._stage)
         layout.addWidget(self._summary)
         layout.addWidget(section_heading("What the AI thinks it has found", self))
+        find = QHBoxLayout()
+        find.addWidget(self._find, 1)
+        find.addWidget(self._found)
+        find.addWidget(self._sort)
+        layout.addLayout(find)
         layout.addWidget(self._list, 2)
         layout.addWidget(self._evidence)
         layout.addLayout(verdict)
@@ -162,7 +204,7 @@ class DiscoveryPanel(QWidget):
         # second at most (T-843), touching only the rows that changed (T-896).
         self._refresher = Coalescer(self._refresh_from_update, parent=self)
         self._items: dict[str, QListWidgetItem] = {}  # variable id -> its row
-        self._keys: list[tuple[str, int]] = []  # (region, offset) of each row, in order
+        self._keys: list[SortKey] = []  # the sort key of each row, in order
         self._touched: dict[str, Variable] = {}  # added or changed since the last update
 
         bridge = context.bridge
@@ -208,6 +250,35 @@ class DiscoveryPanel(QWidget):
             str(self._list.item(i).data(Qt.ItemDataRole.UserRole))
             for i in range(self._list.count())
         )
+
+    def visible_ids(self) -> tuple[str, ...]:
+        """The rows the find box leaves showing, in order."""
+        return tuple(
+            str(self._list.item(i).data(Qt.ItemDataRole.UserRole))
+            for i in range(self._list.count())
+            if not self._list.item(i).isHidden()
+        )
+
+    @property
+    def find_text(self) -> str:
+        return self._find.text()
+
+    def find_rows(self, text: str) -> None:
+        """Show only the rows whose line contains the text (any case); "" shows all."""
+        self._find.setText(text)
+
+    @property
+    def found_text(self) -> str:
+        return self._found.text()
+
+    @property
+    def sort_name(self) -> str:
+        return self._sort.currentText()
+
+    def sort_by(self, name: str) -> None:
+        """Order the rows by one of the :data:`SORTS` labels."""
+        index = [label for label, _ in SORTS].index(name)
+        self._sort.setCurrentIndex(index)
 
     def item_text(self, var_id: str) -> str:
         for i in range(self._list.count()):
@@ -300,15 +371,17 @@ class DiscoveryPanel(QWidget):
         self._items = {}
         self._keys = []
         self._touched = {}
+        key = self._sort_key
         if k is not None:
-            for v in sorted(k, key=lambda v: (v.region, v.offset)):
+            for v in sorted(k, key=key):
                 item = QListWidgetItem(variable_line(v))
                 item.setData(Qt.ItemDataRole.UserRole, v.id)
                 _paint(item, v)
                 self._list.addItem(item)
                 self._items[v.id] = item
-                self._keys.append((v.region, v.offset))
+                self._keys.append(key(v))
         self._list.blockSignals(False)
+        self._apply_filter()
         self._summary.setText(self._context.discovery.summary())
         self._experiment.setEnabled(self._context.discovery.can_experiment())
         self._fill_events()
@@ -327,6 +400,7 @@ class DiscoveryPanel(QWidget):
         selection and the scroll position stay where they are.
         """
         k = self.knowledge
+        key = self._sort_key
         for v in variables:
             item = self._items.get(v.id)
             if k is None or v.id not in k:
@@ -337,29 +411,64 @@ class DiscoveryPanel(QWidget):
             if item is None:
                 item = QListWidgetItem(variable_line(current))
                 item.setData(Qt.ItemDataRole.UserRole, current.id)
-                _paint(item, current)
-                key = (current.region, current.offset)
-                row = bisect_left(self._keys, key)
-                self._list.insertItem(row, item)
-                self._keys.insert(row, key)
-                self._items[current.id] = item
+                self._insert_row(item, current.id, key(current))
             else:
                 line = variable_line(current)
                 if item.text() != line:
                     item.setText(line)
-                _paint(item, current)
+                if self._keys[self._list.row(item)] != key(current):  # it sorts elsewhere now
+                    selected = item is self._list.currentItem()
+                    self._list.blockSignals(True)
+                    self._remove_row(item, current.id)
+                    self._insert_row(item, current.id, key(current))
+                    if selected:
+                        self._list.setCurrentItem(item)
+                    self._list.blockSignals(False)
+            _paint(item, current)
+            item.setHidden(not self._matches(item))
             if current.id == self._selected:
                 self._show_evidence()
+        self._show_found()
         if k is not None and len(k) != len(self._items):  # a change nobody announced
             self.refresh(keep=self._selected)
 
     # ----------------------------------------------------------- internals
+
+    def _insert_row(self, item: QListWidgetItem, var_id: str, key: SortKey) -> None:
+        row = bisect_left(self._keys, key)
+        self._list.insertItem(row, item)
+        self._keys.insert(row, key)
+        self._items[var_id] = item
 
     def _remove_row(self, item: QListWidgetItem, var_id: str) -> None:
         row = self._list.row(item)
         self._list.takeItem(row)
         del self._keys[row]
         del self._items[var_id]
+
+    @property
+    def _sort_key(self) -> Callable[[Variable], SortKey]:
+        return SORTS[self._sort.currentIndex()][1]
+
+    def _on_sort_changed(self, _index: int) -> None:
+        self.refresh(keep=self._selected)
+
+    def _matches(self, item: QListWidgetItem) -> bool:
+        wanted = self._find.text().strip().lower()
+        return not wanted or wanted in item.text().lower()
+
+    def _apply_filter(self) -> None:
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            item.setHidden(not self._matches(item))
+        self._show_found()
+
+    def _show_found(self) -> None:
+        if not self._find.text().strip():
+            self._found.setText("")
+            return
+        shown = sum(1 for i in range(self._list.count()) if not self._list.item(i).isHidden())
+        self._found.setText(f"{shown} of {self._list.count()}")
 
     def _selection(self) -> tuple[Knowledge | None, str | None]:
         k = self.knowledge
@@ -394,6 +503,8 @@ class DiscoveryPanel(QWidget):
 
     def _set_enabled(self, enabled: bool) -> None:
         self._list.setEnabled(enabled)
+        self._find.setEnabled(enabled)
+        self._sort.setEnabled(enabled)
         self._export.setEnabled(enabled)
         self._import.setEnabled(enabled)
         if not enabled:
@@ -485,4 +596,12 @@ class DiscoveryPanel(QWidget):
         self.refresh()
 
 
-__all__ = ["BADGES", "IDLE_TEXT", "NO_SELECTION", "DiscoveryPanel", "badge", "variable_line"]
+__all__ = [
+    "BADGES",
+    "IDLE_TEXT",
+    "NO_SELECTION",
+    "SORTS",
+    "DiscoveryPanel",
+    "badge",
+    "variable_line",
+]
