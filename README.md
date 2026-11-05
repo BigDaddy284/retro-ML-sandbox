@@ -229,7 +229,9 @@ the AI has found it, the AI can learn to avoid the enemy; if it has not,
 the enemy is invisible to it. A value that wanders both ways in small
 steps, often, is taken for the position of something that moves (an enemy,
 a platform, a ball) and listed as "Something moving" until the AI finds a
-button that moves it. The "What the AI is doing" list shows what it has
+button that moves it. For each such thing the AI also sees how far it is
+from its own position, exactly when it is close and roughly when it is far,
+so a thing about to touch it and one across the screen look different. The "What the AI is doing" list shows what it has
 found, and the Research window's memory table lets you name a value for
 it.
 

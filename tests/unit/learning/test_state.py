@@ -11,9 +11,22 @@ from retro_ai_lab.emulator.fake import ToyRacer
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
 from retro_ai_lab.learning import State, StateEncoder, bucket
 from retro_ai_lab.learning.features import DEFAULT_WIDTH
-from retro_ai_lab.learning.state import DEFAULT_MOST, KIND_RANK
+from retro_ai_lab.learning.state import (
+    DEFAULT_MOST,
+    KIND_RANK,
+    MOST_DISTANCES,
+    distance_id,
+    split_distance,
+)
 from retro_ai_lab.observation import MemorySnapshot
-from retro_ai_lab.understanding import Confidence, Encoding, Evidence, Knowledge, VariableKind
+from retro_ai_lab.understanding import (
+    Confidence,
+    Encoding,
+    Evidence,
+    Knowledge,
+    Variable,
+    VariableKind,
+)
 
 RAM = "ram"
 SURE = [Evidence("test", "", 6.0)]
@@ -164,3 +177,115 @@ def test_the_state_takes_the_useful_kinds_first() -> None:
     assert len(StateEncoder(k, most=None).variables) == 16 + 3  # 16 flags (T-850) + 3
     with pytest.raises(ConfigurationError):
         StateEncoder(k, most=0)
+
+
+# ------------------------------------------------------------ T-912: distances
+
+
+def moving_world() -> tuple[Knowledge, Variable, Variable, Variable]:
+    """My position at 1, something moving at 2, a score at 3 (T-912)."""
+    from retro_ai_lab.understanding.knowledge import MOVER
+
+    k = Knowledge("g")
+    me = k.propose(
+        RAM, 1, kind=VariableKind.POSITION, evidence=[Evidence("monotonic", "Climbs.", 6.0)]
+    )
+    it = k.propose(RAM, 2, kind=VariableKind.POSITION, evidence=[Evidence(MOVER, "Moves.", 6.0)])
+    score = k.propose(RAM, 3, kind=VariableKind.SCORE, evidence=SURE)
+    return k, me, it, score
+
+
+def test_the_distance_from_each_moving_thing_is_part_of_the_state() -> None:
+    k, me, it, score = moving_world()
+    enc = StateEncoder(k)
+    assert enc.pairs == ((it, me),)
+    apart = distance_id(it.id, me.id)
+
+    def parts(me_at: int, it_at: int) -> dict[str, int]:
+        return dict(enc.encode(snap(bytes([0, me_at, it_at, 9]))).parts)
+
+    close = parts(100, 105)
+    assert close[apart] == 5 and close[me.id] == bucket(100, VariableKind.POSITION)
+    assert parts(100, 80)[apart] == bucket(-20, VariableKind.POSITION) == -10  # behind me
+    assert parts(100, 230)[apart] == bucket(130, VariableKind.POSITION)  # far ahead
+    # Touching, a jump away and across the screen are three different situations;
+    # under the doubling rule alone 64 and 127 were one.
+    assert len({parts(64, x)[apart] for x in (66, 80, 127)}) == 3
+    assert list(close) == [me.id, it.id, score.id, apart]  # values by address, then distances
+    assert State.from_key(enc.encode(snap(bytes([0, 100, 105, 9]))).key) == enc.encode(
+        snap(bytes([0, 100, 105, 9]))
+    )
+
+
+def test_distance_parts_are_named_in_words() -> None:
+    k, me, it, _ = moving_world()
+    k.correct(me.id, name="Mario")
+    s = StateEncoder(k).encode(snap(bytes([0, 100, 105, 9])))
+    assert f"{it.display_name} from Mario=5" in s.describe(k)
+    assert f"{it.id} from {me.id}=5" in s.describe()  # without the knowledge, the ids
+    assert split_distance(distance_id("v2", "v1")) == ("v2", "v1")
+    assert split_distance("v2") is None and split_distance("~v1") is None
+    with pytest.raises(ConfigurationError):
+        distance_id("a~b", "c")
+
+
+def test_no_distances_without_both_a_mover_and_a_position_of_my_own() -> None:
+    from retro_ai_lab.understanding.knowledge import INPUT_LINKED, MOVER
+
+    k = Knowledge("g")
+    k.propose(RAM, 1, kind=VariableKind.POSITION, evidence=[Evidence("monotonic", "", 6.0)])
+    assert StateEncoder(k).pairs == ()  # nothing moves
+    k2 = Knowledge("g")
+    k2.propose(RAM, 1, kind=VariableKind.POSITION, evidence=[Evidence(MOVER, "", 6.0)])
+    k2.propose(RAM, 2, kind=VariableKind.POSITION, evidence=[Evidence(MOVER, "", 6.0)])
+    assert StateEncoder(k2).pairs == ()  # two things move, none is mine
+    k3 = Knowledge("g")
+    mine = k3.propose(
+        RAM,
+        1,
+        kind=VariableKind.POSITION,
+        evidence=[Evidence(MOVER, "", 6.0), Evidence(INPUT_LINKED, "", 1.0)],
+    )
+    wide = k3.propose(
+        RAM,
+        2,
+        encoding=Encoding.U16LE,
+        kind=VariableKind.POSITION,
+        evidence=[Evidence(MOVER, "", 6.0)],
+    )
+    elsewhere = k3.propose(
+        "vram", 0, kind=VariableKind.POSITION, evidence=[Evidence(MOVER, "", 6.0)]
+    )
+    near = k3.propose(RAM, 4, kind=VariableKind.POSITION, evidence=[Evidence(MOVER, "", 6.0)])
+    enc = StateEncoder(k3)
+    assert enc.pairs == ((near, mine),)  # not the 16-bit one, not the one in another region
+    assert wide.id in {v.id for v in enc.variables} and elsewhere.id in {
+        v.id for v in enc.variables
+    }
+    s = enc.encode(snap(bytes([0, 10, 0, 0, 0])))  # the snapshot has no mover value at 4? it has
+    assert distance_id(near.id, mine.id) in dict(s.parts)
+    s2 = enc.encode(MemorySnapshot(0, {RAM: bytes([0, 10, 0, 0])}))  # too short for ram[4]
+    assert distance_id(near.id, mine.id) not in dict(s2.parts)
+
+
+def test_seats_are_kept_for_distances_when_anything_moves() -> None:
+    from retro_ai_lab.understanding.knowledge import MOVER
+
+    k = Knowledge("g")
+    me = k.propose(RAM, 0, kind=VariableKind.POSITION, evidence=[Evidence("monotonic", "", 6.0)])
+    movers = [
+        k.propose(
+            RAM, 1 + i, kind=VariableKind.POSITION, evidence=[Evidence(MOVER, "", 6.0 - i * 0.1)]
+        )
+        for i in range(12)
+    ]
+    for i in range(20):
+        k.propose(RAM, 20 + i, kind=VariableKind.FLAG, evidence=SURE)
+    enc = StateEncoder(k, most=12)
+    assert len(enc.variables) == 12 - MOST_DISTANCES
+    assert me in enc.variables  # positions are seated first
+    assert len(enc.pairs) <= MOST_DISTANCES and all(p is me for _, p in enc.pairs)
+    assert len(enc.encode(snap(bytes(40))).parts) == len(enc.variables) + len(enc.pairs) <= 12
+    big = StateEncoder(k, most=None)
+    assert len(big.pairs) == MOST_DISTANCES and [m for m, _ in big.pairs] == movers[:MOST_DISTANCES]
+    assert StateEncoder(k, most=1).variables  # the seats never go below one
