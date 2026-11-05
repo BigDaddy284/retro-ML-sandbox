@@ -107,3 +107,16 @@ def test_view_rejects_non_frames(qtbot: QtBot) -> None:
     qtbot.addWidget(v)
     with pytest.raises(ConfigurationError):
         v.set_frame("nope")  # type: ignore[arg-type]
+
+
+def test_a_paint_is_timed_for_the_stall_line(qtbot: QtBot) -> None:
+    """T-906: a slow paint is named on the "App work" line."""
+    from retro_ai_lab.core.worklog import app_work
+    from retro_ai_lab.ui.frame_view import PAINT
+
+    view = FrameView()
+    qtbot.addWidget(view)
+    before = app_work.stats.get(PAINT)
+    count = before.count if before is not None else 0
+    view.render(QImage(64, 48, QImage.Format.Format_RGB32))  # one paint, exposed or not
+    assert app_work.stats[PAINT].count == count + 1

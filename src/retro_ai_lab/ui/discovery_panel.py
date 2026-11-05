@@ -227,7 +227,9 @@ class DiscoveryPanel(QWidget):
 
         # Updates arrive on most training steps; the list follows a few times a
         # second at most (T-843), touching only the rows that changed (T-896).
-        self._refresher = Coalescer(self._refresh_from_update, parent=self)
+        self._refresher = Coalescer(
+            self._refresh_from_update, name="discoveries refresh", parent=self
+        )
         self._items: dict[str, QListWidgetItem] = {}  # variable id -> its row
         self._keys: list[SortKey] = []  # the sort key of each row, in order
         self._touched: dict[str, Variable] = {}  # added or changed since the last update

@@ -30,3 +30,20 @@ def test_first_request_runs_at_once_and_a_burst_runs_once_more(qtbot: QtBot) -> 
     assert Coalescer(lambda: None).delay_ms == DEFAULT_DELAY_MS
     with pytest.raises(ConfigurationError):
         Coalescer(lambda: None, delay_ms=0)
+
+
+def test_a_named_coalescer_times_its_runs() -> None:
+    """T-906: a slow panel refresh is named on the stall line."""
+    from retro_ai_lab.core.worklog import WorkLog
+
+    work = WorkLog()
+    named = Coalescer(lambda: None, name="rewards refresh", worklog=work)
+    assert named.name == "rewards refresh"
+    named.request()
+    assert work.stats["rewards refresh"].count == 1
+    plain = Coalescer(lambda: None, worklog=work)
+    assert plain.name is None
+    plain.request()
+    assert set(work.stats) == {"rewards refresh"}
+    with pytest.raises(ConfigurationError, match="blank"):
+        Coalescer(lambda: None, name=" ")

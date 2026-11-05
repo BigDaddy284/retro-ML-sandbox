@@ -99,7 +99,7 @@ class RewardsPanel(QWidget):
         self._refresh_pending = False
         # Suggestions change on many training steps; the tree is rebuilt a few
         # times a second at most (T-843).
-        self._refresher = Coalescer(self._refresh_from_change, parent=self)
+        self._refresher = Coalescer(self._refresh_from_change, name="rewards refresh", parent=self)
 
         self._personality = QComboBox(self)
         self._personality.setObjectName("personality_combo")
