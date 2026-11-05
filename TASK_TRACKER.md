@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-918 | A thing on screen only now and then is still a mover: three small hops in four make a byte smooth (one big hop each way per visit), and a rare byte that has moved through more than sixteen values over thirty or more changes is a position of something moving | 8 | Done | 1/1 | see PR |
 | T-917 | A guess is rethought only once the byte has changed twice as often as when it was last judged, so a byte on the edge of a rule no longer flips kind at every review; each guess records how many changes it was judged on | 8 | Done | 1/1 | see PR #172 |
 | T-916 | A guess the AI made itself is rethought at every review when its statistics now say another kind, so an enemy slot first seen with five values is not "a speed" for good; a person's confirmed, named or rejected guesses, guesses placed by their word or the restart finding, and input-linked positions are never touched; a guess the AI dropped comes back as another kind | 8 | Done | 1/1 | see PR #171 |
 | T-915 | Distances to moving things are measured from the player's own position, one the stick moves or a person confirmed, falling back to any non-mover position only when none is seated | 8 | Done | 1/1 | see PR #170 |
@@ -2774,6 +2775,22 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 3 new tests pass; understanding + services + learning + integration 296 passed; full suite 1341 passed, 10 skipped in 209.65s (0:03:29).
 - **Commit:** see PR #172. **PR:** #172.
 - **Completion report:** The count lives on the variable rather than in an evidence line because the panels print every evidence line and a "judged on 37 changes" row would read as a reason to believe. A byte judged on two changes is rethought at four, eight, sixteen … so early mistakes are still fixed quickly; the churn the log showed came from bytes judged on hundreds of changes being rethought on one more.
+
+### T-918 – A thing on screen only now and then is still a mover
+- **Status:** Done
+- **Phase:** 8 (the user's 22:12 log: 1,384 rethinks, six to a position, none to "Something moving")
+- **Objective:** The mover rule asked for a change in more than a tenth of all steps and small hops in 95 of 100 changes. An enemy slot on the user's game is filled for a few seconds of each go: it spawns with one big hop, walks, and is cleared with another, so a short visit is under 95% small hops and the byte changes in a twentieth of the steps. A simulated slot alive 12 or 30 steps in every 200 was UNKNOWN. Let rare, briefly visible things count.
+- **Scope:** `SMOOTH_SHARE` and `ByteStats.smooth` in `observation/diff.py`; `_is_mover` in `understanding/variables.py`. **Out of scope:** a briefly visible thing with sixteen values or fewer (the lives and progress rules keep it); the rules' order.
+- **Acceptance criteria:**
+  1. A slot alive 12 steps in every 200 (spawn hop, 2–3 a step, cleared) is a POSITION with `MOVER` evidence; alive 30 and 60 steps likewise.
+  2. The same slot moving through ten values only is not a position; a rare stepper with few values stays what it was.
+  3. A random byte every step is still noise; a countdown is still a counter; a slow steady countdown is still not a mover; every T-914 kind test is unchanged.
+  4. `smooth` is true at three small hops in four and false below.
+- **Expected changes:** `src/retro_ai_lab/observation/diff.py`, `src/retro_ai_lab/understanding/variables.py`, `tests/unit/observation/test_diff.py`, `tests/unit/understanding/test_variables.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_a_thing_on_screen_only_now_and_then_is_a_mover`, `test_a_brief_visitor_with_few_values_is_not_a_position`, `test_smooth_takes_three_small_hops_in_four`; observation + understanding + learning + services + integration suites; full suite.
+- **Results:** 3 new tests pass; observation + understanding + learning + services + integration 416 passed; full suite 1344 passed, 10 skipped in 198.47s (0:03:18).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** Three in four is the lowest share that still leaves random bytes far below (about one small hop in fourteen); a slot visited for fewer than six steps at a time is still rough and stays unknown, and a brief visitor with sixteen values or fewer stays with the lives and progress rules, which doubt and drop it in their own time. The simulated slot is the evidence here, not the user's memory: the next log's "It sees … (N moving)" is the real test.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

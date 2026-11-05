@@ -234,9 +234,10 @@ doing, then the switches, so a position the AI finds late still gets a
 seat before the twentieth flag. If an enemy's position is in memory and
 the AI has found it, the AI can learn to avoid the enemy; if it has not,
 the enemy is invisible to it. A value that wanders both ways in small
-steps, often, is taken for the position of something that moves (an enemy,
-a platform, a ball) and listed as "Something moving" until the AI finds a
-button that moves it. For each such thing the AI also sees how far it is
+steps is taken for the position of something that moves (an enemy, a
+platform, a ball) and listed as "Something moving" until the AI finds a
+button that moves it; a thing that is on screen only now and then counts
+too, once it has moved through enough different values. For each such thing the AI also sees how far it is
 from its own position (the one the stick moves, or one you confirmed),
 exactly when it is close and roughly when it is far, so a thing about to
 touch it and one across the screen look different. None of these labels is

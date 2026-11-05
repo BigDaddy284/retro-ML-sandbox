@@ -78,18 +78,21 @@ def _is_noise(st: ByteStats) -> bool:
 
 
 def _is_mover(st: ByteStats) -> bool:
-    """Moves by small hops (one way or both), often enough to be something on screen.
+    """Moves by small hops (one way or both), enough to be something on screen.
 
     A respawn or a slot taken by a new thing is one big hop; ``smooth`` allows a few.
     Every hop exactly one is a slow timer, not a thing moving (as the climbing
     position rule asks for varied steps), so at least one hop must be larger.
+    A thing that is on screen only now and then (T-918: the user's enemies, a few
+    seconds of every go) changes rarely over a session, so a rare byte counts
+    when it has moved through more values than a life count or a level could
+    have and changed enough times to be judged.
     """
-    return (
-        st.smooth
-        and st.change_rate > RARE_RATE
-        and len(st.distinct) > 2
-        and st.unit_hops < st.changes
-    )
+    if not st.smooth or len(st.distinct) <= 2 or st.unit_hops >= st.changes:
+        return False
+    if st.change_rate > RARE_RATE:
+        return True
+    return st.changes >= MIN_TRANSITIONS and len(st.distinct) > FEW_VALUES
 
 
 def _is_counter(st: ByteStats) -> bool:
