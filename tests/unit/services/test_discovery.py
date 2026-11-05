@@ -20,7 +20,14 @@ from retro_ai_lab.services import (
     ObservationService,
 )
 from retro_ai_lab.services.discovery import BOUNCES, BUSY, MOVES_ALONE, PLAYED, game_id_for
-from retro_ai_lab.understanding import EventKind, Evidence, Variable, VariableKind
+from retro_ai_lab.understanding import (
+    EventKind,
+    Evidence,
+    Moment,
+    Narrowing,
+    Variable,
+    VariableKind,
+)
 from retro_ai_lab.understanding.events import CYCLES
 
 BY_NAME = {b.name: b for b in BUTTONS}
@@ -659,3 +666,111 @@ def test_a_value_that_moves_while_the_ai_plays_earns_its_seat(
     assert sum(e.kind == PLAYED for e in k.get(moving.id).evidence) == 3
     play(connection, observation, 10)
     assert discovery.credit_played() == ()
+
+
+# ------------------------------------------- T-901: "I just lost a life"
+
+
+SURE_LIVES = [Evidence("test", "Planted.", 6.0)]
+
+
+def _play_until_a_life_is_lost(
+    connection: ConnectionService, observation: ObservationService, most: int = 6000
+) -> None:
+    adapter = connection.adapter
+    assert isinstance(adapter, FakeEmulatorAdapter)
+    lives = adapter.game.state.lives
+    for _ in range(most):
+        held = [BY_NAME["start"]] if adapter.game.state.game_over else [BY_NAME["up"]]
+        connection.call(lambda a, held=held: a.set_input(held))
+        connection.call(lambda a: a.advance_frames(1))
+        observation.advance(1)
+        now = adapter.game.state.lives
+        if now < lives:
+            return
+        lives = now
+    raise AssertionError("no life lost")
+
+
+def _telling(
+    connection: ConnectionService, observation: ObservationService, bus: EventBus
+) -> DiscoveryService:
+    """A service whose narrowing window is shorter than the toy racer's crashes are apart."""
+    return DiscoveryService(connection, observation, bus, review_every=100, moment_window=30)
+
+
+def _tell_until_settled(
+    discovery: DiscoveryService, connection: ConnectionService, observation: ObservationService
+) -> Narrowing:
+    for _ in range(6):
+        _play_until_a_life_is_lost(connection, observation)
+        n = discovery.tell(Moment.LOST_LIFE)
+        if n.settled is not None:
+            return n
+    raise AssertionError(f"never settled: {n.text}")
+
+
+def test_telling_the_ai_about_a_lost_life_finds_the_counter(
+    connection: ConnectionService,
+    observation: ObservationService,
+    bus: EventBus,
+    updates: list[DiscoveryUpdated],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from retro_ai_lab.understanding import Confidence
+
+    discovery = _telling(connection, observation, bus)
+    with pytest.raises(UnsupportedCapabilityError):
+        discovery.tell(Moment.LOST_LIFE)  # nothing connected
+    connection.connect("fake", seed=2)
+    k = discovery.knowledge
+    assert k is not None
+    wrong = k.propose("ram", LAYOUT.lane, kind=VariableKind.LIVES, name="", evidence=SURE_LIVES)
+    assert k.best(VariableKind.LIVES) is not None and k.best(VariableKind.LIVES).id == wrong.id
+    with pytest.raises(ConfigurationError, match="Play for a few seconds"):
+        discovery.tell(Moment.LOST_LIFE)
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
+    _play_until_a_life_is_lost(connection, observation)
+    first = discovery.tell(Moment.LOST_LIFE)
+    assert ("ram", LAYOUT.lives) in first.candidates and first.settled is None
+    assert first.text.startswith("You lost a life:") and first.text in caplog.text
+    before = len(updates)
+    second = _tell_until_settled(discovery, connection, observation)
+    assert second.settled == ("ram", LAYOUT.lives) and second.text.startswith('Got it: "Lives"')
+    found = k.at("ram", LAYOUT.lives)
+    assert found is not None and found.confirmed and found.kind is VariableKind.LIVES
+    assert found.name == "Lives" and found.confidence is Confidence.CONFIRMED
+    assert any(e.kind == "told" and f"{second.presses} times" in e.detail for e in found.evidence)
+    assert k.best(VariableKind.LIVES) is not None and k.best(VariableKind.LIVES).id == found.id
+    # The AI's own wrong guess of that kind did not move: dropped by the AI, with a reason.
+    dropped = k.get(wrong.id)
+    assert dropped.rejected and any(e.kind == "told-otherwise" for e in dropped.evidence)
+    assert "1 other lives guesses did not move when you lost a life: dropped" in caplog.text
+    # One update carried both verdicts (the reviews in between carry their own).
+    assert any(
+        {v.id for v in u.added} | {v.id for v in u.changed} >= {found.id, wrong.id}
+        for u in updates[before:]
+    )
+    # Settled: the next press starts a fresh search.
+    _play_until_a_life_is_lost(connection, observation)
+    again = discovery.tell(Moment.LOST_LIFE)
+    assert again.presses == 1 and again.settled is None
+
+
+def test_telling_about_a_named_guess_keeps_its_name(
+    connection: ConnectionService, observation: ObservationService, bus: EventBus
+) -> None:
+    discovery = _telling(connection, observation, bus)
+    connection.connect("fake", seed=2)
+    k = discovery.knowledge
+    assert k is not None
+    mine = k.propose("ram", LAYOUT.lives, kind=VariableKind.PROGRESS, name="Cars left")
+    k.reject(mine.id)  # a wrong "no" is taken back by the person's own word
+    n = _tell_until_settled(discovery, connection, observation)
+    assert n.settled == ("ram", LAYOUT.lives)
+    got = k.get(mine.id)
+    assert got.confirmed and not got.rejected and got.kind is VariableKind.LIVES
+    assert got.name == "Lives"  # a rejected guess's name was part of what was wrong
+    k.correct(mine.id, name="Cars left")
+    n = _tell_until_settled(discovery, connection, observation)
+    assert n.settled == ("ram", LAYOUT.lives) and k.get(mine.id).name == "Cars left"

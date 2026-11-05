@@ -39,13 +39,22 @@ from retro_ai_lab.ui.activity_strip import ActivityStrip
 from retro_ai_lab.ui.coalesce import Coalescer
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.panels import section_heading
-from retro_ai_lab.understanding import Confidence, Knowledge, Variable, describe_key
+from retro_ai_lab.understanding import Confidence, Knowledge, Moment, Variable, describe_key
 
 IDLE_TEXT = "Connect to a game and the AI will start watching it."
 NO_SELECTION = "Pick a discovery to see why the AI thinks so."
 MAX_EVENTS = 8
 MAX_RELATIONSHIPS = 8
 FIND_PLACEHOLDER = "Find by name or address\u2026"
+TELL_BUTTONS = (
+    (Moment.LOST_LIFE, "I just lost a life", "lost_life"),
+    (Moment.GOT_FURTHER, "I just got further", "got_further"),
+    (Moment.SCORED, "My score just went up", "scored"),
+)
+TELL_TIP = (
+    "Press this right after it happens. The AI keeps only the bytes that moved the right "
+    "way in the last few seconds; after two presses that agree it knows the value."
+)
 
 SortKey = tuple[object, ...]
 
@@ -150,6 +159,14 @@ class DiscoveryPanel(QWidget):
         self._rename.clicked.connect(self._on_rename_clicked)
         self._name.returnPressed.connect(self._on_rename_clicked)
         self._experiment.clicked.connect(self.run_experiment)
+        # T-901: the cheat-finder trick, child-sized: say when it happened.
+        self._tell_buttons: dict[Moment, QPushButton] = {}
+        for moment, label, key in TELL_BUTTONS:
+            button = QPushButton(label, self)
+            button.setObjectName(f"tell_{key}")
+            button.setToolTip(TELL_TIP)
+            button.clicked.connect(lambda _=False, m=moment: self.tell(m))
+            self._tell_buttons[moment] = button
         self._export = QPushButton("Share what it learned…", self)
         self._export.setObjectName("export_button")
         self._import = QPushButton("Load shared knowledge…", self)
@@ -191,6 +208,12 @@ class DiscoveryPanel(QWidget):
         layout.addLayout(verdict)
         layout.addLayout(rename)
         layout.addWidget(self._list, 2)
+        tell = QHBoxLayout()
+        tell.addWidget(QLabel("Tell the AI:", self))
+        for button in self._tell_buttons.values():
+            tell.addWidget(button)
+        tell.addStretch(1)
+        layout.addLayout(tell)
         actions = QHBoxLayout()  # T-883: the three "do something" buttons on one row
         actions.addWidget(self._experiment)
         actions.addWidget(self._export)
@@ -356,6 +379,15 @@ class DiscoveryPanel(QWidget):
         self._saved()
         self.refresh(keep=var_id)
 
+    def tell(self, moment: Moment) -> None:
+        """Narrow down the byte behind what the person says just happened (T-901)."""
+        try:
+            narrowing = self._context.discovery.tell(moment)
+        except (ConfigurationError, UnsupportedCapabilityError) as exc:
+            self._note.setText(str(exc))
+            return
+        self._note.setText(narrowing.text)
+
     def run_experiment(self) -> None:
         try:
             self._context.discovery.experiment()
@@ -505,6 +537,8 @@ class DiscoveryPanel(QWidget):
 
     def _set_enabled(self, enabled: bool) -> None:
         self._list.setEnabled(enabled)
+        for button in self._tell_buttons.values():
+            button.setEnabled(enabled)
         self._find.setEnabled(enabled)
         self._sort.setEnabled(enabled)
         self._export.setEnabled(enabled)

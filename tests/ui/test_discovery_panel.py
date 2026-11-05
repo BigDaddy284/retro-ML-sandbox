@@ -439,3 +439,27 @@ def test_the_explanation_and_verdict_sit_above_the_list(panel: DiscoveryPanel) -
     items = panel.findChild(object, "discovery_list")
     tops = [w.geometry().top() for w in (find, evidence, yes, rename, items)]  # type: ignore[union-attr]
     assert tops == sorted(tops) and len(set(tops)) == 5
+
+
+# ------------------------------------------- T-901: tell the AI what just happened
+
+
+def test_tell_buttons_narrow_the_byte_down(panel: DiscoveryPanel, context: AppContext) -> None:
+    names = ("tell_lost_life", "tell_got_further", "tell_scored")
+    buttons = [panel.findChild(object, n) for n in names]
+    assert all(b is not None and not b.isEnabled() for b in buttons)  # type: ignore[union-attr]
+    assert [b.text() for b in buttons] == [  # type: ignore[union-attr]
+        "I just lost a life",
+        "I just got further",
+        "My score just went up",
+    ]
+    context.connection.connect("fake", seed=3)
+    assert all(b.isEnabled() for b in buttons)  # type: ignore[union-attr]
+    buttons[0].click()  # type: ignore[union-attr]
+    assert panel.note_text.startswith("Play for a few seconds first")
+    drive(context, 120)
+    buttons[2].click()  # type: ignore[union-attr]
+    assert panel.note_text.startswith("My score just went up"[:0] + "You scored:")
+    assert "went up in the last 5 seconds" in panel.note_text
+    context.connection.disconnect()
+    assert not buttons[0].isEnabled()  # type: ignore[union-attr]

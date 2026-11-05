@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-901: "Tell the AI:" buttons in "What the AI is doing" ("I just lost a life", "I just got further", "My score just went up"). Each press keeps only the bytes that moved the right way in the last five seconds, like a cheat finder; when one byte is left after two presses the AI takes it as your word, names it, and drops its own guesses of that kind that did not move.
 - T-900: in "What the AI is doing" the explanation and the Yes / No / Rename controls sit above the list, so a short panel still shows them while the list scrolls on its own.
 - T-899: a panel can be dragged smaller than what it holds, and the window smaller than its panels: each panel's content scrolls inside its box instead of setting a floor on the separators and the window.
 - T-898: the "What the AI is doing" list has a find box (keeps the lines containing what you type, with "N of M" beside it) and a sort choice: by address, by name, or "Most sure first" with what you confirmed at the top and what you rejected at the bottom.
