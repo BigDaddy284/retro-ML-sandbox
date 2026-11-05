@@ -160,6 +160,7 @@ class Variable:
     confirmed: bool = False  # set only by a person
     rejected: bool = False  # a person said "no, that's wrong"
     notes: str = ""
+    judged: int = 0  # how many changes of the byte the classifier last judged it on (T-917)
     # Worked out once from the fields above (T-841): the detector, the long look and
     # the suggestion rules read it for every variable on every snapshot.
     confidence: Confidence = field(init=False, repr=False, compare=False)
@@ -209,6 +210,7 @@ class Variable:
             "confirmed": self.confirmed,
             "rejected": self.rejected,
             "notes": self.notes,
+            "judged": self.judged,
         }
 
     @classmethod
@@ -225,6 +227,7 @@ class Variable:
                 confirmed=bool(data.get("confirmed", False)),
                 rejected=bool(data.get("rejected", False)),
                 notes=data.get("notes", ""),
+                judged=int(data.get("judged", 0)),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"Bad variable: {exc}") from exc
@@ -577,10 +580,13 @@ class Knowledge:
         kind: VariableKind = VariableKind.UNKNOWN,
         name: str = "",
         evidence: Iterable[Evidence] = (),
+        judged: int = 0,
     ) -> Variable:
         """Add a new belief with a fresh id (what the discovery engine calls)."""
         return self.add(
-            Variable(self.new_id(), region, offset, encoding, kind, name, tuple(evidence))
+            Variable(
+                self.new_id(), region, offset, encoding, kind, name, tuple(evidence), judged=judged
+            )
         )
 
     def update(self, var_id: str, **changes: Any) -> Variable:

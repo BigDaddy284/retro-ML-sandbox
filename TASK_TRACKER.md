@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-917 | A guess is rethought only once the byte has changed twice as often as when it was last judged, so a byte on the edge of a rule no longer flips kind at every review; each guess records how many changes it was judged on | 8 | Done | 1/1 | see PR |
 | T-916 | A guess the AI made itself is rethought at every review when its statistics now say another kind, so an enemy slot first seen with five values is not "a speed" for good; a person's confirmed, named or rejected guesses, guesses placed by their word or the restart finding, and input-linked positions are never touched; a guess the AI dropped comes back as another kind | 8 | Done | 1/1 | see PR #171 |
 | T-915 | Distances to moving things are measured from the player's own position, one the stick moves or a person confirmed, falling back to any non-mover position only when none is seated | 8 | Done | 1/1 | see PR #170 |
 | T-914 | A value changing every step by small hops (a walking enemy) is no longer noise; it is proposed as something moving whichever way it goes, a timer ticking down every frame is a counter, and every-hop-one bytes are not movers | 8 | Done | 1/1 | see PR #169 |
@@ -2756,6 +2757,23 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 5 new tests pass; understanding + services + learning + observation + integration 411 passed; full suite 1339 passed, 10 skipped in 292.88s (0:04:52).
 - **Commit:** see PR #171. **PR:** #171.
 - **Completion report:** The toy racer's second review already rethinks three of its own guesses (the speed, a progress byte, an unknown), which is the rule working, not a fault: a byte's first label is a guess on a handful of changes. A doubt about the old kind goes with the kind, so a rethought lives guess is not dropped a step later for the sins of its past label. Not done here: refreshing stale evidence words when the kind is unchanged, and a byte that should widen to 16 bits.
+
+### T-917 – A guess is rethought once the byte has changed twice as often
+- **Status:** Done
+- **Phase:** 8 (the user's 22:12 log: 374 reviews changed 1,384 guesses, 654 to progress and 648 back to unknown)
+- **Objective:** T-916 rethinks at every review, so a byte on the edge of a rule (sixteen values, a change in ten steps) flips kind every 120 steps and the brain's seats, rewards and steps churn with it. Rethink a guess only when the byte has changed at least twice as often as when it was last judged.
+- **Scope:** `Candidate.changes`; `Variable.judged` (saved and loaded, older files load as 0); `Knowledge.propose(judged=)`; `propose_candidates` and `rethink_candidates` in `understanding/variables.py`. **Out of scope:** the mover rule's own thresholds (T-918).
+- **Acceptance criteria:**
+  1. A guess judged on N changes is left alone by a candidate with fewer than 2N changes, whatever its kind, and rethought by one with 2N or more; the rethought guess records the new count.
+  2. A guess proposed records the changes it was judged on; a guess with no record (an older file, a planted guess) is rethought on the first differing verdict.
+  3. `find_candidates` fills `Candidate.changes` from the byte (the lower byte of a pair).
+  4. A variable's `judged` survives `to_dict`/`from_dict`, and a dict without it loads as 0.
+  5. The walking-enemy test still turns the early "speed" into a mover (40 changes → 399).
+- **Expected changes:** `src/retro_ai_lab/understanding/variables.py`, `src/retro_ai_lab/understanding/knowledge.py`, `tests/unit/understanding/test_variables.py`, `tests/unit/understanding/test_knowledge.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_a_guess_is_rethought_once_the_byte_has_changed_twice_as_often`, `test_candidates_and_proposals_carry_the_changes_judged_on`, `test_judged_is_saved_and_loaded` plus the T-916 tests; understanding + services + learning + integration suites; full suite.
+- **Results:** 3 new tests pass; understanding + services + learning + integration 296 passed; full suite 1341 passed, 10 skipped in 209.65s (0:03:29).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The count lives on the variable rather than in an evidence line because the panels print every evidence line and a "judged on 37 changes" row would read as a reason to believe. A byte judged on two changes is rethought at four, eight, sixteen … so early mistakes are still fixed quickly; the churn the log showed came from bytes judged on hundreds of changes being rethought on one more.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
