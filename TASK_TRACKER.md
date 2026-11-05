@@ -2685,7 +2685,7 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
   3. No pairs without a mover, without an own position, across encodings or regions; a snapshot too short for the mover gives no distance part.
   4. With a mover believed, `most - 8` variables are seated, positions first; at most 8 pairs, ordered by the own position's rank then the mover's; a state never holds more than `most` parts; `most=1` still seats one.
   5. The first-demonstration test and every existing state, feature, training and panel test pass unchanged.
-- **Expected changes:** `src/retro_ai_lab/learning/state.py`, `tests/unit/learning/test_state.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Expected changes:** `src/retro_ai_lab/learning/state.py`, `tests/unit/learning/test_state.py`, `tests/ui/test_stall_watch.py` (the idle test now ignores another window's line, after a CI run showed one), `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
 - **Test plan:** `test_the_distance_from_each_moving_thing_is_part_of_the_state`, `test_distance_parts_are_named_in_words`, `test_no_distances_without_both_a_mover_and_a_position_of_my_own`, `test_seats_are_kept_for_distances_when_anything_moves`; learning, training, services, integration and Learning panel suites; full suite.
 - **Results:** 4 new tests pass; learning + training + services + integration + Learning panel 264 passed; full suite 1327 passed, 10 skipped (3:53).
 - **Commit:** see PR. **PR:** pending.
