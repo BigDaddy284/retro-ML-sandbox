@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
 from retro_ai_lab.core import Capabilities
@@ -217,22 +218,82 @@ def test_many_updates_rebuild_the_list_once(
         original(keep=keep)
 
     panel.refresh = counted  # type: ignore[method-assign]
+    runs = panel.refresher.runs
     v = k.propose("ram", 0, kind=VariableKind.SCORE, name="Score", evidence=SURE)
     context.bus.publish(DiscoveryUpdated((v,), (), (), ()))
-    assert rebuilds == [1] and v.id in panel.variable_ids()  # the first shows at once
+    assert panel.refresher.runs == runs + 1 and v.id in panel.variable_ids()  # shows at once
     for i in range(1, 11):
         w = k.propose("ram", i, kind=VariableKind.PROGRESS, name=f"P{i}", evidence=SURE)
         context.bus.publish(DiscoveryUpdated((w,), (), (), ()))
-    assert rebuilds == [1] and panel.refresher.pending
+    assert panel.refresher.runs == runs + 1 and panel.refresher.pending
     qtbot.waitUntil(lambda: not panel.refresher.pending, timeout=2000)
-    assert rebuilds == [1, 1] and len(panel.variable_ids()) == 11
+    assert panel.refresher.runs == runs + 2 and len(panel.variable_ids()) == 11
+    assert rebuilds == []  # T-896: rows are added, the list is never rebuilt
     # Events alone refresh the lists under the variables, not the variables.
     event = GameEvent(EventKind.PROGRESS, 7, "v2", "P1 went up to 1.", 0, 1)
     context.discovery.events.extend((event,))
     panel.refresher.flush()
     context.bus.publish(DiscoveryUpdated((), (), (event,), ()))
     qtbot.waitUntil(lambda: not panel.refresher.pending, timeout=2000)
-    assert rebuilds == [1, 1] and any("P1 went up" in t for t in panel.event_texts())
+    assert rebuilds == [] and any("P1 went up" in t for t in panel.event_texts())
+
+
+# ------------------------------------------- T-896: rows change, the list stays
+
+
+def test_updates_touch_only_the_rows_that_changed(
+    panel: DiscoveryPanel, context: AppContext, qtbot: QtBot
+) -> None:
+    """A review's update adds, repaints or drops rows in place; selection and order hold."""
+    context.connection.connect("fake", seed=3)
+    k = context.discovery.knowledge
+    assert k is not None
+    first = k.propose("ram", 4, kind=VariableKind.SCORE, name="Score", evidence=SURE)
+    last = k.propose("ram", 9, kind=VariableKind.LIVES, name="Lives", evidence=SURE)
+    panel.refresh()
+    panel.select(last.id)
+    items = {i: panel._list.item(n) for n, i in enumerate(panel.variable_ids())}
+    # A new one lands between them, in (region, offset) order, without a rebuild.
+    panel.refresher.flush()
+    mid = k.propose("ram", 6, kind=VariableKind.PROGRESS, name="Level", evidence=SURE)
+    context.bus.publish(DiscoveryUpdated((mid,), (), (), ()))
+    panel.refresher.flush()
+    assert panel.variable_ids() == (first.id, mid.id, last.id)
+    assert panel.selected_id == last.id and panel._list.item(2) is items[last.id]
+    # A changed one keeps its row and gets a fresh line, badge and evidence.
+    k.reject(first.id)
+    panel.refresher.flush()
+    context.bus.publish(DiscoveryUpdated((), (k.get(first.id),), (), ()))
+    panel.refresher.flush()
+    assert panel._list.item(0) is items[first.id] and "You said no" in panel.item_text(first.id)
+    assert panel._list.item(0).foreground().color() == Qt.GlobalColor.gray
+    k.correct(first.id, name="Points")  # taken back: the usual colour again
+    panel.refresher.flush()
+    context.bus.publish(DiscoveryUpdated((), (k.get(first.id),), (), ()))
+    panel.refresher.flush()
+    assert panel.item_text(first.id).startswith("Points") and (
+        panel._list.item(0).foreground().color() != Qt.GlobalColor.gray
+    )
+    k.support(last.id, Evidence("test", "Went down when the car crashed.", 1.0))
+    panel.refresher.flush()
+    context.bus.publish(DiscoveryUpdated((), (k.get(last.id),), (), ()))
+    panel.refresher.flush()
+    assert "Went down when the car crashed." in panel.evidence_text  # the selected one
+    # One the knowledge no longer holds loses its row; the selection moves with Qt.
+    k.remove(mid.id)
+    panel.refresher.flush()
+    context.bus.publish(DiscoveryUpdated((), (mid,), (), ()))
+    panel.refresher.flush()
+    assert panel.variable_ids() == (first.id, last.id) and panel.selected_id == last.id
+    # A change nobody announced still shows: the list falls back to a rebuild.
+    quiet = k.propose("ram", 1, kind=VariableKind.FLAG, name="Quiet", evidence=SURE)
+    panel.refresher.flush()
+    context.bus.publish(DiscoveryUpdated((), (k.get(last.id),), (), ()))
+    panel.refresher.flush()
+    assert panel.variable_ids() == (quiet.id, first.id, last.id) and panel.selected_id == last.id
+    # Direct use, for the benchmark and the panel's own verdict buttons.
+    panel.update_rows(())
+    assert len(panel.variable_ids()) == 3
 
 
 # ------------------------------------------- T-883: grouped, without repeats

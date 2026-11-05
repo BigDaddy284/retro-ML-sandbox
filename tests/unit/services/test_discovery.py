@@ -491,6 +491,14 @@ def test_a_lives_guess_that_bounces_is_doubted_then_dropped(
     announced = len(seen)
     assert discovery.doubt_bouncing() == ()
     assert len(seen) == announced and discovery.questions == (question,)  # asked once, kept
+    # T-896: more play changes the counts in the question; that is neither news nor noise.
+    play(connection, observation, 200)  # (its steps announce events of their own)
+    caplog.clear()
+    announced = len(seen)
+    assert discovery.doubt_bouncing() == ()
+    (fresh,) = discovery.questions
+    assert fresh != question and (fresh.var_id, fresh.reason) == (sure.id, BOUNCES)
+    assert len(seen) == announced and "Sworn lives" not in caplog.text
     # Rejecting the sworn guess ends the question; the change is announced once.
     k.reject(sure.id)
     before = len(seen)
