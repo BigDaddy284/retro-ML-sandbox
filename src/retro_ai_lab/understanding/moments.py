@@ -7,11 +7,17 @@ life" does the same, child-sized: each press keeps only the bytes that moved
 the right way in the last few seconds (down by one for a life, up for score
 or progress), and the presses are intersected. When one byte is left after
 enough presses, the AI takes it as the person's word.
+
+The AI presses the button for itself, too (T-904): a restart, when several
+values jump back to their start together, usually follows a death, so the
+:class:`RestartWatch` votes for the bytes that went down by one just before
+each restart. A byte that did so before most restarts, and alone, is the
+AI's own life-counter guess.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -24,6 +30,8 @@ from retro_ai_lab.understanding.knowledge import VariableKind
 WINDOW_FRAMES = 300  # the last five seconds at 60 frames a second
 SETTLE_AFTER = 2  # presses that agree before one byte is taken as the person's word
 WINDOW_WORDS = "the last 5 seconds"
+RESTARTS_NEEDED = 3  # restarts a byte must go down by one before, to be the AI's own guess
+RESTARTS_FORGET = 8  # restarts without a clear winner: the count starts again
 
 
 class Moment(Enum):
@@ -209,4 +217,94 @@ class MomentFinder:
         )
 
 
-__all__ = ["SETTLE_AFTER", "WINDOW_FRAMES", "Moment", "MomentFinder", "Narrowing"]
+class RestartWatch:
+    """Votes for the byte that went down by one before each restart (T-904).
+
+    The window ends at the snapshot *before* the restart, because the restart
+    itself puts the counter back up; it starts ``window_frames`` earlier. A
+    byte wins when it has at least ``needed`` votes, more than any other byte,
+    and from at least two thirds of the restarts seen; after ``forget_after``
+    restarts with no winner the count starts again, so a game whose restarts
+    are mostly level changes never settles on noise.
+    """
+
+    def __init__(
+        self,
+        *,
+        window_frames: int = WINDOW_FRAMES,
+        needed: int = RESTARTS_NEEDED,
+        forget_after: int = RESTARTS_FORGET,
+    ) -> None:
+        if window_frames < 1 or needed < 1 or forget_after < needed:
+            raise ConfigurationError(
+                "window_frames and needed must be positive, and forget_after at least needed."
+            )
+        self._window = window_frames
+        self._needed = needed
+        self._forget_after = forget_after
+        self._restarts = 0
+        self._votes: dict[Address, int] = {}
+
+    @property
+    def restarts(self) -> int:
+        """Restarts counted since the last winner or forget."""
+        return self._restarts
+
+    def votes(self, address: Address) -> int:
+        return self._votes.get(address, 0)
+
+    def forget(self) -> None:
+        self._restarts = 0
+        self._votes = {}
+
+    def restart(
+        self, snapshots: Iterable[MemorySnapshot], *, skip: Collection[Address] = ()
+    ) -> Address | None:
+        """The latest snapshot is a restart; vote, and return the winner if there is one.
+
+        ``skip`` holds bytes that cannot be the counter (known to be something
+        else, or rejected); they get no vote.
+        """
+        items = list(snapshots)
+        if len(items) < 3:
+            return None  # the restart and at least two snapshots before it
+        start, end = _window(items[:-1], self._window)
+        found: set[Address] = set()
+        for region, data in end.regions.items():
+            if region not in start.regions or len(start.regions[region]) != len(data):
+                continue
+            moved = _moved(
+                Moment.LOST_LIFE,
+                np.frombuffer(start.regions[region], dtype=np.uint8),
+                np.frombuffer(data, dtype=np.uint8),
+            )
+            found.update((region, int(o)) for o in np.flatnonzero(moved))
+        found.difference_update(skip)
+        self._restarts += 1
+        for address in found:
+            self._votes[address] = self._votes.get(address, 0) + 1
+        winner = self._winner()
+        if winner is not None or self._restarts >= self._forget_after:
+            self.forget()
+        return winner
+
+    def _winner(self) -> Address | None:
+        if self._restarts < self._needed or not self._votes:
+            return None
+        best = max(self._votes.values())
+        leaders = [a for a, n in self._votes.items() if n == best]
+        if best < self._needed or len(leaders) != 1 or best * 3 < self._restarts * 2:
+            return None
+        return leaders[0]
+
+
+__all__ = [
+    "RESTARTS_FORGET",
+    "RESTARTS_NEEDED",
+    "SETTLE_AFTER",
+    "WINDOW_FRAMES",
+    "Moment",
+    "MomentFinder",
+    "Narrowing",
+    "RestartWatch",
+]

@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-904: at every restart the AI does the "I just lost a life" narrowing for itself: a byte that went down by one just before most restarts becomes its lives guess and takes the seat in the rewards and steps; nothing is dropped, and a guess you confirmed is kept.
 - T-903: the AI's steps run on a worker thread instead of the thread that draws the window, so the panels no longer freeze for every step; Stop, Pause and a mode change wait for the step in flight.
 - T-902: saying "No, that's wrong" (or Yes, or Rename) in "What the AI is doing" reaches the Rewards table and the Progress steps at once: a rejected guess's rewards and step go, a renamed guess's step is reworded.
 - T-901: "Tell the AI:" buttons in "What the AI is doing" ("I just lost a life", "I just got further", "My score just went up"). Each press keeps only the bytes that moved the right way in the last five seconds, like a cheat finder; when one byte is left after two presses the AI takes it as your word, names it, and drops its own guesses of that kind that did not move.

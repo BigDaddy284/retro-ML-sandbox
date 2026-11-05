@@ -40,8 +40,9 @@ from retro_ai_lab.services.connection import (
 from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.observer import MemoryObserved, ObservationService
 from retro_ai_lab.storage.knowledge import KnowledgeStore, export, load
-from retro_ai_lab.understanding.events import CYCLES, EventDetector, EventLog, GameEvent
+from retro_ai_lab.understanding.events import CYCLES, EventDetector, EventKind, EventLog, GameEvent
 from retro_ai_lab.understanding.knowledge import (
+    Confidence,
     Evidence,
     Knowledge,
     Relationship,
@@ -50,7 +51,13 @@ from retro_ai_lab.understanding.knowledge import (
 )
 from retro_ai_lab.understanding.linking import apply_input_links, find_input_links
 from retro_ai_lab.understanding.longlook import LongLook
-from retro_ai_lab.understanding.moments import WINDOW_FRAMES, Moment, MomentFinder, Narrowing
+from retro_ai_lab.understanding.moments import (
+    WINDOW_FRAMES,
+    Moment,
+    MomentFinder,
+    Narrowing,
+    RestartWatch,
+)
 from retro_ai_lab.understanding.relationships import RelationshipFinder
 from retro_ai_lab.understanding.variables import (
     RARE_RATE,
@@ -122,6 +129,9 @@ class DiscoveryUpdated:
         return not (self.added or self.changed or self.events or self.relationships)
 
 
+RESTARTS_WEIGHT = 9.0  # the AI's own restart finding outranks a planted or classified guess (T-904)
+
+
 def _names(variables: list[Variable], most: int = 5) -> str:
     names = [v.display_name for v in variables[:most]]
     if len(variables) > most:
@@ -179,6 +189,7 @@ class DiscoveryService:
         self._questions: dict[str, Question] = {}  # confirmed guesses to check (T-895)
         # "I just lost a life" narrowing (T-901); the window is a setting for tests
         self._moments = MomentFinder(window_frames=moment_window)
+        self._restarts = RestartWatch(window_frames=moment_window)  # the AI's own presses (T-904)
         self._stage = "idle"
         self._enabled = False
         self._experiments_allowed = True  # the training service holds them back (T-839)
@@ -677,6 +688,64 @@ class DiscoveryService:
             self._announce(DiscoveryUpdated(added, tuple(changed), (), ()))
             return narrowing
 
+    def _narrow_at_restart(self) -> None:
+        """A restart just happened: the AI presses "I just lost a life" for itself (T-904).
+
+        Bytes the AI already believes are something else (fairly surely), and
+        bytes anyone rejected, get no vote. When one byte has gone down by one
+        before most restarts, it becomes the AI's lives guess with evidence
+        strong enough to take the seat from its other lives guesses. Nothing is
+        dropped: the AI's finding adds to what it knows, and the reviews keep
+        judging every guess. The person's word stays above the AI's: a lives
+        guess the person confirmed is kept whatever the restarts say.
+        """
+        k = self._knowledge
+        if k is None:
+            return
+        skip: set[tuple[str, int]] = set()
+        for v in k:
+            other_kind = v.kind not in (VariableKind.LIVES, VariableKind.UNKNOWN)
+            if v.rejected or (other_kind and v.confidence.value >= Confidence.MEDIUM.value):
+                skip.add((v.region, v.offset))
+        found = self._restarts.restart(self._observation.ring, skip=skip)
+        if found is None:
+            return
+        region, offset = found
+        best = k.best(VariableKind.LIVES)
+        if best is not None and best.confirmed and (best.region, best.offset) != found:
+            log.info(
+                "%s[%d] went down by one before the last restarts, like a life counter, "
+                'but you confirmed "%s"; the AI keeps your word.',
+                region,
+                offset,
+                best.display_name,
+            )
+            return
+        proof = Evidence(
+            "restarts",
+            "Went down by one just before each of the last restarts, the way a life counter does.",
+            RESTARTS_WEIGHT,
+            self._observation.frame,
+        )
+        var = k.at(region, offset)
+        added: tuple[Variable, ...] = ()
+        changed: tuple[Variable, ...] = ()
+        if var is None:
+            var = k.propose(region, offset, kind=VariableKind.LIVES, evidence=[proof])
+            added = (var,)
+        else:
+            k.support(var.id, proof)
+            if var.kind is not VariableKind.LIVES:
+                k.update(var.id, kind=VariableKind.LIVES)
+            changed = (k.get(var.id),)
+        log.info(
+            "The AI noticed %s[%d] went down by one before each of the last restarts: that "
+            "looks like the life counter, so the rewards and steps follow it.",
+            region,
+            offset,
+        )
+        self._announce(DiscoveryUpdated(added, changed, (), ()))
+
     def ask_for(self, var_ids: Iterable[str]) -> None:
         """Have the detector report every move of these values as UP or DOWN (T-860)."""
         with self._lock:
@@ -761,6 +830,7 @@ class DiscoveryService:
         self._reviews = 0
         self._questions = {}
         self._moments.forget()
+        self._restarts.forget()
         self._enabled = event.capabilities.memory_read
         if self._enabled:
             self._set_stage("watching", f"Watching {info.title} to learn how it works.")
@@ -793,6 +863,8 @@ class DiscoveryService:
             relationships = self._finder.observe(events)
         if events or relationships:
             self._announce(DiscoveryUpdated((), (), events, relationships))
+        if any(e.kind is EventKind.RESET for e in events):
+            self._narrow_at_restart()
         self._since_review += 1
         self._since_experiment += 1
         if self._since_review >= self._review_every:
