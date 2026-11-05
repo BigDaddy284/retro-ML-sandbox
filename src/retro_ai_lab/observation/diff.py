@@ -82,6 +82,10 @@ def diff_snapshots(before: MemorySnapshot, after: MemorySnapshot) -> SnapshotDif
 
 
 SMALL_HOP = 8  # a thing on screen moves by at most this many between observations (T-911)
+# The share of a byte's changes that must be small hops for it to be "smooth" (T-918):
+# a thing that appears and is cleared makes one big hop each way per visit, so a
+# short visit of six small steps is still three small hops in four.
+SMOOTH_SHARE = 0.75
 
 
 @dataclass(slots=True)
@@ -132,8 +136,8 @@ class ByteStats:
 
     @property
     def smooth(self) -> bool:
-        """Nearly every change was a small hop: something moving, not noise (T-914)."""
-        return self.changes > 0 and self.small_hops >= 0.95 * self.changes
+        """Most changes were small hops: something moving, not noise (T-914, T-918)."""
+        return self.changes > 0 and self.small_hops >= SMOOTH_SHARE * self.changes
 
     @property
     def mostly_up(self) -> bool:
@@ -290,6 +294,7 @@ class ChangeTracker:
 
 __all__ = [
     "SMALL_HOP",
+    "SMOOTH_SHARE",
     "ByteChange",
     "ByteStats",
     "ChangeTracker",

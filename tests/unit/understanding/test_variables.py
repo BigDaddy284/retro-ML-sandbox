@@ -474,6 +474,47 @@ def test_random_every_step_is_still_noise_and_a_countdown_is_a_counter() -> None
     assert cands[1].kind is VariableKind.COUNTER  # down by one every frame: a timer, not a mover
 
 
+def visitor_rows(
+    n: int = 2400, *, every: int = 200, alive: int = 12, span: int = 30
+) -> list[bytes]:
+    """An enemy slot filled now and then: spawns, walks left 2 or 3 a step, is cleared."""
+    import random
+
+    rng = random.Random(918)
+    rows = []
+    x = 0
+    for i in range(n):
+        phase = i % every
+        if phase == 0:
+            x = 200 + rng.randint(0, span)  # a new thing takes the slot: one big hop
+        elif phase < alive:
+            x -= 2 + (phase % 2)
+        elif phase == alive:
+            x = 0  # the slot is cleared: one big hop back
+        rows.append(bytes([x & 0xFF]))
+    return rows
+
+
+def test_a_thing_on_screen_only_now_and_then_is_a_mover() -> None:
+    """T-918: the user's enemies are on screen for seconds of each go, so rare overall."""
+    for alive in (12, 30, 60):
+        (c,) = find_candidates(track(visitor_rows(alive=alive)))
+        st = track(visitor_rows(alive=alive)).stats("ram", 0)
+        assert c.kind is VariableKind.POSITION and any(e.kind == MOVER for e in c.evidence), (
+            alive,
+            st.change_rate,
+        )
+    assert track(visitor_rows()).stats("ram", 0).change_rate < 0.1  # rare, as on the user's game
+
+
+def test_a_brief_visitor_with_few_values_is_not_a_position() -> None:
+    few = visitor_rows(alive=4, span=0)  # four steps from 200 each visit: ten values at most
+    (c,) = find_candidates(track(few))
+    assert c.kind is not VariableKind.POSITION and len(track(few).stats("ram", 0).distinct) <= 16
+    (slow,) = find_candidates(track(enemy_rows(every=20)))  # a rare stepper, as before T-911
+    assert slow.kind is not VariableKind.POSITION
+
+
 def test_a_slow_steady_countdown_is_not_a_mover_either() -> None:
     rows = [bytes([(200 - i // 6) & 0xFF]) for i in range(400)]  # one down every six steps
     (c,) = find_candidates(track(rows))

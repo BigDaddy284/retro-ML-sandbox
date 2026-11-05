@@ -12,6 +12,7 @@ from retro_ai_lab.emulator.fake.toy_racer import LAYOUT, RAM_SIZE
 from retro_ai_lab.observation import MemorySnapshot
 from retro_ai_lab.observation.diff import (
     SMALL_HOP,
+    SMOOTH_SHARE,
     ByteChange,
     ByteStats,
     ChangeTracker,
@@ -201,6 +202,24 @@ def test_tracker_records_the_largest_hop_either_way() -> None:
     assert st.max_step == 239  # unchanged: the plain upward step (T-302 keeps its meaning)
     assert st.to_dict()["max_hop"] == 17
     assert ByteStats().max_hop == 0
+
+
+def test_smooth_takes_three_small_hops_in_four() -> None:
+    """T-918: a thing that comes and goes makes one big hop each way per visit."""
+    smooth = ChangeTracker()
+    rough = ChangeTracker()
+    for i, (a, b) in enumerate(
+        [(0, 0), (200, 200), (197, 100), (194, 194), (0, 0)]  # 3 of 4 small; 2 of 4 small
+    ):
+        smooth.observe(MemorySnapshot(i, {"ram": bytes([a])}))
+        rough.observe(MemorySnapshot(i, {"ram": bytes([b])}))
+    assert smooth.stats("ram", 0).small_hops == 2 and smooth.stats("ram", 0).changes == 4
+    assert not smooth.stats("ram", 0).smooth  # 2 of 4 is under three in four
+    for i, value in enumerate((3, 6, 9, 12), start=5):
+        smooth.observe(MemorySnapshot(i, {"ram": bytes([value])}))
+    assert smooth.stats("ram", 0).smooth  # 6 of 8: exactly three in four
+    assert not rough.stats("ram", 0).smooth
+    assert SMOOTH_SHARE == 0.75
 
 
 def test_tracker_counts_small_and_unit_hops() -> None:
