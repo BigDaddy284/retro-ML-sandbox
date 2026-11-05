@@ -207,8 +207,11 @@ class GoalService:
         knowledge = self._discovery.knowledge
         if knowledge is None or knowledge.game_id != goal.game_id:
             return ()
+        before = tuple((o.id, o.description) for o in goal)
         added = merge_suggestions(goal, knowledge)
-        if added:
+        # A retired or reworded step is a change too (T-902): a guess the person
+        # rejected must leave the Progress panel at once, not at the next new guess.
+        if added or tuple((o.id, o.description) for o in goal) != before:
             self._announce("suggestions")
         return added
 

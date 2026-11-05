@@ -142,6 +142,29 @@ def test_new_beliefs_add_behaviours_and_announce(
     assert rewards.saves >= 2 and rewards.store is not None and rewards.store.exists("toyracer-3")
 
 
+def test_a_rejected_guess_loses_its_rewards_at_once(
+    rewards: RewardService,
+    connection: ConnectionService,
+    discovery: DiscoveryService,
+    bus: EventBus,
+    changes: list[RewardProfileChanged],
+) -> None:
+    """The user's rejected "Lifes" kept paying "Lifes goes up" (T-902)."""
+    connection.connect("fake", seed=3)
+    k = teach(discovery, bus)
+    lives = k.at(RAM, LAYOUT.lives)
+    assert lives is not None
+    before = len(changes)
+    discovery.reject(lives.id)  # the panel's No button
+    profile = rewards.profile
+    assert profile is not None
+    names = {b.name for b in profile}
+    assert "Losing Lives" not in names and "Gaining Lives" not in names
+    assert len(changes) == before + 1 and changes[-1].removed
+    discovery.confirm(lives.id)  # a change of mind brings them back
+    assert "Losing Lives" in {b.name for b in rewards.profile or ()}
+
+
 def test_a_person_adds_a_reward_on_a_value_going_up_or_down(
     rewards: RewardService,
     connection: ConnectionService,

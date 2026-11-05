@@ -103,9 +103,13 @@ def test_confirm_reject_and_rename(panel: DiscoveryPanel, context: AppContext) -
     assert k.get(v.id).confidence is Confidence.CONFIRMED
     assert panel.item_text(v.id).endswith("Confirmed by you")
     assert panel.selected_id == v.id  # selection survives the refresh
+    heard: list[DiscoveryUpdated] = []
+    context.bus.subscribe(DiscoveryUpdated, heard.append)
     panel.select(w.id)
     panel.reject_selected()
     assert k.get(w.id).rejected and panel.item_text(w.id).endswith("You said no")
+    # The verdict is announced, so the rewards and steps built on it follow (T-902).
+    assert heard and heard[-1].changed[0].id == w.id and heard[-1].changed[0].rejected
     panel.select(v.id)
     panel.rename_selected("Lives left")
     assert k.get(v.id).name == "Lives left" and k.get(v.id).confirmed
