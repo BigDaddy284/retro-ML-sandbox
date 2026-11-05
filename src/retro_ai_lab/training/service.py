@@ -11,13 +11,15 @@ script can call :meth:`TrainingService.train` with no GUI at all.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections import deque
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from retro_ai_lab.core import ConfigurationError, EmulatorError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
@@ -120,6 +122,27 @@ class TrainingStepped:
     situation: str = ""  # the state key the move was chosen in
 
 
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def _locked(method: F) -> F:
+    """Run ``method`` under the service's lock (T-903).
+
+    The Learning panel steps the AI on a worker thread while the person's
+    buttons (Stop, Pause, a mode change) arrive on the GUI thread; each of
+    those waits for the step in flight instead of changing the go under it.
+    The lock is re-entrant, so a step that records a go and saves the brain
+    takes it again freely.
+    """
+
+    @wraps(method)
+    def inside(self: TrainingService, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return inside  # type: ignore[return-value]
+
+
 class TrainingService:
     def __init__(
         self,
@@ -186,6 +209,7 @@ class TrainingService:
         self._manual_frames = 0
         self._last_frame = 0
         self._busy = False
+        self._lock = threading.RLock()  # the worker's step and the GUI's buttons (T-903)
         self._spot_pinned = False
         self._wake_button: str | None = None
         self._needs_wake = False
@@ -287,12 +311,14 @@ class TrainingService:
         """Steps with nothing changing before a go gives up (None: never)."""
         return self._unstick_after
 
+    @_locked
     def set_go_length(self, steps: int) -> None:
         """How many steps a go lasts at most, for this game from now on; idle only (T-873)."""
         if not isinstance(steps, int) or steps < 1:
             raise ConfigurationError("A go must last at least one step.")
         self._change_go_settings(max_steps=steps)
 
+    @_locked
     def set_give_up_after(self, steps: int | None) -> None:
         """Steps with nothing changing before a go gives up (None: never); idle only (T-873)."""
         if steps is not None and (not isinstance(steps, int) or steps < 1):
@@ -413,6 +439,7 @@ class TrainingService:
 
     # ------------------------------------------------------------ controls
 
+    @_locked
     def pin_spot(self) -> None:
         """Keep the game's current position: every go and every Start restarts here.
 
@@ -432,6 +459,7 @@ class TrainingService:
         self._spot_pinned = True
         self._announce("spot pinned")
 
+    @_locked
     def unpin_spot(self) -> None:
         """Forget the pinned spot; goes start wherever the game is again."""
         if not self._spot_pinned:
@@ -443,6 +471,7 @@ class TrainingService:
         if self._spot_pinned and self._connection.is_connected:
             self._connection.call(lambda a: a.load_state(PRACTISE_SLOT))
 
+    @_locked
     def set_mode(self, mode: Mode) -> None:
         if not isinstance(mode, Mode):
             raise ConfigurationError("mode must be a Mode.")
@@ -466,6 +495,7 @@ class TrainingService:
                 return found
         return self._settings
 
+    @_locked
     def set_settings(self, settings: Settings) -> None:
         """Learn with these settings from now on; idle only. Applied to the brain in use."""
         if not isinstance(settings, Settings):
@@ -488,6 +518,7 @@ class TrainingService:
         self._encoder.refresh()  # discoveries may have changed since the last go
         return self._encoder.encode(snapshot)
 
+    @_locked
     def set_algorithm(self, algorithm: str) -> str:
         """Choose how the AI learns; converts the current brain when the choice differs.
 
@@ -508,6 +539,7 @@ class TrainingService:
         self._announce("algorithm change")
         return self._last_change
 
+    @_locked
     def rehearse(self, passes: int = 1) -> int:
         """Let the AI learn from the child's moves again; returns the steps learned."""
         if self._status is not Status.IDLE:
@@ -519,6 +551,7 @@ class TrainingService:
             self.save()
         return steps
 
+    @_locked
     def set_speed(self, speed: Speed) -> None:
         if not isinstance(speed, Speed):
             raise ConfigurationError("speed must be a Speed.")
@@ -549,6 +582,7 @@ class TrainingService:
             return
         self._fast_applied = wanted
 
+    @_locked
     def start(self, mode: Mode | None = None) -> None:
         if not self._enabled:
             raise ConfigurationError(
@@ -569,6 +603,7 @@ class TrainingService:
         self._apply_speed()
         self._announce("start")
 
+    @_locked
     def pause(self) -> None:
         if self._status is not Status.RUNNING:
             raise ConfigurationError("Nothing is running to pause.")
@@ -576,6 +611,7 @@ class TrainingService:
         self._apply_speed()
         self._announce("pause")
 
+    @_locked
     def resume(self) -> None:
         if self._status is not Status.PAUSED:
             raise ConfigurationError("Training isn't paused.")
@@ -583,6 +619,7 @@ class TrainingService:
         self._apply_speed()
         self._announce("resume")
 
+    @_locked
     def stop(self) -> None:
         if self._status is Status.IDLE:
             raise ConfigurationError("Nothing is running to stop.")
@@ -601,6 +638,7 @@ class TrainingService:
         self._saves += 1
         return path
 
+    @_locked
     def replace_brain(self, data: dict[str, Any]) -> Brain:
         """Swap in a brain for the connected game (loading a saved AI); idle only."""
         if self._status is not Status.IDLE:
@@ -636,6 +674,7 @@ class TrainingService:
         if brain.give_up_after is not None:
             self._unstick_after = brain.give_up_after
 
+    @_locked
     def forget(self) -> None:
         """Start the AI from scratch for this game and delete what was saved."""
         if self._status is not Status.IDLE:
@@ -654,6 +693,7 @@ class TrainingService:
             self._store.delete(self._game_id)
         self._announce("forget")
 
+    @_locked
     def step(self) -> bool:
         """One act-advance-learn step in an AI mode. Returns True if a step was taken.
 
@@ -679,6 +719,7 @@ class TrainingService:
             self._record(runner.finish())
         return True
 
+    @_locked
     def run_for(self, seconds: float, *, max_steps: int | None = None) -> int:
         """Take as many steps as fit in ``seconds`` (fast training). Returns the count."""
         if seconds < 0:
@@ -693,6 +734,7 @@ class TrainingService:
                 break
         return taken
 
+    @_locked
     def compete(
         self,
         entrants: Sequence[tuple[str, Learner]],
@@ -752,6 +794,7 @@ class TrainingService:
             self._runner = None
         return results
 
+    @_locked
     def train(self, episodes: int) -> tuple[EpisodeRecord, ...]:
         """Run whole goes with no GUI: start if needed, stop at the end."""
         if episodes < 1:
