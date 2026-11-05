@@ -239,7 +239,12 @@ a platform, a ball) and listed as "Something moving" until the AI finds a
 button that moves it. For each such thing the AI also sees how far it is
 from its own position (the one the stick moves, or one you confirmed),
 exactly when it is close and roughly when it is far, so a thing about to
-touch it and one across the screen look different. The "What the AI is doing" list shows what it has
+touch it and one across the screen look different. None of these labels is
+final: a value gets its first label at the AI's first look, often after a
+handful of changes, and at every review the AI rethinks any guess it made
+itself whose behaviour now says otherwise, so an enemy slot that looked like
+"a speed" on five values becomes "Something moving" once it has walked.
+Guesses you confirmed, named or rejected are never rethought. The "What the AI is doing" list shows what it has
 found, and the Research window's memory table lets you name a value for
 it.
 

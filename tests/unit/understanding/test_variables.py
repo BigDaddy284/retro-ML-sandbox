@@ -14,11 +14,15 @@ from retro_ai_lab.understanding import (
     Candidate,
     Confidence,
     Encoding,
+    Evidence,
     Knowledge,
+    Variable,
     VariableKind,
     find_candidates,
     propose_candidates,
+    rethink_candidates,
 )
+from retro_ai_lab.understanding.knowledge import INPUT_LINKED
 from retro_ai_lab.understanding.variables import (
     BOUNCE_UPS,
     LIVES_SAMPLES,
@@ -117,6 +121,100 @@ def test_candidate_order_and_pair_takes_precedence_over_singles() -> None:
 
 
 # ------------------------------------------------------------ proposing
+
+
+def _planted(k: Knowledge, offset: int, kind: VariableKind, *evidence: Evidence) -> Variable:
+    return k.propose("ram", offset, kind=kind, evidence=evidence)
+
+
+def test_the_ai_changes_its_mind_about_its_own_guess() -> None:
+    """T-916: a guess the AI made itself takes the classifier's new kind and evidence."""
+    k = Knowledge("g")
+    early = _planted(
+        k,
+        3,
+        VariableKind.SPEED,
+        Evidence("few-values", "Only 5 different values seen.", 1.0),
+        Evidence("played", "Moved 40 times in a go of 100 steps.", 0.5),
+        Evidence("busy", "Still changed 40 times in 100 steps.", 0.0),
+    )
+    same = _planted(k, 7, VariableKind.LIVES, Evidence("rare", "Changes rarely.", 0.5))
+    fresh = (
+        Evidence(MOVER, "Moves in small steps, often.", 1.5),
+        Evidence("many-values", "40 different values seen.", 0.5),
+    )
+    cands = (
+        Candidate("ram", 3, Encoding.U8, VariableKind.POSITION, fresh),
+        Candidate("ram", 7, Encoding.U8, VariableKind.LIVES, ()),  # same kind: nothing to do
+        Candidate("ram", 9, Encoding.U8, VariableKind.FLAG, ()),  # nobody's guess yet
+    )
+    (changed,) = rethink_candidates(k, cands)
+    assert changed.id == early.id and changed.kind is VariableKind.POSITION
+    assert [e.kind for e in changed.evidence] == [MOVER, "many-values", "played"]
+    assert not changed.rejected and k.get(same.id) == same and k.at("ram", 9) is None
+    assert rethink_candidates(k, cands) == ()  # idempotent
+    # a 16-bit guess is not the same place as an 8-bit candidate (a change of width is
+    # out of scope)
+    wide = k.propose("ram", 20, encoding=Encoding.U16LE, kind=VariableKind.SCORE)
+    narrow = Candidate("ram", 20, Encoding.U8, VariableKind.LIVES, ())
+    assert rethink_candidates(k, (narrow,)) == () and k.get(wide.id) == wide
+
+
+def test_a_persons_word_and_the_links_verdict_are_never_rethought() -> None:
+    k = Knowledge("g")
+    sworn = _planted(k, 1, VariableKind.SPEED)
+    k.confirm(sworn.id)
+    named = k.propose("ram", 2, kind=VariableKind.SPEED, name="Hearts")
+    refused = _planted(k, 3, VariableKind.SPEED)
+    k.reject(refused.id)
+    told = _planted(k, 4, VariableKind.SPEED, Evidence("told", "You said you lost a life.", 1.0))
+    found = _planted(k, 5, VariableKind.SPEED, Evidence("restarts", "Went down by one.", 9.0))
+    mine = _planted(k, 6, VariableKind.POSITION, Evidence(INPUT_LINKED, "Changes when Left.", 1.0))
+    held = (sworn, named, refused, told, found, mine)
+    cands = tuple(Candidate("ram", v.offset, Encoding.U8, VariableKind.LIVES, ()) for v in held)
+    assert rethink_candidates(k, cands) == ()
+    assert [k.get(v.id).kind for v in held] == [v.kind for v in held]
+    # an input-linked guess of another kind is the classifier's own and may change
+    linked = _planted(k, 8, VariableKind.SPEED, Evidence(INPUT_LINKED, "Changes when Left.", 1.0))
+    (changed,) = rethink_candidates(
+        k, (Candidate("ram", 8, Encoding.U8, VariableKind.POSITION, fresh_mover()),)
+    )
+    assert changed.id == linked.id and changed.kind is VariableKind.POSITION
+    assert [e.kind for e in changed.evidence] == [MOVER, "many-values", INPUT_LINKED]
+
+
+def fresh_mover() -> tuple[Evidence, ...]:
+    return (
+        Evidence(MOVER, "Moves in small steps, often.", 1.5),
+        Evidence("many-values", "40 different values seen.", 0.5),
+    )
+
+
+def test_a_guess_the_ai_dropped_comes_back_as_another_kind() -> None:
+    k = Knowledge("g")
+    dropped = _planted(k, 3, VariableKind.LIVES, Evidence("busy", "Still busy.", 0.0))
+    k.reject(dropped.id, by="the AI")
+    again = Candidate("ram", 3, Encoding.U8, VariableKind.LIVES, ())
+    assert rethink_candidates(k, (again,)) == () and k.get(dropped.id).rejected
+    (back,) = rethink_candidates(
+        k, (Candidate("ram", 3, Encoding.U8, VariableKind.POSITION, fresh_mover()),)
+    )
+    assert back.id == dropped.id and not back.rejected and back.kind is VariableKind.POSITION
+    assert [e.kind for e in back.evidence] == [MOVER, "many-values"]  # the doubts are gone
+    assert propose_candidates(k, (again,)) == ()  # still the same place, never duplicated
+
+
+def test_a_walking_enemy_judged_early_becomes_a_mover_later() -> None:
+    """The user's log: an enemy slot called "a speed" on its first values stayed so."""
+    rows = enemy_rows()
+    k = Knowledge("g")
+    (early,) = propose_candidates(k, find_candidates(track(rows[:40])))
+    assert early.kind is VariableKind.SPEED
+    later = find_candidates(track(rows))
+    assert propose_candidates(k, later) == ()  # the old rule: judged once
+    (rethought,) = rethink_candidates(k, later)
+    assert rethought.id == early.id and rethought.kind is VariableKind.POSITION
+    assert any(e.kind == MOVER for e in rethought.evidence)
 
 
 def test_propose_adds_unknown_locations_only() -> None:

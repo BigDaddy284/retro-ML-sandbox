@@ -355,6 +355,16 @@ def is_mover(v: Variable) -> bool:
     return v.kind is VariableKind.POSITION and MOVER in kinds and INPUT_LINKED not in kinds
 
 
+AI = "the AI"  # who a guess the AI drops itself is "rejected by" (T-864, T-916)
+
+
+def rejected_by_ai(v: Variable) -> bool:
+    """Dropped by the AI's own doubts, not by a person; such a guess can be rethought (T-916)."""
+    return v.rejected and any(
+        e.kind == "user" and e.detail == f"Rejected by {AI}." for e in v.evidence
+    )
+
+
 ROLE_WORDS: dict[VariableKind, str] = {
     VariableKind.SCORE: "Your score",
     VariableKind.LIVES: "a life",
@@ -717,6 +727,7 @@ class Knowledge:
 
 
 __all__ = [
+    "AI",
     "BELIEVED_PER_KIND",
     "INPUT_LINKED",
     "MOVER",
@@ -738,4 +749,5 @@ __all__ = [
     "decode",
     "is_mover",
     "plain_names",
+    "rejected_by_ai",
 ]

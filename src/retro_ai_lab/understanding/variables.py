@@ -33,12 +33,14 @@ from dataclasses import dataclass
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.observation.diff import SMALL_HOP, ByteStats, ChangeTracker
 from retro_ai_lab.understanding.knowledge import (
+    INPUT_LINKED,
     MOVER,
     Encoding,
     Evidence,
     Knowledge,
     Variable,
     VariableKind,
+    rejected_by_ai,
 )
 
 MIN_TRANSITIONS = 30
@@ -310,6 +312,75 @@ def propose_candidates(
     return tuple(added)
 
 
+# The evidence kinds the classifier itself writes; a rethought guess loses these and
+# takes the fresh ones, keeping what other findings attached (T-916).
+CLASSIFIER_KINDS = frozenset(
+    {
+        "16-bit",
+        "both-ways",
+        "changes",
+        "every-frame",
+        "few-values",
+        "frequent",
+        "irregular",
+        "many-values",
+        "monotonic",
+        "mostly-down",
+        "mostly-up",
+        "rare",
+        "two-values",
+        "unit-steps",
+        "varied-steps",
+        MOVER,
+    }
+)
+# Evidence that placed the guess by a person's word ("told", T-901) or by the AI's own
+# restart finding ("restarts", T-904): both outrank the statistics, so the guess holds.
+HELD_KINDS = frozenset({"told", "restarts"})
+
+
+def rethink_candidates(
+    knowledge: Knowledge, candidates: tuple[Candidate, ...]
+) -> tuple[Variable, ...]:
+    """Change the AI's mind about its own guesses whose statistics now say another kind.
+
+    A byte is judged at the first review after it changes, often on a handful of
+    changes: on the user's game an enemy slot became "a speed" on five values and
+    stayed so for 77 goes, so the mover rule never ran on it (T-916). At every
+    review a guess the AI made itself takes the classifier's current kind when
+    that differs, with the classifier's fresh evidence; evidence other findings
+    attached (the input link, "played", the long look's) is kept and the old
+    kind's zero-weight doubts go. A person's word is never argued with: a
+    confirmed, named or person-rejected guess holds, as does one placed by a
+    person's "I just …" or by the restart finding, and a position the input
+    link found. A guess the AI dropped stays dropped while the classifier
+    repeats the kind it dropped, and comes back as the other kind.
+    Returns the variables whose kind changed.
+    """
+    at: dict[tuple[str, int, Encoding], Variable] = {
+        (v.region, v.offset, v.encoding): v for v in knowledge
+    }
+    changed: list[Variable] = []
+    for c in candidates:
+        v = at.get((c.region, c.offset, c.encoding))
+        if v is None or v.kind is c.kind or not _rethinkable(v):
+            continue
+        kept = tuple(e for e in v.evidence if e.kind not in CLASSIFIER_KINDS and e.weight > 0)
+        changed.append(
+            knowledge.update(v.id, kind=c.kind, rejected=False, evidence=(*c.evidence, *kept))
+        )
+    return tuple(changed)
+
+
+def _rethinkable(v: Variable) -> bool:
+    if v.confirmed or v.name or (v.rejected and not rejected_by_ai(v)):
+        return False
+    kinds = {e.kind for e in v.evidence}
+    if kinds & HELD_KINDS:
+        return False
+    return not (v.kind is VariableKind.POSITION and INPUT_LINKED in kinds)
+
+
 def _overlaps(v: Variable, c: Candidate) -> bool:
     if v.region != c.region:
         return False
@@ -318,7 +389,9 @@ def _overlaps(v: Variable, c: Candidate) -> bool:
 
 __all__ = [
     "BOUNCE_UPS",
+    "CLASSIFIER_KINDS",
     "FEW_VALUES",
+    "HELD_KINDS",
     "LIVES_SAMPLES",
     "MIN_TRANSITIONS",
     "MOVER",
@@ -333,4 +406,5 @@ __all__ = [
     "lives_doubt",
     "progress_doubt",
     "propose_candidates",
+    "rethink_candidates",
 ]

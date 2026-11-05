@@ -29,6 +29,7 @@ from retro_ai_lab.understanding import (
     Narrowing,
     Variable,
     VariableKind,
+    find_candidates,
 )
 from retro_ai_lab.understanding.events import CYCLES
 
@@ -550,6 +551,37 @@ def test_a_busy_flag_guess_is_doubted_then_dropped(
     assert "0 doubted (none), 1 dropped (Timer as flag)" in caplog.text
     got = k.get(over.id)
     assert not got.rejected and not any(e.kind == BUSY for e in got.evidence)
+
+
+def test_a_review_rethinks_the_ais_own_guesses(
+    discovery: DiscoveryService,
+    connection: ConnectionService,
+    observation: ObservationService,
+    updates: list[DiscoveryUpdated],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """T-916: a guess judged on its first few changes is judged again as more is seen."""
+    connection.connect("fake", seed=2)
+    play(connection, observation, 100)  # the first review proposes the toy racer's bytes
+    k = discovery.knowledge
+    assert k is not None and discovery.reviews == 1
+    own = k.at("ram", LAYOUT.speed)
+    assert own is not None and own.kind is not VariableKind.LIVES
+    wrong = k.update(own.id, kind=VariableKind.LIVES)  # as if judged on a handful of values
+    sworn = k.at("ram", LAYOUT.lives)
+    assert sworn is not None
+    k.update(sworn.id, kind=VariableKind.FLAG)
+    k.confirm(sworn.id)  # a person's word, however odd, holds
+    updates.clear()
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
+    play(connection, observation, 120)
+    assert discovery.reviews == 2
+    (now,) = [c for c in find_candidates(observation.tracker) if c.offset == LAYOUT.speed]
+    assert k.get(wrong.id).kind is now.kind and now.kind is not VariableKind.LIVES
+    assert k.get(sworn.id).kind is VariableKind.FLAG and k.get(sworn.id).confirmed
+    assert any(k.get(wrong.id) in u.changed for u in updates)
+    line = next(m for m in caplog.messages if "changed its mind about" in m)
+    assert f"ram[{LAYOUT.speed}]" in line and "of its own guesses" in line
 
 
 def test_a_person_names_a_value_by_address(
