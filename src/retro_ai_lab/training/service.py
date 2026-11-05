@@ -391,10 +391,16 @@ class TrainingService:
         self, window: int = DEFAULT_WINDOW
     ) -> tuple[tuple[BehaviourChange, ...], int, int]:
         """(changes, goes compared over, situations known now) against the policy
-        ``window`` goes ago, or the oldest snapshot kept."""
+        ``window`` goes ago, or the oldest snapshot kept.
+
+        "Now" is the snapshot taken at the end of the last go (T-910): the
+        Learning panel asks on the GUI thread at every go's end, and a fresh
+        policy of a network over 10,000 remembered situations cost the user's
+        window close to a second each time.
+        """
         if self._agent is None or not self._policies:
             return (), 0, 0
-        now = policy_of(self._agent)
+        now = self._policies[-1][1]
         candidates = [p for p in self._policies if p[0] <= self._episodes - window]
         then_number, then = candidates[-1] if candidates else self._policies[0]
         goes_ago = self._episodes - then_number
