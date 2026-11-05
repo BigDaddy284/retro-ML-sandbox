@@ -2620,7 +2620,7 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Expected changes:** `src/retro_ai_lab/understanding/moments.py`, `src/retro_ai_lab/understanding/__init__.py`, `src/retro_ai_lab/services/discovery.py`, `tests/unit/understanding/test_moments.py`, `tests/unit/services/test_discovery.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
 - **Test plan:** `test_restarts_vote_for_the_byte_that_went_down_by_one_before_each`, `test_restarts_with_no_clear_winner_are_forgotten` (watch); `test_the_ai_finds_the_life_counter_from_restarts` (service, toy racer); moments and discovery suites; full suite.
 - **Results:** 3 new tests pass; moments + discovery 33 passed; full suite 1303 passed, 10 skipped (3.13).
-- **Commit:** see PR. **PR:** pending.
+- **Commit:** see PR #159. **PR:** #159.
 - **Completion report:** On the toy racer the speed byte also goes from 1 to 0 at every crash, so without the "known to be something else" rule the vote would tie forever; that rule uses what the AI has already learned rather than anything about the game. The first cut also rejected the AI's other lives guesses that never voted, and the first-demonstration test caught why that is wrong: on the toy racer three crashes come inside one five-second window, so the real counter moves by three, gets no vote, and would have been dropped for a byte that happened to move by one. The AI's finding is now evidence only, strong enough to take the seat; the person can still say no, and a guess the person confirmed is never overridden.
 
 ### T-905 – A narrowed byte must move steadily
