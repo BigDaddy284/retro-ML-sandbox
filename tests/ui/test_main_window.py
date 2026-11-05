@@ -35,6 +35,7 @@ def test_the_window_watches_the_link_and_the_gui_thread(qtbot: QtBot) -> None:
     qtbot.addWidget(w)
     assert w.watchdog.running and w.stall_watch.running
     w.close()
+    assert not w.stall_watch.running  # it would otherwise log for a window that is gone
 
 
 def test_all_six_panels_present_with_child_friendly_titles(qtbot: QtBot) -> None:
@@ -383,3 +384,36 @@ def test_a_panel_without_a_dock_keeps_its_header(qtbot: QtBot) -> None:
     assert panel.help_button.isVisible()
     # The dock-only buttons stay out of the way until a dock wires them.
     assert not panel.pop_out_button.isVisible() and not panel.hide_button.isVisible()
+
+
+# ------------------------------------------- T-899: panels smaller than their content
+
+
+def test_a_panel_can_be_dragged_smaller_than_what_it_holds(qtbot: QtBot) -> None:
+    """The user could not shrink Learning: its chart, text and table set a floor."""
+    from retro_ai_lab.ui.panels import MIN_CONTENT_HEIGHT
+
+    panel = Panel(PanelSpec("x", "X", "Blurb."))
+    qtbot.addWidget(panel)
+    tall = QLabel("tall content")
+    tall.setMinimumHeight(600)
+    panel.set_body(tall)
+    panel.show()
+    assert panel.minimumSizeHint().height() < 200  # the content no longer sets the floor
+    panel.resize(300, 150)
+    qtbot.waitUntil(lambda: panel.height() == 150)
+    assert tall.height() >= 600  # it scrolls rather than squashing
+    assert panel.scroll_area.minimumHeight() == MIN_CONTENT_HEIGHT
+    assert panel.scroll_area.isAncestorOf(tall) and panel.scroll_area.widgetResizable()
+    # Collapsing hides the scroll area, header stays.
+    panel.set_expanded(False)
+    assert not panel.scroll_area.isVisible() and panel.header.isVisible()
+
+
+def test_the_window_is_not_pinned_tall_by_its_panels(qtbot: QtBot) -> None:
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.show()
+    for p in w.panels:
+        assert w.dock(p.key).minimumSizeHint().height() < 200, p.key
+    assert w.minimumSizeHint().height() < 600

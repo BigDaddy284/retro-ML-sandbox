@@ -203,7 +203,9 @@ again.
 
 Every panel can be dragged by its title bar to another edge of the window,
 dropped onto another panel to make tabs, pulled out as its own window, or
-resized by the bars between panels. The **Panels** button on the toolbar hides
+resized by the bars between panels; a panel made smaller than what it holds
+scrolls, so the bars and the window itself go as small as you like. The
+**Panels** button on the toolbar hides
 or shows each one and has **Reset layout** to put everything back. The
 arrangement is remembered between runs.
 
