@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-898: the "What the AI is doing" list has a find box (keeps the lines containing what you type, with "N of M" beside it) and a sort choice: by address, by name, or "Most sure first" with what you confirmed at the top and what you rejected at the bottom.
 - T-897: the question about a confirmed guess names the panel by its real title, "What the AI is doing", and the button to press, instead of a "Discoveries" panel the app never shows.
 - T-896: the Discoveries list changes only the rows a review added or changed, in place, instead of being rebuilt from scratch (which froze the game for up to a second every 15 s on a long list); a question about a confirmed guess is logged and announced only when it is new, not every time its counts move.
 - T-895: a confirmed guess whose byte behaves unlike its kind (a "lives" that changes every few steps or bounces) is kept but questioned: the Learning panel's insights say 'Check "<name>"' with what the byte did and how to reject it in Discoveries, and the log says the same once.

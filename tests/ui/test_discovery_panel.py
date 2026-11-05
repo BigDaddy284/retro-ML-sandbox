@@ -11,7 +11,13 @@ from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import BUTTONS, LAYOUT
 from retro_ai_lab.services import DiscoveryService, DiscoveryUpdated, ObservationService
 from retro_ai_lab.ui.context import AppContext
-from retro_ai_lab.ui.discovery_panel import IDLE_TEXT, NO_SELECTION, DiscoveryPanel, badge
+from retro_ai_lab.ui.discovery_panel import (
+    IDLE_TEXT,
+    NO_SELECTION,
+    SORTS,
+    DiscoveryPanel,
+    badge,
+)
 from retro_ai_lab.ui.main_window import MainWindow
 from retro_ai_lab.understanding import Confidence, Evidence, VariableKind
 from retro_ai_lab.understanding.events import EventKind, GameEvent
@@ -341,3 +347,81 @@ def test_action_buttons_share_a_row(panel: DiscoveryPanel) -> None:
     assert all(b is not None for b in buttons)
     tops = {b.geometry().top() for b in buttons}  # type: ignore[union-attr]
     assert len(tops) == 1
+
+
+# ------------------------------------------- T-898: find and sort
+
+
+def test_the_find_box_narrows_the_list(panel: DiscoveryPanel, context: AppContext) -> None:
+    """Hundreds of guesses: typing part of a name or address leaves only the matches."""
+    assert not panel.findChild(object, "discovery_find").isEnabled()  # type: ignore[union-attr]
+    context.connection.connect("fake", seed=3)
+    assert panel.findChild(object, "discovery_find").isEnabled()  # type: ignore[union-attr]
+    k = context.discovery.knowledge
+    assert k is not None
+    lives = k.propose("ram", 4, kind=VariableKind.LIVES, name="Lives", evidence=SURE)
+    lifes = k.propose("ram", 9, kind=VariableKind.PROGRESS, name="Lifes", evidence=SURE)
+    score = k.propose("ram", 12, kind=VariableKind.SCORE, name="Score", evidence=SURE)
+    panel.refresh()
+    total = len(panel.variable_ids())
+    assert panel.found_text == "" and len(panel.visible_ids()) == total
+    panel.find_rows("LIF")  # any case, anywhere in the line
+    assert panel.visible_ids() == (lifes.id,) and panel.found_text == f"1 of {total}"
+    panel.find_rows("ram[12]")  # the address works too
+    assert panel.visible_ids() == (score.id,)
+    panel.find_rows("Confirmed by you")  # and the badge
+    assert panel.visible_ids() == ()
+    panel.find_rows("Liv")
+    assert panel.visible_ids() == (lives.id,)
+    # A row arriving while the box is in use obeys it; the selection is untouched.
+    panel.select(lives.id)
+    panel.refresher.flush()
+    later = k.propose("ram", 20, kind=VariableKind.LIVES, name="Lives (2nd guess)", evidence=SURE)
+    context.bus.publish(DiscoveryUpdated((later,), (), (), ()))
+    panel.refresher.flush()
+    assert panel.visible_ids() == (lives.id, later.id) and panel.selected_id == lives.id
+    assert panel.found_text == f"2 of {total + 1}"
+    panel.find_rows("")
+    assert len(panel.visible_ids()) == total + 1 and panel.found_text == ""
+
+
+def test_sorting_puts_your_own_verdicts_first(panel: DiscoveryPanel, context: AppContext) -> None:
+    """ "Most sure first" shows what a person confirmed at the top and rejected at the bottom."""
+    assert [label for label, _ in SORTS] == ["By address", "By name", "Most sure first"]
+    context.connection.connect("fake", seed=3)
+    k = context.discovery.knowledge
+    assert k is not None
+    for v in list(k):
+        k.remove(v.id)
+    zed = k.propose("ram", 1, kind=VariableKind.SCORE, name="Zed", evidence=SURE)
+    mid = k.propose("ram", 5, kind=VariableKind.LIVES, name="Mid", evidence=SURE)
+    low = k.propose("ram", 7, kind=VariableKind.FLAG, name="Apple")  # no evidence: low
+    sworn = k.propose("ram", 9, kind=VariableKind.PROGRESS, name="Lifes", evidence=SURE)
+    k.confirm(sworn.id)
+    k.reject(zed.id)
+    panel.refresh()
+    assert panel.sort_name == "By address"
+    assert panel.variable_ids() == (zed.id, mid.id, low.id, sworn.id)
+    panel.select(mid.id)
+    panel.sort_by("By name")
+    assert (
+        panel.variable_ids() == (low.id, sworn.id, mid.id, zed.id) and panel.selected_id == mid.id
+    )
+    panel.sort_by("Most sure first")
+    assert panel.variable_ids() == (sworn.id, mid.id, low.id, zed.id)
+    # A guess whose standing changes moves to its new place without a rebuild.
+    rebuilds: list[int] = []
+    panel.refresh = lambda *, keep=None: rebuilds.append(1)  # type: ignore[method-assign]
+    k.confirm(low.id)
+    panel.refresher.flush()
+    context.bus.publish(DiscoveryUpdated((), (k.get(low.id),), (), ()))
+    panel.refresher.flush()
+    assert panel.variable_ids() == (low.id, sworn.id, mid.id, zed.id)
+    assert rebuilds == [] and panel.selected_id == mid.id
+    k.reject(mid.id)  # the selected one moves and stays selected
+    panel.refresher.flush()
+    context.bus.publish(DiscoveryUpdated((), (k.get(mid.id),), (), ()))
+    panel.refresher.flush()
+    assert panel.variable_ids() == (low.id, sworn.id, zed.id, mid.id)
+    assert rebuilds == [] and panel.selected_id == mid.id
+    assert "You said no" in panel.evidence_text

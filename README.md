@@ -139,8 +139,13 @@ panel, the Progress panel's steps and the step-detection list only show its
 best guess of each role, in plain words: "Your score jumps up", "Losing a
 life", "Progress goes up" (and "Progress (2nd guess) goes up" when it offers
 a second progress value, as a game can have a level and a checkpoint). To
-call something by its real name, pick it in the Discovery panel, type the
-name and press Rename; every list follows. The Discovery panel, the log and
+call something by its real name, pick it in the "What the AI is doing"
+panel, type the name and press Rename; every list follows. That panel's
+list can run to hundreds of guesses: the find box above it keeps only the
+lines containing what you type (a name, an address such as `ram[12]`, or
+"Confirmed by you"), and the box next to it sorts by address, by name or
+"Most sure first", which puts what you confirmed at the top and what you
+rejected at the bottom. The "What the AI is doing" panel, the log and
 the Rewards table's last column (Address) still show the memory address for
 grown-ups. Pick a reward and the line under
 the table says what it means and what it is worth ("Losing a life: the AI
