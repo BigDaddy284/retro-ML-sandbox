@@ -114,6 +114,13 @@ panel refresh by panel refresh, and the picture's paint, leaving out anything
 that never took a millisecond. When the window stutters, that line says which
 part of the app was busy.
 
+Every go leaves two lines: "Go 12 ended by …" with the rewards that paid, and
+"The brain after go 12: Simple table. Knows 840 situations … tries something
+new 60% of the time. It sees 14 values: 2 positions (1 moving), 1 distance to
+a moving thing, 1 life count, …". The second line is how to tell, from a log
+alone, which brain the AI was using, how much it was still guessing, and what
+it could see of the game.
+
 ## Letting the AI start the game
 
 Press Start in the Learning panel wherever the game is, even on its title

@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-913 | After every go the log names the brain in use, its situations known and exploring rate, and what the state sees (positions, moving things, distances, life counts, switches) | 8 | Done | 1/1 | see PR |
 | T-912 | The state holds each moving thing's distance from the player's own position, exact up close and rough far away, with eight seats kept for distances whenever anything moves | 8 | Done | 1/1 | see PR #167 |
 | T-911 | A memory value that wanders both ways in small steps, often, is proposed as the position of something that moves, named "Something moving" until a button moves it, and kept out of the long look's drivers and steppers | 8 | Done | 1/1 | see PR #166 |
 | T-910 | The Learning panel's behaviour changes read the policy snapshot taken as the last go ended instead of running the brain over every remembered situation on the GUI thread at each go's end | 8 | Done | 1/1 | see PR #165 |
@@ -2690,6 +2691,20 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 4 new tests pass; learning + training + services + integration + Learning panel 264 passed; full suite 1327 passed, 10 skipped (3:53).
 - **Commit:** see PR #167. **PR:** #167.
 - **Completion report:** The even-bin attempt is recorded in `ARCHITECTURE.md` so it is not tried again: a lone position's finer bins cost the beginner table learning time and tell it nothing it can act on. Distances pair every mover with every own position, so a game whose player has an x and a y and whose enemies have both gets x-to-y pairs too; the brain can ignore them, but they take seats, and telling x from y (two values that move with the same button family) is a possible later task. The next thing to learn from the user's log is whether "Something moving" values appear at all on the real game and whether the first enemy stops costing a life.
+
+### T-913 – Each go's log names the brain and what it sees
+- **Status:** Done
+- **Phase:** 8 (the user's 16:47 log: "still looping the same type of play, why is it not learning from past plays")
+- **Objective:** The log showed 34 goes with no trend and could not say which brain was in use, how often it still guessed at random or what values it read. Log it after every go, in words.
+- **Scope:** `StateEncoder.describe()` and `SEEN_WORDS` in `learning/state.py`; a second log line in `TrainingService._record`. **Out of scope:** changing the go's own line; showing this in the panel (the Learning panel already shows the brain's stats).
+- **Acceptance criteria:**
+  1. `describe()` says "3 values: 2 positions (1 moving), 1 distance to a moving thing, 1 score" for the T-912 world, "nothing yet" with nothing believed, and counts life counts, progress values and switches with ignored kinds left out.
+  2. After a go, the line following "Go 1 ended by …" starts "The brain after go 1: Simple table. Knows ", names the exploring rate and ends with "It sees <describe()>.".
+- **Expected changes:** `src/retro_ai_lab/learning/state.py`, `src/retro_ai_lab/training/service.py`, `tests/unit/learning/test_state.py`, `tests/unit/training/test_service.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_the_encoder_says_what_the_brain_sees_in_words`, `test_each_go_logs_the_brain_and_what_it_sees`; learning, training and integration suites; full suite.
+- **Results:** 2 new tests pass; learning + training + integration 154 passed; full suite 1329 passed, 10 skipped in 234.16s (0:03:54).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The line is one `log.info` per go with no new work on the GUI thread (the service already holds the agent and the encoder). What the 16:47 log did show is recorded here for the next one: 34 goes, 0 to 6 lives lost a go (about 2 on average), points 2 to 26 times a go, no trend; that log predates T-911 and T-912, so the next log, on the build with distances, is the first that can say whether the memory eyes are enough.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
