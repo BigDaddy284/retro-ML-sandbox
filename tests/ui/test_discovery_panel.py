@@ -425,3 +425,17 @@ def test_sorting_puts_your_own_verdicts_first(panel: DiscoveryPanel, context: Ap
     assert panel.variable_ids() == (low.id, sworn.id, zed.id, mid.id)
     assert rebuilds == [] and panel.selected_id == mid.id
     assert "You said no" in panel.evidence_text
+
+
+# ------------------------------------------- T-900: the verdict stays in view
+
+
+def test_the_explanation_and_verdict_sit_above_the_list(panel: DiscoveryPanel) -> None:
+    """A short panel shows the find box, the why and the buttons; the list scrolls below."""
+    find = panel.findChild(object, "discovery_find")
+    evidence = panel.findChild(object, "discovery_evidence")
+    yes = panel.findChild(object, "confirm_button")
+    rename = panel.findChild(object, "rename_edit")
+    items = panel.findChild(object, "discovery_list")
+    tops = [w.geometry().top() for w in (find, evidence, yes, rename, items)]  # type: ignore[union-attr]
+    assert tops == sorted(tops) and len(set(tops)) == 5
