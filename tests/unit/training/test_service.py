@@ -474,12 +474,28 @@ def test_the_go_log_line_names_the_earners(lab: Lab, caplog: pytest.LogCaptureFi
     assert len(t.history[-1].result.earned) == 5 and " more" not in line, line
     for name in (profile.get(f"setback:{lives.id}").name, "Starting over"):
         assert name in line, line
+    # Survival in the log (T-934): the losses sit between the earners and the reset's why.
+    assert ", lost a life once, the first at step 2: " in line, line
     assert jump.id in [e.id for e in t.history[-1].result.earned]
     while t.episodes < 2:
         t.step()
     line = next(m for m in caplog.records if m.getMessage().startswith("Go 2 ")).getMessage()
     assert (", from " in line) == bool(t.history[-1].result.earned), line
     t.stop()
+
+
+def test_the_survival_line_every_ten_goes(lab: Lab, caplog: pytest.LogCaptureFixture) -> None:
+    """T-934: from the twentieth go, every tenth go compares the last ten with the ten before."""
+    lab.connect()
+    t = lab.training
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.training.service")
+    t.train(21)
+    survival = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Survival")]
+    assert len(survival) == 1 and survival[0].startswith("Survival over the last 10 goes: ")
+    assert "lives lost per go" in survival[0] and "the first life lost after" in survival[0]
+    t.train(9)
+    survival = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Survival")]
+    assert len(survival) == 2
 
 
 def test_the_log_says_why_each_go_ended(lab: Lab, caplog: pytest.LogCaptureFixture) -> None:

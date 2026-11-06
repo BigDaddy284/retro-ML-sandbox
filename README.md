@@ -119,7 +119,11 @@ Every go leaves two lines: "Go 12 ended by …" with the rewards that paid, and
 new 60% of the time. It sees 14 values: 2 positions (1 moving), 1 distance to
 a moving thing, 1 life count, …". The second line is how to tell, from a log
 alone, which brain the AI was using, how much it was still guessing, and what
-it could see of the game.
+it could see of the game. A go that lost lives says so on its line (", lost a
+life 2 times, the first at step 120"), and every tenth go from the twentieth a
+"Survival over the last 10 goes" line compares lives lost per go, and how many
+steps the first loss took, with the ten goes before: the plain measure of
+whether the AI is getting past what kills it.
 
 ## Letting the AI start the game
 

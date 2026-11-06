@@ -165,6 +165,38 @@ def test_episode_runs_the_requested_steps(lab: Lab) -> None:
     assert not r.running
 
 
+def test_a_go_records_its_lives_lost(lab: Lab) -> None:
+    """T-934: how many lives went and at which step the first did, for the log."""
+    lab.connection.connect("fake", seed=3)
+    k = teach(lab)
+    lives = k.at(RAM, LAYOUT.lives)
+    assert lives is not None
+    r = runner(lab, frames_per_step=4, max_steps=10)
+    r.begin()
+    crash = GameEvent(EventKind.SETBACK, 20, lives.id, "", 3, 2)
+    lab.bus.publish(DiscoveryUpdated((), (), (crash,), ()))
+    assert r.step()  # step 1 collects the loss
+    for _ in range(3):
+        assert r.step()
+    lab.bus.publish(DiscoveryUpdated((), (), (crash, crash), ()))
+    while r.step():
+        pass
+    result = r.finish()
+    # The toy racer may lose lives of its own in those steps, so at least the three sent.
+    assert result.setbacks >= 3 and result.first_setback_step == 1
+    assert result.describe_losses().startswith(", lost a life ")
+    assert result.describe_losses().endswith(" times, the first at step 1")
+    assert EpisodeResult.from_dict(result.to_dict()) == result
+    clean = EpisodeResult(5, 20, 0.0, "max_steps", 2)
+    assert clean.setbacks == 0 and clean.first_setback_step is None
+    assert clean.describe_losses() == ""
+    old = {"steps": 1, "frames": 4, "reward": 0.0, "ended_by": "stopped", "states_seen": 1}
+    assert EpisodeResult.from_dict(old).setbacks == 0  # a go saved before T-934
+    assert EpisodeResult.from_dict(old).first_setback_step is None
+    once = EpisodeResult(5, 20, 0.0, "max_steps", 2, setbacks=1, first_setback_step=4)
+    assert once.describe_losses() == ", lost a life once, the first at step 4"
+
+
 def test_game_over_is_unstuck_with_start_and_the_restart_ends_the_episode(lab: Lab) -> None:
     lab.connection.connect("fake", seed=3)
     teach(lab)

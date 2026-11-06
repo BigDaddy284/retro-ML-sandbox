@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-934 | Survival in the log: each go's line says how many lives were lost and at which step the first went, the go result keeps both, and every tenth go a line compares lives lost per go and the steps before the first loss over the last ten goes with the ten before | 8 | Done | 1/1 | see PR |
 | T-933 | The log says at every connection whether the saved brain was picked up (goes and steps so far), that there is none yet, or why it could not be used; "Start from scratch" asks for confirmation before it deletes the brain and the log records the deletion | 8 | Done | 1/1 | see PR #188 |
 | T-932 | Exploring follows results: when the last ten goes score worse than the ten before, the chance of a random move goes back up to `Settings.rebound` (25%) and is held there while the goes stay worse, easing off over ten goes once they recover; the Research window gets the setting and the rise is logged | 8 | Done | 1/1 |see PR #187 |
 | T-931 | Own positions moved by the same buttons are copies (the four sprite columns of the player) and count once in the distance pairs, so the eight distance seats go to eight moving things instead of one thing measured from four copies | 8 | Done | 1/1 |see PR #186 |
@@ -2986,6 +2987,22 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; understanding + services + integration 241 passed; full suite 1358 passed, 10 skipped in 183.18s (0:03:03).
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
+
+### T-934 – Survival in the log
+- **Status:** Done
+- **Phase:** 8 (the user's 20:03 log: whether the AI was learning the first enemy had to be worked out by hand from the "Losing Lives" earners of 160 go lines; the review promised a measure per build)
+- **Objective:** A go's result records how many life or health drops (`SETBACK` events) it saw and the step of the first; the "Go N ended" line ends ", lost a life N time(s), the first at step S" when any were lost; and every `RESULTS_WINDOW` (10) goes, from the twentieth, the service logs "Survival over the last 10 goes: lives lost per go 1.3 (was 0.4 over the 10 before); the first life lost after 120 steps on average (was 310)." from the history, so a log says whether the AI is surviving longer without anyone counting. The measure reads only the events the AI already acts on, so it holds for any game.
+- **Scope:** `EpisodeSignals` counts setbacks per step (`take_setbacks`), `EpisodeRunner._settle` notes the first one's step, `EpisodeResult.setbacks`/`first_setback_step` (saved and loaded, older goes load with none); `describe_survival(goes, window)` in `training/curve.py`; the two log lines in `TrainingService._record`. **Out of scope:** the Progress panel (the log is the ask); counting resets or stuck ends as deaths.
+- **Acceptance criteria:**
+  1. A go with two setback events at steps 3 and 7 ends with `setbacks == 2` and `first_setback_step == 3`; a go with none has 0 and None; a saved result round-trips both and one saved before this task loads with none.
+  2. The go line ends ", lost a life 2 times, the first at step 3" and says nothing about lives when none were lost.
+  3. `describe_survival` with fewer than two windows says so in one short sentence; with twenty goes it gives both averages and the "was" of each; goes with no loss count towards lives per go and are left out of the first-loss average, which says "never" when no go in the window lost one.
+  4. The survival line is logged after the twentieth and thirtieth goes, not after the tenth or the twenty-first.
+- **Expected changes:** `src/retro_ai_lab/training/episode.py`, `src/retro_ai_lab/training/curve.py`, `src/retro_ai_lab/training/service.py`, `src/retro_ai_lab/training/__init__.py` (export), `tests/unit/training/test_episode.py`, `tests/unit/training/test_curve.py`, `tests/unit/training/test_service.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_a_go_records_its_lives_lost` (runner), `test_describe_survival` (curve), `test_the_go_log_line_says_when_the_first_life_went` and `test_the_survival_line_every_ten_goes` (service); training suite; full suite.
+- **Results:** 4 new tests pass; training suite 91 passed; full suite 1370 passed, 10 skipped (172.31s); ruff and mypy clean.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The log now carries the measure the review asked for. Each go line ends with the lives lost and the step of the first loss, and every tenth go from the twentieth a "Survival over the last 10 goes" line compares lives lost per go and the steps before the first loss with the ten goes before. The runner found the toy racer losing lives of its own during the test, which is what the measure is for; the test counts at least the losses it sent.
 
 ### T-933 – The log says whether the saved brain was picked up, and Start from scratch asks first
 - **Status:** Done
