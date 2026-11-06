@@ -358,6 +358,29 @@ def test_describe_names_the_position_distances_come_from() -> None:
     )
 
 
+def test_copies_of_my_position_count_once_in_the_pairs() -> None:
+    """T-931: the user's eight distance seats went to one enemy measured from four copies."""
+    from retro_ai_lab.understanding.knowledge import INPUT_LINKED, MOVER
+
+    k = Knowledge("g")
+    pos = VariableKind.POSITION
+    stick = Evidence(INPUT_LINKED, "Changes when A, Left or Right is held.", 2.0)
+    copies = [k.propose(RAM, 10 + 4 * i, kind=pos, evidence=[stick]) for i in range(4)]
+    jump = Evidence(INPUT_LINKED, "Changes when A is held.", 1.0)
+    y = k.propose(RAM, 40, kind=pos, evidence=[jump])
+    movers = [
+        k.propose(RAM, 100 + i, kind=pos, evidence=[Evidence(MOVER, "Moves.", 1.5)])
+        for i in range(3)
+    ]
+    enc = StateEncoder(k)
+    assert enc.pairs == tuple((m, copies[0]) for m in movers) + tuple((m, y) for m in movers)
+    for i in range(5):  # eight movers: eight seats, all measured from the first copy
+        movers.append(k.propose(RAM, 103 + i, kind=pos, evidence=[Evidence(MOVER, "Moves.", 1.5)]))
+    enc.refresh()
+    assert len(enc.pairs) == 8 and all(p is copies[0] for _, p in enc.pairs)
+    assert sorted(m.id for m, _ in enc.pairs) == sorted(m.id for m in movers)
+
+
 # ------------------------------------------------------------ T-915: my position
 
 

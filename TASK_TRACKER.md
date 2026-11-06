@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-931 | Own positions moved by the same buttons are copies (the four sprite columns of the player) and count once in the distance pairs, so the eight distance seats go to eight moving things instead of one thing measured from four copies | 8 | Done | 1/1 | see PR |
 | T-930 | A button whose trial changes at least half of what the game changes on its own (a pause button, a menu) links to no value, so the user's enemy sprites no longer carry "changes when Start is held" and can still become moving things; the experiment log names such buttons | 8 | Done | 2/2 |see PR #185 |
 | T-929 | The log says what each button experiment found (the values each button moves, and the buttons that moved nothing) and the "It sees" line names the position the distances to moving things are measured from, so a log can show whether the AI knows its own position | 8 | Done | 2/2 | see PR #184 |
 | T-928 | The AI's strongest sixteen guesses of a kind count moving things apart from plain positions, so sixteen climbing positions no longer push every enemy sprite out of what the brain, the rewards and the distance seats can see; the Rewards panel still offers plain positions only | 8 | Done | 2/2 | see PR #183 |
@@ -2983,6 +2984,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; understanding + services + integration 241 passed; full suite 1358 passed, 10 skipped in 183.18s (0:03:03).
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
+
+### T-931 – Copies of the player's position count once in the distance pairs
+- **Status:** Done
+- **Phase:** 8 (the user's 17:03 log: "8 distances to moving things from Position at ram[533] which the stick moves" with one thing moving: the same enemy measured from ram[533], 537, 541 and 545, four sprite columns of the player moved by A, Left and Right)
+- **Objective:** `_pair_up` pairs each mover with each of the player's own positions (T-915: the x the stick moves and the y, say), and `MOST_DISTANCES` (8) caps the pairs. Four own positions that the same buttons move are one position drawn four times; pairing every mover with all four spends the eight seats on two movers. Own positions with the same input-link evidence are copies and the best-believed one stands for them; own positions with different buttons (an x and a y) are both kept, as are confirmed ones.
+- **Scope:** `_pair_up` in `learning/state.py`. **Out of scope:** the order of the pairs (the best own position's first, as before).
+- **Acceptance criteria:**
+  1. Four own positions with the same input-link detail, one with another, and three movers: six pairs, the three movers with the first copy and then with the other axis, no pair with a later copy.
+  2. Eight movers and the same own positions: eight pairs, all with the first copy.
+  3. The T-912, T-915 and T-923 pairing tests hold.
+- **Expected changes:** `src/retro_ai_lab/learning/state.py`, `tests/unit/learning/test_state.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_copies_of_my_position_count_once_in_the_pairs`; learning + training + integration suites; full suite.
+- **Results:** 1 new test passes; learning + training + integration 158 passed; full suite 1359 passed, 10 skipped (177.96s).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The 17:03 log spent all eight distance seats on one moving thing measured from four copies of the player's OAM x (ram[533], [537], [541], [545]), each linked to the same buttons. `_pair_up` now keys each own position by the set of buttons it is linked to and keeps the first (best-ranked) per set, so the four copies count once and the seats go to eight different moving things. Positions with no input link keep their own seat each, so nothing is lost for a game whose player position is unlinked. The generic rule is in the state encoder, not in any game knowledge.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
