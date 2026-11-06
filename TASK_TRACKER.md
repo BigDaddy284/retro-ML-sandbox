@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-926 | The "judged on N changes" record behind a guess is forgotten when a game connects, because the change statistics start again from zero with every connection; the user's run rethought nothing because the counts saved from earlier runs were never reached | 8 | Done | 2/2 | see PR |
 | T-925 | The fast-tick Learning panel test takes its five steps under a generous time budget of its own, checking the 20 ms budget the panel asked for separately, so a slow Windows runner no longer fails it | 8 | Done | 1/1 | see PR #180 |
 | T-924 | A value that climbs by the same hop as its previous change nearly every step is a counter even when it jumps now and then (a frame counter reset by the game), so the user's frame counter leaves its position seat; the tracker keeps each byte's last hop and how often a hop repeated | 8 | Done | 1/1 | see PR #179 |
 | T-923 | The brain's distance seats pair the best-believed moving things with the player's position whether or not those things won one of the few position seats, so forty enemy sprites ranked below six plain positions still reach the brain as distances | 8 | Done | 1/1 | see PR #178 |
@@ -2904,6 +2905,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** the test fails with the step slowed to 30 ms before the change and passes after it; ui suite passed; full suite 1352 passed, 10 skipped in 207.14s (0:03:27).
 - **Commit:** see PR #180. **PR:** #180.
 - **Completion report:** Test only. The panel still asks for a 20 ms slice and the service still cuts a slice at its deadline; the test now proves the first by the recorded budget and the second by the step count, each on its own.
+
+### T-926 – Judged counts start at zero with each run's statistics
+- **Status:** Done
+- **Phase:** 8 (the user's 13:04 log on the T-924 build: 69 goes, "6 positions" with nothing moving, the frame counter still a position, no rethink naming any of them)
+- **Objective:** T-917 rethinks a guess only once its byte has changed twice as often as when it was last judged, and `Variable.judged` is saved with the knowledge. The change tracker starts from zero at every connection, so a guess judged on 60,000 changes in one run can never be rethought in the next, whose statistics reach 30,000. The judged counts belong to the run that made them: when a game connects, every guess's `judged` goes back to zero, and the T-917 doubling starts afresh with the run's own statistics.
+- **Scope:** `Knowledge.forget_judged()` in `understanding/knowledge.py`; `DiscoveryService._on_connected` in `services/discovery.py`. **Out of scope:** the file format (`judged` is still saved, so a save during a run keeps its count).
+- **Acceptance criteria:**
+  1. `forget_judged` sets every guess's `judged` to 0 in one version bump, returns how many it changed, and changes nothing (version included) when all are 0 already.
+  2. A knowledge loaded at connect with judged counts from an earlier run has them at zero, and the next review rethinks a guess whose statistics say otherwise.
+  3. The T-917 tests hold within a run.
+- **Expected changes:** `src/retro_ai_lab/understanding/knowledge.py`, `src/retro_ai_lab/services/discovery.py`, `tests/unit/understanding/test_knowledge.py`, `tests/unit/services/test_discovery.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_forget_judged`, `test_judged_counts_start_over_with_each_connection`; understanding + services + integration suites; full suite.
+- **Results:** 2 new tests pass; understanding + services + integration 238 passed; full suite 1354 passed, 10 skipped in 218.58s (0:03:38).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** With the counts at zero, the first review of a run rethinks every guess the AI made itself whose fresh statistics say another kind, on as few as thirty changes; the doubling then bounds the rest of the run as T-917 meant. The 13:04 log's frame counter (27,630 changes, hops repeating) and the forty sprite positions (rare, 249 values, seven hops in eight small) should both be rethought in the next run's first minutes, which the "changed its mind" lines and the census will show.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

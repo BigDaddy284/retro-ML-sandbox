@@ -599,6 +599,22 @@ class Knowledge:
             self._version += 1
         return updated
 
+    def forget_judged(self) -> int:
+        """Set every guess's ``judged`` count to zero; returns how many had one.
+
+        The count says how many changes of its byte a guess was last judged on
+        (T-917), and those changes are a run's: the tracker starts from zero at
+        every connection, so a count saved from an earlier run could never be
+        reached again and nothing was rethought (T-926).
+        """
+        with self._lock:
+            stale = [v for v in self._variables.values() if v.judged]
+            for v in stale:
+                self._variables[v.id] = replace(v, judged=0)
+            if stale:
+                self._version += 1
+            return len(stale)
+
     def support(self, var_id: str, *evidence: Evidence) -> Variable:
         with self._lock:
             return self.update(var_id, evidence=self.get(var_id).evidence + tuple(evidence))

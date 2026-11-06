@@ -291,6 +291,42 @@ def test_knowledge_is_remembered_between_connections(
     assert d.knowledge is not None and len(d.knowledge) == 0
 
 
+def test_judged_counts_start_over_with_each_connection(
+    connection: ConnectionService, observation: ObservationService, bus: EventBus, tmp_path: object
+) -> None:
+    """T-926: the user's run rethought nothing; its guesses had been judged on 60,000 changes
+    of an earlier run, and the tracker starts from zero at every connection."""
+    from pathlib import Path
+
+    from retro_ai_lab.storage import KnowledgeStore
+
+    store = KnowledgeStore(Path(str(tmp_path)) / "knowledge")
+    d = DiscoveryService(
+        connection, observation, bus, review_every=100, experiment_every=None, store=store
+    )
+    connection.connect("fake", seed=2)
+    play(connection, observation, 100)
+    k = d.knowledge
+    assert k is not None and d.reviews == 1
+    own = k.at("ram", LAYOUT.speed)
+    assert own is not None and own.judged > 0 and own.kind is not VariableKind.LIVES
+    # as if an earlier, longer run had judged it wrongly on far more changes
+    k.update(own.id, kind=VariableKind.LIVES, judged=60_000)
+    d.save()
+    connection.disconnect()
+    assert store.load("toyracer-2").get(own.id).judged == 60_000  # the file keeps the count
+    connection.connect("fake", seed=2)
+    again = d.knowledge
+    assert again is not None and again is not k
+    assert all(v.judged == 0 for v in again)  # this run's statistics start from zero
+    assert again.get(own.id).kind is VariableKind.LIVES
+    play(connection, observation, 100)
+    assert d.reviews == 1  # the count starts over with the connection too
+    (now,) = [c for c in find_candidates(observation.tracker) if c.offset == LAYOUT.speed]
+    assert again.get(own.id).kind is now.kind and now.kind is not VariableKind.LIVES
+    assert again.get(own.id).judged == now.changes
+
+
 def test_damaged_file_starts_over(
     connection: ConnectionService, observation: ObservationService, bus: EventBus, tmp_path: object
 ) -> None:
