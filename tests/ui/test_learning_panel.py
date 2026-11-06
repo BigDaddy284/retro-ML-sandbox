@@ -126,7 +126,9 @@ def test_fast_speed_takes_many_steps_per_tick(panel: LearningPanel, context: App
     panel.start()
     assert panel.tick_interval_ms == 1
     # A fast tick is a slice of steps, as many as fit its budget; on a slow runner
-    # that can be one, so count the steps the service took rather than the clock.
+    # (T-925: a Windows CI step can take longer than the 20 ms) that can be one, so
+    # the stub keeps the budget the panel asked for and takes its five steps under
+    # a budget of its own, counting the steps the service took, not the clock.
     t = context.training
     before = t.total_steps
     budgets: list[float] = []
@@ -134,7 +136,7 @@ def test_fast_speed_takes_many_steps_per_tick(panel: LearningPanel, context: App
 
     def run_for(seconds: float, **kw: object) -> int:
         budgets.append(seconds)
-        return real_run_for(seconds, max_steps=5)
+        return real_run_for(60.0, max_steps=5)
 
     t.run_for = run_for  # type: ignore[method-assign]
     assert panel.tick() == 5 and t.total_steps == before + 5 and budgets == [0.02]
