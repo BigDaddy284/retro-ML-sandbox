@@ -222,6 +222,20 @@ def test_smooth_takes_three_small_hops_in_four() -> None:
     assert SMOOTH_SHARE == 0.75
 
 
+def test_tracker_records_the_smallest_hop_too() -> None:
+    """T-921: the smallest step either way, so a byte always stepping by four shows it."""
+    t = ChangeTracker()
+    for i, v in enumerate([10, 14, 14, 11, 250, 3, 3, 1]):
+        t.observe(MemorySnapshot(i, {"ram": bytes([v])}))
+    st = t.stats("ram", 0)
+    assert st.min_hop == 2 and st.max_hop == 17 and st.to_dict()["min_hop"] == 2
+    assert ByteStats().min_hop == 0
+    steady = ChangeTracker()
+    for i in range(100):
+        steady.observe(MemorySnapshot(i, {"ram": bytes([(i * 4) & 0xFF])}))
+    assert steady.stats("ram", 0).min_hop == steady.stats("ram", 0).max_hop == 4
+
+
 def test_tracker_counts_small_and_unit_hops() -> None:
     """T-914: how many changes were small hops (at most SMALL_HOP) and exact ones."""
     t = ChangeTracker()

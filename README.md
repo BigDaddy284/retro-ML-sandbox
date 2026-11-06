@@ -237,7 +237,8 @@ the enemy is invisible to it. A value that wanders both ways in small
 steps is taken for the position of something that moves (an enemy, a
 platform, a ball) and listed as "Something moving" until the AI finds a
 button that moves it; a thing that is on screen only now and then counts
-too, once it has moved through enough different values. For each such thing the AI also sees how far it is
+too, once it has moved through enough different values. A value that climbs
+by the same amount every step is a clock, not a position, and gets no seat. For each such thing the AI also sees how far it is
 from its own position (the one the stick moves, or one you confirmed),
 exactly when it is close and roughly when it is far, so a thing about to
 touch it and one across the screen look different. None of these labels is
