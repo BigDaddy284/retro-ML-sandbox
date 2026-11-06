@@ -22,7 +22,7 @@ from retro_ai_lab.understanding import (
     propose_candidates,
     rethink_candidates,
 )
-from retro_ai_lab.understanding.knowledge import INPUT_LINKED
+from retro_ai_lab.understanding.knowledge import INPUT_LINKED, is_mover
 from retro_ai_lab.understanding.variables import (
     BOUNCE_UPS,
     LIVES_SAMPLES,
@@ -162,7 +162,9 @@ def test_the_ai_changes_its_mind_about_its_own_guess() -> None:
     )
     cands = (
         Candidate("ram", 3, Encoding.U8, VariableKind.POSITION, fresh),
-        Candidate("ram", 7, Encoding.U8, VariableKind.LIVES, ()),  # same kind: nothing to do
+        Candidate(  # the same kind for the same reasons: nothing to do (T-922 reads the reasons)
+            "ram", 7, Encoding.U8, VariableKind.LIVES, (Evidence("rare", "Changes rarely.", 0.5),)
+        ),
         Candidate("ram", 9, Encoding.U8, VariableKind.FLAG, ()),  # nobody's guess yet
     )
     (changed,) = rethink_candidates(k, cands)
@@ -250,6 +252,51 @@ def test_candidates_and_proposals_carry_the_changes_judged_on() -> None:
     wide = find_candidates(drive(900))
     pair = next(c for c in wide if c.encoding is Encoding.U16LE)
     assert pair.changes == drive(900).stats("ram", pair.offset).changes  # the lower byte's
+
+
+def test_a_guess_is_rethought_when_its_evidence_changes() -> None:
+    """T-922: the user's enemy sprites were positions by the climbing rule for good."""
+    k = Knowledge("g")
+    climbing = _planted(
+        k,
+        3,
+        VariableKind.POSITION,
+        Evidence("monotonic", "Keeps climbing and rolls over.", 1.0),
+        Evidence("varied-steps", "Moves by small, varying amounts.", 1.0),
+        Evidence("played", "Moved 40 times in a go of 100 steps.", 0.5),
+    )
+    k.update(climbing.id, judged=10)
+    same = Candidate(
+        "ram",
+        3,
+        Encoding.U8,
+        VariableKind.POSITION,
+        (
+            Evidence("monotonic", "Keeps climbing and rolls over.", 1.0),
+            Evidence("varied-steps", "Moves by small, varying amounts.", 1.0),
+            Evidence("frequent", "Changes often.", 0.5),
+        ),
+        changes=30,
+    )
+    (changed,) = rethink_candidates(k, (same,))  # "frequent" is a new ground
+    assert changed.kind is VariableKind.POSITION and changed.judged == 30
+    assert [e.kind for e in changed.evidence] == ["monotonic", "varied-steps", "frequent", "played"]
+    again = Candidate("ram", 3, Encoding.U8, VariableKind.POSITION, same.evidence[::-1], 70)
+    assert rethink_candidates(k, (again,)) == ()  # the same grounds in another order
+    mover = Candidate("ram", 3, Encoding.U8, VariableKind.POSITION, fresh_mover(), changes=59)
+    assert rethink_candidates(k, (mover,)) == ()  # not until twice the changes (T-917)
+    mover = Candidate("ram", 3, Encoding.U8, VariableKind.POSITION, fresh_mover(), changes=60)
+    (moving,) = rethink_candidates(k, (mover,))
+    assert moving.kind is VariableKind.POSITION and is_mover(moving)
+    assert [e.kind for e in moving.evidence] == [MOVER, "many-values", "played"]
+    # the real thing: a climbing look first, the whole walk later
+    rows = enemy_rows()
+    early = [bytes([(120 + i) & 0xFF]) for i in range(35)] + rows[:5]  # climbs, then wanders
+    k2 = Knowledge("g")
+    (first,) = propose_candidates(k2, find_candidates(track(early)))
+    assert first.kind is VariableKind.POSITION and not is_mover(first)
+    (later,) = rethink_candidates(k2, find_candidates(track(early + rows)))
+    assert later.id == first.id and is_mover(later)
 
 
 def test_a_walking_enemy_judged_early_becomes_a_mover_later() -> None:

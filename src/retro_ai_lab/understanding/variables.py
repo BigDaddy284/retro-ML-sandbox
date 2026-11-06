@@ -371,11 +371,14 @@ def rethink_candidates(
     confirmed, named or person-rejected guess holds, as does one placed by a
     person's "I just …" or by the restart finding, and a position the input
     link found. A guess the AI dropped stays dropped while the classifier
-    repeats the kind it dropped, and comes back as the other kind. A guess is
-    rethought only once the byte has changed at least twice as often as when it
-    was last judged (T-917): on the user's game a byte on the edge of a rule
-    flipped kind at every review, and with it the brain's seats; doubling bounds
-    the rethinks of a byte to a handful over a session and lets each verdict
+    repeats the kind it dropped, and comes back as the other kind. The same
+    kind for other reasons counts as another verdict (T-922): a position by
+    the climbing rule and one by the mover rule share a kind, but only the
+    second is "something moving" to the brain. A guess is rethought only
+    once the byte has changed at least twice as often as when it was last
+    judged (T-917): on the user's game a byte on the edge of a rule flipped
+    kind at every review, and with it the brain's seats; doubling bounds the
+    rethinks of a byte to a handful over a session and lets each verdict
     rest on twice the evidence of the last. A guess with no record (an older
     file, a planted guess) is rethought on the first differing verdict.
     Returns the variables whose kind changed.
@@ -386,8 +389,10 @@ def rethink_candidates(
     changed: list[Variable] = []
     for c in candidates:
         v = at.get((c.region, c.offset, c.encoding))
-        if v is None or v.kind is c.kind or c.changes < 2 * v.judged or not _rethinkable(v):
+        if v is None or c.changes < 2 * v.judged or not _rethinkable(v):
             continue
+        if v.kind is c.kind and _reasons(v.evidence) == _reasons(c.evidence):
+            continue  # the same verdict for the same reasons: nothing to rethink
         kept = tuple(e for e in v.evidence if e.kind not in CLASSIFIER_KINDS and e.weight > 0)
         changed.append(
             knowledge.update(
@@ -399,6 +404,12 @@ def rethink_candidates(
             )
         )
     return tuple(changed)
+
+
+def _reasons(evidence: tuple[Evidence, ...]) -> frozenset[str]:
+    """The classifier's grounds for a verdict (T-922): a position by the climbing rule
+    and one by the mover rule share a kind but not a meaning."""
+    return frozenset(e.kind for e in evidence if e.kind in CLASSIFIER_KINDS)
 
 
 def _rethinkable(v: Variable) -> bool:
