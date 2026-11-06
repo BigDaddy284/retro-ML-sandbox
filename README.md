@@ -157,7 +157,9 @@ training is stopped.
 
 The AI keeps every guess it makes about the game's memory, but the Rewards
 panel, the Progress panel's steps and the step-detection list only show its
-best guess of each role, in plain words: "Your score jumps up", "Losing a
+best guess of each role, in plain words (a suggested step or reward whose
+guess the AI has changed its mind about, or no longer has at all, goes with
+it; steps you wrote stay): "Your score jumps up", "Losing a
 life", "Progress goes up" (and "Progress (2nd guess) goes up" when it offers
 a second progress value, as a game can have a level and a checkpoint). To
 call something by its real name, pick it in the "What the AI is doing"

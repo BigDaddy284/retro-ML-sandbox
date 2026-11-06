@@ -10,7 +10,7 @@ from retro_ai_lab.core import Capabilities, ConfigurationError, UnsupportedCapab
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
 from retro_ai_lab.emulator.registry import default_registry
-from retro_ai_lab.rewards import Trigger, merge_suggestions
+from retro_ai_lab.rewards import Goal, Objective, Trigger, merge_suggestions
 from retro_ai_lab.services import (
     ConnectionService,
     DiscoveryService,
@@ -271,6 +271,40 @@ def test_edits_save_announce_and_are_remembered(
     assert goals.goal is not None and goals.goal.game_id == "toyracer-4" and len(goals.goal) == 0
     connection.disconnect()  # saved on disconnect even when nothing was edited
     assert set(store.games()) == {"toyracer-3", "toyracer-4"}
+
+
+def test_a_step_of_a_guess_the_ai_no_longer_has_goes(
+    goals: GoalService,
+    connection: ConnectionService,
+    discovery: DiscoveryService,
+    bus: EventBus,
+    store: GoalStore,
+    changes: list[GoalChanged],
+) -> None:
+    """T-938: the user's Progress panel kept "Get further in Progress" steps from guesses gone."""
+    saved = Goal("toyracer-3", title="Get far")
+    saved.add(
+        Objective(
+            "goal:progress:v99",
+            "Get further in Progress",
+            trigger=Trigger(EventKind.PROGRESS, "v99"),
+            suggested=True,
+        )
+    )
+    saved.add(Objective("obj1", "Reach the castle", trigger=Trigger(EventKind.PROGRESS, "v99")))
+    saved.complete("goal:progress:v99", 5)
+    store.save(saved)
+    connection.connect("fake", seed=3)
+    goal = goals.goal
+    assert goal is not None and goal.ids() == ("goal:progress:v99", "obj1")  # nothing known yet
+    before = len(changes)
+    teach(discovery, bus)  # the AI knows the game, and v99 is not among its guesses
+    assert [o.description for o in goal] == [
+        "Reach the castle",
+        "Get further in Checkpoint",
+        "Get further in Lap",
+    ]
+    assert len(changes) > before and changes[-1].reason == "suggestions"
 
 
 def test_damaged_file_starts_fresh_and_no_store_saves_nothing(
