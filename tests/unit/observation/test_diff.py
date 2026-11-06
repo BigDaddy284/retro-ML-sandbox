@@ -236,6 +236,23 @@ def test_tracker_records_the_smallest_hop_too() -> None:
     assert steady.stats("ram", 0).min_hop == steady.stats("ram", 0).max_hop == 4
 
 
+def test_tracker_counts_repeated_hops() -> None:
+    """T-924: how often a hop was the same as the change before, and which hop that was."""
+    t = ChangeTracker()
+    for i, v in enumerate([10, 14, 18, 18, 22, 100, 104, 108, 109]):
+        t.observe(MemorySnapshot(i, {"ram": bytes([v])}))
+    st = t.stats("ram", 0)
+    # hops: 4, 4, 4, 78, 4, 4, 1 -> the same as the one before three times
+    assert st.changes == 7 and st.same_hops == 3 and st.usual_hop == 4 and st.last_hop == 1
+    d = st.to_dict()
+    assert d["same_hops"] == 3 and d["usual_hop"] == 4
+    assert ByteStats().same_hops == 0 and ByteStats().usual_hop == 0
+    once = ChangeTracker()
+    for i, v in enumerate([3, 9]):
+        once.observe(MemorySnapshot(i, {"ram": bytes([v])}))
+    assert once.stats("ram", 0).same_hops == 0 and once.stats("ram", 0).last_hop == 6
+
+
 def test_tracker_counts_small_and_unit_hops() -> None:
     """T-914: how many changes were small hops (at most SMALL_HOP) and exact ones."""
     t = ChangeTracker()

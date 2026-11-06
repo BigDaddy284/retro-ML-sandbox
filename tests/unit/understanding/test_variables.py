@@ -121,6 +121,25 @@ def test_a_value_climbing_by_the_same_amount_every_step_is_a_counter() -> None:
     assert s.kind is VariableKind.SCORE
 
 
+def test_a_counter_that_jumps_now_and_then_is_still_a_counter() -> None:
+    """T-924: the user's frame counter, reset by the game now and then, kept its seat."""
+    rows = [bytes([((i % 300) * 4) & 0xFF]) for i in range(1200)]  # 4, 8, ... then back to 0
+    (c,) = find_candidates(track(rows))
+    assert c.kind is VariableKind.COUNTER
+    assert any(e.detail == "Nearly always by 4." for e in c.evidence)
+    steady = [bytes([(i * 4) & 0xFF]) for i in range(400)]
+    (s,) = find_candidates(track(steady))
+    assert any(e.detail == "Always by exactly 4." for e in s.evidence)
+    # a position that climbs in varied steps and is thrown back now and then is no counter
+    rows = []
+    pos = 0
+    for i in range(1200):
+        pos = 0 if i % 300 == 0 else (pos + (i % 5)) & 0xFF
+        rows.append(bytes([pos]))
+    (p,) = find_candidates(track(rows))
+    assert p.kind is VariableKind.POSITION
+
+
 def test_position_like_byte() -> None:
     rows = []
     pos = 0
