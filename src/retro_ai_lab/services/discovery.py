@@ -883,7 +883,7 @@ class DiscoveryService:
                         f"{region}[{offset}] {word}: {st.changes} changes in {st.samples} "
                         f"steps, {len(st.distinct)} values, hops small {st.small_hops} unit "
                         f"{st.unit_hops} largest {st.max_hop}, up {st.ups} down {st.downs} "
-                        f"wraps {st.wraps}"
+                        f"wraps {st.wraps}, repeat {st.same_hops} usual {st.usual_hop}"
                     )
             return "\n".join(lines)
 
