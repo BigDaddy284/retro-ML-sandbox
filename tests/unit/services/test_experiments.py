@@ -196,3 +196,27 @@ def test_compare_rejects_bad_sets(harness: ExperimentHarness) -> None:
         harness.compare([one, other])
     with pytest.raises(ConfigurationError):
         harness.run_many({})
+
+
+def test_the_harness_reports_every_restore(connection: ConnectionService) -> None:
+    """T-935: whoever watches the memory is told after each load_state."""
+    connection.connect("fake", seed=5)
+    restores = 0
+
+    def noted() -> None:
+        nonlocal restores
+        restores += 1
+
+    with pytest.raises(ConfigurationError, match="callable"):
+        ExperimentHarness(connection, on_restore="later")  # type: ignore[arg-type]
+    harness = ExperimentHarness(connection, on_restore=noted)
+    with pytest.raises(ConfigurationError):
+        harness.restore()  # no checkpoint: nothing was loaded
+    assert restores == 0
+    harness.checkpoint()
+    harness.restore()
+    assert restores == 1
+    harness.run(constant_plan(["up"], 2), label="x")
+    assert restores == 3  # the start of the trial and the restore after it
+    harness.run(constant_plan(["up"], 2), label="y", restore=False)
+    assert restores == 4

@@ -954,7 +954,9 @@ class DiscoveryService:
         self._adopt(knowledge)
         self._events.clear()
         self._buttons = tuple(b.name for b in event.buttons)
-        self._harness = ExperimentHarness(self._connection)
+        self._harness = ExperimentHarness(
+            self._connection, on_restore=self._observation.expect_jump
+        )
         self._experiments_allowed = True
         self._since_review = 0
         self._since_experiment = 0

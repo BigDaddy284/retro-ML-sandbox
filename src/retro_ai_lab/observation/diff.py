@@ -178,6 +178,8 @@ class ChangeTracker:
         self._stats: dict[tuple[str, int], ByteStats] = {}
         self._previous: MemorySnapshot | None = None
         self._observed = 0
+        self._jumps = 0  # snapshots moved past without counting (restores, T-935)
+        self._jump_expected = False
 
     @property
     def observed(self) -> int:
@@ -186,12 +188,30 @@ class ChangeTracker:
 
     @property
     def transitions(self) -> int:
-        return max(0, self._observed - 1)
+        """Transitions counted in the statistics (an expected jump is not one)."""
+        return max(0, self._observed - 1 - self._jumps)
+
+    @property
+    def jump_expected(self) -> bool:
+        return self._jump_expected
 
     def reset(self) -> None:
         self._stats.clear()
         self._previous = None
         self._observed = 0
+        self._jumps = 0
+        self._jump_expected = False
+
+    def expect_jump(self) -> None:
+        """The next snapshot follows a restore (T-935): move on to it without counting.
+
+        Putting the game back to a saved state makes every byte the game had
+        changed since jump back at once. That is the AI's doing, not the game's,
+        so the next ``observe`` returns the diff but adds no sample, change, up,
+        down, hop or wrap to any byte; the one after it counts from the restored
+        values. Before the first snapshot there is nothing to skip.
+        """
+        self._jump_expected = self._previous is not None
 
     def observe(self, snapshot: MemorySnapshot) -> SnapshotDiff | None:
         """Feed the next snapshot; returns the diff from the previous one, if any."""
@@ -203,6 +223,11 @@ class ChangeTracker:
             self._previous = snapshot
             return None
         diff = diff_snapshots(self._previous, snapshot)
+        if self._jump_expected:
+            self._jump_expected = False
+            self._jumps += 1
+            self._move_on(snapshot)
+            return diff
         changed = {(c.region, c.offset) for c in diff.changes}
         wrapped: set[tuple[str, int]] = set()
         for name, data in snapshot.regions.items():
@@ -244,6 +269,16 @@ class ChangeTracker:
                 st.distinct.add(value)
         self._previous = snapshot
         return diff
+
+    def _move_on(self, snapshot: MemorySnapshot) -> None:
+        for name, data in snapshot.regions.items():
+            for offset, value in enumerate(data):
+                st = self._stats[(name, offset)]
+                st.last = value
+                st.minimum = min(st.minimum, value)
+                st.maximum = max(st.maximum, value)
+                st.distinct.add(value)
+        self._previous = snapshot
 
     def _seed(self, snapshot: MemorySnapshot) -> None:
         for name, data in snapshot.regions.items():

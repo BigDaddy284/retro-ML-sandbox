@@ -145,6 +145,11 @@ class ObservationService:
         self._frame += frames
         return self.observe(snapshot=snapshot)
 
+    def expect_jump(self) -> None:
+        """The game was just put back to a saved state: the next snapshot's jump is
+        not a change the game made (T-935)."""
+        self._tracker.expect_jump()
+
     def observe(self, *, snapshot: Sequence[bytes] | None = None) -> MemoryObserved | None:
         """Take a snapshot now. Returns None if observation is off or failed."""
         if not self._enabled or self._capture is None or not self._connection.is_connected:

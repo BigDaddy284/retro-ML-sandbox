@@ -484,6 +484,30 @@ def test_the_go_log_line_names_the_earners(lab: Lab, caplog: pytest.LogCaptureFi
     t.stop()
 
 
+def test_a_go_s_restore_is_not_counted_as_a_change(lab: Lab) -> None:
+    """T-935: the user's lives warning counted the AI's own restores as the lives going up."""
+    restores = 0
+    real = lab.observation.expect_jump
+
+    def spy() -> None:
+        nonlocal restores
+        restores += 1
+        real()
+
+    lab.observation.expect_jump = spy  # type: ignore[method-assign]
+    lab.connect()  # the harness is built at connection, with the spy
+    lab.training.start()
+    while len(lab.finished) < 12:
+        lab.training.step()
+    lab.training.stop()
+    assert restores >= len(lab.finished) - 1  # every go after the first starts from the checkpoint
+    tracker = lab.observation.tracker
+    assert tracker.observed - 1 - tracker.transitions >= len(lab.finished) - 1  # skipped
+    lives = tracker.stats("ram", LAYOUT.lives)
+    assert any(f.record.result.setbacks for f in lab.finished), "no life was lost to put back"
+    assert lives.ups == 0 and lives.downs > 0  # lost in play, never "gained" by a restore
+
+
 def test_the_survival_line_every_ten_goes(lab: Lab, caplog: pytest.LogCaptureFixture) -> None:
     """T-934: from the twentieth go, every tenth go compares the last ten with the ten before."""
     lab.connect()

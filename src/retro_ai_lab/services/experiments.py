@@ -81,11 +81,20 @@ def constant_plan(buttons: Iterable[str], frames: int) -> tuple[frozenset[str], 
 
 
 class ExperimentHarness:
-    def __init__(self, connection: ConnectionService, *, slot: str = DEFAULT_SLOT) -> None:
+    def __init__(
+        self,
+        connection: ConnectionService,
+        *,
+        slot: str = DEFAULT_SLOT,
+        on_restore: Callable[[], None] | None = None,
+    ) -> None:
         if not slot or not isinstance(slot, str):
             raise ConfigurationError("slot must be a non-empty name.")
+        if on_restore is not None and not callable(on_restore):
+            raise ConfigurationError("on_restore must be callable.")
         self._connection = connection
         self._slot = slot
+        self._on_restore = on_restore  # told after every load_state (T-935)
         self._capture = MemoryCapture(connection)
         self._has_checkpoint = False
         self._trials = 0
@@ -138,7 +147,12 @@ class ExperimentHarness:
         self._require()
         if not self._has_checkpoint:
             raise ConfigurationError("No checkpoint yet; call checkpoint() first.")
+        self._load()
+
+    def _load(self) -> None:
         self._connection.call(lambda a: a.load_state(self._slot))
+        if self._on_restore is not None:
+            self._on_restore()
 
     def run(self, plan: InputPlan, *, label: str = "", restore: bool = True) -> Trial:
         """Run one trial from the checkpoint and (by default) restore afterwards.
@@ -162,7 +176,7 @@ class ExperimentHarness:
 
     def _run(self, steps: tuple[frozenset[str], ...], label: str, restore: bool) -> Trial:
         conn = self._connection
-        conn.call(lambda a: a.load_state(self._slot))
+        self._load()
         can_see = conn.call(lambda a: a.capabilities().screen_capture)
         buttons = {b.name: b for b in conn.call(lambda a: a.buttons())}
         unknown = {n for step in steps for n in step} - buttons.keys()
@@ -177,7 +191,7 @@ class ExperimentHarness:
         screen_after = conn.call(lambda a: a.capture_frame()) if can_see else None
         conn.call(lambda a: a.set_input(()))
         if restore:
-            conn.call(lambda a: a.load_state(self._slot))
+            self._load()
         self._trials += 1
         screen_diff = (
             diff_frames(screen_before, screen_after)

@@ -88,6 +88,23 @@ def test_ring_and_tracker_reset_on_reconnect(
     assert observer.tracker.observed == 0
 
 
+def test_the_observation_service_forwards_expect_jump(
+    observer: ObservationService, connection: ConnectionService
+) -> None:
+    """T-935: a restore announced to the service is skipped by its tracker."""
+    connection.connect("fake")
+    observer.observe()
+    observer.advance(4)
+    counted = observer.tracker.transitions
+    connection.call(lambda a: a.save_state("t935"))
+    observer.advance(4)
+    observer.expect_jump()
+    assert observer.tracker.jump_expected
+    connection.call(lambda a: a.load_state("t935"))
+    assert observer.observe() is not None
+    assert observer.tracker.transitions == counted + 1 and not observer.tracker.jump_expected
+
+
 def test_emulator_without_memory_read(
     observer: ObservationService, connection: ConnectionService
 ) -> None:
