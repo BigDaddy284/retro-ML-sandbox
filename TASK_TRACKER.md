@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-925 | The fast-tick Learning panel test takes its five steps under a generous time budget of its own, checking the 20 ms budget the panel asked for separately, so a slow Windows runner no longer fails it | 8 | Done | 1/1 | see PR |
 | T-924 | A value that climbs by the same hop as its previous change nearly every step is a counter even when it jumps now and then (a frame counter reset by the game), so the user's frame counter leaves its position seat; the tracker keeps each byte's last hop and how often a hop repeated | 8 | Done | 1/1 | see PR #179 |
 | T-923 | The brain's distance seats pair the best-believed moving things with the player's position whether or not those things won one of the few position seats, so forty enemy sprites ranked below six plain positions still reach the brain as distances | 8 | Done | 1/1 | see PR #178 |
 | T-922 | A guess is also rethought when the classifier keeps its kind but reads it by other evidence, so a position first judged climbing becomes "Something moving" once it has moved both ways; the user's enemy sprites had stayed plain positions for that reason | 8 | Done | 1/1 | see PR #177 |
@@ -2889,6 +2890,20 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; observation + understanding + learning + services + integration 424 passed; full suite 1352 passed, 10 skipped in 204.34s (0:03:24).
 - **Commit:** see PR #179. **PR:** #179.
 - **Completion report:** The rule compares each hop with the one before it, so a reset of any size is one miss among thousands. A thing that walks at one speed for a whole session reads as a clock too; in practice an enemy stops, turns or is cleared, which breaks the run. The census will show whether ram[9] has become "Counter" and left the position seats.
+
+### T-925 – The fast-tick test no longer depends on runner speed
+- **Status:** Done
+- **Phase:** 8 (CI: `windows-latest / py3.12` failed `test_fast_speed_takes_many_steps_per_tick` on PRs #170 and #179, passing on a re-run each time)
+- **Objective:** The test stubs `run_for` to cap the fast tick at five steps but still hands the panel's 20 ms budget to the real service, so on a runner where one step takes longer than 20 ms the tick returns one step and the `== 5` assertion fails. The stub now records the budget the panel asked for (still checked, `[0.02]`) and takes its five steps under a budget of its own that no runner exceeds, so the test checks what it means to: the panel asks for a 20 ms slice, and a slice is many steps.
+- **Scope:** `tests/ui/test_learning_panel.py`. **Out of scope:** the panel and the service, which are unchanged.
+- **Acceptance criteria:**
+  1. The test passes with a step that takes longer than 20 ms (checked locally by slowing the step).
+  2. The assertions are unchanged: five steps taken, the budget asked for is 0.02, the live tick afterwards takes one step.
+- **Expected changes:** `tests/ui/test_learning_panel.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** the test with the step slowed to 30 ms (one-off, not committed); the ui suite; full suite.
+- **Results:** the test fails with the step slowed to 30 ms before the change and passes after it; ui suite passed; full suite 1352 passed, 10 skipped in 207.14s (0:03:27).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** Test only. The panel still asks for a 20 ms slice and the service still cuts a slice at its deadline; the test now proves the first by the recorded budget and the second by the step count, each on its own.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
