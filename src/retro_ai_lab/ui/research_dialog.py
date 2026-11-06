@@ -582,7 +582,7 @@ class ResearchDialog(QDialog):
         self._search_summary.setWordWrap(True)
         self._search_value = QLineEdit(box)
         self._search_value.setObjectName("search_value_edit")
-        self._search_value.setPlaceholderText("A number, like 12 or 0x0C")
+        self._search_value.setPlaceholderText("A number, like 12, 300 or 0x0C")
         self._search_new = QPushButton("New search", box)
         self._search_new.setObjectName("search_new_button")
         self._search_new.clicked.connect(lambda _=False: self.search_start())

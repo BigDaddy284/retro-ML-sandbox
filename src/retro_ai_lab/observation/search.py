@@ -6,8 +6,12 @@ little, then keep only the bytes that went up, went down, changed, stayed the
 same or now equal a number. A few scans usually leave one byte.
 
 Each scan compares the bytes with the snapshot of the previous scan, so "went
-up" means "went up since I last pressed a scan button". Values are one byte
-(0 to 255); the app only reads the game's memory, it never writes to it.
+up" means "went up since I last pressed a scan button". The rows are bytes,
+but the number typed can be anything a game shows (T-936): a score of 300 is
+looked for in every way games hold numbers (binary over one to four bytes in
+either byte order, packed BCD in either byte order, one digit per byte in
+either order) and every byte taking part is kept. The app only reads the
+game's memory, it never writes to it.
 """
 
 from __future__ import annotations
@@ -21,7 +25,8 @@ from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.observation.memory import MemorySnapshot
 
 MAX_BYTE = 255
-RANGE_TEXT = "Type a number from 0 to 255, like 12, or in hex like 0x0C."
+MAX_VALUE = 99_999_999  # eight digits: four packed-BCD bytes, the most any 8-bit score shows
+RANGE_TEXT = f"Type the number you see, like 12 or 300 (up to {MAX_VALUE:,}), or in hex like 0x0C."
 
 
 class ScanKind(Enum):
@@ -57,13 +62,60 @@ def parse_number(text: str) -> int:
     if not digits or any(c not in allowed for c in digits):
         raise ConfigurationError(f"That is not a number. {RANGE_TEXT}")
     value = int(digits, base)
-    _check_byte(value)
+    _check_value(value)
     return value
 
 
-def _check_byte(value: int) -> None:
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_BYTE:
-        raise ConfigurationError(f"A byte holds 0 to 255. {RANGE_TEXT}")
+def _check_value(value: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_VALUE:
+        raise ConfigurationError(f"The search takes 0 to {MAX_VALUE:,}. {RANGE_TEXT}")
+
+
+def patterns(value: int) -> tuple[tuple[int, ...], ...]:
+    """Every byte sequence a game might hold ``value`` as (T-936), each listed once.
+
+    Binary in as many bytes as the number needs, low byte first and high byte
+    first; packed BCD (two decimal digits per byte), either byte order; and one
+    decimal digit per byte, most-significant first or last, for numbers of two
+    digits or more. A one-byte number is its own binary form.
+    """
+    _check_value(value)
+    out: list[tuple[int, ...]] = []
+
+    def add(p: tuple[int, ...]) -> None:
+        if p not in out:
+            out.append(p)
+
+    width = max(1, (value.bit_length() + 7) // 8)
+    little = tuple((value >> (8 * i)) & 0xFF for i in range(width))
+    add(little)
+    add(tuple(reversed(little)))
+    digits = str(value)
+    if len(digits) % 2:
+        digits = "0" + digits
+    packed = tuple(int(digits[i : i + 2], 16) for i in range(0, len(digits), 2))
+    add(packed)
+    add(tuple(reversed(packed)))
+    if value >= 10:
+        unpacked = tuple(int(d) for d in str(value))
+        add(unpacked)
+        add(tuple(reversed(unpacked)))
+    return tuple(out)
+
+
+def holding(data: np.ndarray, value: int) -> np.ndarray:
+    """A mask over ``data``: True at every byte that takes part in ``value`` (T-936)."""
+    mask = np.zeros(len(data), dtype=bool)
+    for pattern in patterns(value):
+        k = len(pattern)
+        if k > len(data):
+            continue
+        hit = np.ones(len(data) - k + 1, dtype=bool)
+        for j, byte in enumerate(pattern):
+            hit &= data[j : len(data) - k + 1 + j] == byte
+        for start in np.flatnonzero(hit):
+            mask[start : start + k] = True
+    return mask
 
 
 class ValueSearch:
@@ -96,7 +148,7 @@ class ValueSearch:
     def start(self, snapshot: MemorySnapshot, value: int | None = None) -> None:
         """Begin again with every byte, or only those equal to ``value``."""
         if value is not None:
-            _check_byte(value)
+            _check_value(value)
         offsets: dict[str, np.ndarray] = {}
         values: dict[str, np.ndarray] = {}
         for region, data in snapshot.regions.items():
@@ -104,7 +156,7 @@ class ValueSearch:
             if value is None:
                 keep = np.arange(len(current), dtype=np.int64)
             else:
-                keep = np.flatnonzero(current == value)
+                keep = np.flatnonzero(holding(current, value))
             offsets[region] = keep
             values[region] = current[keep].copy()
         self._offsets, self._values, self._before = offsets, values, values
@@ -118,7 +170,7 @@ class ValueSearch:
         if kind is ScanKind.EXACT:
             if value is None:
                 raise ConfigurationError(f"Is exactly needs a number. {RANGE_TEXT}")
-            _check_byte(value)
+            _check_value(value)
         sizes = {r: len(d) for r, d in snapshot.regions.items()}
         if sizes != self._sizes:
             raise ConfigurationError(
@@ -129,10 +181,12 @@ class ValueSearch:
         before_kept: dict[str, np.ndarray] = {}
         for region, data in snapshot.regions.items():
             where = self._offsets[region]
-            current = np.frombuffer(data, dtype=np.uint8)[where]
+            whole = np.frombuffer(data, dtype=np.uint8)
+            current = whole[where]
             before = self._values[region]
             if kind is ScanKind.EXACT:
-                keep = current == value
+                assert value is not None
+                keep = holding(whole, value)[where]
             elif kind is ScanKind.UP:
                 keep = current > before
             elif kind is ScanKind.DOWN:
@@ -159,4 +213,13 @@ class ValueSearch:
         return tuple(out)
 
 
-__all__ = ["RANGE_TEXT", "Match", "ScanKind", "ValueSearch", "parse_number"]
+__all__ = [
+    "MAX_VALUE",
+    "RANGE_TEXT",
+    "Match",
+    "ScanKind",
+    "ValueSearch",
+    "holding",
+    "parse_number",
+    "patterns",
+]

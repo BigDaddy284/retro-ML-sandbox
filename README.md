@@ -219,9 +219,11 @@ there while the goes keep getting worse, so a bad habit is not locked in; the
 log says when that happens.
 
 To find a value yourself, like a cheat finder, use the Research window's
-"Search values" tab. Type the number you see on the screen (12, or hex like
-0x0C or $0C) and press New search, or leave the box empty to start from every
-byte. Play a little, then press the scan that fits: "Is exactly" (with the new
+"Search values" tab. Type the number you see on the screen (12, a score of
+300, or hex like 0x0C or $0C) and press New search, or leave the box empty to
+start from every byte. A number bigger than one byte holds is looked for in
+every way games store numbers (two to four bytes in either order, packed
+decimal digits, one digit per byte), and every byte that takes part is kept. Play a little, then press the scan that fits: "Is exactly" (with the new
 number), "Went up", "Went down", "Changed" or "Didn't change"; each compares
 with the scan before. Every value is shown in decimal and hex, and "Now" keeps
 up with the game. When a few bytes are left, pick one, give it a name and
