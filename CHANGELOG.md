@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-921: a value that climbs by the same amount nearly every step, the way a frame counter does when read every four frames, is a counter and no longer takes a position seat; the user's census showed one sitting among the AI's six positions.
 - T-920: the census now has three lists, the busiest values, the smoothest (small hops in three changes of four) and the widest-ranging rare ones, so a thing on screen for seconds of each go is listed even though random values change every step; the user's first census had every line taken by such values.
 - T-919: every 25th review the log prints a census of the sixteen busiest memory values (how often each changes, how many values it has taken, its small, unit and largest hops, ups, downs and roll-overs, and what the AI calls it), so a log can show why a value is or is not taken for something moving.
 - T-918: a thing that is on screen only now and then (an enemy for a few seconds of each go) is still "Something moving": three small hops in four make a value smooth, since each visit starts and ends with one big hop, and a value that changes rarely over the whole session counts once it has moved through more than sixteen values. The user's log had hundreds of rethinks and not one moving thing because enemies were too brief to qualify.

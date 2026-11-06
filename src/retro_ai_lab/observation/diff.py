@@ -105,6 +105,7 @@ class ByteStats:
     unit_steps: int = 0  # changed by exactly +1 (counting a wrap as +1)
     max_step: int = 0  # largest upward step seen
     max_hop: int = 0  # largest step either way, a roll-over read as the short way round (T-911)
+    min_hop: int = 0  # smallest step either way, 0 until the byte has changed (T-921)
     small_hops: int = 0  # changes by at most SMALL_HOP either way (T-914)
     unit_hops: int = 0  # changes by exactly one either way, roll-overs included (T-914)
 
@@ -159,6 +160,7 @@ class ByteStats:
             "unit_steps": self.unit_steps,
             "max_step": self.max_step,
             "max_hop": self.max_hop,
+            "min_hop": self.min_hop,
             "small_hops": self.small_hops,
             "unit_hops": self.unit_hops,
         }
@@ -208,6 +210,7 @@ class ChangeTracker:
                     delta = value - st.last
                     hop = min(abs(delta), 256 - abs(delta))
                     st.max_hop = max(st.max_hop, hop)
+                    st.min_hop = hop if st.changes == 1 else min(st.min_hop, hop)
                     if hop <= SMALL_HOP:
                         st.small_hops += 1
                     if hop == 1:

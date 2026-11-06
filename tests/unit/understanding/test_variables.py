@@ -104,6 +104,23 @@ def test_lives_flag_progress_speed_and_unknown() -> None:
     assert cands[4].kind is VariableKind.UNKNOWN
 
 
+def test_a_value_climbing_by_the_same_amount_every_step_is_a_counter() -> None:
+    """T-921: the user's frame counter, read every four frames, sat in a position seat."""
+    rows = [bytes([(i * 4) & 0xFF]) for i in range(400)]
+    (c,) = find_candidates(track(rows))
+    assert c.kind is VariableKind.COUNTER
+    assert any(e.detail == "Always by exactly 4." for e in c.evidence)
+    # a score that only ever adds ten, now and then, is still a score
+    score = []
+    total = 0
+    for i in range(400):
+        if i % 15 == 0:
+            total += 10
+        score.append(bytes([total & 0xFF]))
+    (s,) = find_candidates(track(score))
+    assert s.kind is VariableKind.SCORE
+
+
 def test_position_like_byte() -> None:
     rows = []
     pos = 0

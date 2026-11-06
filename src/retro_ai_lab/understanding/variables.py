@@ -178,6 +178,14 @@ def _classify_single(st: ByteStats) -> tuple[VariableKind, tuple[Evidence, ...]]
                 Evidence("every-frame", "Changes every frame.", 1.0),
                 Evidence("unit-steps", "Always by exactly one.", 1.0),
             )
+        if st.min_hop == st.max_hop and st.change_rate >= NOISE_RATE:
+            # A frame counter read every four frames steps by four every step (T-921):
+            # the same hop every time is a clock, not something moving about.
+            return VariableKind.COUNTER, (
+                Evidence("monotonic", "Only ever goes up.", 2.0),
+                Evidence("every-frame", "Changes every frame.", 1.0),
+                Evidence("unit-steps", f"Always by exactly {st.max_hop}.", 1.0),
+            )
         if values == 2:
             if not rare:  # a blinking bit is no flag (T-869), and nothing else fits
                 return None

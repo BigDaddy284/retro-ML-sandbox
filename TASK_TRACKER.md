@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-921 | A value that climbs by the same amount nearly every step (a frame counter stepping by four) is a counter, not a climbing position; the tracker now keeps each byte's smallest hop beside its largest | 8 | Done | 1/1 | see PR |
 | T-920 | The census has three lists: the busiest bytes, the smoothest (small hops in three changes of four, most changes first) and the widest-ranging rare bytes (changing in under a tenth of steps, most values first), so a thing on screen for seconds of each go is listed even though noise changes every step | 8 | Done | 1/1 | see PR #175 |
 | T-919 | Every 25th review the log prints a census of the sixteen busiest memory bytes (changes, values, small, unit and largest hops, ups, downs, wraps, and what the AI calls each), so a log can show why a byte is or is not taken for something moving | 8 | Done | 1/1 | see PR #174 |
 | T-918 | A thing on screen only now and then is still a mover: three small hops in four make a byte smooth (one big hop each way per visit), and a rare byte that has moved through more than sixteen values over thirty or more changes is a position of something moving | 8 | Done | 1/1 | see PR #173 |
@@ -2823,6 +2824,22 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** the extended census test passes; services + understanding + integration 233 passed; full suite 1346 passed, 10 skipped in 201.46s (0:03:21).
 - **Commit:** see PR #175. **PR:** #175.
 - **Completion report:** Forty-eight lines every three minutes at most. The same log showed the frame counter (ram[9]) seated as a climbing position: it steps by exactly four every step, which the climbing rule reads as "varied steps" because the steps are not one; a climbing byte whose hops are all the same size is a counter (T-921, next).
+
+### T-921 – A value climbing by the same amount every step is a counter
+- **Status:** Done
+- **Phase:** 8 (the user's 01:52 log: "Position at ram[9]", 25,368 changes in 26,999 steps, every hop four)
+- **Objective:** The climbing-position rule asks for small steps that are not all one; a frame counter read every four frames steps by exactly four every step and took a position seat (one of the six), a candidate for the player's own position in `_pair_up`. A climbing byte whose hops are all the same size, nearly every step, is a counter.
+- **Scope:** `ByteStats.min_hop` in `observation/diff.py`; the counter branch under `mostly_up` in `understanding/variables.py`. **Out of scope:** rare steady steppers (a score that only ever adds ten stays a score).
+- **Acceptance criteria:**
+  1. A byte stepping by four every step, rolling over, is a COUNTER with evidence saying "Always by exactly 4."
+  2. A byte stepping by 0–4 (the T-302 position test) is still a POSITION; a byte stepping by one is still a COUNTER with the T-302 words.
+  3. A byte adding ten now and then (rare, many values) is still a SCORE.
+  4. `min_hop` is 0 for an unchanged byte, the smallest hop either way otherwise, and in `to_dict`.
+- **Expected changes:** `src/retro_ai_lab/observation/diff.py`, `src/retro_ai_lab/understanding/variables.py`, `tests/unit/observation/test_diff.py`, `tests/unit/understanding/test_variables.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_tracker_records_the_smallest_hop_too`, `test_a_value_climbing_by_the_same_amount_every_step_is_a_counter`; observation + understanding + learning + services + integration suites; full suite.
+- **Results:** 2 new tests pass; observation + understanding + learning + services + integration 420 passed; full suite 1348 passed, 10 skipped in 221.07s (0:03:41).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The rule needs the byte to change in nine steps of ten so that a score adding the same amount now and then stays a score; a clock that ticks every other step would slip through, and the census will say so if one does. With the frame counter out, the six position seats and the "own position" candidates of T-915 are one junk byte lighter.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
