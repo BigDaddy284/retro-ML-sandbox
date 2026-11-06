@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-919 | Every 25th review the log prints a census of the sixteen busiest memory bytes (changes, values, small, unit and largest hops, ups, downs, wraps, and what the AI calls each), so a log can show why a byte is or is not taken for something moving | 8 | Done | 1/1 | see PR |
 | T-918 | A thing on screen only now and then is still a mover: three small hops in four make a byte smooth (one big hop each way per visit), and a rare byte that has moved through more than sixteen values over thirty or more changes is a position of something moving | 8 | Done | 1/1 | see PR #173 |
 | T-917 | A guess is rethought only once the byte has changed twice as often as when it was last judged, so a byte on the edge of a rule no longer flips kind at every review; each guess records how many changes it was judged on | 8 | Done | 1/1 | see PR #172 |
 | T-916 | A guess the AI made itself is rethought at every review when its statistics now say another kind, so an enemy slot first seen with five values is not "a speed" for good; a person's confirmed, named or rejected guesses, guesses placed by their word or the restart finding, and input-linked positions are never touched; a guess the AI dropped comes back as another kind | 8 | Done | 1/1 | see PR #171 |
@@ -2791,6 +2792,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 3 new tests pass; observation + understanding + learning + services + integration 416 passed; full suite 1344 passed, 10 skipped in 198.47s (0:03:18).
 - **Commit:** see PR #173. **PR:** #173.
 - **Completion report:** Three in four is the lowest share that still leaves random bytes far below (about one small hop in fourteen); a slot visited for fewer than six steps at a time is still rough and stays unknown, and a brief visitor with sixteen values or fewer stays with the lives and progress rules, which doubt and drop it in their own time. The simulated slot is the evidence here, not the user's memory: the next log's "It sees … (N moving)" is the real test.
+
+### T-919 – The log takes a census of the busiest bytes
+- **Status:** Done
+- **Phase:** 8 (the user's 00:21 log: T-917 and T-918 in, 84 rethinks, still no moving thing)
+- **Objective:** Three builds in a row changed the mover rule on simulated bytes and the user's game still shows no "Something moving"; the log names kinds but never the statistics they rest on, so each fix was a guess. Print, every 25th review, the sixteen bytes with the most changes and the numbers the classifier reads.
+- **Scope:** `DiscoveryService.census()`, `census_every` and the census log line in `services/discovery.py`. **Out of scope:** any change to the rules; a census in the UI.
+- **Acceptance criteria:**
+  1. `census()` lists at most sixteen bytes, most changes first, each with changes, steps, values, small hops, unit hops, largest hop, ups, downs, wraps and the AI's current word for it ("nobody's guess" when none).
+  2. The review logs the census on every `census_every`-th review and not otherwise; `census_every` below 1 is refused.
+  3. With nothing connected `census()` is empty.
+- **Expected changes:** `src/retro_ai_lab/services/discovery.py`, `tests/unit/services/test_discovery.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_the_census_names_the_busiest_bytes_and_their_numbers`, `test_the_review_logs_the_census_on_schedule`; services + understanding + integration suites; full suite.
+- **Results:** pending.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** pending.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

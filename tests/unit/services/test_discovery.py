@@ -553,6 +553,52 @@ def test_a_busy_flag_guess_is_doubted_then_dropped(
     assert not got.rejected and not any(e.kind == BUSY for e in got.evidence)
 
 
+def test_the_census_names_the_busiest_bytes_and_their_numbers(
+    discovery: DiscoveryService, connection: ConnectionService, observation: ObservationService
+) -> None:
+    """T-919: the log can say why a byte is or is not taken for something moving."""
+    assert discovery.census() == ""  # nothing connected
+    connection.connect("fake", seed=2)
+    play(connection, observation, 300)
+    lines = discovery.census().split("\n")
+    stats = observation.tracker.all_stats()
+    busiest = sorted(stats.values(), key=lambda st: -st.changes)
+    assert 1 <= len(lines) <= 16 and all(st.changes > 0 for st in busiest[: len(lines)])
+    first = lines[0]
+    assert first.startswith("ram[") and f"{busiest[0].changes} changes in " in first
+    for word in ("values", "hops small", "unit", "largest", "up", "down", "wraps"):
+        assert word in first
+    k = discovery.knowledge
+    assert k is not None
+    offset = int(first.split("]")[0].split("[")[1])
+    v = k.at("ram", offset)
+    assert (v.display_name if v is not None else "nobody's guess") in first
+    assert len(discovery.census(most=2).split("\n")) == 2
+    wrong = k.propose("ram", 2000, kind=VariableKind.LIVES, name="Nothing there")  # never changes
+    assert wrong.display_name not in discovery.census()
+
+
+def test_the_review_logs_the_census_on_schedule(
+    connection: ConnectionService,
+    observation: ObservationService,
+    bus: EventBus,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with pytest.raises(ValueError):
+        DiscoveryService(connection, observation, bus, census_every=0)
+    discovery = DiscoveryService(
+        connection, observation, bus, review_every=100, experiment_every=None, census_every=2
+    )
+    connection.connect("fake", seed=2)
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
+    play(connection, observation, 100)
+    assert discovery.reviews == 1 and "Census of the busiest bytes" not in caplog.text
+    play(connection, observation, 100)
+    assert discovery.reviews == 2
+    (line,) = [m for m in caplog.messages if m.startswith("Census of the busiest bytes")]
+    assert "after review 2:" in line and "changes in" in line
+
+
 def test_a_review_rethinks_the_ais_own_guesses(
     discovery: DiscoveryService,
     connection: ConnectionService,

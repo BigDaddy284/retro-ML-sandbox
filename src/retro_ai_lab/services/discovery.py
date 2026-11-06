@@ -74,6 +74,8 @@ log = logging.getLogger(__name__)
 
 DEFAULT_REVIEW_EVERY = 120
 DEFAULT_EXPERIMENT_EVERY = 600
+DEFAULT_CENSUS_EVERY = 25  # reviews between census lines in the log (T-919)
+CENSUS_MOST = 16  # bytes a census names: the ones with the most changes
 
 
 MOVES_ALONE = "moves-alone"  # evidence kind: changed while nobody pressed anything (T-855)
@@ -158,9 +160,13 @@ class DiscoveryService:
         event_window: int = 5,
         store: KnowledgeStore | None = None,
         moment_window: int = WINDOW_FRAMES,
+        census_every: int = DEFAULT_CENSUS_EVERY,
     ) -> None:
         if review_every < 1:
             raise ValueError("review_every must be positive")
+        if census_every < 1:
+            raise ValueError("census_every must be positive")
+        self._census_every = census_every
         if experiment_every is not None and experiment_every < 1:
             raise ValueError("experiment_every must be positive or None")
         self._connection = connection
@@ -819,10 +825,43 @@ class DiscoveryService:
             )
             self._reviews += 1
             self._since_review = 0
+            if self._reviews % self._census_every == 0:
+                log.info(
+                    "Census of the busiest bytes after review %d:\n%s", self._reviews, self.census()
+                )
             update = DiscoveryUpdated(added, changed, (), ())
             self._announce(update)
             self._set_stage("watching", self.summary())
             return update
+
+    def census(self, most: int = CENSUS_MOST) -> str:
+        """The busiest bytes and the numbers the classifier reads, one line each (T-919).
+
+        Three builds changed the mover rule on simulated bytes while the user's
+        game kept showing no moving thing: the log named kinds but never the
+        statistics behind them. This names them, so the next log can say why a
+        byte is or is not taken for something moving.
+        """
+        with self._lock:
+            k = self._knowledge
+            if k is None:
+                return ""
+            stats = self._observation.tracker.all_stats()
+            busiest = sorted(stats.items(), key=lambda item: -item[1].changes)[:most]
+            lines = []
+            for (region, offset), st in busiest:
+                if st.changes == 0:
+                    break
+                v = k.at(region, offset)
+                word = "nobody's guess" if v is None else v.display_name
+                if v is not None and v.rejected:
+                    word += " (dropped)"
+                lines.append(
+                    f"{region}[{offset}] {word}: {st.changes} changes in {st.samples} steps, "
+                    f"{len(st.distinct)} values, hops small {st.small_hops} unit {st.unit_hops} "
+                    f"largest {st.max_hop}, up {st.ups} down {st.downs} wraps {st.wraps}"
+                )
+            return "\n".join(lines)
 
     def experiment(self) -> DiscoveryUpdated:
         """Try every button from the current situation and learn what each does."""
