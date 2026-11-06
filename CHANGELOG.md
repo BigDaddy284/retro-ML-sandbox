@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-928: the AI's strongest sixteen guesses of a kind count moving things apart from plain positions, so the user's sixteen climbing positions no longer push every enemy sprite out of what the brain and the distance seats can see; the Rewards panel still offers plain positions only.
 - T-927: each census line also says how often a value's hop repeated the one before and which hop that was, the numbers the T-924 counter rule reads, so a log can show why a steady stepper is or is not taken for a clock.
 - T-926: the "judged on N changes" record behind each guess is forgotten when a game connects, because the change statistics start from zero with every connection; the user's run on the T-924 build rethought nothing, its guesses having been judged on 60,000 changes of an earlier run that the new run's 30,000 could never double.
 - T-925: the Learning panel's fast-tick test takes its five steps under a time budget of its own and checks the panel's 20 ms budget separately, so a slow Windows CI runner no longer fails it; it had failed on two pull requests and passed on re-run each time.

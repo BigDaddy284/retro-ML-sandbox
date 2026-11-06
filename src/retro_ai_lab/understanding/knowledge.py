@@ -514,13 +514,15 @@ class Knowledge:
                 and (wanted is None or v.region in wanted)
             ]
         candidates.sort(key=lambda item: belief_rank(item[1]))
-        seats: dict[VariableKind, int] = {}
+        # A moving thing is a role of its own (T-928): on the user's game sixteen plain
+        # positions outranked every enemy sprite, and nothing moving was ever believed.
+        seats: dict[tuple[VariableKind, bool], int] = {}
         chosen: list[tuple[int, Variable]] = []
         for item in candidates:
-            kind = item[1].kind
-            taken = seats.get(kind, 0)
+            role = (item[1].kind, is_mover(item[1]))
+            taken = seats.get(role, 0)
             if taken < per_kind:
-                seats[kind] = taken + 1
+                seats[role] = taken + 1
                 chosen.append(item)
         chosen.sort()
         return tuple(v for _, v in chosen)
@@ -535,7 +537,10 @@ class Knowledge:
         """
         few = self.believed(at_least, per_kind=OFFERED_MANY)
         one = {v.id for v in self.believed(at_least, per_kind=OFFERED_PER_KIND)}
-        return tuple(v for v in few if v.kind in OFFERED_MANY_KINDS or v.id in one)
+        # Nobody puts a reward on "Something moving" (T-928): the offers are the roles.
+        return tuple(
+            v for v in few if (v.kind in OFFERED_MANY_KINDS or v.id in one) and not is_mover(v)
+        )
 
     def needs_help(self) -> tuple[Variable, ...]:
         """Beliefs that are worth asking a person about (DESIGN.md §3.4)."""
