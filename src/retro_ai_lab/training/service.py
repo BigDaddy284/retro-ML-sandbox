@@ -55,7 +55,7 @@ from retro_ai_lab.services.goals import GoalService
 from retro_ai_lab.services.observer import MemoryObserved, ObservationService
 from retro_ai_lab.storage.brains import BrainStore
 from retro_ai_lab.training.brain import Brain
-from retro_ai_lab.training.curve import DEFAULT_WINDOW, LearningCurve
+from retro_ai_lab.training.curve import DEFAULT_WINDOW, LearningCurve, describe_survival
 from retro_ai_lab.training.episode import (
     DEFAULT_FRAMES_PER_STEP,
     DEFAULT_MAX_STEPS,
@@ -1145,13 +1145,14 @@ class TrainingService:
         why = self._runner.last_reset if self._runner is not None else ""
         earners = describe_earned(result.earned, most=None)  # the whole breakdown (T-877)
         log.info(
-            "Go %d ended by %s after %d steps (%d frames), %+.1f points%s%s",
+            "Go %d ended by %s after %d steps (%d frames), %+.1f points%s%s%s",
             self._episodes,
             result.ended_by,
             result.steps,
             result.frames,
             result.reward,
             f", from {earners}" if earners else "",
+            result.describe_losses(),  # survival in the log (T-934)
             f": {why}" if result.ended_by == "reset" and why else "",
         )
         if self._agent is not None and self._encoder is not None:
@@ -1165,6 +1166,9 @@ class TrainingService:
                 self._encoder.describe(),
             )
         self._history.append(record)
+        # Every tenth go from the twentieth: is the AI surviving longer? (T-934)
+        if self._episodes >= 2 * DEFAULT_WINDOW and self._episodes % DEFAULT_WINDOW == 0:
+            log.info("%s", describe_survival(tuple(self._history), DEFAULT_WINDOW))
         self._note_listening(result)
         if not self._needs_wake:  # a go the game ignored says nothing about play (T-870)
             self._discovery.credit_played(frame=self._observation.frame)

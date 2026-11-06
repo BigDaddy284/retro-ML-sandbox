@@ -6,7 +6,7 @@ import pytest
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.training import EpisodeRecord, EpisodeResult, LearningCurve, Mode
-from retro_ai_lab.training.curve import IMPROVING, SLIPPING, STEADY, TOO_EARLY
+from retro_ai_lab.training.curve import IMPROVING, SLIPPING, STEADY, TOO_EARLY, describe_survival
 
 
 def go(n: int, reward: float, steps: int = 10, objectives: int = 0) -> EpisodeRecord:
@@ -84,3 +84,30 @@ def test_results_carry_objectives_and_old_files_load_with_none() -> None:
     old = {"steps": 1, "frames": 4, "reward": 0.0, "ended_by": "stopped", "states_seen": 1}
     assert EpisodeResult.from_dict(old).objectives == 0
     assert EpisodeResult(1, 4, 0.0, "reset", 1, 2).succeeded
+
+
+def test_describe_survival() -> None:
+    """T-934: lives lost per go and the steps before the first loss, window against window."""
+
+    def lost(n: int, setbacks: int, first: int | None) -> EpisodeRecord:
+        result = EpisodeResult(
+            450, 1800, 0.0, "max_steps", 2, setbacks=setbacks, first_setback_step=first
+        )
+        return EpisodeRecord(n, Mode.INDEPENDENT, result, n * 1800)
+
+    goes = [lost(1, 0, None), lost(2, 1, 300), lost(3, 2, 100)]
+    assert describe_survival(goes, window=2) == (
+        "Survival: too early to compare, 3 of 4 goes played."
+    )
+    goes.append(lost(4, 3, 80))
+    assert describe_survival(goes, window=2) == (
+        "Survival over the last 2 goes: lives lost per go 2.5 (was 0.5 over the 2 before); "
+        "the first life lost after 90 steps on average (was 300 steps)."
+    )
+    never = [lost(1, 0, None), lost(2, 0, None), lost(3, 1, 120), lost(4, 0, None)]
+    assert describe_survival(never, window=2) == (
+        "Survival over the last 2 goes: lives lost per go 0.5 (was 0.0 over the 2 before); "
+        "the first life lost after 120 steps on average (was never)."
+    )
+    with pytest.raises(ConfigurationError):
+        describe_survival(goes, window=0)

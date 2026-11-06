@@ -1,7 +1,7 @@
 """Training (Phase 5+): running the learner against the game."""
 
 from retro_ai_lab.training.brain import Brain
-from retro_ai_lab.training.curve import CurvePoint, LearningCurve
+from retro_ai_lab.training.curve import CurvePoint, LearningCurve, describe_survival
 from retro_ai_lab.training.episode import (
     DEFAULT_MAX_STEPS,
     DEFAULT_UNSTICK_AFTER,
@@ -56,5 +56,6 @@ __all__ = [
     "TrainingStateChanged",
     "TrainingStepped",
     "describe_earned",
+    "describe_survival",
     "situation_values",
 ]

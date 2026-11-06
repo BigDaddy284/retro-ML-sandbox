@@ -88,6 +88,7 @@ class EpisodeSignals:
         self._listening = False
         self._last_reset = ""  # what the detector blamed, for the log (T-840)
         self._last_reset_ids: tuple[str, ...] = ()
+        self._setbacks = 0  # life or health drops since the last take (T-934)
         bus.subscribe(RewardEarned, self._on_reward)
         bus.subscribe(ObjectiveCompleted, self._on_completed)
         bus.subscribe(ObjectiveSetback, self._on_setback)
@@ -131,6 +132,7 @@ class EpisodeSignals:
         self._earned = {}
         self._last_reset = ""
         self._last_reset_ids = ()
+        self._setbacks = 0
         self._listening = True
 
     def stop(self) -> None:
@@ -141,6 +143,12 @@ class EpisodeSignals:
         out = (self._reward, self._resets)
         self._reward = 0.0
         self._resets = 0
+        return out
+
+    def take_setbacks(self) -> int:
+        """Life or health drops since the last call; clears the count (T-934)."""
+        out = self._setbacks
+        self._setbacks = 0
         return out
 
     def _on_reward(self, event: RewardEarned) -> None:
@@ -173,6 +181,8 @@ class EpisodeSignals:
                 self._resets += 1
                 self._last_reset = f"{event.detail} (frame {event.frame})"
                 self._last_reset_ids = event.variables
+            elif event.kind is EventKind.SETBACK:
+                self._setbacks += 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,10 +194,24 @@ class EpisodeResult:
     states_seen: int
     objectives: int = 0  # objectives completed during the go
     earned: tuple[Earning, ...] = ()  # what paid, biggest first (T-857)
+    setbacks: int = 0  # lives or health lost during the go (T-934)
+    first_setback_step: int | None = None  # the step the first was lost at, 1-based
 
     @property
     def succeeded(self) -> bool:
         return self.objectives > 0
+
+    def describe_losses(self) -> str:
+        """ ", lost a life 2 times, the first at step 3", or "" when none were lost (T-934)."""
+        if self.setbacks == 0:
+            return ""
+        times = "once" if self.setbacks == 1 else f"{self.setbacks} times"
+        first = (
+            f", the first at step {self.first_setback_step}"
+            if self.first_setback_step is not None
+            else ""
+        )
+        return f", lost a life {times}{first}"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -198,6 +222,8 @@ class EpisodeResult:
             "states_seen": self.states_seen,
             "objectives": self.objectives,
             "earned": [e.to_dict() for e in self.earned],
+            "setbacks": self.setbacks,
+            "first_setback_step": self.first_setback_step,
         }
 
     @classmethod
@@ -211,6 +237,8 @@ class EpisodeResult:
                 int(data["states_seen"]),
                 int(data.get("objectives", 0)),
                 tuple(Earning.from_dict(e) for e in data.get("earned", ())),
+                int(data.get("setbacks", 0)),
+                None if data.get("first_setback_step") is None else int(data["first_setback_step"]),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"Bad go result: {exc}") from exc
@@ -269,6 +297,8 @@ class EpisodeRunner:
         self._states: set[str] = set()
         self._ended_by: str | None = None
         self._fingerprint: list[str] = []
+        self._setbacks = 0  # lives lost this go and the step of the first (T-934)
+        self._first_setback_step: int | None = None
         self._actions_seen: set[int] = set()
 
     # ------------------------------------------------------------ queries
@@ -376,6 +406,8 @@ class EpisodeRunner:
         self._ended_by = None
         self._same_state = 0
         self._fingerprint = []
+        self._setbacks = 0
+        self._first_setback_step = None
         self._actions_seen = set()
         self._buttons = {b.name: b for b in self._connection.call(lambda a: a.buttons())}
         self._restored = restore and self._harness is not None and self._harness.has_checkpoint
@@ -462,6 +494,11 @@ class EpisodeRunner:
         """After the frames passed: collect the reward, read the next state, learn."""
         self._frames += frames
         reward, resets = self._signals.take()
+        lost = self._signals.take_setbacks()
+        if lost:
+            self._setbacks += lost
+            if self._first_setback_step is None:
+                self._first_setback_step = self._steps + 1  # this step, 1-based (T-934)
         self._last_state = state
         self._last_reward = reward
         # Putting the game back to the checkpoint looks like a restart to the engine, and
@@ -517,6 +554,8 @@ class EpisodeRunner:
             len(self._states),
             self._signals.completed,
             self._signals.earned,
+            self._setbacks,
+            self._first_setback_step,
         )
         self._state = None
         return result

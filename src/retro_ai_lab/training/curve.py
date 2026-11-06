@@ -130,6 +130,32 @@ class LearningCurve:
         return " ".join(parts)
 
 
+def describe_survival(goes: Sequence[EpisodeRecord], window: int = DEFAULT_WINDOW) -> str:
+    """Lives lost per go and the steps before the first loss, last window against the one before.
+
+    T-934: the user's logs needed the "Losing Lives" earners of 160 go lines counted by hand
+    to say whether the AI was surviving longer.
+    """
+    if window < 1:
+        raise ConfigurationError("window must be at least 1.")
+    if len(goes) < 2 * window:
+        return f"Survival: too early to compare, {len(goes)} of {2 * window} goes played."
+    latest, earlier = goes[-window:], goes[-2 * window : -window]
+
+    def per_go(part: Sequence[EpisodeRecord]) -> float:
+        return sum(g.result.setbacks for g in part) / len(part)
+
+    def first_loss(part: Sequence[EpisodeRecord]) -> str:
+        steps = [g.result.first_setback_step for g in part if g.result.first_setback_step]
+        return f"{sum(steps) / len(steps):.0f} steps" if steps else "never"
+
+    return (
+        f"Survival over the last {window} goes: lives lost per go {per_go(latest):.1f} "
+        f"(was {per_go(earlier):.1f} over the {window} before); the first life lost after "
+        f"{first_loss(latest)} on average (was {first_loss(earlier)})."
+    )
+
+
 __all__ = [
     "DEFAULT_WINDOW",
     "IMPROVING",
@@ -138,4 +164,5 @@ __all__ = [
     "TOO_EARLY",
     "CurvePoint",
     "LearningCurve",
+    "describe_survival",
 ]
