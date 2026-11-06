@@ -2837,9 +2837,9 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
   4. `min_hop` is 0 for an unchanged byte, the smallest hop either way otherwise, and in `to_dict`.
 - **Expected changes:** `src/retro_ai_lab/observation/diff.py`, `src/retro_ai_lab/understanding/variables.py`, `tests/unit/observation/test_diff.py`, `tests/unit/understanding/test_variables.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
 - **Test plan:** `test_tracker_records_the_smallest_hop_too`, `test_a_value_climbing_by_the_same_amount_every_step_is_a_counter`; observation + understanding + learning + services + integration suites; full suite.
-- **Results:** pending.
+- **Results:** 2 new tests pass; observation + understanding + learning + services + integration 420 passed; full suite 1348 passed, 10 skipped in 221.07s (0:03:41).
 - **Commit:** see PR. **PR:** pending.
-- **Completion report:** pending.
+- **Completion report:** The rule needs the byte to change in nine steps of ten so that a score adding the same amount now and then stays a score; a clock that ticks every other step would slip through, and the census will say so if one does. With the frame counter out, the six position seats and the "own position" candidates of T-915 are one junk byte lighter.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
