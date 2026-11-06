@@ -57,6 +57,8 @@ def test_conformance_routing_and_counts() -> None:
     assert agent.epsilon == pytest.approx(after(1))  # the default skill learned one step
     assert agent.end_episode() == pytest.approx(0.995 * after(1)) and agent.episodes == 1
     assert jump.epsilon == pytest.approx(0.995 * after(2))  # every skill explores a little less
+    agent.end_episode(7.5)  # the go's reward reaches every skill (T-932)
+    assert agent.skill_learner(DEFAULT_SKILL).recent_rewards == (7.5,) == jump.recent_rewards  # type: ignore[attr-defined]
     with pytest.raises(ConfigurationError):
         agent.set_skill("")
     with pytest.raises(ConfigurationError):

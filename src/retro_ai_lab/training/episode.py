@@ -507,7 +507,7 @@ class EpisodeRunner:
                 self._observation.record_input([], "ai")
             except EmulatorError:
                 pass  # the connection service reports link loss
-        self._agent.end_episode()
+        self._agent.end_episode(self._reward)  # exploring follows results (T-932)
         self._last_buttons = frozenset()
         result = EpisodeResult(
             self._steps,

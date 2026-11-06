@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-932: exploring follows results: when the last ten goes score worse than the ten before, the chance of a random move goes back up to `Settings.rebound` (25%) and is held there while the goes stay worse, easing off over ten goes once they recover; the runner hands each go's reward to the learner, the brain saves the last goes, the Research window gets "Exploring rebound", and the rise is logged; the user's 20:03 log had exploring at its 5% floor from go 14 while lives lost per go climbed from 0.17 to 1.83.
 - T-931: own positions moved by the same buttons are copies and count once in the distance pairs, so the eight distance seats go to eight moving things; the user's log had one enemy measured from four sprite columns of the player.
 - T-930: a button whose trial changes at least half of what the game changes on its own in those frames (a pause button, a menu, Start on a title screen) is linked to no value and named in the experiment line; on the user's game Start pauses, so every enemy sprite had been linked to it and locked out of the moving things.
 - T-929: each button experiment logs the values the buttons moved and the buttons that moved nothing, and the "It sees" line after every go names the position the distances to moving things are measured from and whether the stick moves it, so a log can show whether the AI knows its own position.

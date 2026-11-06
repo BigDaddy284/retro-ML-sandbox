@@ -76,6 +76,7 @@ SETTING_FIELDS: tuple[tuple[str, str, str], ...] = (
     ("epsilon_min", "Exploring floor", "Exploring never drops below this."),
     ("epsilon_decay", "Exploring decay", "Exploring is multiplied by this after every go."),
     ("explore_steps", "Exploring steps", "Learned steps over which exploring falls to the floor."),
+    ("rebound", "Exploring rebound", "Exploring goes back up to this when goes get worse; 0 off."),
 )
 TAB_TITLES: tuple[str, ...] = (
     "Learning settings",

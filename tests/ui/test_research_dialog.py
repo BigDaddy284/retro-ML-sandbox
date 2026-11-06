@@ -70,6 +70,10 @@ def test_settings_follow_the_live_ones_and_apply(
     dialog.set_settings_values(explore_steps=1234.6)
     assert dialog.settings_values()["explore_steps"] == 1235
     assert dialog.apply_settings() and t.settings.explore_steps == 1235
+    # Exploring rebound is a share from 0 to 1 (T-932).
+    assert dialog.settings_values()["rebound"] == 0.25
+    dialog.set_settings_values(rebound=0.0)
+    assert dialog.apply_settings() and t.settings.rebound == 0.0
     # Not while training runs.
     t.start()
     assert not dialog.findChild(object, "setting_alpha").isEnabled()  # type: ignore[union-attr]

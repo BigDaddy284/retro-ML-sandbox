@@ -159,6 +159,26 @@ def test_exploring_falls_with_the_steps_learned() -> None:
     assert agent.epsilon == 0.05 and agent.updates == 110
 
 
+def test_exploring_rises_again_when_the_goes_get_worse() -> None:
+    """T-932: the network learner lifts exploring to the rebound like the table."""
+    quick = Settings(epsilon=1.0, epsilon_min=0.05, epsilon_decay=1.0, explore_steps=10)
+    agent = DQNLearner(SPACE, quick, seed=5, config=QUICK)
+    chain(agent, 10)
+    assert agent.epsilon == 0.05
+    for reward in (10.0,) * 10 + (0.0,) * 9:
+        assert agent.end_episode(reward) == 0.05
+    assert agent.end_episode(0.0) == 0.25 and agent.lift == 0.25
+    chain(agent, 5)
+    assert agent.epsilon == 0.25
+    data = json.loads(json.dumps(agent.to_dict()))
+    again = learner_from_dict(data, space=SPACE)
+    assert isinstance(again, DQNLearner) and again.lift == 0.25 and again.epsilon == 0.25
+    assert again.recent_rewards == agent.recent_rewards
+    for reward in (0.0,) * 10 + (10.0,) * 10:
+        agent.end_episode(reward)  # no longer worse, then better: the lift eases off
+    assert agent.lift == 0.0 and agent.epsilon == 0.05
+
+
 def test_round_trip_and_refusals(tmp_path: Path) -> None:
     agent = DQNLearner(SPACE, Settings(epsilon=0.4), seed=6, config=QUICK)
     chain(agent, 40)

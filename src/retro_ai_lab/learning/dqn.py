@@ -20,6 +20,7 @@ import numpy as np
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning.actions import ActionSpace
+from retro_ai_lab.learning.exploring import ResultsWatch
 from retro_ai_lab.learning.features import DEFAULT_WIDTH, FeatureMap
 from retro_ai_lab.learning.learner import Decision, Learner, register_learner
 from retro_ai_lab.learning.network import DEFAULT_LEARNING_RATE, Network
@@ -113,6 +114,7 @@ class DQNLearner:
         self._updates = 0
         self._trained = 0
         self._episodes = 0
+        self._results = ResultsWatch(self._settings.rebound)
         self._build()
 
     def _build(self) -> None:
@@ -251,7 +253,7 @@ class DQNLearner:
         self._replay.append(Transition(state, action, float(reward), next_state, bool(done)))
         self._remember(state, next_state)
         self._updates += 1
-        self._epsilon = min(self._epsilon, self._settings.exploring_after(self._updates))
+        self._epsilon = self._scheduled(self._epsilon)
         if len(self._replay) >= self._config.warmup:
             self._train_batch()
         return self.value(state, action)
@@ -305,18 +307,35 @@ class DQNLearner:
         self._updates = other.updates
         self._episodes = other.episodes
 
-    def end_episode(self) -> float:
+    def _scheduled(self, epsilon: float) -> float:
+        """Exploring capped by the step schedule, unless results hold it up (T-932)."""
+        return min(epsilon, max(self._results.lift, self._settings.exploring_after(self._updates)))
+
+    def end_episode(self, reward: float | None = None) -> float:
         self._episodes += 1
-        self._epsilon = max(
-            self._settings.epsilon_min, self._epsilon * self._settings.epsilon_decay
-        )
+        if reward is not None:
+            self._results.note(reward, goes=self._episodes)
+        decayed = self._epsilon * self._settings.epsilon_decay
+        self._epsilon = max(self._settings.epsilon_min, self._results.lift, decayed)
+        self._epsilon = self._scheduled(self._epsilon)
         return self._epsilon
+
+    @property
+    def lift(self) -> float:
+        """The floor results hold exploring above right now (0 when the schedule rules)."""
+        return self._results.lift
+
+    @property
+    def recent_rewards(self) -> tuple[float, ...]:
+        """The last goes' rewards the lift is judged on (T-932)."""
+        return self._results.rewards
 
     def configure(self, settings: Settings) -> None:
         if not isinstance(settings, Settings):
             raise ConfigurationError("Learning settings must be a Settings.")
         self._settings = settings
         self._epsilon = settings.epsilon
+        self._results.set_rebound(settings.rebound)
 
     def reset(self) -> None:
         self._last_decision = None
@@ -324,6 +343,7 @@ class DQNLearner:
         self._updates = 0
         self._trained = 0
         self._episodes = 0
+        self._results = ResultsWatch(self._settings.rebound)
         self._build()
 
     # ------------------------------------------------------------ persistence
@@ -339,6 +359,7 @@ class DQNLearner:
             "updates": self._updates,
             "trained": self._trained,
             "episodes": self._episodes,
+            "results": self._results.to_dict(),
             "rng": self._rng.getstate(),
             "features": self._features.to_dict(),
             "network": self._net.to_dict(),
@@ -369,6 +390,7 @@ class DQNLearner:
             agent._updates = int(data.get("updates", 0))
             agent._trained = int(data.get("trained", 0))
             agent._episodes = int(data.get("episodes", 0))
+            agent._results.load(data.get("results"))
             if "features" in data:
                 agent._features = FeatureMap.from_dict(data["features"])
             agent._net = Network.from_dict(data["network"])

@@ -205,7 +205,11 @@ every panel then uses that name. The AI still learns everything itself; the
 table only shows what it worked out and lets you name it. Its Learning
 settings box has the learning numbers for researchers; "Exploring steps" is
 how many learned steps it takes the AI to go from trying random moves to
-mostly choosing (6,000, about ten 40-second goes).
+mostly choosing (6,000, about ten 40-second goes). Exploring also follows
+results: when the last ten goes score worse than the ten before, the AI goes
+back to trying random moves "Exploring rebound" of the time (25%) and stays
+there while the goes keep getting worse, so a bad habit is not locked in; the
+log says when that happens.
 
 To find a value yourself, like a cheat finder, use the Research window's
 "Search values" tab. Type the number you see on the screen (12, or hex like
