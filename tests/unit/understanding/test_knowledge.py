@@ -149,6 +149,19 @@ def test_variable_round_trip_and_bad_dict() -> None:
     assert v.to_dict()["judged"] == 37
     old = {k: val for k, val in v.to_dict().items() if k != "judged"}  # a file from before T-917
     assert Variable.from_dict(old).judged == 0
+
+
+def test_forget_judged() -> None:
+    """T-926: the judged counts are a run's, and go when a game connects."""
+    k = Knowledge("g")
+    a = k.propose("ram", 0, kind=VariableKind.SCORE, judged=37)
+    b = k.propose("ram", 1, kind=VariableKind.LIVES, judged=4)
+    c = k.propose("ram", 2, kind=VariableKind.FLAG)
+    version = k.version
+    assert k.forget_judged() == 2 and k.version == version + 1
+    assert all(k.get(v.id).judged == 0 for v in (a, b, c))
+    assert k.get(a.id).kind is VariableKind.SCORE and k.get(b.id).kind is VariableKind.LIVES
+    assert k.forget_judged() == 0 and k.version == version + 1  # nothing to forget: no change
     with pytest.raises(ConfigurationError):
         Variable.from_dict({"id": "x", "region": "ram", "offset": 0, "encoding": "u99"})
     with pytest.raises(ConfigurationError):

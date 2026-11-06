@@ -924,6 +924,9 @@ class DiscoveryService:
                 knowledge = Knowledge(game_id, title=info.title)  # a damaged file: start over
         else:
             knowledge = Knowledge(game_id, title=info.title)
+        # The change statistics start from zero with this connection, so the
+        # "judged on N changes" records from an earlier run would never be reached (T-926).
+        knowledge.forget_judged()
         self._adopt(knowledge)
         self._events.clear()
         self._buttons = tuple(b.name for b in event.buttons)
