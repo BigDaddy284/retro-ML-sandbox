@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-928 | The AI's strongest sixteen guesses of a kind count moving things apart from plain positions, so sixteen climbing positions no longer push every enemy sprite out of what the brain, the rewards and the distance seats can see; the Rewards panel still offers plain positions only | 8 | Done | 2/2 | see PR |
 | T-927 | Each census line also says how often a value's hop repeated the one before and which hop that was, the numbers the T-924 counter rule reads, so a log can show why a steady stepper is or is not taken for a counter | 8 | Done | 1/1 | see PR #182 |
 | T-926 | The "judged on N changes" record behind a guess is forgotten when a game connects, because the change statistics start again from zero with every connection; the user's run rethought nothing because the counts saved from earlier runs were never reached | 8 | Done | 2/2 | see PR #181 |
 | T-925 | The fast-tick Learning panel test takes its five steps under a generous time budget of its own, checking the 20 ms budget the panel asked for separately, so a slow Windows runner no longer fails it | 8 | Done | 1/1 | see PR #180 |
@@ -2935,6 +2936,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** census test extended and passing; services 100 passed; full suite 1354 passed, 10 skipped in 211.79s (0:03:31).
 - **Commit:** see PR #182. **PR:** #182.
 - **Completion report:** Two numbers more per line, forty-eight lines every three minutes at most. The next census will say outright whether the frame counter's hops repeat in 95% of its changes.
+
+### T-928 – Moving things have believed seats of their own
+- **Status:** Done
+- **Phase:** 8 (the user's 14:32 log on the T-926 build: 460 rethinks, the sprite bytes' statistics saying mover, "It sees … 6 positions" with nothing moving for 51 goes)
+- **Objective:** `Knowledge.believed` keeps the strongest sixteen guesses of each kind (T-850). A mover is a POSITION with 2.0 of evidence; the game has more than sixteen plain positions at 2.5 or better (the frame counter, a dozen climbing bytes with "played" evidence), so no mover is ever believed, and `StateEncoder` (which pairs from the believed set since T-923) never sees one. A moving thing is a role of its own, not the player's position: the seats count movers apart from plain positions, sixteen each. The Rewards panel's offers (`offered`) leave movers out, as a person has no reward to put on "Something moving".
+- **Scope:** `Knowledge.believed` and `Knowledge.offered` in `understanding/knowledge.py`. **Out of scope:** the frame counter (T-929); how many seats the brain gives positions.
+- **Acceptance criteria:**
+  1. With twenty plain positions outranking three movers, `believed()` holds sixteen plain positions and all three movers; `believed(per_kind=2)` holds two of each.
+  2. `offered()` holds no mover.
+  3. The T-850 test holds; the T-923 state test holds.
+- **Expected changes:** `src/retro_ai_lab/understanding/knowledge.py`, `tests/unit/understanding/test_knowledge.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_believed_counts_moving_things_apart`; understanding + learning + services + integration suites; full suite.
+- **Results:** 1 new test passes; understanding + learning + services + integration 307 passed; full suite 1355 passed, 10 skipped in 209.46s (0:03:29).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The believed set can now hold up to sixteen movers beside sixteen plain positions; the detector, the long look and the goals read it too, and the long look already leaves movers out (T-911). Whether the sprites are movers in the user's knowledge, and which position the distances are measured from, the log cannot yet say; T-929 makes it say so.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

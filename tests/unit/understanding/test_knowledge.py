@@ -382,6 +382,28 @@ def test_the_knowledge_can_be_read_while_another_thread_rewrites_it() -> None:
     assert not t.is_alive() and failures == []
 
 
+def test_believed_counts_moving_things_apart() -> None:
+    """T-928: sixteen plain positions pushed every enemy sprite out of the believed set."""
+    from retro_ai_lab.understanding.knowledge import MOVER, is_mover
+
+    k = Knowledge("g")
+    plain = [
+        k.propose("ram", i, kind=VariableKind.POSITION, evidence=[Evidence("monotonic", "", 2.5)])
+        for i in range(20)
+    ]
+    movers = [
+        k.propose("ram", 100 + i, kind=VariableKind.POSITION, evidence=[Evidence(MOVER, "", 2.0)])
+        for i in range(3)
+    ]
+    chosen = k.believed()
+    assert [v.id for v in chosen if not is_mover(v)] == [v.id for v in plain[:16]]
+    assert [v.id for v in chosen if is_mover(v)] == [v.id for v in movers]
+    two = k.believed(per_kind=2)
+    assert sum(1 for v in two if is_mover(v)) == 2 and sum(1 for v in two if not is_mover(v)) == 2
+    assert not any(is_mover(v) for v in k.offered())
+    assert [v.id for v in k.offered() if v.kind is VariableKind.POSITION] == [plain[0].id]
+
+
 def test_believed_keeps_the_best_few_of_each_kind() -> None:
     """T-850: the AI acts on its strongest 16 guesses of a kind, confirmed ones first."""
     from retro_ai_lab.understanding.knowledge import BELIEVED_PER_KIND
