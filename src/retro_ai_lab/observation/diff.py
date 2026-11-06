@@ -108,6 +108,9 @@ class ByteStats:
     min_hop: int = 0  # smallest step either way, 0 until the byte has changed (T-921)
     small_hops: int = 0  # changes by at most SMALL_HOP either way (T-914)
     unit_hops: int = 0  # changes by exactly one either way, roll-overs included (T-914)
+    last_hop: int = 0  # the hop of the latest change (T-924)
+    same_hops: int = 0  # changes whose hop equalled the previous change's hop (T-924)
+    usual_hop: int = 0  # the hop last seen in two changes running (T-924)
 
     @property
     def change_rate(self) -> float:
@@ -163,6 +166,8 @@ class ByteStats:
             "min_hop": self.min_hop,
             "small_hops": self.small_hops,
             "unit_hops": self.unit_hops,
+            "same_hops": self.same_hops,
+            "usual_hop": self.usual_hop,
         }
 
 
@@ -215,6 +220,10 @@ class ChangeTracker:
                         st.small_hops += 1
                     if hop == 1:
                         st.unit_hops += 1
+                    if st.changes > 1 and hop == st.last_hop:
+                        st.same_hops += 1
+                        st.usual_hop = hop
+                    st.last_hop = hop
                     if delta > 0:
                         st.ups += 1
                         st.max_step = max(st.max_step, delta)

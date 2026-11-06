@@ -101,6 +101,20 @@ def _is_counter(st: ByteStats) -> bool:
     return ticks >= 0.95 * st.changes and st.change_rate >= 0.95
 
 
+def _is_steady(st: ByteStats) -> bool:
+    """Changes nearly every step, nearly always by the same hop as the change before.
+
+    A frame counter read every four frames (T-921) steps by four every step; one
+    the game resets at a level start or a death jumps once in thousands of
+    steps (T-924), so the hops are compared with their neighbours, not the
+    extremes. A thing that moves at one speed for a whole session reads the
+    same way, and a clock it is for the brain's purposes.
+    """
+    return (
+        st.changes >= 2 and st.change_rate >= NOISE_RATE and st.same_hops >= 0.95 * (st.changes - 1)
+    )
+
+
 def _is_pair(low: ByteStats, high: ByteStats) -> bool:
     """``high`` is the upper byte of a 16-bit value whose lower byte is ``low``.
 
@@ -178,13 +192,16 @@ def _classify_single(st: ByteStats) -> tuple[VariableKind, tuple[Evidence, ...]]
                 Evidence("every-frame", "Changes every frame.", 1.0),
                 Evidence("unit-steps", "Always by exactly one.", 1.0),
             )
-        if st.min_hop == st.max_hop and st.change_rate >= NOISE_RATE:
+        if _is_steady(st):
             # A frame counter read every four frames steps by four every step (T-921):
-            # the same hop every time is a clock, not something moving about.
+            # the same hop every time is a clock, not something moving about. One the
+            # game resets now and then jumps once in thousands of steps (T-924).
+            hop = st.max_hop if st.min_hop == st.max_hop else st.usual_hop
+            how = "Always by exactly" if st.min_hop == st.max_hop else "Nearly always by"
             return VariableKind.COUNTER, (
                 Evidence("monotonic", "Only ever goes up.", 2.0),
                 Evidence("every-frame", "Changes every frame.", 1.0),
-                Evidence("unit-steps", f"Always by exactly {st.max_hop}.", 1.0),
+                Evidence("unit-steps", f"{how} {hop}.", 1.0),
             )
         if values == 2:
             if not rare:  # a blinking bit is no flag (T-869), and nothing else fits

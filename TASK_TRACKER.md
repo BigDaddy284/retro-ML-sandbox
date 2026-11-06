@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-924 | A value that climbs by the same hop as its previous change nearly every step is a counter even when it jumps now and then (a frame counter reset by the game), so the user's frame counter leaves its position seat; the tracker keeps each byte's last hop and how often a hop repeated | 8 | Done | 1/1 | see PR |
 | T-923 | The brain's distance seats pair the best-believed moving things with the player's position whether or not those things won one of the few position seats, so forty enemy sprites ranked below six plain positions still reach the brain as distances | 8 | Done | 1/1 | see PR #178 |
 | T-922 | A guess is also rethought when the classifier keeps its kind but reads it by other evidence, so a position first judged climbing becomes "Something moving" once it has moved both ways; the user's enemy sprites had stayed plain positions for that reason | 8 | Done | 1/1 | see PR #177 |
 | T-921 | A value that climbs by the same amount nearly every step (a frame counter stepping by four) is a counter, not a climbing position; the tracker now keeps each byte's smallest hop beside its largest | 8 | Done | 1/1 | see PR #176 |
@@ -2873,6 +2874,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 1 new test passes; learning + training + integration 156 passed; full suite 1350 passed, 10 skipped in 202.15s (0:03:22).
 - **Commit:** see PR #178. **PR:** #178.
 - **Completion report:** The seats are unchanged, so the brain's state grows by the distances only (eight at most). The log's "It sees" line now counts the paired movers in "(N moving)" even when none holds a seat, which is what to look for in the next log. The frame counter at ram[9] still takes a seat and is one of the own-position candidates; T-924 takes it out.
+
+### T-924 – A counter that steps evenly but jumps now and then
+- **Status:** Done
+- **Phase:** 8 (the user's 11:16 census: `Position at ram[9]`, 62,000 changes, hops 4 to 128, still seated)
+- **Objective:** T-921 reads a climbing byte as a counter when its smallest and largest hops are equal. The 11:16 census showed the frame counter's largest hop at 128: the game resets it now and then (a level start, a death), so one jump in thousands of steps kept it a position. A climbing byte that changes nearly every step and whose hop is the same as its previous hop in nearly every change is a counter, however it jumps between.
+- **Scope:** `ByteStats.last_hop`, `same_hops` and `usual_hop` in `observation/diff.py`; the same-hop counter branch under `mostly_up` in `understanding/variables.py`. **Out of scope:** rare steady steppers (a score adding ten stays a score); the by-one counter rule.
+- **Acceptance criteria:**
+  1. A byte stepping by four every step that jumps back to zero every 300 steps is a COUNTER with evidence saying "Nearly always by 4."
+  2. A byte stepping by four with no jump is still a COUNTER saying "Always by exactly 4."; the T-302 position and the by-one counter are unchanged; a score adding ten now and then is still a SCORE.
+  3. `same_hops` counts the changes whose hop equals the previous change's hop, `usual_hop` is the hop last seen twice running, both are 0 for an unchanged byte, and both are in `to_dict`.
+- **Expected changes:** `src/retro_ai_lab/observation/diff.py`, `src/retro_ai_lab/understanding/variables.py`, `tests/unit/observation/test_diff.py`, `tests/unit/understanding/test_variables.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_tracker_counts_repeated_hops`, `test_a_counter_that_jumps_now_and_then_is_still_a_counter`; observation + understanding + learning + services + integration suites; full suite.
+- **Results:** 2 new tests pass; observation + understanding + learning + services + integration 424 passed; full suite 1352 passed, 10 skipped in 204.34s (0:03:24).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The rule compares each hop with the one before it, so a reset of any size is one miss among thousands. A thing that walks at one speed for a whole session reads as a clock too; in practice an enemy stops, turns or is cleared, which breaks the run. The census will show whether ram[9] has become "Counter" and left the position seats.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
