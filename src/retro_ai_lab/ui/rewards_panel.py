@@ -168,8 +168,11 @@ class RewardsPanel(QWidget):
         self._add_own.clicked.connect(self._on_add_own_clicked)
         self._remove_own = QPushButton("Remove", self)
         self._remove_own.setObjectName("remove_own_button")
-        self._remove_own.setToolTip("Take out a reward you added")
-        self._remove_own.clicked.connect(self.remove_selected_own)
+        self._remove_own.setToolTip(
+            "Take out the picked reward. For one the AI suggested, this tells the AI "
+            'its guess is wrong, like "No, that\'s wrong" under What the AI is doing.'
+        )
+        self._remove_own.clicked.connect(self.remove_selected)
 
         self._warning = QLabel("", self)
         self._warning.setObjectName("rewards_warning")
@@ -310,16 +313,34 @@ class RewardsPanel(QWidget):
         self._note.setText("Reward added.")
         self.select(b.id)
 
-    def remove_selected_own(self) -> None:
+    def remove_selected(self) -> None:
+        """Take out the picked row: one of my own, or the AI's guess behind it (T-937)."""
         bid = self._selected
-        if bid is None or not is_own(bid):
+        profile = self.profile
+        if bid is None or profile is None:
             return
         try:
-            self._context.rewards.remove_own(bid)
+            if is_own(bid):
+                self._context.rewards.remove_own(bid)
+                self._note.setText("Reward removed.")
+                return
+            behaviour = profile.find(bid)
+            var_id = behaviour.trigger.variable_id if behaviour is not None else None
+            knowledge = self._context.discovery.knowledge
+            if behaviour is None or var_id is None or knowledge is None or var_id not in knowledge:
+                self._note.setText(
+                    "That row has no guess of the AI's behind it; untick it to switch it off."
+                )
+                return
+            self._context.discovery.reject(var_id)
+            self._context.discovery.save()
         except (UnsupportedCapabilityError, ConfigurationError) as exc:
             self._note.setText(str(exc))
             return
-        self._note.setText("Reward removed.")
+        self._note.setText(
+            f'Told the AI that "{behaviour.name}" is wrong: its rewards are gone and it '
+            "will not guess that byte again."
+        )
 
     def set_selected_enabled(self, enabled: bool) -> None:
         self._control(lambda bid: self._context.rewards.set_enabled(bid, enabled))
@@ -405,7 +426,7 @@ class RewardsPanel(QWidget):
         for w in (self._plus, self._minus, self._suggested, self._points):
             w.setEnabled(on)
         self._show_points()
-        self._remove_own.setEnabled(on and self._selected is not None and is_own(self._selected))
+        self._remove_own.setEnabled(on and self._selected is not None)
 
     def _fill_own_choices(self) -> None:
         """The AI's offered guesses by their plain names, then any other named value."""
