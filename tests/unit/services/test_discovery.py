@@ -611,8 +611,11 @@ def test_the_census_names_the_busiest_bytes_and_their_numbers(
     busiest = sorted(moved, key=lambda item: -item[1].changes)
     assert 1 <= len(busy) <= 16 and f"{busiest[0][1].changes} changes in " in busy[0]
     assert busy[0].startswith(f"ram[{busiest[0][0][1]}] ")
-    for word in ("values", "hops small", "unit", "largest", "up", "down", "wraps"):
+    for word in ("values", "hops small", "unit", "largest", "up", "down", "wraps", "repeat"):
         assert word in busy[0]
+    # the repeated hops the T-924 counter rule reads (T-927)
+    top = busiest[0][1]
+    assert busy[0].endswith(f"wraps {top.wraps}, repeat {top.same_hops} usual {top.usual_hop}")
     k = discovery.knowledge
     assert k is not None
     offset = int(busy[0].split("]")[0].split("[")[1])

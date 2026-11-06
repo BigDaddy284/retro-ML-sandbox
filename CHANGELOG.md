@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-927: each census line also says how often a value's hop repeated the one before and which hop that was, the numbers the T-924 counter rule reads, so a log can show why a steady stepper is or is not taken for a clock.
 - T-926: the "judged on N changes" record behind each guess is forgotten when a game connects, because the change statistics start from zero with every connection; the user's run on the T-924 build rethought nothing, its guesses having been judged on 60,000 changes of an earlier run that the new run's 30,000 could never double.
 - T-925: the Learning panel's fast-tick test takes its five steps under a time budget of its own and checks the panel's 20 ms budget separately, so a slow Windows CI runner no longer fails it; it had failed on two pull requests and passed on re-run each time.
 - T-924: a value that climbs by the same hop as its previous change nearly every step is a counter even when the game resets it now and then, so the user's frame counter, which jumped back to zero once in thousands of steps and so kept a position seat past T-921, is a counter at last; the tracker now keeps each value's last hop and how often a hop repeated.

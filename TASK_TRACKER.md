@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-927 | Each census line also says how often a value's hop repeated the one before and which hop that was, the numbers the T-924 counter rule reads, so a log can show why a steady stepper is or is not taken for a counter | 8 | Done | 1/1 | see PR |
 | T-926 | The "judged on N changes" record behind a guess is forgotten when a game connects, because the change statistics start again from zero with every connection; the user's run rethought nothing because the counts saved from earlier runs were never reached | 8 | Done | 2/2 | see PR #181 |
 | T-925 | The fast-tick Learning panel test takes its five steps under a generous time budget of its own, checking the 20 ms budget the panel asked for separately, so a slow Windows runner no longer fails it | 8 | Done | 1/1 | see PR #180 |
 | T-924 | A value that climbs by the same hop as its previous change nearly every step is a counter even when it jumps now and then (a frame counter reset by the game), so the user's frame counter leaves its position seat; the tracker keeps each byte's last hop and how often a hop repeated | 8 | Done | 1/1 | see PR #179 |
@@ -2920,6 +2921,20 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; understanding + services + integration 238 passed; full suite 1354 passed, 10 skipped in 218.58s (0:03:38).
 - **Commit:** see PR #181. **PR:** #181.
 - **Completion report:** With the counts at zero, the first review of a run rethinks every guess the AI made itself whose fresh statistics say another kind, on as few as thirty changes; the doubling then bounds the rest of the run as T-917 meant. The 13:04 log's frame counter (27,630 changes, hops repeating) and the forty sprite positions (rare, 249 values, seven hops in eight small) should both be rethought in the next run's first minutes, which the "changed its mind" lines and the census will show.
+
+### T-927 – The census shows the repeated hops
+- **Status:** Done
+- **Phase:** 8 (the user's 13:04 census: `Position at ram[9]`, 27,630 changes, hops small 27,533 unit 0 largest 128, which cannot say whether T-924's rule would take it)
+- **Objective:** The census prints the numbers the mover and climbing rules read (small, unit and largest hops, ups, downs, roll-overs) but not the two T-924 added, `same_hops` and `usual_hop`, so the 13:04 log could not show whether the frame counter would be a counter once rethought. Each line now ends "repeat N usual M".
+- **Scope:** the census line in `DiscoveryService.census`. **Out of scope:** any rule.
+- **Acceptance criteria:**
+  1. Every census line carries "repeat" and "usual" with the byte's `same_hops` and `usual_hop`.
+  2. The T-919/T-920 census tests hold.
+- **Expected changes:** `src/retro_ai_lab/services/discovery.py`, `tests/unit/services/test_discovery.py`, `README.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** the census test's word list and a check of the numbers against the tracker; services suite; full suite.
+- **Results:** census test extended and passing; services 100 passed; full suite 1354 passed, 10 skipped in 211.79s (0:03:31).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** Two numbers more per line, forty-eight lines every three minutes at most. The next census will say outright whether the frame counter's hops repeat in 95% of its changes.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
