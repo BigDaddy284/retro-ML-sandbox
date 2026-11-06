@@ -689,6 +689,44 @@ def test_brain_is_saved_as_it_goes_and_restored_on_reconnect(lab: Lab) -> None:
     assert t.last is not None and t.last.number == 4 and t.episodes == 4
 
 
+def test_the_log_says_whether_the_saved_brain_was_picked_up(
+    lab: Lab, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T-933: the user's log had five fresh brains and nothing saying why."""
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.training.service")
+    lab.connect()
+    t = lab.training
+    store = t.store
+    game_id = t.game_id
+    assert store is not None and game_id is not None
+    t.train(2)
+    steps = t.total_steps
+    lab.connection.disconnect()
+    lab.connect()
+    assert t.agent is not None
+    exploring = round(t.agent.epsilon * 100)
+    t.forget()
+    lab.connection.disconnect()
+    store.path_for(game_id).write_text("{", "utf-8")
+    lab.connect()
+    messages = [
+        (r.levelname, r.getMessage())
+        for r in caplog.records
+        if not r.getMessage().startswith(("Go ", "The brain after"))
+    ]
+    assert messages == [
+        ("INFO", "No saved brain for this game yet: the AI starts with a new one."),
+        (
+            "INFO",
+            f"Picked up the saved brain for this game: 2 goes and {steps} steps learned so far; "
+            f"exploring {exploring}% of the time.",
+        ),
+        ("INFO", "The AI forgot this game at your request: its brain and the saved copy are gone."),
+        ("WARNING", t.fresh_start),
+    ]
+    assert "starting afresh" in t.fresh_start
+
+
 def test_saved_brain_for_different_controls_or_damaged_file_starts_afresh(lab: Lab) -> None:
     lab.connect()
     t = lab.training

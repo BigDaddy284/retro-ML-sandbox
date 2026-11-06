@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QTreeWidget,
@@ -83,6 +84,11 @@ FAST_WORKER_SLICE_SECONDS = 0.1  # a fast slice on the worker, between two statu
 FAST_TICK_MS = 1
 
 log = logging.getLogger(__name__)
+
+FORGET_QUESTION = (
+    "This deletes everything the AI has learned about this game, including the saved "
+    "brain, and it cannot be undone. Start from scratch?"
+)
 
 
 class _StepSignals(QObject):
@@ -432,9 +438,25 @@ class LearningPanel(QWidget):
         self.refresh()
 
     def forget(self) -> None:
+        # Asked first (T-933): the user's log had five fresh brains in two hours.
+        if not self.confirm(FORGET_QUESTION):
+            self._note.setText("Kept the brain.")
+            self.refresh()
+            return
         if self._call(self._training.forget):
             self._note.setText("The AI has forgotten this game and will start fresh.")
         self.refresh()
+
+    def confirm(self, question: str) -> bool:
+        """Ask before a step that cannot be undone; tests replace this."""
+        answer = QMessageBox.question(
+            self,
+            "Start from scratch?",
+            question,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     def rehearse(self) -> None:
         steps = 0

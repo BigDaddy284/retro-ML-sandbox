@@ -697,6 +697,7 @@ class TrainingService:
         self._fresh_start = ""
         if self._store is not None:
             self._store.delete(self._game_id)
+        log.info("The AI forgot this game at your request: its brain and the saved copy are gone.")
         self._announce("forget")
 
     @_locked
@@ -853,8 +854,20 @@ class TrainingService:
                 brain = Brain.from_dict(self._store.load(self._game_id), space=space)
             except ConfigurationError as exc:
                 self._fresh_start = f"Couldn't use the saved brain, so starting afresh: {exc}"
+                log.warning("%s", self._fresh_start)
             else:
                 self._adopt(brain)
+                log.info(
+                    "Picked up the saved brain for this game: %d go%s and %d step%s learned so "
+                    "far; exploring %.0f%% of the time.",
+                    brain.episodes,
+                    "" if brain.episodes == 1 else "es",
+                    brain.agent.updates,
+                    "" if brain.agent.updates == 1 else "s",
+                    brain.agent.epsilon * 100,
+                )
+        else:
+            log.info("No saved brain for this game yet: the AI starts with a new one.")
         self._encoder = StateEncoder(knowledge)
         self._harness = (
             ExperimentHarness(self._connection, slot=CHECKPOINT_SLOT)
