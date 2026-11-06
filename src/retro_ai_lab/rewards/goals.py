@@ -389,9 +389,12 @@ def merge_suggestions(
     """Add suggested objectives the goal lacks and retire stale ones. Returns new ids.
 
     Objectives the child wrote are never touched. A suggested one is removed when
-    its variable is known but no longer believed to track progress (the AI changed
-    its mind, so any "completion" it saw was a misreading); its wording follows
-    the variable's name.
+    its variable is no longer an offered progress guess: the AI changed its mind,
+    or no longer has the guess at all (T-938: the user's Progress panel piled up
+    steps "detected by Progress of v12" from guesses that were gone), so any
+    "completion" it saw was a misreading. While the knowledge is empty (the AI
+    has not looked at the game yet) such a step waits. Its wording follows the
+    variable's name.
     """
     offered = knowledge.offered(at_least)  # the best few progress guesses (T-858)
     progress = [v for v in offered if v.kind is VariableKind.PROGRESS]
@@ -401,9 +404,13 @@ def merge_suggestions(
         if not o.suggested or o.trigger is None or o.trigger.kind is not EventKind.PROGRESS:
             continue
         if o.trigger.key not in keys:
+            # A guess the knowledge has never held is not "gone" while the knowledge
+            # is empty: the AI has not looked at this game yet, and a person's edits
+            # on the step (dependencies, ticks) would be lost for nothing.
             vid = o.trigger.variable_id
-            if vid is not None and vid in knowledge:
-                goal.remove(o.id)
+            if vid is not None and vid not in knowledge and len(knowledge) == 0:
+                continue
+            goal.remove(o.id)
             continue
         wanted = f"Get further in {names[keys[o.trigger.key].id]}"
         if o.description != wanted:

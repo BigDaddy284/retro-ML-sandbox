@@ -260,16 +260,24 @@ def test_merge_retires_and_rewords_stale_suggestions() -> None:
     assert g.get("mine").description == "Beat my record"  # the child's step is untouched
     assert g.get(lap_obj.id).description == "Get further in Lap number"
     assert g.get(lap_obj.id).suggested and g.get(lap_obj.id).depends_on == ()
-    # An objective for a variable the knowledge has forgotten entirely is kept.
-    orphan = Objective(
-        "goal:progress:ghost",
-        "Get further in Ghost",
-        trigger=Trigger(EventKind.PROGRESS, "ghost"),
-        suggested=True,
+    # A suggested step for a guess the knowledge no longer has at all is retired too
+    # (T-938); a step the child wrote on such a guess is left alone.
+    g.add(
+        Objective(
+            "goal:progress:ghost",
+            "Get further in Ghost",
+            trigger=Trigger(EventKind.PROGRESS, "ghost"),
+            suggested=True,
+        )
     )
-    g.add(orphan)
-    merge_suggestions(g, k)
-    assert "goal:progress:ghost" in g
+    g.add(Objective("my-ghost", "Beat Ghost", trigger=Trigger(EventKind.PROGRESS, "ghost")))
+    assert merge_suggestions(g, k) == ()
+    assert "goal:progress:ghost" not in g and "my-ghost" in g
+    assert g.get(lap_obj.id).description == "Get further in Lap number"
+    # While the knowledge is empty the AI has not looked yet: nothing is retired.
+    fresh = Knowledge("g", title="Game")
+    assert merge_suggestions(g, fresh) == ()
+    assert lap_obj.id in g and "my-ghost" in g
 
 
 def test_toy_racer_goal_completes_a_checkpoint() -> None:
