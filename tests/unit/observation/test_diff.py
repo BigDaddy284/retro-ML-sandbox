@@ -124,6 +124,30 @@ def test_tracker_reset() -> None:
     assert t.observe(snap(0, b"\x00")) is None
 
 
+def test_tracker_skips_an_expected_jump() -> None:
+    """T-935: the snapshot after a restore is moved past, not counted."""
+    t = ChangeTracker()
+    t.expect_jump()  # nothing to skip before the first snapshot
+    assert not t.jump_expected
+    for v in (3, 4, 5):
+        t.observe(snap(0, bytes([v])))
+    st = t.stats("ram", 0)
+    assert (st.samples, st.changes, st.ups, st.downs, st.last) == (2, 2, 2, 0, 5)
+    t.expect_jump()
+    assert t.jump_expected
+    d = t.observe(snap(3, b"\x03"))  # put back to the start
+    assert d is not None and d.changes == (ByteChange("ram", 0, 5, 3),)
+    assert not t.jump_expected
+    assert (st.samples, st.changes, st.ups, st.downs, st.last) == (2, 2, 2, 0, 3)
+    assert st.monotonic_up and t.transitions == 2 and t.observed == 4
+    t.observe(snap(4, b"\x04"))  # counted again, from the restored value
+    assert (st.samples, st.changes, st.ups, st.downs, st.last) == (3, 3, 3, 0, 4)
+    assert t.transitions == 3
+    t.expect_jump()
+    t.reset()
+    assert not t.jump_expected
+
+
 def test_classify_separates_constant_noise_and_state() -> None:
     t = ChangeTracker()
     # byte0 constant, byte1 noise (changes every frame), byte2 state (changes sometimes)

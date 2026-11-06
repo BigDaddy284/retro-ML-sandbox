@@ -123,7 +123,10 @@ it could see of the game. A go that lost lives says so on its line (", lost a
 life 2 times, the first at step 120"), and every tenth go from the twentieth a
 "Survival over the last 10 goes" line compares lives lost per go, and how many
 steps the first loss took, with the ten goes before: the plain measure of
-whether the AI is getting past what kills it.
+whether the AI is getting past what kills it. Every go starts by putting the
+game back to its checkpoint, and that jump is the AI's doing, not the game's:
+the change statistics behind the "went up N times and down N" warnings skip
+it, so a life count that only ever drops in play is not told it bounces.
 
 ## Letting the AI start the game
 

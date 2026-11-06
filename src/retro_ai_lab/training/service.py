@@ -476,6 +476,7 @@ class TrainingService:
     def _restore_spot(self) -> None:
         if self._spot_pinned and self._connection.is_connected:
             self._connection.call(lambda a: a.load_state(PRACTISE_SLOT))
+            self._observation.expect_jump()  # the jump back is not a change (T-935)
 
     @_locked
     def set_mode(self, mode: Mode) -> None:
@@ -870,7 +871,9 @@ class TrainingService:
             log.info("No saved brain for this game yet: the AI starts with a new one.")
         self._encoder = StateEncoder(knowledge)
         self._harness = (
-            ExperimentHarness(self._connection, slot=CHECKPOINT_SLOT)
+            ExperimentHarness(
+                self._connection, slot=CHECKPOINT_SLOT, on_restore=self._observation.expect_jump
+            )
             if self._use_checkpoint and caps.save_states
             else None
         )
