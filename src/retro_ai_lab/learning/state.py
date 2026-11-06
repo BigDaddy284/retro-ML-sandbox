@@ -206,8 +206,11 @@ class StateEncoder:
                 words.append(word)
                 if self._pairs:
                     d = len(self._pairs)
+                    mine = self._pairs[0][1]  # the best-believed own position (T-929)
+                    whose = " which the stick moves" if _input_linked(mine) else ""
                     words.append(
                         _plural(d, "distance to a moving thing", "distances to moving things")
+                        + f" from {mine.display_name}{whose}"
                     )
                 continue
             words.append(word)

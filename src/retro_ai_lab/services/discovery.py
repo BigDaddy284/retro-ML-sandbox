@@ -50,7 +50,7 @@ from retro_ai_lab.understanding.knowledge import (
     Variable,
     VariableKind,
 )
-from retro_ai_lab.understanding.linking import apply_input_links, find_input_links
+from retro_ai_lab.understanding.linking import InputLinks, apply_input_links, find_input_links
 from retro_ai_lab.understanding.longlook import LongLook
 from retro_ai_lab.understanding.moments import (
     WINDOW_FRAMES,
@@ -146,6 +146,27 @@ def _names(variables: list[Variable], most: int = 5) -> str:
 def game_id_for(system: str, title: str, rom_hash: str | None) -> str:
     """A stable id for a game: its hash when the emulator gives one."""
     return rom_hash or f"{system}:{title}"
+
+
+def _experiment_words(k: Knowledge, links: InputLinks) -> str:
+    """One line on what the buttons moved, for the log (T-929)."""
+    moved: list[str] = []
+    seen: set[str] = set()
+    for loc in sorted(links.locations()):
+        v = k.at(loc[0], loc[1])
+        if v is None or v.id in seen:
+            continue
+        seen.add(v.id)
+        moved.append(f"{v.display_name} ({', '.join(links.buttons_for(loc))})")
+    dead = links.dead_buttons()
+    words = (
+        f"{len(moved)} values move with the buttons: {'; '.join(moved)}"
+        if moved
+        else "no value moves with the buttons here"
+    )
+    if dead:
+        words += f". Buttons that moved nothing: {', '.join(dead)}"
+    return words + "."
 
 
 class DiscoveryService:
@@ -903,6 +924,7 @@ class DiscoveryService:
                 self._since_experiment = 0
             touched = apply_input_links(k, links)
             self._experiments += 1
+            log.info("Experiment %d: %s", self._experiments, _experiment_words(k, links))
             added = tuple(
                 v for v in touched if not any(e.kind != "input-linked" for e in v.evidence)
             )

@@ -155,13 +155,19 @@ def test_experiments_run_on_schedule_and_on_demand(
     connection: ConnectionService,
     observation: ObservationService,
     progress: list[DiscoveryProgress],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
     connection.connect("fake", seed=5)
     assert discovery.can_experiment()
     play(connection, observation, 249)
     assert discovery.experiments == 0
     play(connection, observation, 1)
     assert discovery.experiments == 1
+    # the log says what the buttons moved (T-929)
+    line = next(m for m in caplog.messages if m.startswith("Experiment 1: "))
+    assert f"Position at ram[{LAYOUT.lane}] (" in line and "Controller input (" in line
+    assert "values move with the buttons" in line
     assert any(p.stage == "experimenting" for p in progress)
     k = discovery.knowledge
     assert k is not None

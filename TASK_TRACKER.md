@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-929 | The log says what each button experiment found (the values each button moves, and the buttons that moved nothing) and the "It sees" line names the position the distances to moving things are measured from, so a log can show whether the AI knows its own position | 8 | Done | 2/2 | see PR |
 | T-928 | The AI's strongest sixteen guesses of a kind count moving things apart from plain positions, so sixteen climbing positions no longer push every enemy sprite out of what the brain, the rewards and the distance seats can see; the Rewards panel still offers plain positions only | 8 | Done | 2/2 | see PR #183 |
 | T-927 | Each census line also says how often a value's hop repeated the one before and which hop that was, the numbers the T-924 counter rule reads, so a log can show why a steady stepper is or is not taken for a counter | 8 | Done | 1/1 | see PR #182 |
 | T-926 | The "judged on N changes" record behind a guess is forgotten when a game connects, because the change statistics start again from zero with every connection; the user's run rethought nothing because the counts saved from earlier runs were never reached | 8 | Done | 2/2 | see PR #181 |
@@ -2951,6 +2952,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 1 new test passes; understanding + learning + services + integration 307 passed; full suite 1355 passed, 10 skipped in 209.46s (0:03:29).
 - **Commit:** see PR #183. **PR:** #183.
 - **Completion report:** The believed set can now hold up to sixteen movers beside sixteen plain positions; the detector, the long look and the goals read it too, and the long look already leaves movers out (T-911). Whether the sprites are movers in the user's knowledge, and which position the distances are measured from, the log cannot yet say; T-929 makes it say so.
+
+### T-929 – The log says what the buttons move and where distances come from
+- **Status:** Done
+- **Phase:** 8 (the user's 14:32 log: nothing in it says whether the AI has found the position the stick moves, which every distance is measured from)
+- **Objective:** A button experiment (`DiscoveryService.experiment`) logs nothing, and the census and rethink lines print a guess's kind label, so "Position at ram[134]" with the stick's evidence and one without look the same. Each experiment now logs one line naming every value the buttons moved, with its buttons, and the buttons that moved nothing; the "It sees" line says which position the distances are measured from and whether the stick moves it.
+- **Scope:** `DiscoveryService.experiment` in `services/discovery.py`; `StateEncoder.describe` in `learning/state.py`. **Out of scope:** any rule.
+- **Acceptance criteria:**
+  1. An experiment on the toy racer logs "Experiment 1: …" naming the lane position with its buttons and the controller mirror, and a nothing-found experiment says so.
+  2. `describe` ends the distances with "from Position at ram[N]", adding "which the stick moves" when that position has input-linked evidence.
+  3. The T-913 and T-923 describe tests hold with the new words.
+- **Expected changes:** `src/retro_ai_lab/services/discovery.py`, `src/retro_ai_lab/learning/state.py`, `tests/unit/services/test_discovery.py`, `tests/unit/learning/test_state.py`, `README.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** the experiment test's caplog check; `test_describe_names_the_position_distances_come_from`; services + learning + training + integration suites; full suite.
+- **Results:** experiment test extended and 1 new test pass; services + learning + training + integration 257 passed; full suite 1356 passed, 10 skipped in 205.40s (0:03:25).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** One log line per experiment (a handful per run) and a few words more on the line after each go. The next log will say whether the AI has its own position, which decides whether the distances mean anything.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

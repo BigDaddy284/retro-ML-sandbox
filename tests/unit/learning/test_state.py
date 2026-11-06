@@ -330,7 +330,8 @@ def test_moving_things_get_distance_seats_without_a_position_seat() -> None:
 def test_the_encoder_says_what_the_brain_sees_in_words() -> None:
     k, _me, _it, _score = moving_world()
     assert StateEncoder(k).describe() == (
-        "3 values: 2 positions (1 moving), 1 distance to a moving thing, 1 score"
+        "3 values: 2 positions (1 moving), 1 distance to a moving thing from Position at ram[1], "
+        "1 score"
     )
     assert StateEncoder(Knowledge("empty")).describe() == "nothing yet"
     k2 = Knowledge("g")
@@ -341,6 +342,20 @@ def test_the_encoder_says_what_the_brain_sees_in_words() -> None:
     k2.propose(RAM, 6, kind=VariableKind.PROGRESS, evidence=SURE)
     k2.propose(RAM, 7, kind=VariableKind.COUNTER, evidence=SURE)  # ignored kinds are not seen
     assert StateEncoder(k2).describe() == "6 values: 1 life count, 2 progress values, 3 switches"
+
+
+def test_describe_names_the_position_distances_come_from() -> None:
+    """T-929: the user's log could not say whether the AI knew its own position."""
+    from retro_ai_lab.understanding.knowledge import INPUT_LINKED, MOVER
+
+    k = Knowledge("g")
+    pos = VariableKind.POSITION
+    k.propose(RAM, 0, kind=pos, evidence=[Evidence("monotonic", "Climbs.", 6.0)])
+    k.propose(RAM, 1, kind=pos, evidence=[Evidence(INPUT_LINKED, "Left/Right", 1.5)])
+    k.propose(RAM, 3, kind=pos, evidence=[Evidence(MOVER, "Moves.", 1.5)])
+    assert "1 distance to a moving thing from Position at ram[1] which the stick moves" in (
+        StateEncoder(k).describe()
+    )
 
 
 # ------------------------------------------------------------ T-915: my position

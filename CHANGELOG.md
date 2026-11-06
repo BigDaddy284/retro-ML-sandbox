@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-929: each button experiment logs the values the buttons moved and the buttons that moved nothing, and the "It sees" line after every go names the position the distances to moving things are measured from and whether the stick moves it, so a log can show whether the AI knows its own position.
 - T-928: the AI's strongest sixteen guesses of a kind count moving things apart from plain positions, so the user's sixteen climbing positions no longer push every enemy sprite out of what the brain and the distance seats can see; the Rewards panel still offers plain positions only.
 - T-927: each census line also says how often a value's hop repeated the one before and which hop that was, the numbers the T-924 counter rule reads, so a log can show why a steady stepper is or is not taken for a clock.
 - T-926: the "judged on N changes" record behind each guess is forgotten when a game connects, because the change statistics start from zero with every connection; the user's run on the T-924 build rethought nothing, its guesses having been judged on 60,000 changes of an earlier run that the new run's 30,000 could never double.
