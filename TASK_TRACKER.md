@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-920 | The census has three lists: the busiest bytes, the smoothest (small hops in three changes of four, most changes first) and the widest-ranging rare bytes (changing in under a tenth of steps, most values first), so a thing on screen for seconds of each go is listed even though noise changes every step | 8 | Done | 1/1 | see PR |
 | T-919 | Every 25th review the log prints a census of the sixteen busiest memory bytes (changes, values, small, unit and largest hops, ups, downs, wraps, and what the AI calls each), so a log can show why a byte is or is not taken for something moving | 8 | Done | 1/1 | see PR #174 |
 | T-918 | A thing on screen only now and then is still a mover: three small hops in four make a byte smooth (one big hop each way per visit), and a rare byte that has moved through more than sixteen values over thirty or more changes is a position of something moving | 8 | Done | 1/1 | see PR #173 |
 | T-917 | A guess is rethought only once the byte has changed twice as often as when it was last judged, so a byte on the edge of a rule no longer flips kind at every review; each guess records how many changes it was judged on | 8 | Done | 1/1 | see PR #172 |
@@ -2807,6 +2808,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; services + understanding + integration 233 passed; full suite 1346 passed, 10 skipped in 207.41s (0:03:27).
 - **Commit:** see PR #174. **PR:** #174.
 - **Completion report:** Sixteen lines every three minutes is a few hundred lines an hour, which the stall watch and the link already exceed. The census ranks by changes, so a byte that moves rarely but matters (a brief enemy) can miss the top sixteen; if the next log shows the enemy bytes below the cut, the next step is a second list of the bytes with the most distinct values.
+
+### T-920 – The census lists the smoothest and the widest-ranging rare bytes too
+- **Status:** Done
+- **Phase:** 8 (the user's 01:52 log: nine censuses, all sixteen lines taken by random bytes, a frame counter and sprite flicker)
+- **Objective:** T-919 ranks by changes, so every census line went to bytes that change every step and the enemy's position, which changes for seconds of each go, never appeared. Add the two lists that would hold it: the smooth bytes with the most changes, and the rare bytes with the most distinct values.
+- **Scope:** `DiscoveryService.census()` in `services/discovery.py` (three headed lists, `most` each). **Out of scope:** any rule change; the frame counter seated as a position (T-921).
+- **Acceptance criteria:**
+  1. The census has three headed lists: "Busiest", "Smoothest" (smooth bytes, most changes first) and "Widest-ranging rare" (change rate at or under RARE_RATE, most distinct values first), each at most `most` lines in the T-919 format; a byte can appear in more than one list.
+  2. A list with no byte prints its heading and "none".
+  3. With nothing connected the census is empty; the review still logs it on schedule.
+- **Expected changes:** `src/retro_ai_lab/services/discovery.py`, `tests/unit/services/test_discovery.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_the_census_names_the_busiest_bytes_and_their_numbers` extended for the three lists; `test_the_review_logs_the_census_on_schedule` unchanged; services + understanding + integration suites; full suite.
+- **Results:** the extended census test passes; services + understanding + integration 233 passed; full suite 1346 passed, 10 skipped in 201.46s (0:03:21).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** Forty-eight lines every three minutes at most. The same log showed the frame counter (ram[9]) seated as a climbing position: it steps by exactly four every step, which the climbing rule reads as "varied steps" because the steps are not one; a climbing byte whose hops are all the same size is a counter (T-921, next).
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

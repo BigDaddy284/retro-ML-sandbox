@@ -835,32 +835,56 @@ class DiscoveryService:
             return update
 
     def census(self, most: int = CENSUS_MOST) -> str:
-        """The busiest bytes and the numbers the classifier reads, one line each (T-919).
+        """The busiest, smoothest and widest-ranging rare bytes, with the numbers the
+        classifier reads, one line each (T-919, T-920).
 
         Three builds changed the mover rule on simulated bytes while the user's
         game kept showing no moving thing: the log named kinds but never the
-        statistics behind them. This names them, so the next log can say why a
-        byte is or is not taken for something moving.
+        statistics behind them. Ranking by changes alone filled every line with
+        random bytes and a frame counter (T-920), so a thing on screen for
+        seconds of each go is looked for in the two lists that would hold it:
+        the smooth bytes with the most changes, and the rare bytes with the
+        most distinct values.
         """
         with self._lock:
             k = self._knowledge
             if k is None:
                 return ""
             stats = self._observation.tracker.all_stats()
-            busiest = sorted(stats.items(), key=lambda item: -item[1].changes)[:most]
-            lines = []
-            for (region, offset), st in busiest:
-                if st.changes == 0:
-                    break
-                v = k.at(region, offset)
-                word = "nobody's guess" if v is None else v.display_name
-                if v is not None and v.rejected:
-                    word += " (dropped)"
-                lines.append(
-                    f"{region}[{offset}] {word}: {st.changes} changes in {st.samples} steps, "
-                    f"{len(st.distinct)} values, hops small {st.small_hops} unit {st.unit_hops} "
-                    f"largest {st.max_hop}, up {st.ups} down {st.downs} wraps {st.wraps}"
-                )
+            moved = [(loc, st) for loc, st in stats.items() if st.changes > 0]
+            lists = (
+                ("Busiest", sorted(moved, key=lambda item: -item[1].changes)),
+                (
+                    "Smoothest",
+                    sorted(
+                        (item for item in moved if item[1].smooth),
+                        key=lambda item: -item[1].changes,
+                    ),
+                ),
+                (
+                    "Widest-ranging rare",
+                    sorted(
+                        (item for item in moved if item[1].change_rate <= RARE_RATE),
+                        key=lambda item: -len(item[1].distinct),
+                    ),
+                ),
+            )
+            lines: list[str] = []
+            for heading, ranked in lists:
+                lines.append(f"{heading}:")
+                if not ranked:
+                    lines.append("none")
+                for (region, offset), st in ranked[:most]:
+                    v = k.at(region, offset)
+                    word = "nobody's guess" if v is None else v.display_name
+                    if v is not None and v.rejected:
+                        word += " (dropped)"
+                    lines.append(
+                        f"{region}[{offset}] {word}: {st.changes} changes in {st.samples} "
+                        f"steps, {len(st.distinct)} values, hops small {st.small_hops} unit "
+                        f"{st.unit_hops} largest {st.max_hop}, up {st.ups} down {st.downs} "
+                        f"wraps {st.wraps}"
+                    )
             return "\n".join(lines)
 
     def experiment(self) -> DiscoveryUpdated:
