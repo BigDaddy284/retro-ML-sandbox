@@ -321,7 +321,7 @@ def test_adding_and_removing_a_reward_of_my_own(panel: RewardsPanel, context: Ap
     lives = k.at(RAM, LAYOUT.lives)
     assert lives
     panel.select(f"setback:{lives.id}")
-    assert not button(panel, "remove_own_button").isEnabled()  # type: ignore[attr-defined]
+    assert button(panel, "remove_own_button").isEnabled()  # type: ignore[attr-defined]
     panel.add_own(lane.id, True, 2.0)
     assert panel.note_text == "Reward added."
     up = f"mine:up:{lane.id}"
@@ -346,11 +346,45 @@ def test_adding_and_removing_a_reward_of_my_own(panel: RewardsPanel, context: Ap
     panel.refresher.flush()
     assert up in panel.behaviour_ids() and down in panel.behaviour_ids()
     panel.select(down)
-    panel.remove_selected_own()
+    panel.remove_selected()
     assert panel.note_text == "Reward removed." and down not in panel.behaviour_ids()
     assert up in panel.behaviour_ids()
     context.connection.disconnect()
     assert not button(panel, "add_own_button").isEnabled()  # type: ignore[attr-defined]
+
+
+def test_remove_tells_the_ai_a_suggested_guess_is_wrong(
+    panel: RewardsPanel, context: AppContext
+) -> None:
+    """T-937: the user's wrong rows were "hard baked": Remove now rejects the guess behind one."""
+    assert not button(panel, "remove_own_button").isEnabled()  # type: ignore[attr-defined]
+    context.connection.connect("fake", seed=2)
+    k = teach(context)
+    panel.refresher.flush()
+    lives = k.at(RAM, LAYOUT.lives)
+    assert lives
+    row = f"setback:{lives.id}"
+    assert row in panel.behaviour_ids()
+    panel.select(row)
+    assert button(panel, "remove_own_button").isEnabled()  # type: ignore[attr-defined]
+    panel.remove_selected()
+    panel.refresher.flush()
+    assert panel.note_text == (
+        'Told the AI that "Losing Lives" is wrong: its rewards are gone and it will not '
+        "guess that byte again."
+    )
+    assert k.get(lives.id).rejected
+    assert not any(bid.endswith(lives.id) for bid in panel.behaviour_ids())
+    context.rewards.refresh_suggestions()
+    panel.refresher.flush()
+    assert not any(bid.endswith(lives.id) for bid in panel.behaviour_ids())
+    # A row with no guess behind it cannot be removed; the tick is the way to switch it off.
+    for bid in ("reset:*", "button:press:up"):
+        panel.select(bid)
+        panel.remove_selected()
+        assert "untick" in panel.note_text and bid in panel.behaviour_ids()
+    panel.select(None)
+    assert not button(panel, "remove_own_button").isEnabled()  # type: ignore[attr-defined]
 
 
 def test_the_name_column_can_be_dragged_wider(qtbot: QtBot, context: AppContext) -> None:

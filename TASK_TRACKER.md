@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-937 | The Rewards panel's Remove button works on every row: a reward of one's own is taken out as before, and a row the AI suggested tells the AI its guess is wrong (as "No, that's wrong" does), so its rewards go and the byte is not guessed again; a row with no guess behind it (Starting over, the buttons) says to untick it instead | 8 | Done | 1/1 | see PR |
 | T-936 | The value search takes any number a game shows (up to 99,999,999), not just 0 to 255: it looks for it in every way games store numbers (binary over one to four bytes, either byte order; packed BCD, either byte order; one digit per byte, either order) and keeps every byte that takes part; "Is exactly" does the same; the hint names the real range | 8 | Done | 1/1 | see PR #191 |
 | T-935 | A checkpoint or practise-spot restore is not a change: the change statistics skip the jump the next snapshot shows after a `load_state`, so the "went up N times and down N" lives warning no longer counts the AI's own restores as the lives coming back; the restore's diff is still returned | 8 | Done | 1/1 | see PR #190 |
 | T-934 | Survival in the log: each go's line says how many lives were lost and at which step the first went, the go result keeps both, and every tenth go a line compares lives lost per go and the steps before the first loss over the last ten goes with the ten before | 8 | Done | 1/1 | see PR #189 |
@@ -2989,6 +2990,22 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; understanding + services + integration 241 passed; full suite 1358 passed, 10 skipped in 183.18s (0:03:03).
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
+
+### T-937 – Remove works on every reward row
+- **Status:** Done
+- **Phase:** 8 (the user found the real score and lives, and asked for "a way to remove all the bits in the image that are wrong, it's like they're hard baked in there": the Rewards panel's Remove only took out rewards of one's own, and the wrong guesses had to be rejected in another panel)
+- **Objective:** `RewardsPanel.remove_selected()` takes out whichever row is picked. A reward of one's own is removed as before. A row the AI suggested has a guess behind it (`trigger.variable_id`): the panel calls `DiscoveryService.reject` on it, saves the knowledge, and the note says 'Told the AI that "Lifes goes up" is wrong: its rewards are gone and it will not guess that byte again.'; the existing rule removes every reward row of a rejected guess and keeps the guess as rejected so it is not re-proposed. A row with no guess behind it (Starting over, the button rows) is not removable; the note says to untick it to switch it off. The button is enabled whenever a row is picked and the game is connected; its tooltip says what it does to a guess. This is the same "No, that's wrong" the discovery panel has, reached from where the person sees the wrong row, so nothing new is decided for the person and nothing is game-specific.
+- **Scope:** `ui/rewards_panel.py` (`remove_selected`, the button's tooltip and enabling). **Out of scope:** removing a guess the person confirmed (rejecting it un-confirms it, as the discovery panel does); a confirmation dialog (a rejection can be undone with "Yes, that's right" in the discovery panel).
+- **Acceptance criteria:**
+  1. With an AI-suggested row picked, Remove is enabled; pressing it leaves no reward row for that guess, the guess is rejected in the knowledge, the note names the row, and a later `refresh_suggestions` does not bring it back.
+  2. With a row of one's own picked, Remove takes it out as before ("Reward removed.").
+  3. With a button row or "Starting over" picked, the rows stay and the note says to untick it.
+  4. With no row picked, or no game connected, the button is disabled.
+- **Expected changes:** `src/retro_ai_lab/ui/rewards_panel.py`, `tests/ui/test_rewards_panel.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_remove_tells_the_ai_a_suggested_guess_is_wrong` (panel); the own-reward test calls `remove_selected`; ui suite; full suite.
+- **Results:** 1 new test passes; rewards panel tests 14 passed; full suite 1381 passed, 10 skipped (182.87s); ruff and mypy clean.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** Remove now does from the Rewards panel what "No, that's wrong" does from the discovery panel, for the row the person is looking at. The service rules were already there (a rejected guess loses its reward rows and is not proposed again); the panel only needed to reach them. Rows with no guess behind them keep their tick as the way to switch them off.
 
 ### T-936 – The value search takes any number the game shows
 - **Status:** Done
