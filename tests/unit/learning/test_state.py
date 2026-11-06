@@ -291,6 +291,39 @@ def test_seats_are_kept_for_distances_when_anything_moves() -> None:
     assert StateEncoder(k, most=1).variables  # the seats never go below one
 
 
+def test_moving_things_get_distance_seats_without_a_position_seat() -> None:
+    """T-923: the user's enemy sprites ranked below six plain positions and were unseen."""
+    from retro_ai_lab.learning.state import DISTANCE_SEP
+    from retro_ai_lab.understanding.knowledge import INPUT_LINKED, MOVER, is_mover
+
+    k = Knowledge("g")
+    me = k.propose(RAM, 0, kind=VariableKind.POSITION, evidence=[Evidence(INPUT_LINKED, "", 1.5)])
+    plain = [
+        k.propose(RAM, 1 + i, kind=VariableKind.POSITION, evidence=[Evidence("monotonic", "", 6.0)])
+        for i in range(8)
+    ]
+    movers = [
+        k.propose(RAM, 10 + i, kind=VariableKind.POSITION, evidence=[Evidence(MOVER, "", 2.0)])
+        for i in range(3)
+    ]
+    for i in range(20):
+        k.propose(RAM, 20 + i, kind=VariableKind.FLAG, evidence=SURE)
+    enc = StateEncoder(k, most=14)  # 6 seats after the 8 kept for distances: 3 positions, 3 flags
+    seated = [v for v in enc.variables if v.kind is VariableKind.POSITION]
+    assert seated and all(v in plain for v in seated)  # the movers won no seat
+    assert me not in enc.variables and not any(is_mover(v) for v in enc.variables)
+    assert sorted(m.id for m, _ in enc.pairs) == sorted(m.id for m in movers)
+    assert all(p is me for _, p in enc.pairs)
+    state = enc.encode(snap(bytes([5] + [0] * 9 + [20, 40, 60] + [0] * 30)))
+    distances = [p for p in state.parts if DISTANCE_SEP in p[0]]
+    assert len(distances) == 3 and len(state.parts) == len(enc.variables) + 3
+    assert "(3 moving)" in enc.describe() and "3 distances to moving things" in enc.describe()
+    # a seated mover is counted once
+    k.update(movers[0].id, evidence=(Evidence(MOVER, "", 9.0),))
+    enc.refresh()
+    assert movers[0].id in {v.id for v in enc.variables} and "(3 moving)" in enc.describe()
+
+
 # ------------------------------------------------------------ T-913: what it sees
 
 

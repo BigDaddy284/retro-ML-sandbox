@@ -199,9 +199,10 @@ class StateEncoder:
                 continue
             word = _plural(c, *SEEN_WORDS.get(kind, (kind.value, kind.value + "s")))
             if kind is VariableKind.POSITION:
-                moving = sum(1 for v in self._variables if is_mover(v))
+                moving = {v.id for v in self._variables if is_mover(v)}
+                moving.update(m.id for m, _ in self._pairs)  # paired without a seat (T-923)
                 if moving:
-                    word += f" ({moving} moving)"
+                    word += f" ({len(moving)} moving)"
                 words.append(word)
                 if self._pairs:
                     d = len(self._pairs)
@@ -221,7 +222,10 @@ class StateEncoder:
         if most is not None and any(is_mover(v) for v in believed):
             most = max(1, most - MOST_DISTANCES)
         self._variables = tuple(sorted(_choose(believed, most), key=lambda v: (v.region, v.offset)))
-        self._pairs = _pair_up(self._variables)
+        # The pairs come from everything believed, not the seats (T-923): a mover's
+        # evidence (2.0) loses a position seat to any climbing or played position, and
+        # the distance seats are kept for movers whether or not they hold a seat.
+        self._pairs = _pair_up(tuple(believed))
         return self._variables
 
     def encode(self, snapshot: MemorySnapshot) -> State:
@@ -234,6 +238,13 @@ class StateEncoder:
                 continue  # the snapshot does not cover this variable
             values[v.id] = value
             parts.append((v.id, bucket(value, v.kind, self._bins)))
+        for pair in self._pairs:
+            for v in pair:  # a mover or own position without a seat is still read (T-923)
+                if v.id not in values:
+                    try:
+                        values[v.id] = v.decode(snapshot)
+                    except ConfigurationError:
+                        continue
         for mover, mine in self._pairs:
             if mover.id in values and mine.id in values:
                 apart = values[mover.id] - values[mine.id]
@@ -255,7 +266,8 @@ def _pair_up(variables: tuple[Variable, ...]) -> tuple[tuple[Variable, Variable]
     """Each mover with each of the player's own positions of the same size and region.
 
     Own means confirmed by a person or moved by the stick (``INPUT_LINKED``), when
-    any such position is seated; otherwise any position that is not a mover.
+    any such position is believed; otherwise any position that is not a mover.
+    ``variables`` is everything believed, seated or not (T-923).
 
     The best-believed own position's pairs come first, then the next's, so the
     ``MOST_DISTANCES`` kept are the ones most likely to matter.

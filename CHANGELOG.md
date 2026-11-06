@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-923: the brain's distance seats now pair the best-believed moving things with the AI's own position whether or not those things won one of its few position seats, so dozens of enemy sprites ranked below plainer positions still reach the brain as distances; the log's "(N moving)" counts them too.
 - T-922: the AI also rethinks a guess when it keeps the kind but for other reasons, so a position first seen climbing becomes "Something moving" once it has moved both ways; the user's enemy sprites had stayed plain positions, invisible to the brain's distance seats, for that reason.
 - T-921: a value that climbs by the same amount nearly every step, the way a frame counter does when read every four frames, is a counter and no longer takes a position seat; the user's census showed one sitting among the AI's six positions.
 - T-920: the census now has three lists, the busiest values, the smoothest (small hops in three changes of four) and the widest-ranging rare ones, so a thing on screen for seconds of each go is listed even though random values change every step; the user's first census had every line taken by such values.
