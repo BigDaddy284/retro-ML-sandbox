@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-923 | The brain's distance seats pair the best-believed moving things with the player's position whether or not those things won one of the few position seats, so forty enemy sprites ranked below six plain positions still reach the brain as distances | 8 | Done | 1/1 | see PR |
 | T-922 | A guess is also rethought when the classifier keeps its kind but reads it by other evidence, so a position first judged climbing becomes "Something moving" once it has moved both ways; the user's enemy sprites had stayed plain positions for that reason | 8 | Done | 1/1 | see PR #177 |
 | T-921 | A value that climbs by the same amount nearly every step (a frame counter stepping by four) is a counter, not a climbing position; the tracker now keeps each byte's smallest hop beside its largest | 8 | Done | 1/1 | see PR #176 |
 | T-920 | The census has three lists: the busiest bytes, the smoothest (small hops in three changes of four, most changes first) and the widest-ranging rare bytes (changing in under a tenth of steps, most values first), so a thing on screen for seconds of each go is listed even though noise changes every step | 8 | Done | 1/1 | see PR #175 |
@@ -2857,6 +2858,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 1 new test passes (the T-916 same-kind case now carries matching reasons); understanding + services + learning + integration 302 passed; full suite 1349 passed, 10 skipped in 207.89s (0:03:27).
 - **Commit:** see PR #177. **PR:** #177.
 - **Completion report:** Reasons are compared as sets of evidence kinds, not weights or words, so a fresh "Only 7 different values seen" against "Only 5" is not a rethink and the knowledge's version does not churn on counts.
+
+### T-923 – Moving things get the distance seats without a position seat
+- **Status:** Done
+- **Phase:** 8 (the user's 11:16 census: dozens of mover positions believed, six position seats, all taken by plainer positions)
+- **Objective:** `_pair_up` draws movers from the seated variables, and the seats go kind by kind in `belief_rank` order, where a climbing position (2.5) and a played one outrank a mover (2.0); with sixteen positions believed and five or six seats, no mover is seated, so the eight distance seats reserved for them stay empty. Pair the best-believed movers from the whole believed set, and read their values for the distances even when they hold no seat of their own.
+- **Scope:** `StateEncoder.refresh`, `encode`, `describe` and `_pair_up` in `learning/state.py`. **Out of scope:** how many seats positions get; the frame counter (T-924).
+- **Acceptance criteria:**
+  1. With eight plain positions outranking three movers and seats for five positions, the pairs hold all three movers with the player's position, the state carries their distances, and `describe` says "(3 moving)" and "3 distances to moving things" though no mover is seated.
+  2. A seated mover is counted once.
+  3. The T-912 and T-915 tests hold: pairs come from the best-believed own position first and are capped at `MOST_DISTANCES`.
+- **Expected changes:** `src/retro_ai_lab/learning/state.py`, `tests/unit/learning/test_state.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_moving_things_get_distance_seats_without_a_position_seat`; learning + training + integration suites; full suite.
+- **Results:** 1 new test passes; learning + training + integration 156 passed; full suite 1350 passed, 10 skipped in 202.15s (0:03:22).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The seats are unchanged, so the brain's state grows by the distances only (eight at most). The log's "It sees" line now counts the paired movers in "(N moving)" even when none holds a seat, which is what to look for in the next log. The frame counter at ram[9] still takes a seat and is one of the own-position candidates; T-924 takes it out.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

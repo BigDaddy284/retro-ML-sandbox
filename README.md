@@ -241,7 +241,9 @@ too, once it has moved through enough different values. A value that climbs
 by the same amount every step is a clock, not a position, and gets no seat. For each such thing the AI also sees how far it is
 from its own position (the one the stick moves, or one you confirmed),
 exactly when it is close and roughly when it is far, so a thing about to
-touch it and one across the screen look different. None of these labels is
+touch it and one across the screen look different; those distances get
+their own seats, so a moving thing is seen even when plainer positions
+take all the position seats. None of these labels is
 final: a value gets its first label at the AI's first look, often after a
 handful of changes, and at every review the AI rethinks any guess it made
 itself whose behaviour now says otherwise, so an enemy slot that looked like
