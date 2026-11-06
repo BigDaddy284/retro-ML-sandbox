@@ -270,7 +270,8 @@ def _pair_up(variables: tuple[Variable, ...]) -> tuple[tuple[Variable, Variable]
 
     Own means confirmed by a person or moved by the stick (``INPUT_LINKED``), when
     any such position is believed; otherwise any position that is not a mover.
-    ``variables`` is everything believed, seated or not (T-923).
+    ``variables`` is everything believed, seated or not (T-923). Own positions
+    the same buttons move count once (T-931).
 
     The best-believed own position's pairs come first, then the next's, so the
     ``MOST_DISTANCES`` kept are the ones most likely to matter.
@@ -282,8 +283,22 @@ def _pair_up(variables: tuple[Variable, ...]) -> tuple[tuple[Variable, Variable]
     # such position, every position that is not a mover will do, as before.
     surely = [v for v in own if v.confirmed or _input_linked(v)]
     mine = sorted(surely or own, key=belief_rank)
+    # Own positions the same buttons move are one position drawn several times (T-931:
+    # the user's four sprite columns); the best-believed one stands for them, and an own
+    # position other buttons move (the other axis) is kept beside it.
+    seen: set[frozenset[str]] = set()
+    distinct: list[Variable] = []
+    for p in mine:
+        links = frozenset(e.detail for e in p.evidence if e.kind == INPUT_LINKED)
+        if links and links in seen:
+            continue
+        seen.add(links)
+        distinct.append(p)
     pairs = [
-        (m, p) for p in mine for m in movers if m.region == p.region and m.encoding is p.encoding
+        (m, p)
+        for p in distinct
+        for m in movers
+        if m.region == p.region and m.encoding is p.encoding
     ]
     return tuple(pairs[:MOST_DISTANCES])
 
