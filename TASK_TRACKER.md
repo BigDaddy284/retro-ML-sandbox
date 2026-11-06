@@ -2870,9 +2870,9 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
   3. The T-912 and T-915 tests hold: pairs come from the best-believed own position first and are capped at `MOST_DISTANCES`.
 - **Expected changes:** `src/retro_ai_lab/learning/state.py`, `tests/unit/learning/test_state.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
 - **Test plan:** `test_moving_things_get_distance_seats_without_a_position_seat`; learning + training + integration suites; full suite.
-- **Results:** pending.
+- **Results:** 1 new test passes; learning + training + integration 156 passed; full suite 1350 passed, 10 skipped in 202.15s (0:03:22).
 - **Commit:** see PR. **PR:** pending.
-- **Completion report:** pending.
+- **Completion report:** The seats are unchanged, so the brain's state grows by the distances only (eight at most). The log's "It sees" line now counts the paired movers in "(N moving)" even when none holds a seat, which is what to look for in the next log. The frame counter at ram[9] still takes a seat and is one of the own-position candidates; T-924 takes it out.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
