@@ -155,6 +155,7 @@ def test_episode_runs_the_requested_steps(lab: Lab) -> None:
     assert result.steps == 40 and result.frames == 120 and result.ended_by == "max_steps"
     assert lab.observation.frame == frames_before + 120
     assert r._agent.updates == 40 and r._agent.episodes == 1
+    assert r._agent.recent_rewards == (result.reward,)  # exploring follows results (T-932)
     assert 1 <= result.states_seen <= 41
     ai_inputs = lab.observation.inputs.by_source("ai")
     assert ai_inputs and all(e.source == "ai" for e in ai_inputs)

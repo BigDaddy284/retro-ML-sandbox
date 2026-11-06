@@ -69,7 +69,7 @@ class GreedyPlayer:
     ) -> float:
         return 0.0  # a race is not a lesson
 
-    def end_episode(self) -> float:
+    def end_episode(self, reward: float | None = None) -> float:
         self._episodes += 1
         return 0.0
 

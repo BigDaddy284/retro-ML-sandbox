@@ -307,9 +307,11 @@ def test_the_gui_buttons_wait_for_a_step_on_another_thread(lab: Lab) -> None:
     worker.join(timeout=5.0)
     assert not worker.is_alive() and failures == [] and taken and taken[0] >= 1
     assert t.status is Status.IDLE and t.episode is None
-    # Stop closed the go that was running, or the slice had just ended one: never half a go.
+    # Stop closed the go that was running, or the slice had just ended one (by its length,
+    # or stuck when the slice was long enough for nothing to change for 25 steps): never
+    # half a go.
     assert t.episodes == len(lab.finished)
-    assert lab.finished[-1].record.result.ended_by in ("stopped", "max_steps")
+    assert lab.finished[-1].record.result.ended_by in ("stopped", "max_steps", "stuck")
     assert t.total_steps == sum(f.record.result.steps for f in lab.finished)
     assert not t.step()  # stopped: the next step takes nothing
 

@@ -174,10 +174,10 @@ class SkillsLearner:
     ) -> float:
         return self._current.learn(state, action, reward, next_state, done)
 
-    def end_episode(self) -> float:
+    def end_episode(self, reward: float | None = None) -> float:
         self._episodes += 1
         for s in self._skills.values():
-            s.end_episode()
+            s.end_episode(reward)
         return self._current.epsilon
 
     def resume_from(self, other: Learner) -> None:

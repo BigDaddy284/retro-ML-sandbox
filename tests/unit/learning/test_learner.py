@@ -136,7 +136,7 @@ class Stub:
         self.updates += 1
         return 0.0
 
-    def end_episode(self) -> float:
+    def end_episode(self, reward: float | None = None) -> float:
         self.episodes += 1
         return self.epsilon
 

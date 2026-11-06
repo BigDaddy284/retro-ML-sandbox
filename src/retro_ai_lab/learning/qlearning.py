@@ -16,6 +16,7 @@ from typing import Any, ClassVar
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning.actions import ActionSpace
+from retro_ai_lab.learning.exploring import ResultsWatch
 from retro_ai_lab.learning.learner import Q_TABLE, Decision, Learner, register_learner
 from retro_ai_lab.learning.state import State
 
@@ -52,6 +53,9 @@ class Settings:
     # Learned steps over which exploring falls in a straight line to the floor (T-875):
     # a 40-second go is 600 steps, so the per-go decay alone took hundreds of goes.
     explore_steps: int = 6000
+    # Exploring goes back up to this when the last ten goes are worse than the ten before
+    # (T-932), and eases off again once they recover; 0 leaves the schedule alone.
+    rebound: float = 0.25
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "alpha", _check(self.alpha, "alpha", 0.0, 1.0))
@@ -62,6 +66,7 @@ class Settings:
             self, "epsilon_decay", _check(self.epsilon_decay, "epsilon_decay", 0.0, 1.0)
         )
         object.__setattr__(self, "explore_steps", _whole(self.explore_steps, "explore_steps"))
+        object.__setattr__(self, "rebound", _check(self.rebound, "rebound", 0.0, 1.0))
         if self.epsilon_min > self.epsilon:
             raise ConfigurationError("epsilon_min can't be above epsilon.")
         if self.alpha == 0.0:
@@ -75,6 +80,7 @@ class Settings:
             "epsilon_min": self.epsilon_min,
             "epsilon_decay": self.epsilon_decay,
             "explore_steps": self.explore_steps,
+            "rebound": self.rebound,
         }
 
     def exploring_after(self, updates: int) -> float:
@@ -152,6 +158,7 @@ class QLearningAgent:
         self._last_decision: Decision | None = None
         self._updates = 0
         self._episodes = 0
+        self._results = ResultsWatch(self._settings.rebound)
 
     # ------------------------------------------------------------ queries
 
@@ -232,16 +239,35 @@ class QLearningAgent:
         target = reward + self._settings.gamma * future
         row[action] += self._settings.alpha * (target - row[action])
         self._updates += 1
-        self._epsilon = min(self._epsilon, self._settings.exploring_after(self._updates))
+        self._epsilon = self._scheduled(self._epsilon)
         return row[action]
 
-    def end_episode(self) -> float:
-        """Count an episode and explore a little less from now on."""
+    def _scheduled(self, epsilon: float) -> float:
+        """Exploring capped by the step schedule, unless results hold it up (T-932)."""
+        return min(epsilon, max(self._results.lift, self._settings.exploring_after(self._updates)))
+
+    def end_episode(self, reward: float | None = None) -> float:
+        """Count an episode and explore a little less from now on.
+
+        With the go's ``reward``, exploring goes back up when the goes get worse (T-932).
+        """
         self._episodes += 1
-        self._epsilon = max(
-            self._settings.epsilon_min, self._epsilon * self._settings.epsilon_decay
-        )
+        if reward is not None:
+            self._results.note(reward, goes=self._episodes)
+        decayed = self._epsilon * self._settings.epsilon_decay
+        self._epsilon = max(self._settings.epsilon_min, self._results.lift, decayed)
+        self._epsilon = self._scheduled(self._epsilon)
         return self._epsilon
+
+    @property
+    def lift(self) -> float:
+        """The floor results hold exploring above right now (0 when the schedule rules)."""
+        return self._results.lift
+
+    @property
+    def recent_rewards(self) -> tuple[float, ...]:
+        """The last goes' rewards the lift is judged on (T-932)."""
+        return self._results.rewards
 
     def resume_from(self, other: Learner) -> None:
         """Carry on another learner's exploration and counts (when a brain changes kind)."""
@@ -254,6 +280,7 @@ class QLearningAgent:
             raise ConfigurationError("Learning settings must be a Settings.")
         self._settings = settings
         self._epsilon = settings.epsilon
+        self._results.set_rebound(settings.rebound)
 
     def reset(self) -> None:
         self._last_decision = None
@@ -261,6 +288,7 @@ class QLearningAgent:
         self._epsilon = self._settings.epsilon
         self._updates = 0
         self._episodes = 0
+        self._results = ResultsWatch(self._settings.rebound)
 
     # ------------------------------------------------------------ persistence
 
@@ -273,6 +301,7 @@ class QLearningAgent:
             "epsilon": self._epsilon,
             "updates": self._updates,
             "episodes": self._episodes,
+            "results": self._results.to_dict(),
             "rng": self._rng.getstate(),
             "table": self._table.to_dict(),
         }
@@ -294,6 +323,7 @@ class QLearningAgent:
             agent._epsilon = _check(data.get("epsilon", agent._epsilon), "epsilon", 0.0, 1.0)
             agent._updates = int(data.get("updates", 0))
             agent._episodes = int(data.get("episodes", 0))
+            agent._results.load(data.get("results"))
             agent._table = QTable.from_dict(data["table"])
             if agent._table.actions != len(saved):
                 raise ConfigurationError("The Q-table does not match the action space.")

@@ -28,6 +28,8 @@ def test_settings_and_table_validation() -> None:
         dict(alpha="fast"),
         dict(explore_steps=0),
         dict(explore_steps=2.5),
+        dict(rebound=1.5),
+        dict(rebound=-0.1),
         dict(explore_steps="many"),
     ):
         with pytest.raises(ConfigurationError):
@@ -97,6 +99,51 @@ def test_exploring_falls_with_the_steps_learned() -> None:
     del data["settings"]["explore_steps"]  # a brain saved before T-875
     assert QLearningAgent.from_dict(data, space=SPACE).settings.explore_steps == 6000
     assert Settings(explore_steps=3000.0).explore_steps == 3000  # a whole number as a float
+
+
+def test_exploring_rises_again_when_the_goes_get_worse() -> None:
+    """T-932: the last ten goes worse than the ten before lifts exploring to the rebound."""
+    quick = Settings(epsilon=1.0, epsilon_min=0.05, epsilon_decay=1.0, explore_steps=10)
+    agent = QLearningAgent(SPACE, quick, seed=1)
+    for _ in range(10):
+        agent.learn(A, RIGHT, 0.0, B)
+    assert agent.epsilon == 0.05 and agent.lift == 0.0
+    for _ in range(10):
+        assert agent.end_episode(10.0) == 0.05  # ten good goes: nothing to compare with yet
+    for _ in range(9):
+        assert agent.end_episode(0.0) == 0.05  # not judged until a whole window is worse
+    assert agent.end_episode(0.0) == 0.25 and agent.lift == 0.25  # ten worse goes: back up
+    assert agent.recent_rewards == (10.0,) * 10 + (0.0,) * 10
+    agent.learn(A, RIGHT, 0.0, B)
+    assert agent.epsilon == 0.25  # the schedule's floor no longer pulls it down
+    assert agent.end_episode(0.0) == 0.25  # still worse than the window before: held there
+    for _ in range(9):
+        agent.end_episode(0.0)
+    # Once the latest window is no longer worse than the one before (all poor now), the
+    # lift eases off by a window's share each go: two such goes so far.
+    assert agent.lift == pytest.approx(0.2)
+    for _ in range(10):
+        agent.end_episode(10.0)  # ten better goes: the lift is gone
+    assert agent.lift == 0.0 and agent.epsilon == 0.05
+    agent.end_episode()  # a go with no reward given is counted and judged on nothing
+    assert agent.episodes == 41 and agent.recent_rewards[-1] == 10.0
+    # A brain keeps its lift and its last goes.
+    agent.end_episode(0.0)
+    data = json.loads(json.dumps(agent.to_dict()))
+    again = QLearningAgent.from_dict(data, space=SPACE)
+    assert again.lift == agent.lift and again.recent_rewards == agent.recent_rewards
+    del data["results"]  # a brain saved before T-932
+    assert QLearningAgent.from_dict(data, space=SPACE).recent_rewards == ()
+    # Rebound 0 turns it off; the setting is in the defaults and the saved settings.
+    off = QLearningAgent(SPACE, Settings(epsilon_decay=1.0, explore_steps=10, rebound=0.0))
+    for _ in range(10):
+        off.learn(A, RIGHT, 0.0, B)
+    for reward in (10.0,) * 10 + (0.0,) * 10:
+        off.end_episode(reward)
+    assert off.epsilon == 0.05 and off.lift == 0.0
+    assert Settings().rebound == 0.25 and Settings().to_dict()["rebound"] == 0.25
+    agent.reset()
+    assert agent.lift == 0.0 and agent.recent_rewards == ()
 
 
 def test_learns_a_two_state_chain() -> None:
