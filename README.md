@@ -251,9 +251,10 @@ forth. Guesses you confirmed, named or rejected are never rethought. The "What t
 found, and the Research window's memory table lets you name a value for
 it.
 
-Every few minutes the log also prints a census of the sixteen memory values
-that change most, with the numbers behind the AI's word for each, so a log
-can show why a value is or is not taken for something moving.
+Every few minutes the log also prints a census of memory values, the
+sixteen that change most, the sixteen smoothest and the sixteen rare ones
+with the widest range, with the numbers behind the AI's word for each, so a
+log can show why a value is or is not taken for something moving.
 
 ## Arranging the panels
 

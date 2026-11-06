@@ -556,24 +556,61 @@ def test_a_busy_flag_guess_is_doubted_then_dropped(
 def test_the_census_names_the_busiest_bytes_and_their_numbers(
     discovery: DiscoveryService, connection: ConnectionService, observation: ObservationService
 ) -> None:
-    """T-919: the log can say why a byte is or is not taken for something moving."""
+    """T-919/T-920: the log can say why a byte is or is not taken for something moving."""
     assert discovery.census() == ""  # nothing connected
     connection.connect("fake", seed=2)
     play(connection, observation, 300)
-    lines = discovery.census().split("\n")
+    text = discovery.census()
     stats = observation.tracker.all_stats()
-    busiest = sorted(stats.values(), key=lambda st: -st.changes)
-    assert 1 <= len(lines) <= 16 and all(st.changes > 0 for st in busiest[: len(lines)])
-    first = lines[0]
-    assert first.startswith("ram[") and f"{busiest[0].changes} changes in " in first
+    moved = [(loc, st) for loc, st in stats.items() if st.changes > 0]
+    heads = [i for i, line in enumerate(text.split("\n")) if line.endswith(":")]
+    assert [text.split("\n")[i] for i in heads] == [
+        "Busiest:",
+        "Smoothest:",
+        "Widest-ranging rare:",
+    ]
+    busy = text.split("\n")[heads[0] + 1 : heads[1]]
+    smooth = text.split("\n")[heads[1] + 1 : heads[2]]
+    rare = text.split("\n")[heads[2] + 1 :]
+    busiest = sorted(moved, key=lambda item: -item[1].changes)
+    assert 1 <= len(busy) <= 16 and f"{busiest[0][1].changes} changes in " in busy[0]
+    assert busy[0].startswith(f"ram[{busiest[0][0][1]}] ")
     for word in ("values", "hops small", "unit", "largest", "up", "down", "wraps"):
-        assert word in first
+        assert word in busy[0]
     k = discovery.knowledge
     assert k is not None
-    offset = int(first.split("]")[0].split("[")[1])
+    offset = int(busy[0].split("]")[0].split("[")[1])
     v = k.at("ram", offset)
-    assert (v.display_name if v is not None else "nobody's guess") in first
-    assert len(discovery.census(most=2).split("\n")) == 2
+    assert (v.display_name if v is not None else "nobody's guess") in busy[0]
+
+    # the smooth list holds only smooth bytes, most changes first; the rare list only
+    # rare bytes, most values first; both say "none" when empty
+    def offsets(lines: list[str]) -> list[int]:
+        return [int(line.split("]")[0].split("[")[1]) for line in lines if line != "none"]
+
+    for off in offsets(smooth):
+        assert stats[("ram", off)].smooth
+    assert (
+        offsets(smooth)
+        == [
+            loc[1]
+            for loc, _ in sorted((i for i in moved if i[1].smooth), key=lambda i: -i[1].changes)
+        ][:16]
+    )
+    for off in offsets(rare):
+        assert stats[("ram", off)].change_rate <= 0.1
+    assert (
+        offsets(rare)
+        == [
+            loc[1]
+            for loc, _ in sorted(
+                (i for i in moved if i[1].change_rate <= 0.1), key=lambda i: -len(i[1].distinct)
+            )
+        ][:16]
+    )
+    assert smooth == ["none"] or len(smooth) >= 1
+    narrow = discovery.census(most=2).split("\n")
+    assert narrow.count("Busiest:") == 1 and len(narrow) <= 3 * 3
     wrong = k.propose("ram", 2000, kind=VariableKind.LIVES, name="Nothing there")  # never changes
     assert wrong.display_name not in discovery.census()
 
