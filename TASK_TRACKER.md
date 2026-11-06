@@ -2820,9 +2820,9 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
   3. With nothing connected the census is empty; the review still logs it on schedule.
 - **Expected changes:** `src/retro_ai_lab/services/discovery.py`, `tests/unit/services/test_discovery.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
 - **Test plan:** `test_the_census_names_the_busiest_bytes_and_their_numbers` extended for the three lists; `test_the_review_logs_the_census_on_schedule` unchanged; services + understanding + integration suites; full suite.
-- **Results:** pending.
+- **Results:** the extended census test passes; services + understanding + integration 233 passed; full suite 1346 passed, 10 skipped in 201.46s (0:03:21).
 - **Commit:** see PR. **PR:** pending.
-- **Completion report:** pending.
+- **Completion report:** Forty-eight lines every three minutes at most. The same log showed the frame counter (ram[9]) seated as a climbing position: it steps by exactly four every step, which the climbing rule reads as "varied steps" because the steps are not one; a climbing byte whose hops are all the same size is a counter (T-921, next).
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
