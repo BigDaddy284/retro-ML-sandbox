@@ -2854,9 +2854,9 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
   4. `enemy_rows` judged early as climbing, then on the full stream, is a mover.
 - **Expected changes:** `src/retro_ai_lab/understanding/variables.py`, `tests/unit/understanding/test_variables.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
 - **Test plan:** `test_a_guess_is_rethought_when_its_evidence_changes`; understanding + services + learning + integration suites; full suite.
-- **Results:** pending.
+- **Results:** 1 new test passes (the T-916 same-kind case now carries matching reasons); understanding + services + learning + integration 302 passed; full suite 1349 passed, 10 skipped in 207.89s (0:03:27).
 - **Commit:** see PR. **PR:** pending.
-- **Completion report:** pending.
+- **Completion report:** Reasons are compared as sets of evidence kinds, not weights or words, so a fresh "Only 7 different values seen" against "Only 5" is not a rethink and the knowledge's version does not churn on counts.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
