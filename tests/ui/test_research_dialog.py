@@ -339,7 +339,14 @@ def test_search_narrows_and_shows_hex(dialog: ResearchDialog, context: AppContex
     count = dialog.search_count
     assert not dialog.search_refine(ScanKind.EXACT, "lots")
     assert "not a number" in dialog.note_text and dialog.search_count == count
-    assert not dialog.search_start("300") and dialog.search_count == count
+    assert not dialog.search_start("100000000") and dialog.search_count == count
+    assert "99,999,999" in dialog.note_text
+    # A score of 300 is not one byte; it is searched for across bytes (T-936).
+    _poke(context, LAYOUT.score, 0x2C)
+    _poke(context, LAYOUT.score + 1, 0x01)
+    assert dialog.search_start("300") and dialog.note_text == ""
+    rows = {r[0]: r for r in dialog.search_rows()}
+    assert f"ram[{LAYOUT.score}]" in rows and f"ram[{LAYOUT.score + 1}]" in rows
     # Start over empties it; disconnecting does too.
     dialog.search_reset()
     assert dialog.search_count == 0 and dialog.tabs.tabText(4) == "Search values"
