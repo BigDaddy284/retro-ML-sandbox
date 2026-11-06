@@ -2804,9 +2804,9 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
   3. With nothing connected `census()` is empty.
 - **Expected changes:** `src/retro_ai_lab/services/discovery.py`, `tests/unit/services/test_discovery.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
 - **Test plan:** `test_the_census_names_the_busiest_bytes_and_their_numbers`, `test_the_review_logs_the_census_on_schedule`; services + understanding + integration suites; full suite.
-- **Results:** pending.
+- **Results:** 2 new tests pass; services + understanding + integration 233 passed; full suite 1346 passed, 10 skipped in 207.41s (0:03:27).
 - **Commit:** see PR. **PR:** pending.
-- **Completion report:** pending.
+- **Completion report:** Sixteen lines every three minutes is a few hundred lines an hour, which the stall watch and the link already exceed. The census ranks by changes, so a byte that moves rarely but matters (a brief enemy) can miss the top sixteen; if the next log shows the enemy bytes below the cut, the next step is a second list of the bytes with the most distinct values.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
