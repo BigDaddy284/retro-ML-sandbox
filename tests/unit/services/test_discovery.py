@@ -168,6 +168,7 @@ def test_experiments_run_on_schedule_and_on_demand(
     line = next(m for m in caplog.messages if m.startswith("Experiment 1: "))
     assert f"Position at ram[{LAYOUT.lane}] (" in line and "Controller input (" in line
     assert "values move with the buttons" in line
+    assert "stop or replace the whole game" not in line  # the toy racer has no pause (T-930)
     assert any(p.stage == "experimenting" for p in progress)
     k = discovery.knowledge
     assert k is not None

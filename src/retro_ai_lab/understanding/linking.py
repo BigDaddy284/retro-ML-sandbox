@@ -31,6 +31,7 @@ from retro_ai_lab.understanding.longlook import LONG_LOOK_KINDS
 if TYPE_CHECKING:
     # Imported lazily at run time: services already import this package, and
     # loading it first (as the rewards package does) must not go round in a circle.
+    from retro_ai_lab.observation.memory import MemorySnapshot
     from retro_ai_lab.services.experiments import ExperimentHarness, Trial
 
 Location = tuple[str, int]
@@ -38,6 +39,11 @@ Location = tuple[str, int]
 DIRECTIONS = frozenset({"up", "down", "left", "right"})
 DEFAULT_FRAMES = 8
 DEFAULT_REPEATS = 2
+# A button whose trial differs from idle in at least this share of what the game changes
+# on its own (and at least SWEEP_LEAST bytes) stopped or replaced the game: a pause, a
+# menu, Start on a title screen. It moves nothing in particular (T-930).
+SWEEP_SHARE = 0.5
+SWEEP_LEAST = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,9 +52,14 @@ class InputLinks:
     frames: int
     by_button: Mapping[str, frozenset[Location]]
     unstable: frozenset[Location]
+    sweeping: tuple[str, ...] = ()  # buttons that stopped or replaced the game (T-930)
 
     def buttons_for(self, location: Location) -> tuple[str, ...]:
         return tuple(b for b in self.buttons if location in self.by_button[b])
+
+    def active(self) -> tuple[str, ...]:
+        """The buttons whose links say what each one moves: all but the sweeping ones."""
+        return tuple(b for b in self.buttons if b not in self.sweeping)
 
     def locations(self) -> frozenset[Location]:
         out: set[Location] = set()
@@ -58,16 +69,25 @@ class InputLinks:
 
     def dead_buttons(self) -> tuple[str, ...]:
         """Buttons that changed nothing in this situation."""
-        return tuple(b for b in self.buttons if not self.by_button[b])
+        return tuple(b for b in self.active() if not self.by_button[b])
+
+
+def _changed(x: MemorySnapshot, y: MemorySnapshot) -> frozenset[Location]:
+    out: set[Location] = set()
+    for name in x.region_names:
+        a = x.regions[name]
+        b = y.regions[name]
+        out.update((name, i) for i in range(min(len(a), len(b))) if a[i] != b[i])
+    return frozenset(out)
 
 
 def _differences(a: Trial, b: Trial) -> frozenset[Location]:
-    out: set[Location] = set()
-    for name in a.after.region_names:
-        x = a.after.regions[name]
-        y = b.after.regions[name]
-        out.update((name, i) for i in range(min(len(x), len(y))) if x[i] != y[i])
-    return frozenset(out)
+    return _changed(a.after, b.after)
+
+
+def _sweeps(moved: frozenset[Location], drift: frozenset[Location]) -> bool:
+    """Did holding the button stop or replace what the game was doing on its own?"""
+    return len(moved & drift) >= max(SWEEP_LEAST, SWEEP_SHARE * len(drift))
 
 
 def find_input_links(
@@ -91,11 +111,19 @@ def find_input_links(
     unstable: set[Location] = set()
     for other in idle[1:]:
         unstable |= _differences(idle[0], other)
+    drift = _changed(idle[0].before, idle[0].after) - unstable  # what moves by itself
     by_button: dict[str, frozenset[Location]] = {}
+    sweeping: list[str] = []
     for name in names:
         trial = harness.run(constant_plan((name,), frames), label=name)
-        by_button[name] = _differences(idle[0], trial) - unstable
-    return InputLinks(names, frames, by_button, frozenset(unstable))
+        moved = _differences(idle[0], trial) - unstable
+        if _sweeps(moved, drift):
+            # A pause button leaves every byte where idle moved it on; Start on a title
+            # screen replaces the lot. Neither says what the button moves (T-930).
+            sweeping.append(name)
+            moved = frozenset()
+        by_button[name] = moved
+    return InputLinks(names, frames, by_button, frozenset(unstable), tuple(sweeping))
 
 
 def _covering(knowledge: Knowledge, location: Location) -> Variable | None:
@@ -140,7 +168,8 @@ def apply_input_links(knowledge: Knowledge, links: InputLinks) -> tuple[Variable
             orphans.append(loc)
         else:
             grouped.setdefault(var.id, set()).add(loc)
-    everything = len(links.buttons) >= 3
+    active = links.active()  # a sweeping button links to nothing and counts for nothing (T-930)
+    everything = len(active) >= 3
 
     def buttons_for(locs: Iterable[Location]) -> tuple[str, ...]:
         wanted = set(locs)
@@ -148,7 +177,7 @@ def apply_input_links(knowledge: Knowledge, links: InputLinks) -> tuple[Variable
 
     for loc in sorted(orphans):
         buttons = buttons_for([loc])
-        mirror = everything and set(buttons) == set(links.buttons)
+        mirror = everything and set(buttons) == set(active)
         kind = (
             VariableKind.INPUT
             if mirror
@@ -171,7 +200,7 @@ def apply_input_links(knowledge: Knowledge, links: InputLinks) -> tuple[Variable
             continue
         buttons = buttons_for(locs)
         proof = _evidence(buttons)
-        mirror = everything and set(buttons) == set(links.buttons)
+        mirror = everything and set(buttons) == set(active)
         changes: dict[str, object] = {}
         if not any(e.kind == proof.kind and e.detail == proof.detail for e in var.evidence):
             changes["evidence"] = (*var.evidence, proof)
@@ -197,6 +226,8 @@ __all__ = [
     "DEFAULT_FRAMES",
     "DEFAULT_REPEATS",
     "DIRECTIONS",
+    "SWEEP_LEAST",
+    "SWEEP_SHARE",
     "InputLinks",
     "apply_input_links",
     "find_input_links",

@@ -166,6 +166,8 @@ def _experiment_words(k: Knowledge, links: InputLinks) -> str:
     )
     if dead:
         words += f". Buttons that moved nothing: {', '.join(dead)}"
+    if links.sweeping:  # a pause or a menu (T-930)
+        words += f". Buttons that stop or replace the whole game: {', '.join(links.sweeping)}"
     return words + "."
 
 
