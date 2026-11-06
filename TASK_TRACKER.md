@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-930 | A button whose trial changes at least half of what the game changes on its own (a pause button, a menu) links to no value, so the user's enemy sprites no longer carry "changes when Start is held" and can still become moving things; the experiment log names such buttons | 8 | Done | 2/2 | see PR |
 | T-929 | The log says what each button experiment found (the values each button moves, and the buttons that moved nothing) and the "It sees" line names the position the distances to moving things are measured from, so a log can show whether the AI knows its own position | 8 | Done | 2/2 | see PR #184 |
 | T-928 | The AI's strongest sixteen guesses of a kind count moving things apart from plain positions, so sixteen climbing positions no longer push every enemy sprite out of what the brain, the rewards and the distance seats can see; the Rewards panel still offers plain positions only | 8 | Done | 2/2 | see PR #183 |
 | T-927 | Each census line also says how often a value's hop repeated the one before and which hop that was, the numbers the T-924 counter rule reads, so a log can show why a steady stepper is or is not taken for a counter | 8 | Done | 1/1 | see PR #182 |
@@ -2967,6 +2968,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** experiment test extended and 1 new test pass; services + learning + training + integration 257 passed; full suite 1356 passed, 10 skipped in 205.40s (0:03:25).
 - **Commit:** see PR #184. **PR:** #184.
 - **Completion report:** One log line per experiment (a handful per run) and a few words more on the line after each go. The next log will say whether the AI has its own position, which decides whether the distances mean anything.
+
+### T-930 – A pause or menu button links to nothing
+- **Status:** Done
+- **Phase:** 8 (the user's 17:03 log on the T-929 build: "Experiment 1: 119 values move with the buttons", nearly all "(start)", the enemy sprites among them; "5 positions (1 moving)")
+- **Objective:** A button trial holds one button for eight frames and takes every byte that differs from the idle trial as moved by that button. Start pauses Super Mario Bros., so every byte that would have advanced in eight frames (the frame counter, timers, every enemy's position) differed and was linked to Start. An input-linked position is never a mover (T-911) and is never rethought (T-916), so the sprites were locked out of the distance seats, and "Position at ram[683] (start)" looked like the player's own. A button whose changed set covers at least half of what the game changes on its own in those frames (and at least eight bytes) stopped or replaced the game: it links to no value, is reported as such, and does not count for the controller mirror.
+- **Scope:** `InputLinks.sweeping`, `find_input_links` and the mirror rule in `apply_input_links` (`understanding/linking.py`); the experiment line in `services/discovery.py`. **Out of scope:** which own position the distances pair with (T-931).
+- **Acceptance criteria:**
+  1. On a stub game where idle advances forty bytes, Start freezes them, A touches ten of them and a byte of its own and Left a byte of its own: `sweeping == ("start",)`, Start's links are empty, A and Left keep theirs, and Start is not a dead button.
+  2. The mirror is still found with three active buttons beside a sweeping one; with Start among the mirror's buttons and only two others it is not.
+  3. The experiment line names the sweeping buttons; the toy racer links are unchanged.
+- **Expected changes:** `src/retro_ai_lab/understanding/linking.py`, `src/retro_ai_lab/services/discovery.py`, `tests/unit/understanding/test_linking.py`, `tests/unit/services/test_discovery.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_a_button_that_stops_the_game_links_to_nothing`, `test_a_sweeping_button_does_not_count_for_the_mirror`; understanding + services + integration suites; full suite.
+- **Results:** 2 new tests pass; understanding + services + integration 241 passed; full suite 1358 passed, 10 skipped in 183.18s (0:03:03).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).

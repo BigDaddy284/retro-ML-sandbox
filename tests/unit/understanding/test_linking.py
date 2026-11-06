@@ -74,6 +74,68 @@ def test_links_on_the_toy_racer(harness: ExperimentHarness, connection: Connecti
         assert (RAM, off) not in links.locations()
 
 
+class _PausingGame:
+    """A harness stub: idle advances forty bytes, Start freezes them, A and Left move their own."""
+
+    has_checkpoint = True
+
+    def run(self, plan: tuple[frozenset[str], ...], *, label: str = "") -> object:
+        from retro_ai_lab.observation.diff import diff_snapshots
+        from retro_ai_lab.observation.memory import MemorySnapshot
+        from retro_ai_lab.services.experiments import Trial
+
+        held = plan[0]
+        before = bytearray(256)
+        after = bytearray(256)
+        if "start" not in held:  # the game runs on: forty bytes advance
+            for i in range(40):
+                after[i] = 1
+        if "a" in held:  # a jump touches ten of those and a byte of its own
+            for i in range(10):
+                after[i] = 7
+            after[101] = 9
+        if "left" in held:
+            after[100] = 5
+        x = MemorySnapshot(0, {RAM: bytes(before)})
+        y = MemorySnapshot(len(plan), {RAM: bytes(after)})
+        return Trial(label, plan, x, y, diff_snapshots(x, y), None, None, None)
+
+
+def test_a_button_that_stops_the_game_links_to_nothing() -> None:
+    """T-930: Start paused the user's game, and every enemy sprite was linked to it."""
+    from typing import cast
+
+    from retro_ai_lab.understanding.linking import SWEEP_LEAST, SWEEP_SHARE
+
+    assert SWEEP_SHARE == 0.5 and SWEEP_LEAST == 8
+    links = find_input_links(cast(ExperimentHarness, _PausingGame()), ("a", "left", "start"))
+    assert links.sweeping == ("start",) and links.active() == ("a", "left")
+    assert links.by_button["start"] == frozenset()
+    assert links.by_button["left"] == {(RAM, 100)}
+    assert links.by_button["a"] == {(RAM, i) for i in range(10)} | {(RAM, 101)}
+    assert links.dead_buttons() == () and "start" not in links.buttons_for((RAM, 5))
+    assert links.locations() == {(RAM, i) for i in range(10)} | {(RAM, 100), (RAM, 101)}
+
+
+def test_a_sweeping_button_does_not_count_for_the_mirror() -> None:
+    """T-930: the controller mirror is the byte every active button moves."""
+    k = Knowledge("g")
+    by_button = {
+        "a": frozenset({(RAM, 1), (RAM, 9)}),
+        "b": frozenset({(RAM, 1)}),
+        "left": frozenset({(RAM, 1), (RAM, 2)}),
+        "start": frozenset(),
+    }
+    links = InputLinks(("a", "b", "left", "start"), 8, by_button, frozenset(), ("start",))
+    touched = {v.offset: v for v in apply_input_links(k, links)}
+    assert touched[1].kind is VariableKind.INPUT and touched[1].name == "Controller input"
+    assert touched[2].kind is VariableKind.POSITION and touched[9].kind is VariableKind.UNKNOWN
+    # with only two active buttons there is no mirror to find
+    two = {b: by_button[b] for b in ("a", "b", "start")}
+    few = InputLinks(("a", "b", "start"), 8, two, frozenset(), ("start",))
+    assert all(v.kind is not VariableKind.INPUT for v in apply_input_links(Knowledge("h"), few))
+
+
 def test_unstable_bytes_are_excluded(
     harness: ExperimentHarness, connection: ConnectionService
 ) -> None:
