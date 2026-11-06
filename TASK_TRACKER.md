@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-922 | A guess is also rethought when the classifier keeps its kind but reads it by other evidence, so a position first judged climbing becomes "Something moving" once it has moved both ways; the user's enemy sprites had stayed plain positions for that reason | 8 | Done | 1/1 | see PR |
 | T-921 | A value that climbs by the same amount nearly every step (a frame counter stepping by four) is a counter, not a climbing position; the tracker now keeps each byte's smallest hop beside its largest | 8 | Done | 1/1 | see PR #176 |
 | T-920 | The census has three lists: the busiest bytes, the smoothest (small hops in three changes of four, most changes first) and the widest-ranging rare bytes (changing in under a tenth of steps, most values first), so a thing on screen for seconds of each go is listed even though noise changes every step | 8 | Done | 1/1 | see PR #175 |
 | T-919 | Every 25th review the log prints a census of the sixteen busiest memory bytes (changes, values, small, unit and largest hops, ups, downs, wraps, and what the AI calls each), so a log can show why a byte is or is not taken for something moving | 8 | Done | 1/1 | see PR #174 |
@@ -2840,6 +2841,22 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; observation + understanding + learning + services + integration 420 passed; full suite 1348 passed, 10 skipped in 221.07s (0:03:41).
 - **Commit:** see PR #176. **PR:** #176.
 - **Completion report:** The rule needs the byte to change in nine steps of ten so that a score adding the same amount now and then stays a score; a clock that ticks every other step would slip through, and the census will say so if one does. With the frame counter out, the six position seats and the "own position" candidates of T-915 are one junk byte lighter.
+
+### T-922 – A guess is rethought when its evidence changes, not only its kind
+- **Status:** Done
+- **Phase:** 8 (the user's 11:16 census: forty sprite positions with mover statistics, "Position" all, "It sees … 6 positions" with nothing moving)
+- **Objective:** `rethink_candidates` skips a candidate of the same kind. A byte judged on its first few changes while climbing is a POSITION by the climbing rule; once it has moved both ways the classifier says POSITION by the mover rule, the kind matches, and the guess keeps its climbing evidence for good, so `is_mover` never holds and the brain's distance seats never fill. Rethink when the classifier's evidence kinds differ too.
+- **Scope:** `rethink_candidates` in `understanding/variables.py`. **Out of scope:** seats for movers (T-923); the frame counter's jumps (T-924).
+- **Acceptance criteria:**
+  1. A POSITION with climbing evidence and a POSITION candidate with `MOVER` evidence (twice the changes) is rethought: same kind, mover evidence, other evidence kept.
+  2. A candidate with the same kind and the same evidence kinds (details or weights aside) changes nothing.
+  3. The held guesses of T-916 are still held; the doubling rule of T-917 still gates it.
+  4. `enemy_rows` judged early as climbing, then on the full stream, is a mover.
+- **Expected changes:** `src/retro_ai_lab/understanding/variables.py`, `tests/unit/understanding/test_variables.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_a_guess_is_rethought_when_its_evidence_changes`; understanding + services + learning + integration suites; full suite.
+- **Results:** pending.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** pending.
 
 ### Later Phase 4 tasks
 None outstanding: T-402 to T-409 are Done (PRs #28 to #35).
