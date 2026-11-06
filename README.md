@@ -225,7 +225,10 @@ app only reads the game's memory; it never changes it.
 After a long run on an older build, the AI may have dropped the real score or
 lives for reasons a newer build no longer has. Press "Start from scratch" in
 the Learning panel once so it forgets that game and can find the real values
-again.
+again. It asks first, because it also deletes the brain the AI has trained for
+that game. The brain itself needs no saving: it is written after every go and
+picked up again when the same game connects, and the log says so ("Picked up
+the saved brain for this game: 109 goes and 49,050 steps learned so far").
 
 ## What the AI sees
 

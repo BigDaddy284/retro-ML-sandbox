@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-933 | The log says at every connection whether the saved brain was picked up (goes and steps so far), that there is none yet, or why it could not be used; "Start from scratch" asks for confirmation before it deletes the brain and the log records the deletion | 8 | Done | 1/1 | see PR |
 | T-932 | Exploring follows results: when the last ten goes score worse than the ten before, the chance of a random move goes back up to `Settings.rebound` (25%) and is held there while the goes stay worse, easing off over ten goes once they recover; the Research window gets the setting and the rise is logged | 8 | Done | 1/1 |see PR #187 |
 | T-931 | Own positions moved by the same buttons are copies (the four sprite columns of the player) and count once in the distance pairs, so the eight distance seats go to eight moving things instead of one thing measured from four copies | 8 | Done | 1/1 |see PR #186 |
 | T-930 | A button whose trial changes at least half of what the game changes on its own (a pause button, a menu) links to no value, so the user's enemy sprites no longer carry "changes when Start is held" and can still become moving things; the experiment log names such buttons | 8 | Done | 2/2 |see PR #185 |
@@ -2985,6 +2986,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; understanding + services + integration 241 passed; full suite 1358 passed, 10 skipped in 183.18s (0:03:03).
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
+
+### T-933 – The log says whether the saved brain was picked up, and Start from scratch asks first
+- **Status:** Done
+- **Phase:** 8 (the user's 20:03 log: five runs in two hours each began with "The brain after go 1 … over 1 go", so no run grew past 109 goes; the brain is saved after every go and picked up at connect, so the fresh starts came from "Start from scratch", which deletes it without asking, and nothing in the log says which happened)
+- **Objective:** `TrainingService._on_connected` logs one line after the store is consulted: "Picked up the saved brain for this game: N goes and M steps learned so far; exploring X% of the time." when a brain was adopted, "No saved brain for this game yet: the AI starts with a new one." when there was none, or the `fresh_start` reason as a warning when the saved one could not be used. `forget()` logs "The AI forgot this game at your request: its brain and the saved copy are gone." The Learning panel's "Start from scratch" asks "This deletes everything the AI has learned about this game, including the saved brain. Start from scratch?" first; No keeps the brain and says so in the note; the question goes through `LearningPanel.confirm`, a callable tests replace.
+- **Scope:** `_on_connected` and `forget` in `training/service.py`; `forget` and `confirm` in `ui/learning_panel.py`. **Out of scope:** a second confirmation anywhere else; changing what is forgotten.
+- **Acceptance criteria:**
+  1. Connecting with no saved brain logs the "No saved brain" line; connecting after goes logs the "Picked up" line with the goes and steps; connecting with a damaged file logs the reason as a warning.
+  2. `forget()` logs the deletion line.
+  3. The panel's button asks; No leaves the brain, its goes and the saved file alone and the note says "Kept the brain."; Yes forgets as before.
+- **Expected changes:** `src/retro_ai_lab/training/service.py`, `src/retro_ai_lab/ui/learning_panel.py`, `tests/unit/training/test_service.py`, `tests/ui/test_learning_panel.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_the_log_says_whether_the_saved_brain_was_picked_up` (service); `test_forget_asks_first` (panel) and the existing forget test answering Yes; training + ui panel suites; full suite.
+- **Results:** 2 new tests pass; training + panel suites 136 passed; full suite 1367 passed, 10 skipped (174.36s); ruff and mypy clean.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The brain was always kept; what was missing was the log saying so and a guard on the one button that throws it away. Every connection now logs "Picked up the saved brain for this game: N goes and M steps learned so far; exploring X% of the time.", "No saved brain for this game yet", or the reason a saved one could not be used; "Start from scratch" asks first and logs when it goes ahead. The user's next log will show whether a run carried on from the one before.
 
 ### T-932 – Exploring follows results
 - **Status:** Done

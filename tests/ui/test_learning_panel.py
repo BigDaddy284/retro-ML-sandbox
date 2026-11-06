@@ -16,7 +16,13 @@ from retro_ai_lab.services import DiscoveryUpdated
 from retro_ai_lab.training import Mode, Speed, Status
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.controller_pad import AI_HAS_CONTROLS, KEY_HINT
-from retro_ai_lab.ui.learning_panel import ENDED_BY, IDLE_TEXT, LearningPanel, go_cells
+from retro_ai_lab.ui.learning_panel import (
+    ENDED_BY,
+    FORGET_QUESTION,
+    IDLE_TEXT,
+    LearningPanel,
+    go_cells,
+)
 from retro_ai_lab.ui.main_window import MainWindow
 from retro_ai_lab.understanding import Encoding, Evidence, Knowledge, VariableKind
 
@@ -282,9 +288,32 @@ def test_manual_mode_leaves_the_controls_with_the_child(qtbot: QtBot, context: A
     w.close()
 
 
+def test_forget_asks_first(panel: LearningPanel, context: AppContext) -> None:
+    """T-933: "Start from scratch" deletes the saved brain, so it asks; No keeps everything."""
+    connect(context)
+    t = context.training
+    t.train(2)
+    store = t.store
+    assert store is not None and t.game_id is not None and store.exists(t.game_id)
+    asked: list[str] = []
+
+    def no(question: str) -> bool:
+        asked.append(question)
+        return False
+
+    panel.confirm = no  # type: ignore[method-assign]
+    panel.forget()
+    assert asked == [FORGET_QUESTION] and "cannot be undone" in FORGET_QUESTION
+    assert panel.note_text == "Kept the brain." and t.episodes == 2 and store.exists(t.game_id)
+    panel.confirm = lambda question: True  # type: ignore[method-assign]
+    panel.forget()
+    assert "forgotten" in panel.note_text and t.episodes == 0 and not store.exists(t.game_id)
+
+
 def test_forget_and_link_loss(panel: LearningPanel, context: AppContext) -> None:
     connect(context)
     t = context.training
+    panel.confirm = lambda question: True  # type: ignore[method-assign]
     panel.start()
     panel.forget()
     assert "Stop training" in panel.note_text and t.episodes == 0
