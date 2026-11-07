@@ -506,3 +506,56 @@ def test_a_mover_is_called_something_moving_until_the_stick_moves_it() -> None:
     assert not is_mover(linked)
     assert plain_names((linked,))[linked.id] == "Your position"
     assert plain_names((mover, linked))[linked.id] == "Your position"
+
+
+@pytest.mark.parametrize(
+    ("raw", "enc", "value"),
+    [
+        (b"\x58\x02", Encoding.UINT_LE, 600),
+        (b"\x58\x02\x00", Encoding.UINT_LE, 600),
+        (b"\x00\x02\x58", Encoding.UINT_BE, 600),
+        (b"\x06\x00", Encoding.BCD_BE, 600),
+        (b"\x00\x06", Encoding.BCD_LE, 600),
+        (b"\x00\x06\x00", Encoding.BCD_BE, 600),
+        (b"\x00\x00\x00\x06\x00\x00", Encoding.DIGITS_BE, 600),
+        (b"\x00\x00\x06\x00\x00\x00", Encoding.DIGITS_LE, 600),
+        (b"\x09", Encoding.DIGITS_BE, 9),
+        (b"\x99\x99\x99\x99", Encoding.BCD_BE, 99_999_999),
+    ],
+)
+def test_sized_encodings_decode_both_ways_round(raw: bytes, enc: Encoding, value: int) -> None:
+    """T-941: a number over several bytes reads as one value, whichever way it is held."""
+    assert decode(raw, enc) == value
+    assert enc.sized and enc.width == 0
+
+
+def test_a_sized_variable_needs_a_length() -> None:
+    """T-941: a digit that is not a digit, a length out of range, and the plain words."""
+    with pytest.raises(ConfigurationError, match="digit"):
+        decode(b"\x00\x0a", Encoding.DIGITS_BE)
+    with pytest.raises(ConfigurationError, match="BCD"):
+        decode(b"\x1a\x00", Encoding.BCD_LE)
+    with pytest.raises(ConfigurationError, match="1 to 8"):
+        decode(b"\x00" * 9, Encoding.DIGITS_BE)
+    with pytest.raises(ConfigurationError, match="1 to 4"):
+        decode(b"\x00" * 5, Encoding.UINT_LE)
+    with pytest.raises(ConfigurationError, match="takes 1 to 8"):
+        Variable("v1", "ram", 0, Encoding.DIGITS_BE)
+    with pytest.raises(ConfigurationError, match="takes 1 to 4"):
+        Variable("v1", "ram", 0, Encoding.UINT_LE, length=5)
+    with pytest.raises(ConfigurationError, match="takes 1 byte"):
+        Variable("v1", "ram", 0, Encoding.U8, length=2)
+    score = Variable("v1", "ram", 10, Encoding.DIGITS_BE, VariableKind.SCORE, "Score", length=6)
+    assert score.width == 6 and score.address == "ram[10..15]"
+    assert score.held_as == "6 digits, highest first"
+    snapshot = MemorySnapshot(1, {"ram": bytes([0] * 10 + [0, 0, 1, 2, 5, 0, 7])})
+    assert score.decode(snapshot) == 1250
+    again = Variable.from_dict(score.to_dict())
+    assert again == score and again.length == 6
+    plain = Variable.from_dict({"id": "v2", "region": "ram", "offset": 3})
+    assert plain.length == 0 and plain.width == 1 and plain.address == "ram[3]"
+    assert plain.held_as == "1 byte"
+    assert Variable("v3", "ram", 0, Encoding.U16LE, length=2).width == 2
+    assert Encoding.U16BE.describe(2) == "2 bytes, high first"
+    assert Encoding.BCD_LE.describe(3) == "packed decimal, 3 bytes, low first"
+    assert Encoding.FLAG.describe(1) == "1 byte (on or off)"

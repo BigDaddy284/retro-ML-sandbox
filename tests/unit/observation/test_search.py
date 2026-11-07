@@ -11,13 +11,19 @@ from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.observation import MemorySnapshot
 from retro_ai_lab.observation.search import (
     MAX_VALUE,
+    Form,
     Match,
     ScanKind,
     ValueSearch,
+    forms,
     holding,
     parse_number,
     patterns,
+    read_spans,
+    spans,
+    typed_digits,
 )
+from retro_ai_lab.understanding.knowledge import Encoding
 
 
 def snap(frame: int, ram: list[int], **more: list[int]) -> MemorySnapshot:
@@ -32,17 +38,20 @@ def test_start_keeps_every_byte_or_the_ones_equal() -> None:
     assert s.started and s.count == 5 and s.frame == 1
     s.start(snap(2, [5, 7, 5], wram=[5, 0]), value=5)
     assert s.count == 3
+    # wram's 5 is followed by a zero, so it also reads as a longer number (T-941):
+    # the row stands for those readings too.
     assert s.matches() == (
         Match("ram", 0, 5, 5),
         Match("ram", 2, 5, 5),
-        Match("wram", 0, 5, 5),
+        Match("wram", 0, 5, 5, Encoding.U8, 1, 4),
     )
+    assert s.total == 6
 
 
 @pytest.mark.parametrize(
     ("kind", "value", "kept"),
     [
-        (ScanKind.EXACT, 9, [1, 3]),
+        (ScanKind.EXACT, 9, [1, 3]),  # the 9 at 1 also reads over the 0 after it: one row
         (ScanKind.UP, None, [1, 3]),
         (ScanKind.DOWN, None, [2]),
         (ScanKind.CHANGED, None, [1, 2, 3]),
@@ -54,7 +63,7 @@ def test_each_scan_kind(kind: ScanKind, value: int | None, kept: list[int]) -> N
     s.start(snap(0, [1, 2, 3, 4, 5]))
     s.refine(snap(4, [1, 9, 0, 9, 5]), kind, value)
     assert [m.offset for m in s.matches()] == kept
-    assert s.frame == 4
+    assert s.count == len(kept) and s.frame == 4
 
 
 def test_scans_chain_against_the_previous_scan() -> None:
@@ -138,8 +147,13 @@ def test_a_big_number_is_found_across_bytes() -> None:
     assert not holding(np.frombuffer(b"\x2c", dtype=np.uint8), 300).any()
     s = ValueSearch()
     s.start(snap(0, ram), value=300)
-    assert {m.offset for m in s.matches()} == found
+    covered = {o for m in s.matches() for o in range(m.offset, m.offset + m.length)}
+    assert {10, 11, 20, 21, 30, 31, 32} <= covered <= found
     assert all(m.region == "ram" for m in s.matches())
+    by_address = {m.address: m for m in s.matches()}
+    assert by_address["ram[10..11]"].held_as == "2 bytes, low first"
+    assert by_address["ram[30..32]"].held_as == "3 digits, highest first"
+    assert all(m.now == 300 for m in s.matches())
 
 
 def test_is_exactly_with_a_big_number() -> None:
@@ -147,9 +161,9 @@ def test_is_exactly_with_a_big_number() -> None:
     s = ValueSearch()
     s.start(snap(0, [0x2C, 0x01, 0x2C, 0x01, 7, 3]))
     s.refine(snap(1, [0x2C, 0x01, 0x2D, 0x01, 7, 3]), ScanKind.EXACT, 300)
-    assert [m.offset for m in s.matches()] == [0, 1]
+    assert s.matches() == (Match("ram", 0, 300, 300, Encoding.U16LE, 2),)
     s.refine(snap(2, [0x2C, 0x01, 0x2D, 0x01, 7, 3]), ScanKind.UNCHANGED)
-    assert [m.offset for m in s.matches()] == [0, 1]
+    assert s.matches() == (Match("ram", 0, 300, 300, Encoding.U16LE, 2),)
     t = ValueSearch()
     t.start(snap(0, [3, 1, 3]))
     t.refine(snap(1, [3, 1, 3]), ScanKind.EXACT, 3)
@@ -186,3 +200,108 @@ def test_a_big_region_scans_quickly() -> None:
     elapsed = time.perf_counter() - started
     assert s.count == len([i for i in range(size) if i % 3 == 0])
     assert elapsed < 0.05
+
+
+def test_forms_name_how_each_pattern_is_held() -> None:
+    """T-941: every pattern comes with its layout, and typed zeros fix the digit count."""
+    assert forms(5) == (
+        Form(Encoding.U8, (5,), False),
+        Form(Encoding.U8, (5,), True),
+        Form(Encoding.BCD, (5,), True),
+        Form(Encoding.BCD, (5,), False),
+        Form(Encoding.DIGITS_BE, (5,), True),
+        Form(Encoding.DIGITS_LE, (5,), False),
+    )
+    by_layout = {f.encoding: f.bytes for f in forms(300)}
+    assert by_layout[Encoding.U16LE] == (0x2C, 0x01) and by_layout[Encoding.U16BE] == (0x01, 0x2C)
+    assert by_layout[Encoding.BCD_BE] == (0x03, 0x00) and by_layout[Encoding.BCD_LE] == (0x00, 0x03)
+    assert by_layout[Encoding.DIGITS_BE] == (3, 0, 0) and by_layout[Encoding.DIGITS_LE] == (0, 0, 3)
+    six = {f.encoding: f.bytes for f in forms(600, digits=6)}
+    assert six[Encoding.DIGITS_BE] == (0, 0, 0, 6, 0, 0) and six[Encoding.BCD_BE] == (0, 6, 0)
+    assert six[Encoding.U16LE] == (0x58, 0x02)
+    assert typed_digits("000600") == 6 and typed_digits("0600") == 4
+    assert typed_digits("600") is None and typed_digits("0x0C") is None
+    assert typed_digits("0") is None and typed_digits(" 007 ") == 3
+    with pytest.raises(ConfigurationError, match="digits"):
+        forms(600, digits=2)
+    with pytest.raises(ConfigurationError, match="digits"):
+        forms(600, digits=9)
+    assert patterns(300) == tuple(dict.fromkeys(f.bytes for f in forms(300)))
+
+
+def test_a_score_over_six_digit_bytes_is_one_value() -> None:
+    """T-941: the user's score, one digit per byte, rolled from 800 to 1,000 and the byte
+    the search had kept went back to 0; the search now follows the whole number."""
+    ram = [0] * 24
+    ram[10:16] = [0, 0, 0, 6, 0, 0]  # 000600, highest digit first
+    s = ValueSearch()
+    s.start(snap(0, ram), value=600)
+    rows = {m.address: m for m in s.matches()}
+    assert rows["ram[13..15]"].held_as == "3 digits, highest first"
+    assert rows["ram[13..15]"].readings == 6  # 3 to 8 digits, over the zeros before
+    assert rows["ram[13..15]"].now == 600 and rows["ram[13..15]"].low_end == 15
+    ram[10:16] = [0, 0, 1, 0, 0, 0]  # 001000
+    s.refine(snap(1, ram), ScanKind.UP)
+    rows = {m.address: m for m in s.matches()}
+    assert "ram[13..15]" not in rows  # 0 did not go up
+    assert rows["ram[12..15]"].now == 1000 and rows["ram[12..15]"].before == 600
+    assert rows["ram[12..15]"].held_as == "4 digits, highest first"
+    s.refine(snap(2, ram), ScanKind.EXACT, 1000)
+    rows = {m.address: m for m in s.matches()}
+    assert rows["ram[12..15]"].now == 1000 and all(m.now == 1000 for m in rows.values())
+    # Typing the number as the game shows it, zeros and all, names the digit count.
+    t = ValueSearch()
+    t.start(snap(2, ram), value=1000, digits=6)
+    rows = {m.address: m for m in t.matches()}
+    assert rows["ram[10..15]"].held_as == "6 digits, highest first" and "ram[12..15]" not in rows
+    ram[10:16] = [0, 0, 1, 2, 5, 0]
+    t.refine(snap(3, ram), ScanKind.UP)
+    rows = {m.address: m for m in t.matches()}
+    assert rows["ram[10..15]"].now == 1250 and rows["ram[10..15]"].before == 1000
+    # The same bytes read lowest digit first went up too (001000 to 052100 that way round);
+    # the data cannot tell yet, and "Is exactly 1250" would.
+    assert rows["ram[9..14]"].held_as == "6 digits, lowest first"
+    t.refine(snap(4, ram), ScanKind.EXACT, 1250, digits=6)
+    assert [m.address for m in t.matches()] == ["ram[10..15]"]
+
+
+def test_a_span_that_stops_being_digits_is_dropped() -> None:
+    """T-941: bytes that no longer read as digits (or BCD) are not that number."""
+    s = ValueSearch()
+    s.start(snap(0, [1, 2, 0x12, 0, 0]), value=12)
+    held = {m.address: m.held_as for m in s.matches()}
+    assert held == {"ram[0..1]": "2 digits, highest first", "ram[2]": "packed decimal, 1 byte"}
+    s.refine(snap(1, [1, 11, 0x1A, 0, 0]), ScanKind.CHANGED)
+    assert s.matches() == ()
+    s.start(snap(2, [1, 2, 0x12, 0, 0]), value=12)
+    s.refine(snap(3, [1, 3, 0x13, 0, 0]), ScanKind.UP)
+    assert [(m.address, m.now) for m in s.matches()] == [("ram[0..1]", 13), ("ram[2]", 13)]
+
+
+def test_is_exactly_keeps_spans_over_bytes_still_running() -> None:
+    """T-941: from every byte, "Is exactly 300" finds the two-byte 300 whose bytes are both
+    still in the running, and not one whose byte a scan already threw out."""
+    s = ValueSearch()
+    s.start(snap(0, [0x2C, 0x01, 9, 0x2C, 0x01]))
+    s.refine(snap(1, [0x2C, 0x01, 9, 0x2C, 0x02]), ScanKind.UNCHANGED)  # byte 4 goes
+    s.refine(snap(2, [0x2C, 0x01, 9, 0x2C, 0x01]), ScanKind.EXACT, 300)
+    assert s.matches() == (Match("ram", 0, 300, 300, Encoding.U16LE, 2),)
+
+
+def test_read_spans_decodes_every_layout_at_once() -> None:
+    data = np.frombuffer(bytes([0x12, 0x34, 1, 2, 3, 0xA1]), dtype=np.uint8)
+    starts = np.array([0], dtype=np.int64)
+    assert read_spans(data, Encoding.U16LE, 2, starts)[0].tolist() == [0x3412]
+    assert read_spans(data, Encoding.U16BE, 2, starts)[0].tolist() == [0x1234]
+    assert read_spans(data, Encoding.BCD_BE, 2, starts)[0].tolist() == [1234]
+    assert read_spans(data, Encoding.BCD_LE, 2, starts)[0].tolist() == [3412]
+    two = np.array([2], dtype=np.int64)
+    assert read_spans(data, Encoding.DIGITS_BE, 3, two)[0].tolist() == [123]
+    assert read_spans(data, Encoding.DIGITS_LE, 3, two)[0].tolist() == [321]
+    _values, valid = read_spans(data, Encoding.DIGITS_BE, 4, two)
+    assert not valid[0]
+    _values, valid = read_spans(data, Encoding.BCD_LE, 2, np.array([4], dtype=np.int64))
+    assert not valid[0]
+    assert read_spans(data, Encoding.UINT_BE, 4, starts)[0].tolist() == [0x12340102]
+    found = spans(data, 0x1234)
+    assert (Encoding.U16BE, 2) in found and found[(Encoding.U16BE, 2)].tolist() == [0]

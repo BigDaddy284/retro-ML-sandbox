@@ -234,13 +234,22 @@ To find a value yourself, like a cheat finder, use the Research window's
 300, or hex like 0x0C or $0C) and press New search, or leave the box empty to
 start from every byte. A number bigger than one byte holds is looked for in
 every way games store numbers (two to four bytes in either order, packed
-decimal digits, one digit per byte), and every byte that takes part is kept. Play a little, then press the scan that fits: "Is exactly" (with the new
-number), "Went up", "Went down", "Changed" or "Didn't change"; each compares
-with the scan before. Every value is shown in decimal and hex, and "Now" keeps
-up with the game. When a few bytes are left, pick one, give it a name and
-points, and press "Reward going up" or "Reward going down": the byte is named
-for the AI and the reward appears in the Rewards panel under Progression. The
-app only reads the game's memory; it never changes it.
+decimal digits, one digit per byte), and each place found is one row that
+reads as one number: a score kept one digit per byte over six bytes shows as
+`ram[2013..2018]` with "6 digits, highest first" in the "Held as" column, and
+the scans follow the whole number, so it still "went up" when it rolls from
+800 to 1,000. Type the number as the game shows it, zeros and all (000600),
+to say how many digits it has; otherwise the row shows the shortest reading
+and counts the longer ones. Play a little, then press the scan that fits: "Is
+exactly" (with the new number), "Went up", "Went down", "Changed" or "Didn't
+change"; each compares with the scan before. A byte is shown in decimal and
+hex, a longer number as it reads, and "Now" keeps up with the game. When a
+few values are left, pick one, give it a name and points, and press "Reward
+going up" or "Reward going down": the value is named for the AI in that
+layout, the reward appears in the Rewards panel under Progression, and the
+AI's own guesses on the other bytes of the value are set aside, since a byte
+that is part of a value you named is not a value of its own. The app only
+reads the game's memory; it never changes it.
 
 After a long run on an older build, the AI may have dropped the real score or
 lives for reasons a newer build no longer has. Press "Start from scratch" in

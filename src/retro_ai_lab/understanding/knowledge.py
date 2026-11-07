@@ -16,10 +16,12 @@ import threading
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from retro_ai_lab.core import ConfigurationError
-from retro_ai_lab.observation.memory import MemorySnapshot
+
+if TYPE_CHECKING:
+    from retro_ai_lab.observation.memory import MemorySnapshot
 
 BELIEVED_PER_KIND = 16  # the most guesses of one kind the AI acts on at once (T-850)
 OFFERED_PER_KIND = 1  # guesses of one kind offered as rewards and steps (T-858) ...
@@ -83,17 +85,71 @@ def confidence_from_evidence(weights: Iterable[float]) -> Confidence:
     return Confidence.UNKNOWN
 
 
+MAX_DIGITS = 8  # the most decimal digits a value holds (a score of 99,999,999)
+MAX_BINARY = 4  # the most bytes a binary or packed-BCD value holds (the same number)
+
+
 class Encoding(Enum):
     U8 = "u8"
     S8 = "s8"
     U16LE = "u16le"
     U16BE = "u16be"
-    BCD = "bcd"  # one decimal digit per nibble, little-endian bytes
+    BCD = "bcd"  # one decimal digit per nibble, one byte
     FLAG = "flag"  # 0 / non-zero
+    # Sized layouts (T-941): the variable's own ``length`` says how many bytes.
+    UINT_LE = "uint_le"  # binary, low byte first
+    UINT_BE = "uint_be"  # binary, high byte first
+    BCD_LE = "bcd_le"  # packed decimal, two digits a byte, lowest pair first
+    BCD_BE = "bcd_be"  # packed decimal, highest pair first
+    DIGITS_LE = "digits_le"  # one decimal digit per byte, lowest digit first
+    DIGITS_BE = "digits_be"  # one decimal digit per byte, highest first (as it reads on screen)
+
+    @property
+    def sized(self) -> bool:
+        """Whether the variable's ``length`` sets how many bytes this takes (T-941)."""
+        return self in _SIZED
 
     @property
     def width(self) -> int:
+        """Bytes taken; 0 for a sized layout, whose variable says."""
+        if self.sized:
+            return 0
         return 2 if self in (Encoding.U16LE, Encoding.U16BE) else 1
+
+    @property
+    def max_length(self) -> int:
+        if self in (Encoding.DIGITS_LE, Encoding.DIGITS_BE):
+            return MAX_DIGITS
+        return MAX_BINARY if self.sized else self.width
+
+    def describe(self, length: int) -> str:
+        """How a value is held, in plain words: "1 byte", "6 digits", "2 bytes, low first"."""
+        if self in (Encoding.DIGITS_LE, Encoding.DIGITS_BE):
+            order = "highest first" if self is Encoding.DIGITS_BE else "lowest first"
+            return f"{length} digit{'s' if length != 1 else ''}, {order}"
+        if self in (Encoding.BCD, Encoding.BCD_LE, Encoding.BCD_BE):
+            n = 1 if self is Encoding.BCD else length
+            text = f"packed decimal, {n} byte{'s' if n != 1 else ''}"
+            if n > 1:
+                text += ", high first" if self is Encoding.BCD_BE else ", low first"
+            return text
+        n = self.width or length
+        if n == 1:
+            return "1 byte" if self is not Encoding.FLAG else "1 byte (on or off)"
+        order = "high first" if self in (Encoding.U16BE, Encoding.UINT_BE) else "low first"
+        return f"{n} bytes, {order}"
+
+
+_SIZED = frozenset(
+    {
+        Encoding.UINT_LE,
+        Encoding.UINT_BE,
+        Encoding.BCD_LE,
+        Encoding.BCD_BE,
+        Encoding.DIGITS_LE,
+        Encoding.DIGITS_BE,
+    }
+)
 
 
 class VariableKind(Enum):
@@ -161,6 +217,7 @@ class Variable:
     rejected: bool = False  # a person said "no, that's wrong"
     notes: str = ""
     judged: int = 0  # how many changes of the byte the classifier last judged it on (T-917)
+    length: int = 0  # bytes taken by a sized encoding (T-941); 0 means the encoding's own width
     # Worked out once from the fields above (T-841): the detector, the long look and
     # the suggestion rules read it for every variable on every snapshot.
     confidence: Confidence = field(init=False, repr=False, compare=False)
@@ -174,6 +231,19 @@ class Variable:
             raise ConfigurationError("Variable offset must be a non-negative integer.")
         if self.confirmed and self.rejected:
             raise ConfigurationError("A variable can't be both confirmed and rejected.")
+        if isinstance(self.length, bool) or not isinstance(self.length, int) or self.length < 0:
+            raise ConfigurationError("Variable length must be a non-negative integer.")
+        if self.encoding.sized:
+            if not 1 <= self.length <= self.encoding.max_length:
+                raise ConfigurationError(
+                    f"A {self.encoding.value} value takes 1 to {self.encoding.max_length} bytes, "
+                    f"not {self.length}."
+                )
+        elif self.length not in (0, self.encoding.width):
+            raise ConfigurationError(
+                f"A {self.encoding.value} value takes {self.encoding.width} byte(s), "
+                f"not {self.length}."
+            )
         if self.rejected:
             confidence = Confidence.UNKNOWN
         elif self.confirmed:
@@ -184,7 +254,17 @@ class Variable:
 
     @property
     def width(self) -> int:
-        return self.encoding.width
+        return self.length if self.encoding.sized else self.encoding.width
+
+    @property
+    def address(self) -> str:
+        """Where it is: ``ram[12]``, or ``ram[2013..2018]`` over several bytes (T-941)."""
+        return address_text(self.region, self.offset, self.width)
+
+    @property
+    def held_as(self) -> str:
+        """How the bytes hold the number, in plain words (T-941)."""
+        return self.encoding.describe(self.width)
 
     @property
     def display_name(self) -> str:
@@ -211,6 +291,7 @@ class Variable:
             "rejected": self.rejected,
             "notes": self.notes,
             "judged": self.judged,
+            "length": self.length,
         }
 
     @classmethod
@@ -228,12 +309,28 @@ class Variable:
                 rejected=bool(data.get("rejected", False)),
                 notes=data.get("notes", ""),
                 judged=int(data.get("judged", 0)),
+                length=int(data.get("length", 0)),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"Bad variable: {exc}") from exc
 
 
+def address_text(region: str, offset: int, width: int = 1, *, hex_form: bool = False) -> str:
+    """``ram[12]`` or ``ram[2013..2018]``; in hex, ``0x000C`` or ``0x07DD..0x07E2`` (T-941)."""
+    last = offset + max(1, width) - 1
+    if hex_form:
+        return f"0x{offset:04X}" if last == offset else f"0x{offset:04X}..0x{last:04X}"
+    inside = f"{offset}" if last == offset else f"{offset}..{last}"
+    return f"{region}[{inside}]"
+
+
 def decode(raw: bytes, encoding: Encoding) -> int:
+    if encoding.sized:
+        if not 1 <= len(raw) <= encoding.max_length:
+            raise ConfigurationError(
+                f"{encoding.value} takes 1 to {encoding.max_length} bytes, got {len(raw)}."
+            )
+        return _decode_sized(raw, encoding)
     if len(raw) != encoding.width:
         raise ConfigurationError(
             f"{encoding.value} needs {encoding.width} byte(s), got {len(raw)}."
@@ -252,6 +349,28 @@ def decode(raw: bytes, encoding: Encoding) -> int:
             raise ConfigurationError(f"{raw[0]:#04x} is not a BCD byte.")
         return hi * 10 + lo
     return 1 if raw[0] else 0
+
+
+def _decode_sized(raw: bytes, encoding: Encoding) -> int:
+    """Read a value over several bytes (T-941); highest part first after the turn."""
+    high_first = (
+        raw if encoding in (Encoding.UINT_BE, Encoding.BCD_BE, Encoding.DIGITS_BE) else raw[::-1]
+    )
+    if encoding in (Encoding.UINT_LE, Encoding.UINT_BE):
+        return int.from_bytes(high_first, "big")
+    value = 0
+    if encoding in (Encoding.BCD_LE, Encoding.BCD_BE):
+        for b in high_first:
+            hi, lo = b >> 4, b & 0xF
+            if hi > 9 or lo > 9:
+                raise ConfigurationError(f"{b:#04x} is not a BCD byte.")
+            value = value * 100 + hi * 10 + lo
+        return value
+    for b in high_first:
+        if b > 9:
+            raise ConfigurationError(f"{b} is not a decimal digit.")
+        value = value * 10 + b
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -586,11 +705,20 @@ class Knowledge:
         name: str = "",
         evidence: Iterable[Evidence] = (),
         judged: int = 0,
+        length: int = 0,
     ) -> Variable:
         """Add a new belief with a fresh id (what the discovery engine calls)."""
         return self.add(
             Variable(
-                self.new_id(), region, offset, encoding, kind, name, tuple(evidence), judged=judged
+                self.new_id(),
+                region,
+                offset,
+                encoding,
+                kind,
+                name,
+                tuple(evidence),
+                judged=judged,
+                length=length,
             )
         )
 
@@ -639,6 +767,7 @@ class Knowledge:
         name: str | None = None,
         kind: VariableKind | None = None,
         encoding: Encoding | None = None,
+        length: int | None = None,
         by: str = "user",
     ) -> Variable:
         """A person fixes what the belief means; the fix counts as confirmation."""
@@ -649,6 +778,8 @@ class Knowledge:
             changes["kind"] = kind
         if encoding is not None:
             changes["encoding"] = encoding
+        if length is not None:
+            changes["length"] = length
         if not changes:
             raise ConfigurationError("correct() needs something to change.")
         self.update(var_id, **changes)
@@ -757,6 +888,8 @@ __all__ = [
     "AI",
     "BELIEVED_PER_KIND",
     "INPUT_LINKED",
+    "MAX_BINARY",
+    "MAX_DIGITS",
     "MOVER",
     "MOVING_WORD",
     "OFFERED_MANY",
@@ -771,6 +904,7 @@ __all__ = [
     "Relationship",
     "Variable",
     "VariableKind",
+    "address_text",
     "belief_rank",
     "confidence_from_evidence",
     "decode",
