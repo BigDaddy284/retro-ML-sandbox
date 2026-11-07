@@ -85,6 +85,8 @@ DOUBTED_KINDS = frozenset({VariableKind.SCORE, VariableKind.PROGRESS})
 BOUNCES = "bounces"  # evidence kind: a "lives" byte going up nearly as often as down (T-864)
 BUSY = "busy"  # evidence kind: a "lives" byte changing more than once in ten steps (T-865)
 NOT_LIVES = frozenset({BOUNCES, BUSY})
+# Kinds a game has one of: confirming one sets the AI's other guesses of it aside (T-939).
+ONE_PER_GAME = frozenset({VariableKind.LIVES, VariableKind.HEALTH, VariableKind.SCORE})
 # Kinds re-checked at every review against the byte's fresh statistics (T-864 to T-866, T-869):
 # the doubt function says why the byte is not that kind, the words name the kind.
 PLAYED = "played"  # evidence kind: the byte moved during a go, so it is worth a seat (T-870)
@@ -657,8 +659,46 @@ class DiscoveryService:
         with self._lock:
             k = self._require()
             var = k.confirm(var_id)
-        self._announce(DiscoveryUpdated((), (var,), (), ()))
+            aside = self._set_others_aside(k, var)
+        self._announce(DiscoveryUpdated((), (var, *aside), (), ()))
         return var
+
+    def _set_others_aside(self, k: Knowledge, var: Variable) -> list[Variable]:
+        """A game has one life count, one health and one score (T-939).
+
+        Once a person confirms one, the AI's own other guesses of that kind are set
+        aside by the person's word: the user's 950-go log counted "45 lives lost" a go
+        from three timer-like life counts beside the confirmed one, and they sat in
+        what the AI sees and in its setback events every step.
+        """
+        if var.kind not in ONE_PER_GAME:
+            return []
+        label = var.kind.label.lower()
+        aside: list[Variable] = []
+        for other in k.by_kind(var.kind):
+            if other.id == var.id or other.confirmed:
+                continue
+            k.support(
+                other.id,
+                Evidence(
+                    "your-word",
+                    f"You confirmed {var.display_name} as the game's {label}; a game has one.",
+                    0.0,
+                    self._observation.frame,
+                ),
+            )
+            aside.append(k.reject(other.id, by="your word"))
+        if aside:
+            log.info(
+                "You confirmed %s as the game's %s: %d other %s guess%s set aside (%s).",
+                var.display_name,
+                label,
+                len(aside),
+                label,
+                "" if len(aside) == 1 else "es",
+                _names(aside),
+            )
+        return aside
 
     def reject(self, var_id: str) -> Variable:
         """A person says a guess is wrong; the rewards and steps built on it go too (T-902)."""
@@ -676,7 +716,8 @@ class DiscoveryService:
         with self._lock:
             k = self._require()
             var = k.correct(var_id, name=name)
-        self._announce(DiscoveryUpdated((), (var,), (), ()))
+            aside = self._set_others_aside(k, var)
+        self._announce(DiscoveryUpdated((), (var, *aside), (), ()))
         return var
 
     def tell(self, moment: Moment) -> Narrowing:

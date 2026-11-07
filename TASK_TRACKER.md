@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-939 | A game has one life count, one health and one score: when a person confirms (or names) a guess of one of those kinds, the AI's own other guesses of that kind are set aside by the person's word, so they leave the rewards, the steps, what the AI sees and the survival count; the user's 950-go log counted "45 lives lost" a go from three timer-like guesses beside the confirmed Lifes | 8 | Done | 1/1 | see PR |
 | T-938 | A suggested step whose guess the knowledge no longer has is retired, like one whose guess was rejected, so the Progress panel stops piling up "Get further in Progress" steps "detected by Progress of v12" from guesses that are gone; nothing is retired while the knowledge is empty, and a person's own steps are never touched | 8 | Done | 1/1 | see PR #193 |
 | T-937 | The Rewards panel's Remove button works on every row: a reward of one's own is taken out as before, and a row the AI suggested tells the AI its guess is wrong (as "No, that's wrong" does), so its rewards go and the byte is not guessed again; a row with no guess behind it (Starting over, the buttons) says to untick it instead | 8 | Done | 1/1 | see PR #192 |
 | T-936 | The value search takes any number a game shows (up to 99,999,999), not just 0 to 255: it looks for it in every way games store numbers (binary over one to four bytes, either byte order; packed BCD, either byte order; one digit per byte, either order) and keeps every byte that takes part; "Is exactly" does the same; the hint names the real range | 8 | Done | 1/1 | see PR #191 |
@@ -2991,6 +2992,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; understanding + services + integration 241 passed; full suite 1358 passed, 10 skipped in 183.18s (0:03:03).
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
+
+### T-939 – One life count, one health, one score per game
+- **Status:** Done
+- **Phase:** 8 (the user's 950-go log: "lost a life 45 times" a go, the first always at step 31, while the confirmed "Lifes" row paid about once a go; the AI held three other "life count" guesses that ticked down like a timer, and they sat in what the AI sees, in the survival line and in the setback events every step)
+- **Objective:** `ONE_PER_GAME` = lives, health, score. When `DiscoveryService.confirm` or `rename` makes a guess of one of those kinds the person's word, every other non-rejected, unconfirmed guess of that kind is given a "your-word" evidence line ("You confirmed Lifes as the game's lives; a game has one.") and rejected by "your word" (not by the AI, so it is not rethought), the log says so, and the `DiscoveryUpdated` carries the confirmed guess and the ones set aside, so the rewards, the steps, the state and the survival count all follow at once. The rule is the one `tell` already applies for a moment the person reported; it reads nothing about the game.
+- **Scope:** `services/discovery.py` (`ONE_PER_GAME`, `_set_others_aside`, `confirm`, `rename`). **Out of scope:** progress, positions, flags (a game has several); guesses the person confirmed themselves (two confirmed life counts are both the person's word).
+- **Acceptance criteria:**
+  1. With two lives guesses, confirming one rejects the other with a "your-word" line, `by_kind(LIVES)` holds only the confirmed one, and the announced update's `changed` holds both.
+  2. Naming (rename) a score guess does the same for the other score guesses; confirming a position guess leaves the other positions alone; a second lives guess the person confirmed earlier is left alone.
+  3. The set-aside guess is not rethought (`rejected_by_ai` is false).
+- **Expected changes:** `src/retro_ai_lab/services/discovery.py`, `tests/unit/services/test_discovery.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_confirming_the_lives_sets_the_ai_s_other_life_counts_aside` (discovery); services suite; full suite.
+- **Results:** 1 new test passes; discovery tests 31 passed; full suite 1383 passed, 10 skipped (159.96s); ruff and mypy clean.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The person's confirmation now carries the weight the reported moment already did: one life count, one health, one score. The user's three timer-like life counts will be set aside the moment "Lifes" is confirmed again (or at once if it still is, on the next confirm or rename of it), and with them go the false setbacks in the state, the rewards and the survival line.
 
 ### T-938 – Steps of guesses the AI no longer has are retired
 - **Status:** Done

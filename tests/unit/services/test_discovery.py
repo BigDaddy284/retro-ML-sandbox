@@ -1036,6 +1036,40 @@ def test_a_confirmed_score_is_never_the_progress_byte(
     assert ("ram", LAYOUT.score) in m.candidates
 
 
+def test_confirming_the_lives_sets_the_ai_s_other_life_counts_aside(
+    discovery: DiscoveryService, connection: ConnectionService, bus: EventBus
+) -> None:
+    """T-939: the user's log counted 45 lives lost a go from three timer-like guesses."""
+    from retro_ai_lab.understanding.knowledge import rejected_by_ai
+
+    connection.connect("fake", seed=2)
+    k = discovery.knowledge
+    assert k is not None
+    lives = k.propose("ram", LAYOUT.lives, kind=VariableKind.LIVES, name="Lifes")
+    timer = k.propose("ram", LAYOUT.timer, kind=VariableKind.LIVES)
+    frame = k.propose("ram", LAYOUT.frame, kind=VariableKind.LIVES)
+    mine = k.confirm(k.propose("ram", LAYOUT.lap, kind=VariableKind.LIVES).id)
+    pos_a = k.propose("ram", LAYOUT.position, kind=VariableKind.POSITION)
+    pos_b = k.propose("ram", LAYOUT.lane, kind=VariableKind.POSITION)
+    seen: list[DiscoveryUpdated] = []
+    bus.subscribe(DiscoveryUpdated, seen.append)
+    discovery.confirm(lives.id)
+    assert {v.id for v in seen[-1].changed} == {lives.id, timer.id, frame.id}
+    assert {v.id for v in k.by_kind(VariableKind.LIVES)} == {lives.id, mine.id}  # yours both
+    gone = k.get(timer.id)
+    assert gone.rejected and not rejected_by_ai(gone)  # by your word: not rethought
+    assert any(e.kind == "your-word" and "Lifes" in e.detail for e in gone.evidence)
+    # Confirming a position leaves the other positions alone: a game has many.
+    discovery.confirm(pos_a.id)
+    assert {v.id for v in seen[-1].changed} == {pos_a.id}
+    assert not k.get(pos_b.id).rejected
+    # Naming a score is the person's word too.
+    score = k.propose("ram", LAYOUT.score, kind=VariableKind.SCORE)
+    other = k.propose("ram", LAYOUT.checkpoint, kind=VariableKind.SCORE)
+    discovery.rename(score.id, "Points")
+    assert k.get(other.id).rejected and {v.id for v in seen[-1].changed} == {score.id, other.id}
+
+
 # ------------------------------------------------------------ T-907: the summary cache
 
 
