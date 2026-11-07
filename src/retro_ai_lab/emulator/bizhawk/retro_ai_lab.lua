@@ -949,7 +949,9 @@ local function main()
       end
       emu.yield()
     else
-      if app then
+      -- In free run the app's held pad is applied every frame, unless the last
+      -- step watched: then the person's own controller reaches the game (T-942).
+      if app and not watching then
         apply_held()
       end
       emu.frameadvance()

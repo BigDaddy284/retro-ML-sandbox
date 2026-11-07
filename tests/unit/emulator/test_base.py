@@ -561,3 +561,14 @@ def test_read_many_returns_bytes_in_order(adapter: RecordingAdapter) -> None:
     blind.connect()
     with pytest.raises(UnsupportedCapabilityError):
         blind.read_many([("ram", 0, 1)])
+
+
+def test_the_base_adapter_holds_and_cannot_free_run() -> None:
+    """T-942: an adapter says whether its game stands still between requests and whether
+    it can be let run; the base holds and cannot switch."""
+    a = RecordingAdapter()
+    assert a.hold and not a.free_run and not a.supports_free_run
+    with pytest.raises(ConfigurationError):
+        a.set_free_run("yes")  # type: ignore[arg-type]
+    with pytest.raises(UnsupportedCapabilityError):
+        a.set_free_run(True)

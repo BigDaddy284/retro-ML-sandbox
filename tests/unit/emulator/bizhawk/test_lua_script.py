@@ -730,3 +730,31 @@ def test_steps_that_follow_each_other_keep_the_emulator_running() -> None:
         channel.send_line(encode_request(10, "bye"))
         assert json.loads(channel.receive_line(5.0))["ok"] is True
         wait_until(lambda: not host.paused)
+
+
+def test_free_run_leaves_the_real_controller_alone_between_watched_steps() -> None:
+    """T-942: while a person plays with the game running on its own, the app's empty pad
+    must not be pressed over their controller on the turns between watched steps."""
+    with LuaScriptHost() as host:
+        adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
+        adapter.connect(timeout_s=5.0)
+        adapter.set_free_run(True)
+        wait_until(lambda: not host.paused)
+        host.real_pad = ("up",)
+        watched = adapter.step(1, watch=True)
+        assert watched.pressed == frozenset({"up"})
+        sets = host.calls.count("joypad_set")
+        start = host.frames
+        wait_until(lambda: host.frames > start + 5)
+        assert host.calls.count("joypad_set") == sets  # the pad was left to the person
+        assert host.game.state.speed > 0  # and their Up reached the game
+        # A step that holds the pad takes it back on every turn after it.
+        adapter.step(1, pressed={Button("a", "A")})
+        sets = host.calls.count("joypad_set")
+        start = host.frames
+        wait_until(lambda: host.frames > start + 3)
+        assert host.calls.count("joypad_set") > sets
+        adapter.set_free_run(False)
+        wait_until(lambda: host.paused)
+        adapter.disconnect()
+        assert host.error is None

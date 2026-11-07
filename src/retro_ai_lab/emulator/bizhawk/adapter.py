@@ -237,6 +237,12 @@ class BizHawkAdapter(EmulatorAdapter):
         """True when the game runs between the app's steps (ARCHITECTURE.md §5.3)."""
         return self._free_run
 
+    @property
+    def supports_free_run(self) -> bool:
+        """A bridge that holds the game can also let it run (T-942); one that cannot hold
+        is running all the time, so there is nothing to switch."""
+        return self._hold
+
     def ping(self) -> None:
         """Round trip to the script; raises if the link is gone."""
         self._require_connected()

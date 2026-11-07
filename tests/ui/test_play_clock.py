@@ -526,3 +526,47 @@ def test_an_empty_pad_watches_the_real_controller_and_records_it(qtbot: QtBot) -
         request = sim.requests[-1]
         assert "watch" not in request and request["buttons"]["Up"] is True
         context.connection.disconnect()
+
+
+def test_play_runs_a_bizhawk_link_free_and_pause_holds_it(qtbot: QtBot) -> None:
+    """T-942: the user found play "difficult with all the pause buffers": a person's play
+    is now the emulator's own time. Play lets the game run before the first step, every
+    pulse then watches one frame however many the wall clock owes, and Pause holds it."""
+    from retro_ai_lab.emulator.bizhawk.simulator import BizHawkSimulator
+
+    with BizHawkSimulator() as sim:
+        context = AppContext()
+        now = [100.0]
+        clock = PlayClock(context, fps=100, clock=lambda: now[0])
+        clock.pause()
+        context.connection.connect("bizhawk", port=sim.port, call_timeout_s=2.0, timeout_s=2.0)
+        assert clock.loose and sim.paused and not sim.free_run
+        before = len(sim.requests)
+        clock.play()
+        now[0] += 0.5  # fifty frames owed on a holding link; a free-running one owes nothing
+        qtbot.waitUntil(lambda: clock.frames >= 3)
+        requests = sim.requests[before:]
+        assert requests[0]["cmd"] == "mode" and requests[0]["free_run"] is True
+        steps = [r for r in requests if r["cmd"] == "step"]
+        assert steps and all(r["frames"] == 1 for r in steps)
+        assert not sim.paused and sim.free_run
+        assert clock.forgiven == 0 and clock.early == 0
+        clock.pause()
+        qtbot.waitUntil(lambda: sim.paused)
+        assert not sim.free_run
+        assert sim.requests[-1]["cmd"] == "mode" and sim.requests[-1]["free_run"] is False
+        count = len(sim.requests)
+        clock.play()
+        qtbot.waitUntil(lambda: len(sim.requests) > count + 1)
+        assert sim.requests[count]["cmd"] == "mode" and sim.requests[count]["free_run"] is True
+        context.connection.disconnect()
+        assert not clock.loose and not clock.running
+
+
+def test_the_practice_console_is_driven_as_before(qtbot: QtBot, context: AppContext) -> None:
+    """T-942: an emulator that cannot run on its own still gets the frames the clock owes."""
+    clock = PlayClock(context, fps=100)
+    context.connection.connect("fake")
+    assert not clock.loose and clock.running
+    qtbot.waitUntil(lambda: clock.frames >= 3)
+    clock.pause()
