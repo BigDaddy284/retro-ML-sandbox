@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-940 | The survival count follows the best life count and the best health (the person's confirmed one first), not every guess of those kinds: `EpisodeSignals.watch_setbacks`, set by the runner at every go from the knowledge, keeps only their setback events, so the go line and the survival line count real deaths | 8 | Done | 1/1 | see PR |
 | T-939 | A game has one life count, one health and one score: when a person confirms (or names) a guess of one of those kinds, the AI's own other guesses of that kind are set aside by the person's word, so they leave the rewards, the steps, what the AI sees and the survival count; the user's 950-go log counted "45 lives lost" a go from three timer-like guesses beside the confirmed Lifes | 8 | Done | 1/1 | see PR #194 |
 | T-938 | A suggested step whose guess the knowledge no longer has is retired, like one whose guess was rejected, so the Progress panel stops piling up "Get further in Progress" steps "detected by Progress of v12" from guesses that are gone; nothing is retired while the knowledge is empty, and a person's own steps are never touched | 8 | Done | 1/1 | see PR #193 |
 | T-937 | The Rewards panel's Remove button works on every row: a reward of one's own is taken out as before, and a row the AI suggested tells the AI its guess is wrong (as "No, that's wrong" does), so its rewards go and the byte is not guessed again; a row with no guess behind it (Starting over, the buttons) says to untick it instead | 8 | Done | 1/1 | see PR #192 |
@@ -2992,6 +2993,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; understanding + services + integration 241 passed; full suite 1358 passed, 10 skipped in 183.18s (0:03:03).
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
+
+### T-940 – The survival count follows the lives the AI rewards
+- **Status:** Done
+- **Phase:** 8 (the user's 950-go log: "lost a life 45 times" a go from every life-count guess's setbacks, while the confirmed Lifes row paid about once a go; T-939 sets the stray guesses aside once a person confirms one, but with nobody confirming anything the measure would still add up every guess)
+- **Objective:** `EpisodeSignals.watch_setbacks(ids)` keeps only the `SETBACK` events of the given variables (None keeps every one, as before). `EpisodeRunner.begin` sets it at every go to the knowledge's best lives guess and best health guess (`Knowledge.best`, which puts the person's confirmed guess first), through a new `StateEncoder.knowledge` property, so the go line's "lost a life N times" and the survival line count the one life count and the one health the rewards also follow. The rule reads the knowledge's own ranking and nothing about the game.
+- **Scope:** `training/episode.py` (`EpisodeSignals.watch_setbacks`, `EpisodeRunner.begin`), `learning/state.py` (`StateEncoder.knowledge`). **Out of scope:** the rewards (they already follow the offered guesses); counting resets as deaths.
+- **Acceptance criteria:**
+  1. With two lives guesses, a setback on the lesser one is not counted and one on the best is; the first-loss step follows the counted one.
+  2. With the watch set to None every setback counts (the signals on their own are unchanged).
+  3. A person's confirmed life count outranks a surer-looking unconfirmed one.
+- **Expected changes:** `src/retro_ai_lab/training/episode.py`, `src/retro_ai_lab/learning/state.py`, `tests/unit/training/test_episode.py`, `README.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_only_the_best_life_count_s_losses_are_counted` (runner); training suite; full suite.
+- **Results:** 1 new test passes; training and learning tests 169 passed; full suite 1384 passed, 10 skipped (151.93s); ruff and mypy clean.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** The survival measure now counts what a death is to the rewards: the drops of the one life count and the one health the knowledge ranks first, with a person's confirmed guess ahead of any evidence. The signals on their own still count every value, so nothing else that reads them changed. On the user's game the line will read about one death a go instead of 45, which is the number to watch.
 
 ### T-939 – One life count, one health, one score per game
 - **Status:** Done

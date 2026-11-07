@@ -250,6 +250,31 @@ def test_checkpoint_restarts_from_the_same_place(lab: Lab) -> None:
     assert bare.finish().ended_by == "stopped"
 
 
+def test_only_the_best_life_count_s_losses_are_counted(lab: Lab) -> None:
+    """T-940: the user's log added up every life-count guess's drops: 45 "lives" a go."""
+    lab.connection.connect("fake", seed=3)
+    k = teach(lab)
+    lives = k.at(RAM, LAYOUT.lives)
+    assert lives is not None
+    timer = k.propose(RAM, LAYOUT.timer, kind=VariableKind.LIVES, evidence=SURE)  # a stray
+    k.confirm(lives.id)  # your word outranks any evidence
+    r = runner(lab, frames_per_step=4, max_steps=6)
+    assert r.signals.watched is None  # on their own the signals count every value
+    r.begin()
+    assert r.signals.watched == frozenset({lives.id})
+    r.signals.take_setbacks()  # whatever the restore brought
+    stray = GameEvent(EventKind.SETBACK, 20, timer.id, "", 9, 8)
+    real = GameEvent(EventKind.SETBACK, 20, lives.id, "", 3, 2)
+    lab.bus.publish(DiscoveryUpdated((), (), (stray, stray), ()))
+    assert r.signals.take_setbacks() == 0  # the stray guess does not count
+    lab.bus.publish(DiscoveryUpdated((), (), (real, stray), ()))
+    assert r.signals.take_setbacks() == 1
+    r.signals.watch_setbacks(None)
+    lab.bus.publish(DiscoveryUpdated((), (), (stray,), ()))
+    assert r.signals.take_setbacks() == 1
+    r.finish()
+
+
 def test_a_reset_seen_just_after_a_checkpoint_restore_is_the_restore(lab: Lab) -> None:
     lab.connection.connect("fake", seed=3)
     teach(lab)

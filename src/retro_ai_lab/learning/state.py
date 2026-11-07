@@ -167,6 +167,11 @@ class StateEncoder:
         self.refresh()
 
     @property
+    def knowledge(self) -> Knowledge:
+        """The knowledge the state is read from (T-940)."""
+        return self._knowledge
+
+    @property
     def bins(self) -> int:
         return self._bins
 
