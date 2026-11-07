@@ -185,6 +185,8 @@ class RewardProfile:
     personality: str = "custom"
     _items: dict[str, Behaviour] = field(default_factory=dict, init=False, repr=False)
     _weights: dict[Category, float] = field(default_factory=dict, init=False, repr=False)
+    # Rules a person removed (T-943): a suggested row's rule key, or a fixed row's id.
+    _dismissed: set[str] = field(default_factory=set, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not self.game_id or not isinstance(self.game_id, str):
@@ -237,6 +239,22 @@ class RewardProfile:
     def remove(self, behaviour_id: str) -> None:
         self.get(behaviour_id)
         del self._items[behaviour_id]
+
+    @property
+    def dismissed(self) -> frozenset[str]:
+        """The rules a person removed, which suggestions and button rows skip (T-943)."""
+        return frozenset(self._dismissed)
+
+    def dismiss(self, key: str) -> None:
+        if not key or not isinstance(key, str):
+            raise ConfigurationError("A dismissed rule needs a key.")
+        self._dismissed.add(key)
+
+    def bring_back(self) -> tuple[str, ...]:
+        """Forget every dismissal; returns what was dismissed."""
+        gone = tuple(sorted(self._dismissed))
+        self._dismissed.clear()
+        return gone
 
     def by_category(self) -> dict[Category, tuple[Behaviour, ...]]:
         groups: dict[Category, list[Behaviour]] = {c: [] for c in Category}
@@ -357,6 +375,7 @@ class RewardProfile:
             "personality": self.personality,
             "weights": {c.value: w for c, w in self._weights.items()},
             "behaviours": [b.to_dict() for b in self._items.values()],
+            "dismissed": sorted(self._dismissed),
         }
 
     @classmethod
@@ -373,6 +392,8 @@ class RewardProfile:
             )
             for item in data.get("behaviours", []):
                 profile.add(Behaviour.from_dict(item))
+            for key in data.get("dismissed", []):
+                profile.dismiss(key)
         except (KeyError, TypeError, AttributeError, ValueError) as exc:
             raise ConfigurationError(f"Bad rewards data: {exc}") from exc
         return profile

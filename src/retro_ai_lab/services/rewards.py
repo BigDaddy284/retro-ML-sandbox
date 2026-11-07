@@ -10,7 +10,7 @@ profile and announce :class:`RewardProfileChanged`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
@@ -20,7 +20,12 @@ from retro_ai_lab.rewards.exploitation import ExploitDetector, ExploitWarning
 from retro_ai_lab.rewards.model import Behaviour, RewardProfile
 from retro_ai_lab.rewards.own import is_own, own_behaviour, own_id
 from retro_ai_lab.rewards.personalities import Personality, apply_personality
-from retro_ai_lab.rewards.suggestions import RelationshipWatch, SuggestionReport, apply_suggestions
+from retro_ai_lab.rewards.suggestions import (
+    RelationshipWatch,
+    SuggestionReport,
+    apply_suggestions,
+    rule_key,
+)
 from retro_ai_lab.rewards.tally import RewardTally
 from retro_ai_lab.services.connection import (
     ConnectionService,
@@ -202,6 +207,37 @@ class RewardService:
         profile.remove(behaviour_id)
         self._ask_for_own()
         self._announce(RewardProfileChanged((), (), (behaviour_id,), "control"))
+
+    def dismiss(self, behaviour_id: str) -> str:
+        """Take a row out for good (T-943): the rule behind it is remembered, so the AI's
+        next guess of the same kind brings no row of that name back. Returns the key."""
+        profile = self._require()
+        behaviour = profile.get(behaviour_id)
+        if is_own(behaviour_id):
+            raise ConfigurationError("A reward you added is removed, not dismissed.")
+        key = behaviour_id
+        var_id = behaviour.trigger.variable_id
+        knowledge = self._discovery.knowledge
+        if var_id is not None and knowledge is not None and var_id in knowledge:
+            key = rule_key(behaviour.trigger.kind, knowledge.get(var_id).kind)
+        profile.dismiss(key)
+        profile.remove(behaviour_id)
+        self._ask_for_own()
+        self._announce(RewardProfileChanged((), (), (behaviour_id,), "control"))
+        return key
+
+    def suggest_again(self) -> SuggestionReport:
+        """Forget every dismissal (T-943) and bring the suggested rows back."""
+        profile = self._require()
+        profile.bring_back()
+        session = self._connection.session
+        buttons: tuple[str, ...] = ()
+        if session is not None:
+            buttons, _ = ensure_button_rows(profile, session.buttons)
+            if buttons:
+                self._announce(RewardProfileChanged(buttons, (), (), "control"))
+        report = self.refresh_suggestions()
+        return replace(report, added=buttons + report.added) if buttons else report
 
     def _ask_for_own(self) -> None:
         """Tell the detector which values the person's own rewards watch."""

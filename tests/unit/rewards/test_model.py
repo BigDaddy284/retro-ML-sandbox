@@ -269,3 +269,22 @@ def test_clicking_never_leaves_the_allowed_range(start: float, clicks: list[str]
     for c in clicks:
         b = p.increase("b1") if c == "+" else p.decrease("b1")
         assert -MAX_VALUE <= b.value <= MAX_VALUE
+
+
+def test_dismissals_round_trip() -> None:
+    """T-943: what a person removed is saved with the profile; an older file has none."""
+    p = RewardProfile("g")
+    with pytest.raises(ConfigurationError):
+        p.dismiss("")
+    p.dismiss("setback:<lives>")
+    p.dismiss("button:press:up")
+    p.dismiss("setback:<lives>")
+    assert p.dismissed == frozenset({"setback:<lives>", "button:press:up"})
+    data = p.to_dict()
+    assert data["dismissed"] == ["button:press:up", "setback:<lives>"]
+    again = RewardProfile.from_dict(data)
+    assert again.dismissed == p.dismissed
+    del data["dismissed"]
+    assert RewardProfile.from_dict(data).dismissed == frozenset()
+    assert p.bring_back() == ("button:press:up", "setback:<lives>")
+    assert p.dismissed == frozenset() and p.bring_back() == ()

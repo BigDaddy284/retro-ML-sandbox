@@ -11,6 +11,7 @@ from retro_ai_lab.rewards import (
     RewardProfile,
     Trigger,
     apply_suggestions,
+    rule_key,
     suggest_behaviours,
 )
 from retro_ai_lab.understanding import (
@@ -234,3 +235,29 @@ def test_only_the_best_guess_of_each_role_is_rewarded_in_plain_words() -> None:
     assert suggested[f"recovery:{lives.id}"].name == "Gaining a life"
     assert suggested[f"progress:{first.id}"].name == "Progress goes up"
     assert suggested[f"progress:{second.id}"].name == "Progress (2nd guess) goes up"
+
+
+def test_a_dismissed_rule_is_not_suggested_again() -> None:
+    """T-943: the user removed rows and "it auto readds it": a removed rule stays removed,
+    whichever guess of that kind the AI believes next."""
+    k = Knowledge("g")
+    first = k.propose(RAM, 0, kind=VariableKind.LIVES, name="Lives", evidence=MAYBE)
+    p = RewardProfile("g")
+    apply_suggestions(p, k)
+    assert f"setback:{first.id}" in p and f"recovery:{first.id}" in p
+    p.dismiss(rule_key(EventKind.SETBACK, VariableKind.LIVES))
+    report = apply_suggestions(p, k)
+    assert report.removed == (f"setback:{first.id}",) and f"recovery:{first.id}" in p
+    # A surer lives guess takes the seat: still no "Losing" row.
+    second = k.propose(RAM, 1, kind=VariableKind.LIVES, name="Hearts", evidence=SURE)
+    report = apply_suggestions(p, k)
+    assert f"setback:{second.id}" not in p and f"recovery:{second.id}" in p
+    assert f"setback:{first.id}" not in report.added
+    # The reset row can go the same way, and bringing back undoes it all.
+    p.dismiss("reset:*")
+    apply_suggestions(p, k)
+    assert "reset:*" not in p
+    assert set(p.bring_back()) == {"setback:<lives>", "reset:*"} and p.dismissed == frozenset()
+    report = apply_suggestions(p, k)
+    assert set(report.added) == {f"setback:{second.id}", "reset:*"}
+    assert rule_key(EventKind.PROGRESS, VariableKind.PROGRESS) == "progress:<progress>"

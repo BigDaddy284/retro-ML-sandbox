@@ -56,9 +56,10 @@ def ensure_button_rows(
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Add the rows the game's controller calls for and drop those for buttons it lacks.
 
-    A row already there keeps its points and its switch. Returns (added, removed).
+    A row already there keeps its points and its switch; a row a person removed
+    (``profile.dismissed``, T-943) is not added back. Returns (added, removed).
     """
-    wanted = {b.id: b for b in button_behaviours(buttons)}
+    wanted = {b.id: b for b in button_behaviours(buttons) if b.id not in profile.dismissed}
     added = tuple(bid for bid in wanted if profile.find(bid) is None)
     for bid in added:
         profile.add(wanted[bid])
