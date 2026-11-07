@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.learning import Settings
 from retro_ai_lab.observation import MemorySnapshot, ScanKind, ValueSearch, parse_number
+from retro_ai_lab.observation.search import Match, typed_digits
 from retro_ai_lab.services import EmulatorConnected, EmulatorDisconnected
 from retro_ai_lab.training import (
     COLUMNS,
@@ -49,6 +50,7 @@ from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.panels import name_column
 from retro_ai_lab.ui.theme import polish_views
 from retro_ai_lab.understanding import Confidence, Variable
+from retro_ai_lab.understanding.knowledge import address_text, decode
 
 REFRESH_MS = 500
 MAX_ROWS = 200
@@ -85,14 +87,24 @@ TAB_TITLES: tuple[str, ...] = (
     "Step log",
     "Search values",
 )
-SEARCH_COLUMNS: tuple[str, ...] = ("Address", "Offset (hex)", "Now", "Last scan", "Scan before")
+SEARCH_COLUMNS: tuple[str, ...] = (
+    "Address",
+    "Offset (hex)",
+    "Now",
+    "Last scan",
+    "Scan before",
+    "Held as",
+)
 MAX_SEARCH_ROWS = 500
 SEARCH_IDLE_TEXT = "Connect to a game that shares its memory to search it."
 SEARCH_READY_TEXT = (
-    "Find the byte that holds a number on the screen: type it (12, or hex like 0x0C) and "
-    "press New search, or press it with the box empty to start from every byte. Play a "
-    "little, then press the scan that fits: Is exactly, Went up, Went down, Changed or "
-    "Didn't change. Each scan compares with the one before."
+    "Find the value that holds a number on the screen: type it (12, a score of 300, or hex "
+    "like 0x0C) and press New search, or press it with the box empty to start from every "
+    "byte. Play a little, then press the scan that fits: Is exactly, Went up, Went down, "
+    "Changed or Didn't change. Each scan compares with the one before. A number held over "
+    "several bytes, like a score kept one digit per byte, is one row (ram[2013..2018]) and "
+    "is followed as one number; type it as the game shows it, zeros and all (000600), to "
+    "say how many digits it has."
 )
 SCAN_BUTTONS: tuple[tuple[str, str, ScanKind], ...] = (
     ("search_exact_button", "Is exactly", ScanKind.EXACT),
@@ -254,7 +266,8 @@ class ResearchDialog(QDialog):
         log_layout.addLayout(log_buttons)
         log_layout.addWidget(self._log_table, 1)
 
-        self._search_selected: str | None = None  # "region[offset]"
+        self._search_selected: str | None = None  # the picked row's address, "ram[12..14]"
+        self._search_shown: dict[str, Match] = {}  # the rows in the table, by address
         search_box = self._build_search()
 
         self._note = QLabel("", self)
@@ -437,7 +450,7 @@ class ResearchDialog(QDialog):
         return self._search.count
 
     def search_rows(self) -> tuple[tuple[str, ...], ...]:
-        """(address, offset in hex, now, last scan, scan before) per row shown."""
+        """(address, offset in hex, now, last scan, scan before, held as) per row shown."""
         table = self._search_table
         return tuple(
             tuple(item.text(c) for c in range(len(SEARCH_COLUMNS)))
@@ -453,7 +466,7 @@ class ResearchDialog(QDialog):
             return False
         try:
             value = parse_number(text) if text.strip() else None
-            self._search.start(snapshot, value)
+            self._search.start(snapshot, value, typed_digits(text))
         except ConfigurationError as exc:
             self._note.setText(str(exc))
             return False
@@ -469,7 +482,7 @@ class ResearchDialog(QDialog):
             return False
         try:
             value = parse_number(text) if kind is ScanKind.EXACT else None
-            self._search.refine(snapshot, kind, value)
+            self._search.refine(snapshot, kind, value, typed_digits(text))
         except ConfigurationError as exc:
             self._note.setText(str(exc))
             return False
@@ -496,17 +509,23 @@ class ResearchDialog(QDialog):
         raise ConfigurationError(f"No row at {address}.")
 
     def reward_search(self, *, goes_up: bool, name: str, points: float) -> bool:
-        """Name the picked byte and reward it going up (or down) by ``points``."""
+        """Name the picked value, in its layout, and reward it going up (or down)."""
         address = self._search_selected
-        if address is None:
+        match = self._search_shown.get(address) if address is not None else None
+        if match is None:
             self._note.setText("Pick a value in the search table first.")
             return False
         if not name.strip():
             self._note.setText("Give the value a name first, like Coins.")
             return False
-        region, _, rest = address.partition("[")
         try:
-            var = self._context.discovery.name_value(region, int(rest.rstrip("]")), name)
+            var = self._context.discovery.name_value(
+                match.region,
+                match.offset,
+                name,
+                encoding=match.encoding,
+                length=match.length if match.encoding.sized else 0,
+            )
             row = self._context.rewards.add_own(
                 var.id, goes_up=goes_up, value=float(points), name=var.display_name
             )
@@ -563,12 +582,13 @@ class ResearchDialog(QDialog):
         table = self._search_table
         for i in range(table.topLevelItemCount()):
             item = table.topLevelItem(i)
-            if item is None:
+            match = self._search_shown.get(item.text(0)) if item is not None else None
+            if item is None or match is None:
                 continue
-            region, _, rest = item.text(0).partition("[")
             try:
-                now = _dec_hex(snapshot.byte(region, int(rest.rstrip("]"))))
-            except (ConfigurationError, ValueError, IndexError):
+                raw = snapshot.get(match.region, match.offset, match.length)
+                now = _number(decode(raw, match.encoding), match.length)
+            except ConfigurationError:
                 continue
             if item.text(2) != now:
                 item.setText(2, now)
@@ -608,7 +628,7 @@ class ResearchDialog(QDialog):
         self._search_table.setColumnCount(len(SEARCH_COLUMNS))
         self._search_table.setHeaderLabels(list(SEARCH_COLUMNS))
         self._search_table.setRootIsDecorated(False)
-        for column, width in enumerate((110, 110, 110, 110)):
+        for column, width in enumerate((130, 130, 110, 110, 110)):
             self._search_table.header().resizeSection(column, width)
         self._search_table.currentItemChanged.connect(self._on_search_current_changed)
 
@@ -678,15 +698,21 @@ class ResearchDialog(QDialog):
         table.blockSignals(True)
         table.clear()
         chosen: QTreeWidgetItem | None = None
+        self._search_shown = {}
         for m in self._search.matches(limit=MAX_SEARCH_ROWS):
-            address = f"{m.region}[{m.offset}]"
+            address = m.address
+            self._search_shown[address] = m
+            held = m.held_as
+            if m.readings > 1:
+                held += f" (+{m.readings - 1} longer reading{'s' if m.readings > 2 else ''})"
             item = QTreeWidgetItem(
                 [
                     address,
-                    f"0x{m.offset:04X}",
-                    _dec_hex(m.now),
-                    _dec_hex(m.now),
-                    _dec_hex(m.before),
+                    address_text(m.region, m.offset, m.length, hex_form=True),
+                    _number(m.now, m.length),
+                    _number(m.now, m.length),
+                    _number(m.before, m.length),
+                    held,
                 ]
             )
             table.addTopLevelItem(item)
@@ -700,7 +726,8 @@ class ResearchDialog(QDialog):
         count = self._search.count
         self._count_tab(4, count)
         if self._search.started:
-            text = f"{count:,} bytes match at frame {self._search.frame:,}."
+            plural = "s" if count != 1 else ""
+            text = f"{count:,} value{plural} match at frame {self._search.frame:,}."
             if count > MAX_SEARCH_ROWS:
                 text += f" Showing the first {MAX_SEARCH_ROWS:,}; scan again to narrow it."
             elif count == 0:
@@ -857,6 +884,11 @@ class ResearchDialog(QDialog):
 
 def _dec_hex(value: int) -> str:
     return f"{value} (0x{value:02X})"
+
+
+def _number(value: int, length: int) -> str:
+    """A byte in decimal and hex; a number over several bytes as it reads (T-941)."""
+    return _dec_hex(value) if length == 1 else f"{value:,}"
 
 
 def _thinks(var: Variable | None) -> str:

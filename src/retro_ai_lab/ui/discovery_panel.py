@@ -95,7 +95,7 @@ def badge(variable: Variable) -> str:
 
 
 def variable_line(variable: Variable) -> str:
-    where = f"{variable.region}[{variable.offset}]"
+    where = variable.address
     return f"{variable.display_name}  ({variable.kind.label}, {where})  —  {badge(variable)}"
 
 

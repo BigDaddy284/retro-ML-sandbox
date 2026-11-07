@@ -49,6 +49,7 @@ from retro_ai_lab.ui.coalesce import Coalescer
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.panels import name_column
 from retro_ai_lab.understanding import Knowledge, plain_names
+from retro_ai_lab.understanding.knowledge import address_text
 
 IDLE_TEXT = "Connect to a game to choose what the AI gets points for."
 CUSTOM_LABEL = "Custom"
@@ -79,7 +80,7 @@ def address_cell(behaviour: Behaviour, knowledge: Knowledge | None) -> str:
         v = knowledge.get(var_id)
     except ConfigurationError:
         return ""  # a button name, or a value the knowledge no longer has
-    return f"{v.region}[{v.offset}] (0x{v.offset:04X})"
+    return f"{v.address} ({address_text(v.region, v.offset, v.width, hex_form=True)})"
 
 
 def category_text(category: Category, count: int) -> str:

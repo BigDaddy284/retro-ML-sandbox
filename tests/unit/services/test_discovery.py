@@ -745,6 +745,47 @@ def test_a_person_names_a_value_by_address(
     assert updates[-1].changed == (mystery,) and updates[-1].added == ()
 
 
+def test_naming_a_span_sets_the_byte_guesses_inside_it_aside(
+    discovery: DiscoveryService,
+    connection: ConnectionService,
+    updates: list[DiscoveryUpdated],
+) -> None:
+    """T-941: a value named over several bytes takes the person's layout, and the AI's
+    unconfirmed guesses on its other bytes are set aside by the person's word."""
+    connection.connect("fake", seed=3)
+    k = discovery.knowledge
+    assert k is not None
+    at = LAYOUT.header
+    hundreds = k.propose("ram", at + 3, kind=VariableKind.SCORE)  # the AI's one-byte guess
+    tens = k.propose("ram", at + 4, kind=VariableKind.PROGRESS)
+    kept = k.propose("ram", at + 5, kind=VariableKind.LIVES)
+    k.confirm(kept.id)  # a person's word is never overridden
+    outside = k.propose("ram", at + 6, kind=VariableKind.PROGRESS)
+    updates.clear()
+    score = discovery.name_value("ram", at, "Score", encoding=Encoding.DIGITS_BE, length=6)
+    assert score.confirmed and score.width == 6 and score.address == f"ram[{at}..{at + 5}]"
+    assert score.kind is VariableKind.UNKNOWN and score.held_as == "6 digits, highest first"
+    assert k.get(hundreds.id).rejected and k.get(tens.id).rejected
+    assert not k.get(kept.id).rejected and not k.get(outside.id).rejected
+    assert any(
+        e.kind == "your-word" and "part of it" in e.detail for e in k.get(hundreds.id).evidence
+    )
+    assert updates[-1].added == (score,)
+    assert {v.id for v in updates[-1].changed} == {hundreds.id, tens.id}
+    # Naming the AI's one-byte guess in another layout is the person's word on the layout:
+    # the kind the AI judged on one byte is unknown again, and the name is kept.
+    guess = k.propose("ram", LAYOUT.score, kind=VariableKind.PROGRESS)
+    named = discovery.name_value("ram", LAYOUT.score, "Points", encoding=Encoding.U16LE)
+    assert named.id == guess.id and named.encoding is Encoding.U16LE and named.width == 2
+    assert named.kind is VariableKind.UNKNOWN and named.confirmed and named.name == "Points"
+    # Naming it again in the same layout keeps the kind a person may have set.
+    k.correct(named.id, kind=VariableKind.SCORE)
+    again = discovery.name_value("ram", LAYOUT.score, "Points", encoding=Encoding.U16LE)
+    assert again.kind is VariableKind.SCORE
+    with pytest.raises(ConfigurationError, match="1 to 8"):
+        discovery.name_value("ram", at, "Big", encoding=Encoding.DIGITS_BE, length=9)
+
+
 def test_memory_from_several_threads_is_observed_one_at_a_time(
     connection: ConnectionService,
     observation: ObservationService,

@@ -411,3 +411,16 @@ def test_the_name_column_can_be_dragged_wider(qtbot: QtBot, context: AppContext)
         assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Interactive, name
         assert header.sectionSize(0) >= NAME_COLUMN_WIDTH, name
         assert header.stretchLastSection(), name
+
+
+def test_the_address_column_shows_a_range(panel: RewardsPanel, context: AppContext) -> None:
+    """T-941: a value over several bytes shows every byte it takes."""
+    context.connection.connect("fake", seed=2)
+    k = teach(context)
+    panel.refresher.flush()
+    score = k.at(RAM, LAYOUT.score)
+    assert score is not None and score.width == 2
+    first, last = LAYOUT.score, LAYOUT.score + 1
+    assert panel.row_text(f"score_gain:{score.id}")[4] == (
+        f"ram[{first}..{last}] (0x{first:04X}..0x{last:04X})"
+    )

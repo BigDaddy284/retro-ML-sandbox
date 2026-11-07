@@ -327,12 +327,13 @@ def test_search_narrows_and_shows_hex(dialog: ResearchDialog, context: AppContex
     _poke(context, LAYOUT.lives, 2)
     assert dialog.search_refine(ScanKind.DOWN)
     rows = {r[0]: r for r in dialog.search_rows()}
-    assert lives in rows and rows[lives][2:] == ("2 (0x02)", "2 (0x02)", "3 (0x03)")
+    assert lives in rows and rows[lives][2:5] == ("2 (0x02)", "2 (0x02)", "3 (0x03)")
+    assert rows[lives][5].startswith("1 byte")
     # The Now column follows the game between scans; the scans stay as they were.
     _poke(context, LAYOUT.lives, 9)
     dialog.refresh()
     rows = {r[0]: r for r in dialog.search_rows()}
-    assert rows[lives][2:] == ("9 (0x09)", "2 (0x02)", "3 (0x03)")
+    assert rows[lives][2:5] == ("9 (0x09)", "2 (0x02)", "3 (0x03)")
     _poke(context, LAYOUT.lives, 2)
     assert all(int(r[3].split()[0]) < 3 for r in rows.values())
     # A bad number is refused and the search stays.
@@ -341,12 +342,16 @@ def test_search_narrows_and_shows_hex(dialog: ResearchDialog, context: AppContex
     assert "not a number" in dialog.note_text and dialog.search_count == count
     assert not dialog.search_start("100000000") and dialog.search_count == count
     assert "99,999,999" in dialog.note_text
-    # A score of 300 is not one byte; it is searched for across bytes (T-936).
+    # A score of 300 is not one byte; it is searched for across bytes (T-936) and is one
+    # row, the two bytes read as one number (T-941).
     _poke(context, LAYOUT.score, 0x2C)
     _poke(context, LAYOUT.score + 1, 0x01)
     assert dialog.search_start("300") and dialog.note_text == ""
     rows = {r[0]: r for r in dialog.search_rows()}
-    assert f"ram[{LAYOUT.score}]" in rows and f"ram[{LAYOUT.score + 1}]" in rows
+    score = rows[f"ram[{LAYOUT.score}..{LAYOUT.score + 1}]"]
+    assert score[1] == f"0x{LAYOUT.score:04X}..0x{LAYOUT.score + 1:04X}"
+    assert score[2] == "300" and score[5].startswith("2 bytes, low first")
+    assert "value" in dialog.search_summary and "bytes match" not in dialog.search_summary
     # Start over empties it; disconnecting does too.
     dialog.search_reset()
     assert dialog.search_count == 0 and dialog.tabs.tabText(4) == "Search values"
@@ -397,3 +402,55 @@ def test_a_found_value_becomes_a_reward(dialog: ResearchDialog, context: AppCont
     dialog.select_search(other)
     dialog.findChild(object, "reward_up_button").click()  # type: ignore[union-attr]
     assert "Spare goes up" in dialog.note_text
+
+
+def test_a_value_over_several_bytes_is_one_row_and_one_reward(
+    dialog: ResearchDialog, context: AppContext
+) -> None:
+    """T-941: the user's score, one digit per byte, rolled from 800 to 1,000 and the byte
+    went back to 0; a number over several bytes is one row, followed, named and rewarded
+    as one value, and the AI's guesses on its other bytes are set aside."""
+    from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
+    from retro_ai_lab.observation import ScanKind
+    from retro_ai_lab.rewards.own import own_id
+    from retro_ai_lab.understanding import Encoding, VariableKind
+
+    connect(context)
+    at = LAYOUT.header  # six constant bytes stand in for a score shown as 000600
+    for i, digit in enumerate([0, 0, 0, 6, 0, 0]):
+        _poke(context, at + i, digit)
+    k = context.discovery.knowledge
+    assert k is not None
+    stray = k.propose("ram", at + 3, kind=VariableKind.PROGRESS)  # the AI's one-byte guess
+    dialog.refresh()
+    assert dialog.search_start("000600") and dialog.note_text == ""
+    address = f"ram[{at}..{at + 5}]"
+    rows = {r[0]: r for r in dialog.search_rows()}
+    assert rows[address][2] == "600" and rows[address][5].startswith("6 digits, highest first")
+    assert rows[address][1] == f"0x{at:04X}..0x{at + 5:04X}"
+    assert f"ram[{at + 3}..{at + 5}]" not in rows  # the typed zeros said six digits
+    for i, digit in enumerate([0, 0, 1, 0, 0, 0]):
+        _poke(context, at + i, digit)
+    dialog.refresh()  # Now follows the whole number between scans
+    assert {r[0]: r for r in dialog.search_rows()}[address][2] == "1,000"
+    assert dialog.search_refine(ScanKind.UP)
+    rows = {r[0]: r for r in dialog.search_rows()}
+    assert rows[address][2:5] == ("1,000", "1,000", "600")
+    dialog.select_search(address)
+    assert dialog.reward_search(goes_up=True, name="Score", points=2.0)
+    var = k.at("ram", at)
+    assert var is not None and var.confirmed and var.name == "Score"
+    assert var.encoding is Encoding.DIGITS_BE and var.length == 6 and var.width == 6
+    assert k.get(stray.id).rejected  # part of the value, not a value of its own
+    profile = context.rewards.profile
+    assert profile is not None
+    row = profile.find(own_id(var.id, True))
+    assert row is not None and row.value == 2.0 and "Score goes up" in dialog.note_text
+    # The reward follows the whole number: the value reads 1,000, then 1,250.
+    snapshot = context.observation.latest
+    assert snapshot is not None
+    assert var.decode(snapshot) == 1000
+    for i, digit in enumerate([0, 0, 1, 2, 5, 0]):
+        _poke(context, at + i, digit)
+    latest = context.observation.latest
+    assert latest is not None and var.decode(latest) == 1250

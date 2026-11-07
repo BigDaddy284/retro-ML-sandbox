@@ -44,6 +44,7 @@ from retro_ai_lab.understanding.events import CYCLES, EventDetector, EventKind, 
 from retro_ai_lab.understanding.knowledge import (
     AI,
     Confidence,
+    Encoding,
     Evidence,
     Knowledge,
     Relationship,
@@ -621,17 +622,31 @@ class DiscoveryService:
         self._announce(DiscoveryUpdated(tuple(imported), (), (), imported.relationships()))
         return imported
 
-    def name_value(self, region: str, offset: int, name: str) -> Variable:
-        """A person names the value at an address (T-862).
+    def name_value(
+        self,
+        region: str,
+        offset: int,
+        name: str,
+        *,
+        encoding: Encoding = Encoding.U8,
+        length: int = 0,
+    ) -> Variable:
+        """A person names the value at an address (T-862), in a layout (T-941).
 
         The AI's guess there is confirmed under that name; where it had none, a
         named value of unknown kind is made and confirmed, so the lists use the name.
         A guess the AI had rejected comes back as a named value of unknown kind:
-        the name is the person's, the old kind was wrong (T-895).
+        the name is the person's, the old kind was wrong (T-895). A layout other
+        than the guess's (a score over six digit bytes where the AI saw one byte)
+        is the person's word too: the value takes it, and a kind the AI judged on
+        the old layout is unknown again unless a person had confirmed it. The AI's
+        unconfirmed guesses on the other bytes of the value are set aside: a byte
+        that is part of a value a person named is not a value of its own.
         """
         name = name.strip()
         if not name:
             raise ConfigurationError("The value needs a name.")
+        width = length if encoding.sized else encoding.width
         with self._lock:
             k = self._require()
             var = k.at(region, offset)
@@ -640,19 +655,60 @@ class DiscoveryService:
                     region,
                     offset,
                     name=name,
+                    encoding=encoding,
+                    length=length,
                     evidence=[Evidence("user", "Named by a person.", 0.0)],
                 )
                 k.correct(var.id, name=name)
                 added: tuple[Variable, ...] = (k.get(var.id),)
                 changed: tuple[Variable, ...] = ()
-            elif var.rejected:
-                k.correct(var.id, name=name, kind=VariableKind.UNKNOWN)
-                added, changed = (), (k.get(var.id),)
             else:
-                k.correct(var.id, name=name)
+                relaid = (var.encoding, var.width) != (encoding, width)
+                kind = None
+                if var.rejected or (relaid and not var.confirmed):
+                    kind = VariableKind.UNKNOWN
+                if relaid:
+                    k.correct(var.id, name=name, kind=kind, encoding=encoding, length=length)
+                else:
+                    k.correct(var.id, name=name, kind=kind)
                 added, changed = (), (k.get(var.id),)
-        self._announce(DiscoveryUpdated(added, changed, (), ()))
-        return k.get(var.id)
+            named = k.get(var.id)
+            aside = self._set_bytes_aside(k, named)
+        self._announce(DiscoveryUpdated(added, (*changed, *aside), (), ()))
+        return named
+
+    def _set_bytes_aside(self, k: Knowledge, var: Variable) -> list[Variable]:
+        """The AI's unconfirmed guesses on the other bytes of a value a person named (T-941)."""
+        aside: list[Variable] = []
+        if var.width < 2:
+            return aside
+        for other in tuple(k):
+            if other.id == var.id or other.rejected or other.confirmed:
+                continue
+            if other.region != var.region:
+                continue
+            if other.offset >= var.offset + var.width or var.offset >= other.offset + other.width:
+                continue
+            k.support(
+                other.id,
+                Evidence(
+                    "your-word",
+                    f"You named {var.display_name} over {var.address}; this byte is part of it.",
+                    0.0,
+                    self._observation.frame,
+                ),
+            )
+            aside.append(k.reject(other.id, by="your word"))
+        if aside:
+            log.info(
+                "You named %s over %s: %d guess%s on its bytes set aside (%s).",
+                var.display_name,
+                var.address,
+                len(aside),
+                "" if len(aside) == 1 else "es",
+                _names(aside),
+            )
+        return aside
 
     def confirm(self, var_id: str) -> Variable:
         """A person says a guess is right; everything listening hears it (T-902)."""
