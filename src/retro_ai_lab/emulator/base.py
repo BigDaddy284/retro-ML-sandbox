@@ -103,6 +103,36 @@ class EmulatorAdapter(ABC):
         finally:
             self._lock.release()
 
+    # ------------------------------------------------------------ run mode
+
+    @property
+    def hold(self) -> bool:
+        """True when the game stands still between requests (ARCHITECTURE.md §5.3).
+
+        A backend that cannot pause its game (mGBA) says False: the game runs
+        on between steps, and a step's reads describe the frame it was answered on.
+        """
+        return True
+
+    @property
+    def free_run(self) -> bool:
+        """True while the game has been let run between the app's steps (T-942)."""
+        return False
+
+    @property
+    def supports_free_run(self) -> bool:
+        """Whether ``set_free_run`` can let a holding game run on its own (T-942)."""
+        return False
+
+    def set_free_run(self, free_run: bool) -> None:
+        """Let the game run between steps (True) or hold it still (False).
+
+        The base cannot switch: the practice console only moves when stepped.
+        """
+        if not isinstance(free_run, bool):
+            raise ConfigurationError("free_run must be True or False.")
+        raise UnsupportedCapabilityError("This emulator cannot run the game on its own.")
+
     def _do_check_link(self) -> bool:
         """Hook: probe the transport. The default trusts ``is_connected``.
 
@@ -190,10 +220,13 @@ class EmulatorAdapter(ABC):
         cannot capture its screen. With ``watch`` the backend leaves the pad
         to the person for those frames and names the buttons they held in
         ``StepResult.pressed`` (T-887); ``pressed`` cannot be given as well.
+        While the game runs on its own (``free_run``, T-942) the frames are
+        not driven but waited for: the step answers once that many have passed.
         """
         with self._lock:
             self._require_connected()
-            self._require("frame_advance")
+            if not self.free_run:
+                self._require("frame_advance")
             _check_int(frames, "frame count", minimum=1)
             held: frozenset[Button] | None = None
             if pressed is not None:

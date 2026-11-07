@@ -1540,3 +1540,20 @@ def test_each_go_logs_the_brain_and_what_it_sees(
     assert "tries something new" in brain and brain.endswith(f"It sees {t.encoder.describe()}.")
     assert "position" in brain or "value" in brain
     t.stop()
+
+
+def test_training_starts_in_hold_mode(lab: Lab, caplog: pytest.LogCaptureFixture) -> None:
+    """T-942: a link the play clock let run free is held again before the AI's first step."""
+    from retro_ai_lab.emulator.bizhawk.simulator import BizHawkSimulator
+
+    with BizHawkSimulator() as sim:
+        lab.connection.connect("bizhawk", port=sim.port, call_timeout_s=2.0, timeout_s=2.0)
+        lab.connection.call(lambda a: a.set_free_run(True))
+        assert sim.free_run and not sim.paused
+        with caplog.at_level(logging.INFO, logger="retro_ai_lab.training.service"):
+            lab.training.start(Mode.INDEPENDENT)
+        assert not sim.free_run and sim.paused
+        assert not lab.connection.call(lambda a: a.free_run)
+        assert "holds it between steps" in caplog.text
+        lab.training.stop()
+        lab.connection.disconnect()

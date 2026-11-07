@@ -21,6 +21,12 @@ slower than a frame, ``MAX_FRAMES_PER_STEP`` at most, with any longer
 backlog forgiven rather than raced through. When the on-screen pad holds
 nothing, the step watches the emulator's own controller (T-887) and records
 what the person held, so a real controller plays and teaches the AI.
+
+An emulator that can run on its own is let run while a person plays (T-942):
+Play switches a BizHawk link to free run (the game keeps its own time, so
+there are no bursts of owed frames between round trips) and every pulse then
+sends one frame to watch, reads, pad and picture; Pause holds the game again.
+The AI's training puts the link back in hold mode before its first step.
 """
 
 from __future__ import annotations
@@ -51,7 +57,11 @@ class _StepSignals(QObject):
 
 
 class _StepTask(QRunnable):
-    """One bundled ``step`` (buttons, frames, memory, screenshot), off the GUI thread."""
+    """One bundled ``step`` (buttons, frames, memory, screenshot), off the GUI thread.
+
+    ``free_run`` switches the emulator's run mode first (T-942), in the same
+    worker turn, so the first step of play already finds the game running.
+    """
 
     def __init__(
         self,
@@ -62,6 +72,7 @@ class _StepTask(QRunnable):
         *,
         pressed: frozenset[Button] | None,
         screenshot: bool,
+        free_run: bool | None = None,
     ) -> None:
         super().__init__()
         self.signals = _StepSignals()
@@ -71,9 +82,12 @@ class _StepTask(QRunnable):
         self._generation = generation
         self._pressed = pressed
         self._screenshot = screenshot
+        self._free_run = free_run
 
     def run(self) -> None:
         try:
+            if self._free_run is not None:
+                _set_free_run(self._connection, self._free_run)
             frame = _step(
                 self._connection,
                 self._observation,
@@ -85,6 +99,26 @@ class _StepTask(QRunnable):
             report(self.signals.done, self._generation, exc)
         else:
             report(self.signals.done, self._generation, (self._n, frame))
+
+
+class _ModeTask(QRunnable):
+    """Hold the game still again after the last step of play (T-942), on the worker."""
+
+    def __init__(self, connection: ConnectionService) -> None:
+        super().__init__()
+        self._connection = connection
+
+    def run(self) -> None:
+        try:
+            _set_free_run(self._connection, False)
+        except EmulatorDisconnectedError:
+            pass  # the link went: the script holds nothing any more
+        except EmulatorError as exc:
+            log.warning("Could not hold the game after play: %s", exc)
+
+
+def _set_free_run(connection: ConnectionService, free_run: bool) -> None:
+    connection.call(lambda a: a.set_free_run(free_run) if a.free_run != free_run else None)
 
 
 def _step(
@@ -150,6 +184,8 @@ class PlayClock(QObject):
         self._timer.setInterval(max(1, 1000 // fps))
         self._timer.timeout.connect(self._on_timer)
         self._available = False
+        self._loose = False  # the emulator keeps its own time while a person plays (T-942)
+        self._switch: bool | None = None  # a run-mode change the next step carries
         self._wanted = True  # the child's Play/Pause choice
         self._frames = 0
         self._errors = 0
@@ -179,6 +215,11 @@ class PlayClock(QObject):
     @property
     def running(self) -> bool:
         return self._timer.isActive()
+
+    @property
+    def loose(self) -> bool:
+        """True when the emulator runs the game on its own while a person plays (T-942)."""
+        return self._loose
 
     @property
     def playing(self) -> bool:
@@ -273,9 +314,15 @@ class PlayClock(QObject):
         return owed
 
     def _on_timer(self) -> None:
-        """Each timer pulse sends the frames owed, if any and if the worker is free."""
+        """Each timer pulse sends the frames owed, if any and if the worker is free.
+
+        A game running on its own (T-942) owes nothing: each pulse watches one frame.
+        """
         if self._in_flight:
             self._skipped += 1
+            return
+        if self._loose:
+            self.pulse(1)
             return
         owed = self._owed()
         if owed < 1:
@@ -313,7 +360,9 @@ class PlayClock(QObject):
             self._generation,
             pressed=self._pressed(),
             screenshot=screenshot,
+            free_run=self._switch,
         )
+        self._switch = None
         task.signals.done.connect(self._on_step_done)
         self._pool.start(task)
         return True
@@ -380,6 +429,8 @@ class PlayClock(QObject):
         if want and not self._timer.isActive():
             self._origin = self._clock()
             self._sent = 0
+            if self._loose:
+                self._switch = True  # let the game run: the first step carries it (T-942)
             self._timer.start()
             self.state_changed.emit(True)
         elif not want and self._timer.isActive():
@@ -390,6 +441,10 @@ class PlayClock(QObject):
         if self._timer.isActive():
             self._timer.stop()
             self.state_changed.emit(False)
+            if self._loose and self._connection.is_connected:
+                # Hold the game again, after any step still out on the worker (T-942).
+                self._switch = None
+                self._pool.start(_ModeTask(self._connection))
 
     def _pressed(self) -> frozenset[Button] | None:
         """The pad's held set for this step, or None when there is nothing to send."""
@@ -400,6 +455,11 @@ class PlayClock(QObject):
     def _on_connected(self, event: EmulatorConnected) -> None:
         self._available = event.capabilities.frame_advance
         self._capabilities = event.capabilities
+        try:
+            self._loose = self._connection.call(lambda a: a.supports_free_run or not a.hold)
+        except EmulatorError:
+            self._loose = False
+        self._switch = None
         self._frames = 0
         self._pulses = 0
         self._frames_captured = 0
@@ -407,6 +467,7 @@ class PlayClock(QObject):
 
     def _on_disconnected(self, event: EmulatorDisconnected) -> None:
         self._available = False
+        self._loose = False
         self._stop()
 
 

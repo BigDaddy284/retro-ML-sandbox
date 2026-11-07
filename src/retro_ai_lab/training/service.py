@@ -1131,11 +1131,19 @@ class TrainingService:
         if self._harness is None or not self._mode.ai_plays:
             return
         try:
+            self._hold_the_game()
             if self._harness.available():
                 self._restore_spot()  # a pinned spot is where every go starts
                 self._harness.checkpoint()
         except EmulatorError:
             pass  # link loss is announced by the connection service
+
+    def _hold_the_game(self) -> None:
+        """A link the play clock let run free (T-942) is held again before the AI's first
+        step, so its steps stay one request per frame and restores land where they should."""
+        if self._connection.call(lambda a: a.free_run):
+            self._connection.call(lambda a: a.set_free_run(False))
+            log.info("The game was running on its own for you; the AI holds it between steps.")
 
     def _close_episode(self, ended_by: str) -> None:
         runner = self._runner
