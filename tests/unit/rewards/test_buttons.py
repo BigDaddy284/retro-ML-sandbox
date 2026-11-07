@@ -38,3 +38,16 @@ def test_button_rows_follow_the_controller() -> None:
     assert added == (press_id("b"),) and removed == (press_id("a"),)
     assert profile.get(press_id("up")).value == 2.5 and not profile.get(AGAIN_ID).enabled
     assert ensure_button_rows(profile, (Button("up", "Up"), Button("b", "B"))) == ((), ())
+
+
+def test_a_dismissed_button_row_is_not_added_back() -> None:
+    """T-943: a button row a person removed stays out when the game connects again."""
+    profile = RewardProfile("g")
+    ensure_button_rows(profile, PAD)
+    profile.dismiss(press_id("up"))
+    profile.remove(press_id("up"))
+    added, removed = ensure_button_rows(profile, PAD)
+    assert added == () and removed == () and press_id("up") not in profile
+    profile.bring_back()
+    added, _ = ensure_button_rows(profile, PAD)
+    assert added == (press_id("up"),)

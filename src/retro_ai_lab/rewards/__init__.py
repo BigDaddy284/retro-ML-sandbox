@@ -37,6 +37,7 @@ from retro_ai_lab.rewards.suggestions import (
     SuggestionReport,
     apply_suggestions,
     is_automatic,
+    rule_key,
     suggest_behaviours,
 )
 from retro_ai_lab.rewards.tally import BehaviourTotal, RewardEntry, RewardTally
@@ -87,6 +88,7 @@ __all__ = [
     "own_id",
     "personality",
     "press_id",
+    "rule_key",
     "suggest_behaviours",
     "suggest_goal",
 ]

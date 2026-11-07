@@ -353,11 +353,13 @@ def test_adding_and_removing_a_reward_of_my_own(panel: RewardsPanel, context: Ap
     assert not button(panel, "add_own_button").isEnabled()  # type: ignore[attr-defined]
 
 
-def test_remove_tells_the_ai_a_suggested_guess_is_wrong(
+def test_remove_takes_any_row_out_and_it_stays_out(
     panel: RewardsPanel, context: AppContext
 ) -> None:
-    """T-937: the user's wrong rows were "hard baked": Remove now rejects the guess behind one."""
+    """T-937 gave Remove every row; T-943 makes a removal stick: the user found removed
+    rows "auto readded" by the AI's next guess, and wanted to remove everything."""
     assert not button(panel, "remove_own_button").isEnabled()  # type: ignore[attr-defined]
+    assert not button(panel, "suggest_again_button").isEnabled()  # type: ignore[attr-defined]
     context.connection.connect("fake", seed=2)
     k = teach(context)
     panel.refresher.flush()
@@ -369,20 +371,28 @@ def test_remove_tells_the_ai_a_suggested_guess_is_wrong(
     assert button(panel, "remove_own_button").isEnabled()  # type: ignore[attr-defined]
     panel.remove_selected()
     panel.refresher.flush()
-    assert panel.note_text == (
-        'Told the AI that "Losing Lives" is wrong: its rewards are gone and it will not '
-        "guess that byte again."
-    )
-    assert k.get(lives.id).rejected
-    assert not any(bid.endswith(lives.id) for bid in panel.behaviour_ids())
+    assert panel.note_text.startswith('Removed "Losing Lives". It stays out for this game')
+    assert not k.get(lives.id).rejected and row not in panel.behaviour_ids()
+    assert button(panel, "suggest_again_button").isEnabled()  # type: ignore[attr-defined]
+    # The AI's next life count brings no "Losing" row back.
+    hearts = k.propose(RAM, LAYOUT.lap, kind=VariableKind.LIVES, name="Hearts", evidence=SURE)
+    k.update(lives.id, evidence=())
     context.rewards.refresh_suggestions()
     panel.refresher.flush()
-    assert not any(bid.endswith(lives.id) for bid in panel.behaviour_ids())
-    # A row with no guess behind it cannot be removed; the tick is the way to switch it off.
+    ids = panel.behaviour_ids()
+    assert f"setback:{hearts.id}" not in ids and f"recovery:{hearts.id}" in ids
+    # Rows with nothing behind them go too.
     for bid in ("reset:*", "button:press:up"):
         panel.select(bid)
         panel.remove_selected()
-        assert "untick" in panel.note_text and bid in panel.behaviour_ids()
+        panel.refresher.flush()
+        assert bid not in panel.behaviour_ids() and "stays out" in panel.note_text
+    button(panel, "suggest_again_button").click()  # type: ignore[attr-defined]
+    panel.refresher.flush()
+    assert panel.note_text == "Brought back 3 suggested rewards."
+    ids = panel.behaviour_ids()
+    assert f"setback:{hearts.id}" in ids and "reset:*" in ids and "button:press:up" in ids
+    assert not button(panel, "suggest_again_button").isEnabled()  # type: ignore[attr-defined]
     panel.select(None)
     assert not button(panel, "remove_own_button").isEnabled()  # type: ignore[attr-defined]
 

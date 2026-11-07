@@ -170,10 +170,14 @@ class RewardsPanel(QWidget):
         self._remove_own = QPushButton("Remove", self)
         self._remove_own.setObjectName("remove_own_button")
         self._remove_own.setToolTip(
-            "Take out the picked reward. For one the AI suggested, this tells the AI "
-            'its guess is wrong, like "No, that\'s wrong" under What the AI is doing.'
+            "Take out the picked reward. A suggested row stays out for this game, whichever "
+            'value the AI finds next; "Bring back suggestions" undoes that.'
         )
         self._remove_own.clicked.connect(self.remove_selected)
+        self._suggest_again = QPushButton("Bring back suggestions", self)
+        self._suggest_again.setObjectName("suggest_again_button")
+        self._suggest_again.setToolTip("Put back every suggested row you removed.")
+        self._suggest_again.clicked.connect(self.suggest_again)
 
         self._warning = QLabel("", self)
         self._warning.setObjectName("rewards_warning")
@@ -193,6 +197,7 @@ class RewardsPanel(QWidget):
         controls.addWidget(self._plus)
         controls.addWidget(self._suggested)
         controls.addWidget(self._remove_own)
+        controls.addWidget(self._suggest_again)
         own = QHBoxLayout()
         own.addWidget(QLabel("Add a reward:", self))
         own.addWidget(self._own_value, 1)
@@ -325,22 +330,28 @@ class RewardsPanel(QWidget):
                 self._context.rewards.remove_own(bid)
                 self._note.setText("Reward removed.")
                 return
-            behaviour = profile.find(bid)
-            var_id = behaviour.trigger.variable_id if behaviour is not None else None
-            knowledge = self._context.discovery.knowledge
-            if behaviour is None or var_id is None or knowledge is None or var_id not in knowledge:
-                self._note.setText(
-                    "That row has no guess of the AI's behind it; untick it to switch it off."
-                )
-                return
-            self._context.discovery.reject(var_id)
-            self._context.discovery.save()
+            behaviour = profile.get(bid)
+            self._context.rewards.dismiss(bid)
         except (UnsupportedCapabilityError, ConfigurationError) as exc:
             self._note.setText(str(exc))
             return
         self._note.setText(
-            f'Told the AI that "{behaviour.name}" is wrong: its rewards are gone and it '
-            "will not guess that byte again."
+            f'Removed "{behaviour.name}". It stays out for this game, whichever value the AI '
+            'finds next; "Bring back suggestions" undoes that.'
+        )
+
+    def suggest_again(self) -> None:
+        """Forget every removal of a suggested row and bring them back (T-943)."""
+        try:
+            report = self._context.rewards.suggest_again()
+        except (UnsupportedCapabilityError, ConfigurationError) as exc:
+            self._note.setText(str(exc))
+            return
+        count = len(report.added)
+        self._note.setText(
+            f"Brought back {count} suggested reward{'s' if count != 1 else ''}."
+            if count
+            else "Nothing was removed; the suggestions are all here."
         )
 
     def set_selected_enabled(self, enabled: bool) -> None:
@@ -428,6 +439,10 @@ class RewardsPanel(QWidget):
             w.setEnabled(on)
         self._show_points()
         self._remove_own.setEnabled(on and self._selected is not None)
+        # Bringing back what was removed needs no row picked (T-943).
+        profile = self.profile
+        enabled = self._tree.isEnabled() and profile is not None and bool(profile.dismissed)
+        self._suggest_again.setEnabled(enabled)
 
     def _fill_own_choices(self) -> None:
         """The AI's offered guesses by their plain names, then any other named value."""

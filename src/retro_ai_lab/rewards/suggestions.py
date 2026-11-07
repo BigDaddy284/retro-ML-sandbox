@@ -59,6 +59,12 @@ def _key(kind: EventKind, variable_id: str | None) -> str:
     return Trigger(kind, variable_id).key
 
 
+def rule_key(event_kind: EventKind, var_kind: VariableKind) -> str:
+    """The key of a suggestion rule, what a person dismisses (T-943): ``setback:<lives>``
+    is "a setback of any life count", whichever byte the AI believes is one."""
+    return f"{event_kind.value}:<{var_kind.value}>"
+
+
 def _causes(knowledge: Knowledge) -> tuple[set[str], set[str]]:
     """Trigger keys that lead to progress, and flags that lead to a reset."""
     progress: set[str] = set()
@@ -77,20 +83,29 @@ def _causes(knowledge: Knowledge) -> tuple[set[str], set[str]]:
 
 
 def suggest_behaviours(
-    knowledge: Knowledge, *, at_least: Confidence = Confidence.LOW
+    knowledge: Knowledge,
+    *,
+    at_least: Confidence = Confidence.LOW,
+    dismissed: frozenset[str] = frozenset(),
 ) -> tuple[Behaviour, ...]:
-    """Behaviours the knowledge supports, each with a suggested value."""
+    """Behaviours the knowledge supports, each with a suggested value.
+
+    ``dismissed`` holds the rules a person removed (T-943): their keys from
+    :func:`rule_key`, and the reset row's id; none of those is suggested.
+    """
     leads_to_progress, game_over_flags = _causes(knowledge)
     out: list[Behaviour] = []
     offered = knowledge.offered(at_least)  # the best guess of each role (T-858)
     names = plain_names(offered)
     for var in offered:
         for (event_kind, var_kind), rule in RULES.items():
-            if var_kind is not var.kind:
+            if var_kind is not var.kind or rule_key(event_kind, var_kind) in dismissed:
                 continue
             out.append(
                 _build(var, names[var.id], event_kind, rule, leads_to_progress, game_over_flags)
             )
+    if RESET_KEY in dismissed:
+        return tuple(out)
     out.append(
         Behaviour(
             RESET_KEY,
@@ -194,7 +209,10 @@ def apply_suggestions(
     automatic behaviour whose variable is gone or rejected is removed, or
     only disabled if a person set its value.
     """
-    wanted = {b.id: b for b in suggest_behaviours(knowledge, at_least=at_least)}
+    wanted = {
+        b.id: b
+        for b in suggest_behaviours(knowledge, at_least=at_least, dismissed=profile.dismissed)
+    }
     added: list[str] = []
     updated: list[str] = []
     removed: list[str] = []
@@ -242,5 +260,6 @@ __all__ = [
     "SuggestionReport",
     "apply_suggestions",
     "is_automatic",
+    "rule_key",
     "suggest_behaviours",
 ]

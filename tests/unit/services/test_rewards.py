@@ -10,7 +10,7 @@ from retro_ai_lab.core import Capabilities, ConfigurationError, UnsupportedCapab
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
 from retro_ai_lab.emulator.registry import default_registry
-from retro_ai_lab.rewards import Category, RewardProfile, is_button
+from retro_ai_lab.rewards import Category, RewardProfile, is_button, press_id
 from retro_ai_lab.rewards.suggestions import SuggestionReport, apply_suggestions
 from retro_ai_lab.services import (
     ConnectionService,
@@ -453,3 +453,42 @@ def test_relationship_updates_refresh_suggestions_sparingly(
     assert "This leads to progress" in rewards.profile.get("score_gain:v3").notes
     bus.publish(DiscoveryUpdated((k.get("v2"),), (), (), ()))  # a variable change: always
     assert len(calls) == 3
+
+
+def test_dismiss_takes_a_row_out_for_good_and_suggest_again_undoes_it(
+    rewards: RewardService,
+    connection: ConnectionService,
+    discovery: DiscoveryService,
+    bus: EventBus,
+    changes: list[RewardProfileChanged],
+) -> None:
+    """T-943: "every time i remove something from the rewards it auto readds it"."""
+    connection.connect("fake", seed=3)
+    k = teach(discovery, bus)
+    lives = k.at(RAM, LAYOUT.lives)
+    assert lives
+    hit = f"setback:{lives.id}"
+    assert rewards.dismiss(hit) == "setback:<lives>"
+    profile = rewards.profile
+    assert profile is not None and hit not in profile and f"recovery:{lives.id}" in profile
+    assert changes[-1].removed == (hit,) and not k.get(lives.id).rejected
+    assert rewards.refresh_suggestions().is_empty and hit not in profile
+    # The AI's next life count brings nothing back; a row of one's own cannot be dismissed.
+    hearts = k.propose(RAM, LAYOUT.lap, kind=VariableKind.LIVES, name="Hearts", evidence=SURE)
+    k.update(lives.id, evidence=())
+    rewards.refresh_suggestions()
+    assert f"setback:{hearts.id}" not in profile and f"recovery:{hearts.id}" in profile
+    with pytest.raises(ConfigurationError):
+        rewards.dismiss(hit)
+    # The reset row and a button row go the same way and stay out across a reconnect.
+    assert rewards.dismiss("reset:*") == "reset:*"
+    assert rewards.dismiss(press_id("up")) == press_id("up")
+    connection.disconnect()
+    connection.connect("fake", seed=3)
+    profile = rewards.profile
+    assert profile is not None
+    assert "reset:*" not in profile and press_id("up") not in profile
+    assert profile.dismissed == {"setback:<lives>", "reset:*", press_id("up")}
+    report = rewards.suggest_again()
+    assert profile.dismissed == frozenset() and "reset:*" in report.added
+    assert press_id("up") in profile and "reset:*" in profile

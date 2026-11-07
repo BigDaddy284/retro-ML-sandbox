@@ -206,11 +206,11 @@ To reward something the AI did not think of, use "Add a reward" under the
 table: pick a value ("Your position"), "goes up" or "goes down", and the
 points (below zero takes points away), then press Add. "Going right is good,
 going left is bad" is two rows: goes up +2 and goes down -2. "Remove" takes
-the picked row out: one of your own is simply removed, and one the AI
-suggested tells the AI its guess is wrong (the same as "No, that's wrong"
-under What the AI is doing), so its rows go and it does not guess that byte
-again. "Starting over" and the button rows have no guess behind them; untick
-them to switch them off.
+any picked row out, and it stays out for that game: a suggested row such as
+"Losing Lives" is not put back for the AI's next guess of that kind, and
+"Starting over" and the button rows go the same way. Removing a row does not
+tell the AI its guess is wrong; use "No, that's wrong" under What the AI is
+doing for that. "Bring back suggestions" undoes every removal at once.
 The Controls group lists every button of the connected game ("Pressing A")
 and "Pressing the same button again"; all start at 0, so they change nothing
 until you give one points (below zero to put the AI off hammering a button).
