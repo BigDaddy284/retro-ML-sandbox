@@ -26,6 +26,7 @@ from retro_ai_lab.services.goals import ObjectiveCompleted, ObjectiveSetback
 from retro_ai_lab.services.observer import ButtonsHeld, ObservationService
 from retro_ai_lab.services.rewards import GoStarted, RewardEarned
 from retro_ai_lab.understanding.events import EventKind
+from retro_ai_lab.understanding.knowledge import VariableKind
 
 DEFAULT_FRAMES_PER_STEP = 4
 DEFAULT_MAX_STEPS = 600
@@ -89,6 +90,7 @@ class EpisodeSignals:
         self._last_reset = ""  # what the detector blamed, for the log (T-840)
         self._last_reset_ids: tuple[str, ...] = ()
         self._setbacks = 0  # life or health drops since the last take (T-934)
+        self._watched: frozenset[str] | None = None  # whose setbacks count (T-940)
         bus.subscribe(RewardEarned, self._on_reward)
         bus.subscribe(ObjectiveCompleted, self._on_completed)
         bus.subscribe(ObjectiveSetback, self._on_setback)
@@ -151,6 +153,20 @@ class EpisodeSignals:
         self._setbacks = 0
         return out
 
+    @property
+    def watched(self) -> frozenset[str] | None:
+        """Whose setbacks count; None for every value's (T-940)."""
+        return self._watched
+
+    def watch_setbacks(self, ids: frozenset[str] | None) -> None:
+        """Count only the setbacks of these values; None counts every one (T-940).
+
+        The user's 950-go log counted 45 lives lost a go because every life-count
+        guess's drops were added up; the one life count and the one health the
+        rewards follow are what a death looks like.
+        """
+        self._watched = ids
+
     def _on_reward(self, event: RewardEarned) -> None:
         if not self._listening:
             return
@@ -181,7 +197,9 @@ class EpisodeSignals:
                 self._resets += 1
                 self._last_reset = f"{event.detail} (frame {event.frame})"
                 self._last_reset_ids = event.variables
-            elif event.kind is EventKind.SETBACK:
+            elif event.kind is EventKind.SETBACK and (
+                self._watched is None or event.variable_id in self._watched
+            ):
                 self._setbacks += 1
 
 
@@ -415,6 +433,9 @@ class EpisodeRunner:
             assert self._harness is not None
             self._harness.restore()
         self._encoder.refresh()
+        knowledge = self._encoder.knowledge
+        best = (knowledge.best(VariableKind.LIVES), knowledge.best(VariableKind.HEALTH))
+        self._signals.watch_setbacks(frozenset(v.id for v in best if v is not None))
         # Observe before listening: putting the game back to the checkpoint looks like
         # a restart to the understanding engine, and that must not end the new episode.
         latest = self._observation.observe()
