@@ -142,6 +142,21 @@ class DiscoveryUpdated:
 RESTARTS_WEIGHT = 9.0  # the AI's own restart finding outranks a planted or classified guess (T-904)
 
 
+def _size_words(knowledge: Knowledge, path: Path) -> str:
+    """``"1,600 guesses, 20,000 relationships, 6.4 MB"`` for the log (T-955)."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        size = 0
+    guesses = len(knowledge)
+    relationships = len(knowledge.relationships())
+    return (
+        f"{guesses:,} guess{'es' if guesses != 1 else ''}, "
+        f"{relationships:,} relationship{'s' if relationships != 1 else ''}, "
+        f"{size / 1_000_000:.1f} MB"
+    )
+
+
 def _names(variables: list[Variable], most: int = 5) -> str:
     names = [v.display_name for v in variables[:most]]
     if len(variables) > most:
@@ -617,10 +632,17 @@ class DiscoveryService:
         """Write the knowledge to the store (no store: nothing happens)."""
         if self._store is None or self._knowledge is None:
             return None
+        started = time.perf_counter()
         with app_work.timed("discovery: save"):
             if self._finder is not None:
                 self._finder.flush()  # rates the finder has not written yet (T-946)
             path = self._store.save(self._knowledge)
+        log.info(
+            "Saved what the AI learned about %s: %s in %d ms.",
+            self._knowledge.title or self._knowledge.game_id,
+            _size_words(self._knowledge, path),
+            round((time.perf_counter() - started) * 1000),
+        )
         self._saves += 1
         self._dirty = False
         self._last_save = self._clock()
@@ -1087,6 +1109,16 @@ class DiscoveryService:
                 knowledge = self._store.load_or_new(game_id, title=info.title)
             except ConfigurationError:
                 knowledge = Knowledge(game_id, title=info.title)  # a damaged file: start over
+            if self._store.exists(game_id):  # how big it is tells how long a save takes (T-955)
+                log.info(
+                    "Picked up what the AI learned about %s: %s.",
+                    info.title or game_id,
+                    _size_words(knowledge, self._store.path_for(game_id)),
+                )
+            else:
+                log.info(
+                    "Starting fresh on %s: nothing learned about it yet.", info.title or game_id
+                )
         else:
             knowledge = Knowledge(game_id, title=info.title)
         # The change statistics start from zero with this connection, so the

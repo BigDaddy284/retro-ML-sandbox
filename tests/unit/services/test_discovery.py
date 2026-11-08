@@ -312,6 +312,42 @@ def test_knowledge_is_remembered_between_connections(
     assert d.knowledge is not None and len(d.knowledge) == 0
 
 
+def test_the_log_says_how_big_the_knowledge_is(
+    connection: ConnectionService,
+    observation: ObservationService,
+    bus: EventBus,
+    tmp_path: object,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """T-955: the user's saves took 1.1 s and nothing said how big the file was."""
+    from pathlib import Path
+
+    from retro_ai_lab.storage import KnowledgeStore
+
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
+    store = KnowledgeStore(Path(str(tmp_path)) / "knowledge")
+    d = DiscoveryService(
+        connection, observation, bus, review_every=100, experiment_every=None, store=store
+    )
+    connection.connect("fake", seed=2)
+    assert any(m.startswith("Starting fresh on Toy Racer") for m in caplog.messages)
+    play(connection, observation, 100)
+    d.save()
+    k = d.knowledge
+    assert k is not None
+    saved = next(m for m in caplog.messages if m.startswith("Saved what the AI learned about"))
+    size = store.path_for("toyracer-2").stat().st_size
+    expected = f"{len(k):,} guesses, {len(k.relationships()):,} relationship"
+    assert (
+        expected in saved and f"{size / 1_000_000:.1f} MB in " in saved and saved.endswith(" ms.")
+    )
+    connection.disconnect()
+    caplog.clear()
+    connection.connect("fake", seed=2)
+    picked = next(m for m in caplog.messages if m.startswith("Picked up what the AI learned about"))
+    assert expected in picked and f"{size / 1_000_000:.1f} MB." in picked
+
+
 def test_judged_counts_start_over_with_each_connection(
     connection: ConnectionService, observation: ObservationService, bus: EventBus, tmp_path: object
 ) -> None:

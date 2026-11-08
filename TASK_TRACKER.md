@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-955 | The log says how big the knowledge is: one line when a game's knowledge is picked up (guesses, relationships, file size) and one per save (the same plus the time it took); the user's saves took 1.1 s where the same work takes 46 ms here, and nothing in the log said whether the file was 6 MB or 60 | 8 | Done | 1/1 | see PR |
 | T-954 | The Research window refreshes on a finished go, a training state change or a connection change only while it is visible; hidden, it waits for `showEvent`, which already refreshes it, instead of rebuilding its memory, situation and step-log tables at every go's end for nobody (part of `on EpisodeFinished` 524 ms × 14 in the user's log) | 8 | Done | 1/1 | see PR #209 |
 | T-953 | `Knowledge.at(region, offset)` looks the location up in an index kept by `add`, `update` and `remove` instead of walking every variable; the hidden Research window asked it once per shown address at every go's end (1,800 walks over 1,600 guesses, 45 ms here, more on the user's PC under `on EpisodeFinished` 524 ms × 14) | 8 | Done | 1/1 | see PR #208 |
 | T-952 | The knowledge keeps its confident relationships in an index kept up to date by every write, so the panel, the suggestions and the goals read the few that matter instead of walking every pair and recomputing its confidence; the `discoveries refresh` was 136 ms × 585 on the GUI thread in the user's log | 8 | Done | 1/1 | see PR #207 |
@@ -3008,6 +3009,19 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
+### T-955 – The log says how big the knowledge is
+- **Status:** Done
+- **Phase:** 8 (the user's stage log: `discovery: save` 122 × 1.1 s; a save of 1,600 guesses and 20,000 relationships, a 6.4 MB file, takes 46 ms here, so the user's file is either far bigger or the machine far slower at writing it, and the log cannot say which: nothing reports the knowledge's size at load or at save)
+- **Objective:** when a game's saved knowledge is picked up, log one line with its guesses, relationships and file size (or that the game starts fresh); on every save, log one line with the guesses, relationships, file size and the time the save took. Saves run at most once a minute (T-949), so that is at most one line a minute.
+- **Scope:** `services/discovery.py`. **Out of scope:** making the save faster; that waits for the numbers.
+- **Acceptance criteria:**
+  1. A store-backed service logs "Picked up what the AI learned about …" with counts and size on connecting to a game with saved knowledge, "Starting fresh on …" for a game without, and "Saved what the AI learned about …" with counts, size and milliseconds on each save.
+  2. The discovery suite passes unchanged.
+- **Expected changes:** `src/retro_ai_lab/services/discovery.py`, `tests/unit/services/test_discovery.py`, `TASK_TRACKER.md`, `CHANGELOG.md`, `README.md` (the troubleshooting note on logs).
+- **Test plan:** `test_the_log_says_how_big_the_knowledge_is`; discovery suite; full suite.
+- **Results:** services suite 109 passed; full suite 1428 passed, 10 skipped (143.37s); ruff and mypy clean.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** `_size_words` gives "N guesses, M relationships, X MB"; the connect path logs "Picked up …" or "Starting fresh …", `save()` logs "Saved … in N ms"; README's log paragraph mentions the lines.
 ### T-954 – The hidden Research window stops refreshing for nobody
 - **Status:** Done
 - **Phase:** 8 (the user's stage log: `on EpisodeFinished` 14 × 524 ms on the GUI thread; the Research window is built with the main window and subscribes to `EpisodeFinished`, `TrainingStateChanged`, `EmulatorConnected` and `EmulatorDisconnected`, refreshing every table on each, visible or not; a profile at the user's scale put its hidden refresh at 45 ms before T-953 and 6 ms after, 400 table rows built and thrown away)

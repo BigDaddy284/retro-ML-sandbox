@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-955: the log says how big the knowledge is, once when a game's knowledge is picked up and once per save, with the time the save took.
 - T-954: the Research window refreshes on a finished go or a state change only while it is open; closed, it waits to be opened, which already refreshes it, instead of rebuilding its tables at every go's end for nobody.
 - T-953: a guess is found by its address through an index the knowledge keeps, instead of a walk over every guess; the Research window's memory table asked that question 1,800 times at every go's end.
 - T-952: the knowledge keeps its confident relationships in an index that every write keeps up to date, so the panel's "What leads to what" list, the reward suggestions and the goals no longer walk every relationship and recompute its confidence to find the few that matter (the panel refresh took 136 ms a time on the GUI thread in the user's log).
