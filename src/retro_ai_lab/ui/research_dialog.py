@@ -138,6 +138,7 @@ class ResearchDialog(QDialog):
         self._context = context
         self._training = context.training
         self._log = context.step_log
+        self._refreshes = 0
 
         intro = QLabel(WHAT_IS_THIS, self)
         intro.setObjectName("research_intro")
@@ -334,6 +335,11 @@ class ResearchDialog(QDialog):
     @property
     def ticking(self) -> bool:
         return self._ticker.isActive()
+
+    @property
+    def refreshes(self) -> int:
+        """How many full refreshes the window has run (T-954)."""
+        return self._refreshes
 
     def settings_values(self) -> dict[str, float]:
         return {key: spin.value() for key, spin in self._spins.items()}
@@ -540,6 +546,7 @@ class ResearchDialog(QDialog):
         return True
 
     def refresh(self) -> None:
+        self._refreshes += 1
         self._show_settings()
         self._refresh_live()
 
@@ -879,7 +886,14 @@ class ResearchDialog(QDialog):
             self.export_to(Path(path))
 
     def _on_changed(self, event: object) -> None:
-        self.refresh()
+        """Refresh for a finished go or a state change only while someone can see it (T-954).
+
+        The window is built with the main window and hears every event from then on;
+        hidden, it rebuilt its memory, situation and step-log tables at every go's
+        end for nobody. ``showEvent`` refreshes it the moment it is opened.
+        """
+        if self.isVisible():
+            self.refresh()
 
 
 def _dec_hex(value: int) -> str:
