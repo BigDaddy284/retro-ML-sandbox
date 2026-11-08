@@ -117,7 +117,9 @@ emulator link's line, an "App work" line counts the stalls of the window's
 thread and names what that thread did, event by event (`on DiscoveryUpdated`),
 panel refresh by panel refresh, and the picture's paint, leaving out anything
 that never took a millisecond. When the window stutters, that line says which
-part of the app was busy. The AI's step is on the same line stage by stage:
+part of the app was busy. One line says how big a game's knowledge is when it
+is picked up (guesses, relationships, file size), and one per save adds how
+long the save took. The AI's step is on the same line stage by stage:
 `step: choose` (picking the buttons), `step: emulator` (the frames), `step:
 observe` (reading the memory, with its parts as `observe: track` and the
 `discovery: …` stages), `step: encode` and `step: learn`. When "Practise
