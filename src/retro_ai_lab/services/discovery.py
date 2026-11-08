@@ -31,6 +31,7 @@ from pathlib import Path
 
 from retro_ai_lab.core import ConfigurationError, EmulatorError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
+from retro_ai_lab.core.worklog import app_work
 from retro_ai_lab.observation.diff import ByteStats
 from retro_ai_lab.services.connection import (
     ConnectionService,
@@ -596,9 +597,10 @@ class DiscoveryService:
         """Write the knowledge to the store (no store: nothing happens)."""
         if self._store is None or self._knowledge is None:
             return None
-        if self._finder is not None:
-            self._finder.flush()  # rates the finder has not written yet (T-946)
-        path = self._store.save(self._knowledge)
+        with app_work.timed("discovery: save"):
+            if self._finder is not None:
+                self._finder.flush()  # rates the finder has not written yet (T-946)
+            path = self._store.save(self._knowledge)
         self._saves += 1
         return path
 
@@ -1087,21 +1089,27 @@ class DiscoveryService:
         if not self._enabled or self._knowledge is None:
             return
         assert self._detector is not None and self._finder is not None
-        events = self._detector.observe(event.snapshot)
+        # Each stage is timed for the "App work" log line (T-947).
+        with app_work.timed("discovery: events"):
+            events = self._detector.observe(event.snapshot)
         if self._look is not None:
-            self._look.observe(event.snapshot)
+            with app_work.timed("discovery: long look"):
+                self._look.observe(event.snapshot)
         relationships: tuple[Relationship, ...] = ()
         if events:
             self._events.extend(events)
-            relationships = self._finder.observe(events)
+            with app_work.timed("discovery: relationships"):
+                relationships = self._finder.observe(events)
         if events or relationships:
-            self._announce(DiscoveryUpdated((), (), events, relationships))
+            with app_work.timed("discovery: announce"):
+                self._announce(DiscoveryUpdated((), (), events, relationships))
         if any(e.kind is EventKind.RESET for e in events):
             self._narrow_at_restart()
         self._since_review += 1
         self._since_experiment += 1
         if self._since_review >= self._review_every:
-            self.review()
+            with app_work.timed("discovery: review"):
+                self.review()
         if (
             self._experiment_every is not None
             and self._since_experiment >= self._experiment_every
@@ -1109,7 +1117,8 @@ class DiscoveryService:
             and self.can_experiment()
         ):
             try:
-                self.experiment()
+                with app_work.timed("discovery: experiment"):
+                    self.experiment()
             except EmulatorError:
                 # Link loss is announced by the connection service; carry on.
                 self._since_experiment = 0

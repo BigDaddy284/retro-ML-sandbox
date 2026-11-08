@@ -16,6 +16,7 @@ from typing import Any
 
 from retro_ai_lab.core import Button, ConfigurationError, EmulatorError
 from retro_ai_lab.core.events import EventBus
+from retro_ai_lab.core.worklog import app_work
 from retro_ai_lab.learning.learner import Learner
 from retro_ai_lab.learning.replay import Transition
 from retro_ai_lab.learning.state import State, StateEncoder
@@ -471,7 +472,8 @@ class EpisodeRunner:
             self._unsticks += 1
             self._same_state = 0
         else:
-            action = self._agent.choose(state)
+            with app_work.timed("step: choose"):
+                action = self._agent.choose(state)
             names = self._agent.space.buttons_for(action)
         held = [self._buttons[n] for n in names]
         self._last_buttons = frozenset(names)
@@ -484,8 +486,13 @@ class EpisodeRunner:
             frames = self._frames_per_step
             reads = self._observation.snapshot_reads()
             pressed = frozenset(held)
-            result = self._connection.call(lambda a: a.step(frames, pressed=pressed, reads=reads))
-            self._observation.advance(frames, snapshot=result.reads if reads else None)
+            with app_work.timed("step: emulator"):
+                result = self._connection.call(
+                    lambda a: a.step(frames, pressed=pressed, reads=reads)
+                )
+            # The snapshot's readers (change tracker, discovery, rewards) run inside.
+            with app_work.timed("step: observe"):
+                self._observation.advance(frames, snapshot=result.reads if reads else None)
         except EmulatorError:
             self._ended_by = "disconnected"
             self._signals.stop()
@@ -528,12 +535,14 @@ class EpisodeRunner:
         if self._restored and self._frames <= self._settle_frames:
             resets = 0
         snapshot = self._observation.latest
-        next_state = self._encoder.encode(snapshot) if snapshot is not None else state
+        with app_work.timed("step: encode"):
+            next_state = self._encoder.encode(snapshot) if snapshot is not None else state
         done = resets > 0
         if action is not None:
-            self._agent.learn(state, action, reward, next_state, done)
-            if self._on_learned is not None:
-                self._on_learned(Transition(state, action, reward, next_state, done, source))
+            with app_work.timed("step: learn"):
+                self._agent.learn(state, action, reward, next_state, done)
+                if self._on_learned is not None:
+                    self._on_learned(Transition(state, action, reward, next_state, done, source))
         self._reward += reward
         self._steps += 1
         if action is not None:

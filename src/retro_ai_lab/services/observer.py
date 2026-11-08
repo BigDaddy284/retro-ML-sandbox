@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from retro_ai_lab.core import ConfigurationError, EmulatorDisconnectedError, EmulatorError, Frame
 from retro_ai_lab.core.events import EventBus
+from retro_ai_lab.core.worklog import app_work
 from retro_ai_lab.observation.diff import ChangeTracker, SnapshotDiff
 from retro_ai_lab.observation.inputs import InputEvent, InputLog
 from retro_ai_lab.observation.memory import MemoryCapture, MemorySnapshot, SnapshotRing
@@ -167,7 +168,8 @@ class ObservationService:
             self._errors += 1
             return None
         self._ring.append(captured)
-        diff = self._tracker.observe(captured)
+        with app_work.timed("observe: track"):
+            diff = self._tracker.observe(captured)
         event = MemoryObserved(captured, diff)
         self._bus.publish(event)
         return event

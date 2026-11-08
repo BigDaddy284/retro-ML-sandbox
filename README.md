@@ -117,7 +117,11 @@ emulator link's line, an "App work" line counts the stalls of the window's
 thread and names what that thread did, event by event (`on DiscoveryUpdated`),
 panel refresh by panel refresh, and the picture's paint, leaving out anything
 that never took a millisecond. When the window stutters, that line says which
-part of the app was busy.
+part of the app was busy. The AI's step is on the same line stage by stage:
+`step: choose` (picking the buttons), `step: emulator` (the frames), `step:
+observe` (reading the memory, with its parts as `observe: track` and the
+`discovery: …` stages), `step: encode` and `step: learn`. When "Practise
+fast" is not fast, those names say which stage of each step is slow.
 
 Every go leaves two lines: "Go 12 ended by …" with the rewards that paid, and
 "The brain after go 12: Simple table. Knows 840 situations … tries something
