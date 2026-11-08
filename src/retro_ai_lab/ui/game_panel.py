@@ -23,7 +23,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 from retro_ai_lab.core import EmulatorDisconnectedError, Frame
 from retro_ai_lab.core.worklog import app_work
 from retro_ai_lab.services import ConnectionService, EmulatorConnected, EmulatorDisconnected
-from retro_ai_lab.training import Speed, Status, TrainingStateChanged
+from retro_ai_lab.training import TrainingStateChanged
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.controller_pad import ControllerPad
 from retro_ai_lab.ui.frame_view import FrameView
@@ -314,8 +314,7 @@ class GamePanel(QWidget):
         training = self._context.training
         ai = training.ai_in_control
         # Fast practice needs the link for its steps: a few pictures a second (T-836).
-        fast = ai and training.status is Status.RUNNING and training.speed is Speed.FAST
-        self._pump.set_fps(PRACTISE_FPS if fast else self._fps)
+        self._pump.set_fps(PRACTISE_FPS if training.practising_fast else self._fps)
         if ai and not self._ai_had_controls:
             self._resume_clock = self._clock.playing
             self._clock.pause()

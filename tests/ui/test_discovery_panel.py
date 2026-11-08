@@ -522,3 +522,27 @@ def test_the_lists_under_the_variables_refill_only_when_they_moved(
     fills.clear()
     panel.refresh()
     assert fills == ["_fill_events", "_fill_relationships"]
+
+
+def test_the_list_rests_while_the_ai_practises_fast(
+    panel: DiscoveryPanel, context: AppContext
+) -> None:
+    """T-944: the user's log had this panel refreshing three times a second through two
+    hours of "Practise fast" that nobody watched, taking the app's time from the AI."""
+    from retro_ai_lab.training import Speed
+    from retro_ai_lab.ui.coalesce import DEFAULT_DELAY_MS, REST_DELAY_MS
+
+    context.connection.connect("fake", seed=1)
+    t = context.training
+    assert panel.refresher.delay_ms == DEFAULT_DELAY_MS
+    t.set_speed(Speed.FAST)
+    t.start()
+    assert panel.refresher.resting and panel.refresher.delay_ms == REST_DELAY_MS
+    t.pause()
+    assert not panel.refresher.resting and panel.refresher.delay_ms == DEFAULT_DELAY_MS
+    t.resume()
+    assert panel.refresher.resting
+    t.set_speed(Speed.LIVE)  # "Watch it play": a person is looking again
+    assert not panel.refresher.resting
+    t.stop()
+    assert not panel.refresher.resting

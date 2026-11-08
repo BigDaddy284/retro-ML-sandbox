@@ -45,6 +45,7 @@ from retro_ai_lab.services import (
     RewardEarned,
     RewardProfileChanged,
 )
+from retro_ai_lab.training import TrainingStateChanged
 from retro_ai_lab.ui.coalesce import Coalescer
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.panels import name_column
@@ -223,6 +224,7 @@ class RewardsPanel(QWidget):
             bridge.subscribe(ExploitSuspected, self._on_exploit),
             bridge.subscribe(EmulatorConnected, self._on_connected),
             bridge.subscribe(EmulatorDisconnected, self._on_disconnected),
+            bridge.subscribe(TrainingStateChanged, self._on_training_state),
         )
         unsubscribe = self._unsubscribe
         self.destroyed.connect(lambda *_: [u() for u in unsubscribe])
@@ -539,6 +541,10 @@ class RewardsPanel(QWidget):
             self._show_personality(self.profile)
             return
         self.choose_personality(pid)
+
+    def _on_training_state(self, event: TrainingStateChanged) -> None:
+        """Nobody watches the table while the AI practises fast: it rests (T-944)."""
+        self._refresher.rest(self._context.training.practising_fast)
 
     def _on_profile_changed(self, event: RewardProfileChanged) -> None:
         if event.reason == "suggestions":

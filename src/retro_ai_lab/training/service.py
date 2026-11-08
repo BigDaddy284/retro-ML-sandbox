@@ -265,6 +265,12 @@ class TrainingService:
         return self._status is not Status.IDLE and self._mode.ai_plays
 
     @property
+    def practising_fast(self) -> bool:
+        """True while the AI plays on its own at "Practise fast" (T-944): the emulator runs
+        flat out and the window rests, since nobody needs to watch."""
+        return self._status is Status.RUNNING and self._mode.ai_plays and self._speed is Speed.FAST
+
+    @property
     def agent(self) -> Learner | None:
         return self._agent
 
@@ -575,9 +581,7 @@ class TrainingService:
         throttle, so "Practise fast" was no faster than watching. An emulator
         without speed control (mGBA) is left alone; a refused call is logged.
         """
-        wanted = (
-            self._status is Status.RUNNING and self._mode.ai_plays and self._speed is Speed.FAST
-        )
+        wanted = self.practising_fast
         if wanted == self._fast_applied or not self._connection.is_connected:
             return
         try:

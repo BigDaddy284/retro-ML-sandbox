@@ -434,3 +434,20 @@ def test_the_address_column_shows_a_range(panel: RewardsPanel, context: AppConte
     assert panel.row_text(f"score_gain:{score.id}")[4] == (
         f"ram[{first}..{last}] (0x{first:04X}..0x{last:04X})"
     )
+
+
+def test_the_table_rests_while_the_ai_practises_fast(
+    panel: RewardsPanel, context: AppContext
+) -> None:
+    """T-944: the table follows the knowledge panel: once every 2 s while nobody watches."""
+    from retro_ai_lab.training import Speed
+    from retro_ai_lab.ui.coalesce import DEFAULT_DELAY_MS, REST_DELAY_MS
+
+    context.connection.connect("fake", seed=2)
+    t = context.training
+    assert panel.refresher.delay_ms == DEFAULT_DELAY_MS
+    t.set_speed(Speed.FAST)
+    t.start()
+    assert panel.refresher.resting and panel.refresher.delay_ms == REST_DELAY_MS
+    t.stop()
+    assert not panel.refresher.resting and panel.refresher.delay_ms == DEFAULT_DELAY_MS

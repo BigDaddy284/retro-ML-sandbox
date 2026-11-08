@@ -1557,3 +1557,24 @@ def test_training_starts_in_hold_mode(lab: Lab, caplog: pytest.LogCaptureFixture
         assert "holds it between steps" in caplog.text
         lab.training.stop()
         lab.connection.disconnect()
+
+
+def test_practising_fast_names_fast_training_in_an_ai_mode(lab: Lab) -> None:
+    """T-944: the window rests on this, as the emulator's speed-up already did."""
+    lab.connect()
+    t = lab.training
+    assert not t.practising_fast
+    t.set_speed(Speed.FAST)
+    assert not t.practising_fast  # not started
+    t.start(Mode.INDEPENDENT)
+    assert t.practising_fast
+    t.pause()
+    assert not t.practising_fast
+    t.resume()
+    assert t.practising_fast
+    t.set_speed(Speed.LIVE)
+    assert not t.practising_fast
+    t.set_speed(Speed.FAST)
+    assert t.practising_fast
+    t.stop()
+    assert not t.practising_fast

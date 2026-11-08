@@ -36,6 +36,7 @@ from retro_ai_lab.services import (
     EmulatorConnected,
     EmulatorDisconnected,
 )
+from retro_ai_lab.training import TrainingStateChanged
 from retro_ai_lab.ui.activity_strip import ActivityStrip
 from retro_ai_lab.ui.coalesce import Coalescer
 from retro_ai_lab.ui.context import AppContext
@@ -245,6 +246,7 @@ class DiscoveryPanel(QWidget):
             bridge.subscribe(DiscoveryUpdated, self._on_updated),
             bridge.subscribe(EmulatorConnected, self._on_connected),
             bridge.subscribe(EmulatorDisconnected, self._on_disconnected),
+            bridge.subscribe(TrainingStateChanged, self._on_training_state),
         )
         unsubscribe = self._unsubscribe
         self.destroyed.connect(lambda *_: [u() for u in unsubscribe])
@@ -613,6 +615,10 @@ class DiscoveryPanel(QWidget):
         """
         self._stage.setText(text)
         self._stage.setVisible(not repeats_summary)
+
+    def _on_training_state(self, event: TrainingStateChanged) -> None:
+        """Nobody watches the list while the AI practises fast: it rests (T-944)."""
+        self._refresher.rest(self._context.training.practising_fast)
 
     def _on_updated(self, event: DiscoveryUpdated) -> None:
         for v in (*event.added, *event.changed):
