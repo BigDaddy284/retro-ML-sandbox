@@ -160,6 +160,13 @@ seconds unless you change it) and "Give up when nothing changes for" (about
 two seconds), both in seconds and remembered for that game. Change them while
 training is stopped.
 
+"Speed" in the same panel is "Watch it play" (one step a game tick) or
+"Practise fast": the emulator runs flat out, the picture drops to two a
+second and the Discovery and Rewards panels refresh once every two seconds
+instead of several times a second, since every refresh takes time from the
+AI's steps and nobody is watching. They catch up the moment you pause, stop
+or switch back to "Watch it play".
+
 ## Reading the rewards
 
 The AI keeps every guess it makes about the game's memory, but the Rewards

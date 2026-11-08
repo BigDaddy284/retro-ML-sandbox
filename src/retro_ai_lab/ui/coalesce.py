@@ -20,6 +20,7 @@ from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.core.worklog import WorkLog, app_work
 
 DEFAULT_DELAY_MS = 250
+REST_DELAY_MS = 2000  # while the AI practises fast and nobody watches (T-944)
 
 
 class Coalescer(QObject):
@@ -41,6 +42,7 @@ class Coalescer(QObject):
         self._name = name
         self._worklog = worklog
         self._delay_s = delay_ms / 1000
+        self._own_ms = delay_ms  # the delay to come back to after a rest (T-944)
         self._last: float | None = None
         self._runs = 0
         self._timer = QTimer(self)
@@ -67,6 +69,29 @@ class Coalescer(QObject):
     def name(self) -> str | None:
         """What the work log calls a run, or None when runs are not timed."""
         return self._name
+
+    @property
+    def resting(self) -> bool:
+        return self._timer.interval() != self._own_ms
+
+    def rest(self, on: bool, *, delay_ms: int = REST_DELAY_MS) -> None:
+        """Refresh once every ``delay_ms`` while ``on`` (T-944), else at the usual rate.
+
+        The user's log had the knowledge panel refreshing three times a second
+        for two hours of "Practise fast", holding the interpreter from the AI's
+        steps; nobody was watching it. A request already waiting is kept and
+        runs at the new window's end, so a wake refreshes promptly.
+        """
+        if delay_ms < 1:
+            raise ConfigurationError("delay_ms must be at least 1.")
+        wanted = delay_ms if on else self._own_ms
+        if wanted == self._timer.interval():
+            return
+        self._timer.setInterval(wanted)
+        self._delay_s = wanted / 1000
+        if self.pending:
+            self._timer.stop()
+            self.request()
 
     def request(self) -> None:
         """Run now if the window is clear, else once when it closes."""
@@ -101,4 +126,4 @@ class Coalescer(QObject):
             self._action()
 
 
-__all__ = ["DEFAULT_DELAY_MS", "Coalescer"]
+__all__ = ["DEFAULT_DELAY_MS", "REST_DELAY_MS", "Coalescer"]
