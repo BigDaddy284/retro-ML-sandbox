@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-953: a guess is found by its address through an index the knowledge keeps, instead of a walk over every guess; the Research window's memory table asked that question 1,800 times at every go's end.
 - T-952: the knowledge keeps its confident relationships in an index that every write keeps up to date, so the panel's "What leads to what" list, the reward suggestions and the goals no longer walk every relationship and recompute its confidence to find the few that matter (the panel refresh took 136 ms a time on the GUI thread in the user's log).
 - T-951: the AI's review proposes new guesses by looking each candidate's bytes up in a set of the bytes its variables already span, instead of comparing every candidate with every variable (about a million comparisons a review at the user's scale, the review's largest share); the same guesses are added as before.
 - T-950: the big-region scan test takes the best of three runs and allows 50 ms or a plain Python pass over the same bytes, whichever is longer, after tripping twice on slow CI runners while the scan was fine.

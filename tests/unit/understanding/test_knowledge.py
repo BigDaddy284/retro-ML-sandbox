@@ -633,3 +633,53 @@ def test_the_confident_index_matches_the_old_walk_after_every_write(ops: list[tu
             getattr(k, f"{op[0]}_relationship")(rel_id)
         for level in (Confidence.LOW, Confidence.MEDIUM, Confidence.HIGH, Confidence.CONFIRMED):
             assert k.confident_relationships(level) == _old_confident(k, level)
+
+
+# ------------------------------------------------------- T-953 location index for at()
+
+
+def _old_at(k: Knowledge, region: str, offset: int) -> Variable | None:
+    """The walk `at` made before T-953."""
+    for v in k:
+        if v.region == region and v.offset == offset:
+            return v
+    return None
+
+
+_GRID = [(r, o) for r in ("ram", "vram") for o in range(4)]
+
+
+def _variable_ops() -> st.SearchStrategy[tuple]:
+    where = st.sampled_from(_GRID)
+    add = st.tuples(st.just("add"), where, st.booleans())  # rejected at birth or not
+    move = st.tuples(st.just("move"), st.integers(0, 9), where)  # the nth variable moves
+    verdict = st.tuples(st.sampled_from(["reject", "remove"]), st.integers(0, 9))
+    return st.one_of(add, move, verdict)
+
+
+@given(st.lists(_variable_ops(), min_size=1, max_size=40))
+@settings(max_examples=100, deadline=None)
+def test_at_reads_the_index_and_answers_like_the_old_walk(ops: list[tuple]) -> None:
+    """T-953: adds, moves, rejections and removals leave `at` answering as the walk did."""
+    k = Knowledge("g")
+    for op in ops:
+        ids = [v.id for v in k]
+        if op[0] == "add":
+            _, (region, offset), rejected = op
+            clash = _old_at(k, region, offset)
+            if clash is not None and not clash.rejected:
+                with pytest.raises(ConfigurationError):
+                    k.propose(region, offset)
+                continue
+            v = k.propose(region, offset)
+            if rejected:
+                k.reject(v.id)
+        elif not ids:
+            continue
+        elif op[0] == "move":
+            _, nth, (region, offset) = op
+            k.update(ids[nth % len(ids)], region=region, offset=offset)
+        else:
+            getattr(k, op[0])(ids[op[1] % len(ids)])
+        for region, offset in _GRID:
+            assert k.at(region, offset) == _old_at(k, region, offset)
