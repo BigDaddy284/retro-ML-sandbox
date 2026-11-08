@@ -535,6 +535,9 @@ class Knowledge:
         self.game_id = game_id
         self.title = title
         self._variables: dict[str, Variable] = {}
+        # (region, offset) -> the ids of the variables that start there, in insertion
+        # order (T-953): what `at` reads instead of walking every variable.
+        self._at: dict[tuple[str, int], list[str]] = {}
         self._relationships: dict[str, Relationship] = {}
         # The relationships that are not rejected and at least LOW, with their level
         # and their place in insertion order (T-952): what the panel, the suggestions
@@ -594,12 +597,31 @@ class Knowledge:
             raise ConfigurationError(f"No variable {var_id!r} in the knowledge.") from None
 
     def at(self, region: str, offset: int) -> Variable | None:
-        """The variable that starts at this location, if any."""
+        """The variable that starts at this location, if any.
+
+        Read from the location index (T-953) rather than by a walk over every
+        variable: the Research window asks for each of its 1,800 addresses at
+        every go's end. Two variables share a start only when a rejected guess
+        was replaced; the first in insertion order answers, as the walk did.
+        """
         with self._lock:
-            for v in self._variables.values():
-                if v.region == region and v.offset == offset:
-                    return v
-        return None
+            ids = self._at.get((region, offset))
+            if not ids:
+                return None
+            if len(ids) == 1:
+                return self._variables[ids[0]]
+            wanted = set(ids)
+            return next(v for v in self._variables.values() if v.id in wanted)
+
+    def _index_add(self, variable: Variable) -> None:
+        self._at.setdefault((variable.region, variable.offset), []).append(variable.id)
+
+    def _index_remove(self, variable: Variable) -> None:
+        where = (variable.region, variable.offset)
+        ids = self._at[where]
+        ids.remove(variable.id)
+        if not ids:
+            del self._at[where]
 
     def by_kind(self, kind: VariableKind) -> tuple[Variable, ...]:
         with self._lock:
@@ -704,6 +726,7 @@ class Knowledge:
                     "update it instead."
                 )
             self._variables[variable.id] = variable
+            self._index_add(variable)
             self._version += 1
         return variable
 
@@ -748,6 +771,9 @@ class Knowledge:
                 raise ConfigurationError("A variable's id can't change.")
             updated = replace(current, **changes)
             self._variables[var_id] = updated
+            if (updated.region, updated.offset) != (current.region, current.offset):
+                self._index_remove(current)
+                self._index_add(updated)
             self._version += 1
         return updated
 
@@ -814,7 +840,7 @@ class Knowledge:
 
     def remove(self, var_id: str) -> None:
         with self._lock:
-            self.get(var_id)
+            self._index_remove(self.get(var_id))
             del self._variables[var_id]
             self._version += 1
 
