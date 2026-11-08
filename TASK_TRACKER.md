@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-945 | The change tracker counts every byte of a region in numpy arrays instead of a Python loop, and the diff finds changed bytes in one comparison; `ByteStats` is built from the arrays on request, so a reading is a fresh object | 8 | Done | 1/1 | see PR |
 | T-944 | "Practise fast" rests the panels: the knowledge and rewards panels refresh once every 2 s instead of 4 times a second while the AI practises fast, so the window stops taking the app's time from the AI's steps; `TrainingService.practising_fast` names the state and `Coalescer.rest` the pause | 8 | Done | 4/4 | see PR #199 |
 | T-943 | Remove takes any reward row out and it stays out: the profile keeps the rules a person dismissed (an event of a kind of guess, the reset row, a button row) and the suggestions and the button rows skip them, so the AI's next guess of the same kind brings no row back; Remove no longer rejects the AI's guess; "Bring back suggestions" clears the dismissals | 8 | Done | 5/5 | see PR #198 |
 | T-942 | While a person plays, the game runs at the emulator's own pace: the play clock switches a BizHawk link to free run on Play and back to hold on Pause, sends one-frame steps that only watch (reads, the pad, a picture) instead of frames the wall clock owes, the script leaves the real controller alone between watched steps in free run, and training puts the link back in hold mode before its first step | 8 | Done | 5/5 | see PR #197 |
@@ -2997,6 +2998,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; understanding + services + integration 241 passed; full suite 1358 passed, 10 skipped in 183.18s (0:03:03).
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
+
+### T-945 – The change tracker counts in arrays
+- **Status:** Done
+- **Phase:** 8 (the T-944 profile of a synthetic step at the user's scale, 2 KB of RAM and 1,600 guesses: 17.7 ms a step, of which `ChangeTracker.observe` took 5.1 ms walking every byte of the region in Python, with twenty attribute updates per changed byte, on every step of every go; a slower PC and the interpreter lock multiply it)
+- **Objective:** `ChangeTracker` keeps one `_RegionStats` per region, an int64 array per statistic (samples, changes, ups, downs, minimum, maximum, last, wraps, carry-ins, unit steps, max step, max/min/small/unit/last/same/usual hop) and a bytes × 256 boolean table of the values seen, and counts a transition with array operations: the same rules as before, roll-overs, carries from the byte below, first-change `min_hop` and repeated hops included. `stats(region, offset)` builds a `ByteStats` from the arrays (a fresh object, not a live one), `all_stats()` builds every byte's, `classify()` groups by masks, and `diff_snapshots` finds the changed offsets in one array comparison before making `ByteChange` objects for them alone. `move_on` (an expected jump, T-935) takes the values without counting, as before.
+- **Scope:** `observation/diff.py`. **Out of scope:** the relationship finder and the DQN's share of a step.
+- **Acceptance criteria:**
+  1. Every statistic of every byte equals what the one-byte-at-a-time loop counted, on random streams with walks, roll-overs with carries, repeats and restores (a property test against a hand-written copy of the old loop).
+  2. The existing tracker, classifier, discovery, observer and research tests pass unchanged, except that a test reading a statistic after further snapshots re-reads it.
+  3. The synthetic step's tracker share falls from about 5 ms to about 1 ms, most of that the diff's change objects.
+- **Expected changes:** `src/retro_ai_lab/observation/diff.py`, `tests/unit/observation/test_diff.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_the_arrays_count_exactly_as_the_byte_loop_did` (property test, 60 examples); the observation, variables, discovery, observer and research-dialog suites; full suite.
+- **Results:** the property test passes (60 examples); observation, variables, discovery, observer and research-dialog suites 223 passed; full suite 1417 passed, 10 skipped (154.70s); ruff and mypy clean; synthetic step tracker share 5.1 ms → 0.97 ms.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** pending.
 
 ### T-944 – "Practise fast" rests the panels
 - **Status:** Done
