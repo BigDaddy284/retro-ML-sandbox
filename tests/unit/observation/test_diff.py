@@ -138,9 +138,11 @@ def test_tracker_skips_an_expected_jump() -> None:
     d = t.observe(snap(3, b"\x03"))  # put back to the start
     assert d is not None and d.changes == (ByteChange("ram", 0, 5, 3),)
     assert not t.jump_expected
+    st = t.stats("ram", 0)  # a fresh reading each time (T-945): the counts live in arrays
     assert (st.samples, st.changes, st.ups, st.downs, st.last) == (2, 2, 2, 0, 3)
     assert st.monotonic_up and t.transitions == 2 and t.observed == 4
     t.observe(snap(4, b"\x04"))  # counted again, from the restored value
+    st = t.stats("ram", 0)
     assert (st.samples, st.changes, st.ups, st.downs, st.last) == (3, 3, 3, 0, 4)
     assert t.transitions == 3
     t.expect_jump()
@@ -288,3 +290,97 @@ def test_tracker_counts_small_and_unit_hops() -> None:
     assert st.to_dict()["small_hops"] == 4 and st.to_dict()["unit_hops"] == 3
     assert ByteStats().small_hops == 0 and ByteStats().unit_hops == 0
     assert SMALL_HOP == 8
+
+
+# ---------------------------------------------------- the arrays agree (T-945)
+
+
+def _count_by_hand(streams: list[bytes], jumps: set[int]) -> dict[int, ByteStats]:
+    """The tracker's counting as T-202..T-935 wrote it, one byte at a time, for one region."""
+    stats = {
+        i: ByteStats(minimum=v, maximum=v, last=v, distinct={v}) for i, v in enumerate(streams[0])
+    }
+    for n, data in enumerate(streams[1:], start=1):
+        wrapped: set[int] = set()
+        for offset, value in enumerate(data):
+            st = stats[offset]
+            if n not in jumps:
+                st.samples += 1
+                assert st.last is not None
+                if value != st.last:
+                    st.changes += 1
+                    delta = value - st.last
+                    hop = min(abs(delta), 256 - abs(delta))
+                    st.max_hop = max(st.max_hop, hop)
+                    st.min_hop = hop if st.changes == 1 else min(st.min_hop, hop)
+                    if hop <= SMALL_HOP:
+                        st.small_hops += 1
+                    if hop == 1:
+                        st.unit_hops += 1
+                    if st.changes > 1 and hop == st.last_hop:
+                        st.same_hops += 1
+                        st.usual_hop = hop
+                    st.last_hop = hop
+                    if delta > 0:
+                        st.ups += 1
+                        st.max_step = max(st.max_step, delta)
+                        if delta == 1:
+                            st.unit_steps += 1
+                    else:
+                        st.downs += 1
+                        if delta < -128:
+                            st.wraps += 1
+                            wrapped.add(offset)
+                            if delta + 256 == 1:
+                                st.unit_steps += 1
+                    if offset - 1 in wrapped:
+                        st.carry_ins += 1
+            st.last = value
+            st.minimum = min(st.minimum, value)
+            st.maximum = max(st.maximum, value)
+            st.distinct.add(value)
+    return stats
+
+
+@settings(max_examples=60, deadline=None)
+@given(
+    width=st.integers(min_value=1, max_value=6),
+    steps=st.integers(min_value=1, max_value=12),
+    data=st.data(),
+)
+def test_the_arrays_count_exactly_as_the_byte_loop_did(
+    width: int, steps: int, data: st.DataObject
+) -> None:
+    """T-945: the tracker counts every byte of a region in numpy; every statistic of every
+    byte, restores included, must equal what the one-byte-at-a-time loop counted."""
+    small = st.integers(min_value=-3, max_value=3)
+    streams = [data.draw(st.binary(min_size=width, max_size=width))]
+    jumps: set[int] = set()
+    for n in range(1, steps + 1):
+        kind = data.draw(st.sampled_from(["walk", "wrap", "random", "same", "jump"]))
+        prev = streams[-1]
+        if kind == "walk":
+            nxt = bytes((b + data.draw(small)) % 256 for b in prev)
+        elif kind == "wrap":  # a counter rolling over, with the byte above carrying
+            nxt = bytes(
+                [(prev[0] + 1) % 256, *((b + (1 if prev[0] == 255 else 0)) % 256 for b in prev[1:])]
+            )
+        elif kind == "random":
+            nxt = data.draw(st.binary(min_size=width, max_size=width))
+        elif kind == "same":
+            nxt = prev
+        else:
+            nxt = data.draw(st.binary(min_size=width, max_size=width))
+            jumps.add(n)
+        streams.append(nxt)
+    t = ChangeTracker()
+    for n, stream in enumerate(streams):
+        if n in jumps:
+            t.expect_jump()
+        t.observe(snap(n, stream))
+    expected = _count_by_hand(streams, jumps)
+    for offset in range(width):
+        assert t.stats("ram", offset) == expected[offset], f"byte {offset}"
+    assert t.transitions == steps - len(jumps)
+    assert set(t.all_stats()) == {("ram", i) for i in range(width)}
+    assert t.all_stats()[("ram", 0)] == expected[0]

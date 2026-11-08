@@ -16,6 +16,9 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
+from numpy.typing import NDArray
+
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.observation.memory import MemorySnapshot
 
@@ -74,10 +77,12 @@ def diff_snapshots(before: MemorySnapshot, after: MemorySnapshot) -> SnapshotDif
             )
         if a == b:
             continue
-        # Fast path on the common case of few changes: compare in chunks.
-        for i in range(len(a)):
-            if a[i] != b[i]:
-                changes.append(ByteChange(name, i, a[i], b[i]))
+        # The bytes that differ are found in one array comparison (T-945); only
+        # those become objects.
+        differ = np.flatnonzero(
+            np.frombuffer(a, dtype=np.uint8) != np.frombuffer(b, dtype=np.uint8)
+        )
+        changes.extend(ByteChange(name, i, a[i], b[i]) for i in differ.tolist())
     return SnapshotDiff(before.frame, after.frame, tuple(changes))
 
 
@@ -171,11 +176,164 @@ class ByteStats:
         }
 
 
+Counts = NDArray[np.int64]
+
+
+def _values(data: bytes) -> Counts:
+    return np.frombuffer(data, dtype=np.uint8).astype(np.int64)
+
+
+class _RegionStats:
+    """Every byte's statistics of one region, one array per field (T-945).
+
+    The user's log had the app's step at 140 ms against 30 ms of emulator; the
+    tracker walked every byte of a 2 KB region in Python on every step, about
+    5 ms of pure work at that scale and more under the interpreter lock. The
+    same counting over arrays costs a fraction of a millisecond, and
+    :class:`ByteStats` is built from the arrays when someone asks for a byte.
+    """
+
+    __slots__ = (
+        "carry_ins",
+        "changes",
+        "downs",
+        "last",
+        "last_hop",
+        "max_hop",
+        "max_step",
+        "maximum",
+        "min_hop",
+        "minimum",
+        "same_hops",
+        "samples",
+        "seen",
+        "size",
+        "small_hops",
+        "unit_hops",
+        "unit_steps",
+        "ups",
+        "usual_hop",
+        "wraps",
+    )
+    size: int
+    samples: Counts
+    changes: Counts
+    ups: Counts
+    downs: Counts
+    minimum: Counts
+    maximum: Counts
+    last: Counts
+    seen: NDArray[np.bool_]
+    wraps: Counts
+    carry_ins: Counts
+    unit_steps: Counts
+    max_step: Counts
+    max_hop: Counts
+    min_hop: Counts
+    small_hops: Counts
+    unit_hops: Counts
+    last_hop: Counts
+    same_hops: Counts
+    usual_hop: Counts
+
+    def __init__(self, data: bytes) -> None:
+        values = _values(data)
+        self.size = len(data)
+        zeros = np.zeros(self.size, dtype=np.int64)
+        self.samples = zeros.copy()
+        self.changes = zeros.copy()
+        self.ups = zeros.copy()
+        self.downs = zeros.copy()
+        self.wraps = zeros.copy()
+        self.carry_ins = zeros.copy()
+        self.unit_steps = zeros.copy()
+        self.max_step = zeros.copy()
+        self.max_hop = zeros.copy()
+        self.min_hop = zeros.copy()
+        self.small_hops = zeros.copy()
+        self.unit_hops = zeros.copy()
+        self.last_hop = zeros.copy()
+        self.same_hops = zeros.copy()
+        self.usual_hop = zeros.copy()
+        self.minimum = values.copy()
+        self.maximum = values.copy()
+        self.last = values
+        self.seen = np.zeros((self.size, 256), dtype=bool)  # the distinct values of each byte
+        self._note(values)
+
+    def _note(self, values: Counts) -> None:
+        self.last = values
+        np.minimum(self.minimum, values, out=self.minimum)
+        np.maximum(self.maximum, values, out=self.maximum)
+        self.seen[np.arange(self.size), values] = True
+
+    def move_on(self, data: bytes) -> None:
+        """Take the values without counting a transition (a restore, T-935)."""
+        self._note(_values(data))
+
+    def count(self, data: bytes) -> None:
+        """Count the transition from the last values to ``data``."""
+        values = _values(data)
+        delta = values - self.last
+        changed = delta != 0
+        away = np.abs(delta)
+        hop = np.minimum(away, 256 - away)
+        self.samples += 1
+        self.changes += changed
+        first = changed & (self.changes == 1)
+        later = changed & (self.changes > 1)
+        np.maximum(self.max_hop, np.where(changed, hop, 0), out=self.max_hop)
+        self.min_hop = np.where(
+            first, hop, np.where(later, np.minimum(self.min_hop, hop), self.min_hop)
+        )
+        self.small_hops += changed & (hop <= SMALL_HOP)
+        self.unit_hops += changed & (hop == 1)
+        same = later & (hop == self.last_hop)
+        self.same_hops += same
+        self.usual_hop = np.where(same, hop, self.usual_hop)
+        self.last_hop = np.where(changed, hop, self.last_hop)
+        up = delta > 0
+        self.ups += up
+        np.maximum(self.max_step, np.where(up, delta, 0), out=self.max_step)
+        down = delta < 0
+        self.downs += down
+        wrapped = delta < -128  # 255 -> 0 style roll-over
+        self.wraps += wrapped
+        self.unit_steps += (delta == 1) | (delta == -255)  # +1, a roll-over counted as +1
+        carry = np.zeros(self.size, dtype=bool)
+        carry[1:] = wrapped[:-1]  # the byte below rolled over in the same transition
+        self.carry_ins += changed & carry
+        self._note(values)
+
+    def stats(self, offset: int) -> ByteStats:
+        return ByteStats(
+            samples=int(self.samples[offset]),
+            changes=int(self.changes[offset]),
+            ups=int(self.ups[offset]),
+            downs=int(self.downs[offset]),
+            minimum=int(self.minimum[offset]),
+            maximum=int(self.maximum[offset]),
+            last=int(self.last[offset]),
+            distinct=set(np.flatnonzero(self.seen[offset]).tolist()),
+            wraps=int(self.wraps[offset]),
+            carry_ins=int(self.carry_ins[offset]),
+            unit_steps=int(self.unit_steps[offset]),
+            max_step=int(self.max_step[offset]),
+            max_hop=int(self.max_hop[offset]),
+            min_hop=int(self.min_hop[offset]),
+            small_hops=int(self.small_hops[offset]),
+            unit_hops=int(self.unit_hops[offset]),
+            last_hop=int(self.last_hop[offset]),
+            same_hops=int(self.same_hops[offset]),
+            usual_hop=int(self.usual_hop[offset]),
+        )
+
+
 class ChangeTracker:
     """Accumulates per-byte statistics from a stream of snapshots."""
 
     def __init__(self) -> None:
-        self._stats: dict[tuple[str, int], ByteStats] = {}
+        self._regions: dict[str, _RegionStats] = {}
         self._previous: MemorySnapshot | None = None
         self._observed = 0
         self._jumps = 0  # snapshots moved past without counting (restores, T-935)
@@ -196,7 +354,7 @@ class ChangeTracker:
         return self._jump_expected
 
     def reset(self) -> None:
-        self._stats.clear()
+        self._regions.clear()
         self._previous = None
         self._observed = 0
         self._jumps = 0
@@ -219,84 +377,36 @@ class ChangeTracker:
             raise ConfigurationError("ChangeTracker.observe needs a MemorySnapshot.")
         self._observed += 1
         if self._previous is None:
-            self._seed(snapshot)
+            self._regions = {name: _RegionStats(data) for name, data in snapshot.regions.items()}
             self._previous = snapshot
             return None
-        diff = diff_snapshots(self._previous, snapshot)
+        diff = diff_snapshots(self._previous, snapshot)  # checks the regions and sizes
         if self._jump_expected:
             self._jump_expected = False
             self._jumps += 1
-            self._move_on(snapshot)
-            return diff
-        changed = {(c.region, c.offset) for c in diff.changes}
-        wrapped: set[tuple[str, int]] = set()
-        for name, data in snapshot.regions.items():
-            for offset, value in enumerate(data):
-                st = self._stats[(name, offset)]
-                st.samples += 1
-                if (name, offset) in changed:
-                    st.changes += 1
-                    assert st.last is not None
-                    delta = value - st.last
-                    hop = min(abs(delta), 256 - abs(delta))
-                    st.max_hop = max(st.max_hop, hop)
-                    st.min_hop = hop if st.changes == 1 else min(st.min_hop, hop)
-                    if hop <= SMALL_HOP:
-                        st.small_hops += 1
-                    if hop == 1:
-                        st.unit_hops += 1
-                    if st.changes > 1 and hop == st.last_hop:
-                        st.same_hops += 1
-                        st.usual_hop = hop
-                    st.last_hop = hop
-                    if delta > 0:
-                        st.ups += 1
-                        st.max_step = max(st.max_step, delta)
-                        if delta == 1:
-                            st.unit_steps += 1
-                    else:
-                        st.downs += 1
-                        if delta < -128:
-                            st.wraps += 1
-                            wrapped.add((name, offset))
-                            if delta + 256 == 1:
-                                st.unit_steps += 1
-                    if (name, offset - 1) in wrapped:
-                        st.carry_ins += 1
-                st.last = value
-                st.minimum = min(st.minimum, value)
-                st.maximum = max(st.maximum, value)
-                st.distinct.add(value)
+            for name, data in snapshot.regions.items():
+                self._regions[name].move_on(data)
+        else:
+            for name, data in snapshot.regions.items():
+                self._regions[name].count(data)
         self._previous = snapshot
         return diff
-
-    def _move_on(self, snapshot: MemorySnapshot) -> None:
-        for name, data in snapshot.regions.items():
-            for offset, value in enumerate(data):
-                st = self._stats[(name, offset)]
-                st.last = value
-                st.minimum = min(st.minimum, value)
-                st.maximum = max(st.maximum, value)
-                st.distinct.add(value)
-        self._previous = snapshot
-
-    def _seed(self, snapshot: MemorySnapshot) -> None:
-        for name, data in snapshot.regions.items():
-            for offset, value in enumerate(data):
-                self._stats[(name, offset)] = ByteStats(
-                    minimum=value, maximum=value, last=value, distinct={value}
-                )
 
     # ------------------------------------------------------------ queries
 
     def stats(self, region: str, offset: int) -> ByteStats:
-        try:
-            return self._stats[(region, offset)]
-        except KeyError:
-            raise ConfigurationError(f"No statistics for {region}[{offset}].") from None
+        """This byte's statistics so far, built from the arrays (a fresh object each time)."""
+        found = self._regions.get(region)
+        if found is None or not 0 <= offset < found.size:
+            raise ConfigurationError(f"No statistics for {region}[{offset}].")
+        return found.stats(offset)
 
     def all_stats(self) -> Mapping[tuple[str, int], ByteStats]:
-        return dict(self._stats)
+        return {
+            (name, offset): region.stats(offset)
+            for name, region in self._regions.items()
+            for offset in range(region.size)
+        }
 
     def classify(
         self,
@@ -319,15 +429,22 @@ class ChangeTracker:
             "state": [],
             "unknown": [],
         }
-        for key, st in self._stats.items():
-            if st.samples < min_transitions:
-                groups["unknown"].append(key)
-            elif st.constant:
-                groups["constant"].append(key)
-            elif st.change_rate >= noise_rate:
-                groups["noise"].append(key)
-            else:
-                groups["state"].append(key)
+        for name, region in self._regions.items():
+            samples = region.samples
+            changes = region.changes
+            with np.errstate(divide="ignore", invalid="ignore"):
+                rate = np.where(samples > 0, changes / np.maximum(samples, 1), 0.0)
+            unknown = samples < min_transitions
+            constant = ~unknown & (samples > 0) & (changes == 0)
+            noise = ~unknown & ~constant & (rate >= noise_rate)
+            state = ~unknown & ~constant & ~noise
+            for group, mask in (
+                ("unknown", unknown),
+                ("constant", constant),
+                ("noise", noise),
+                ("state", state),
+            ):
+                groups[group].extend((name, offset) for offset in np.flatnonzero(mask).tolist())
         return {k: tuple(v) for k, v in groups.items()}
 
     def changed_in_all(self, diffs: Iterable[SnapshotDiff]) -> set[tuple[str, int]]:
