@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.emulator.fake import ToyRacer
@@ -154,9 +156,129 @@ def test_rates_refresh_when_only_counts_change() -> None:
     f.observe([ev(EventKind.SCORE_GAIN, 1, "v2")])
     for frame in range(10, 20):
         f.observe([ev(EventKind.PROGRESS, frame * 10)])  # progress without any gain
+    f.flush()  # count-only changes reach the knowledge at the next flush (T-946)
     rel = k.relationship("progress:v1->score_gain:v2")
     assert rel.cause_count == 11 and rel.follow_rate == pytest.approx(1 / 11)
     assert rel.confidence is Confidence.UNKNOWN
+
+
+def _old_rule(
+    frames: list[list[GameEvent]], window: int
+) -> list[tuple[dict[str, Relationship], set[str]]]:
+    """What the finder wrote before T-946: every stored pair rebuilt on every call.
+
+    Returns, per call, the whole knowledge as it should stand and the ids
+    the call reports as changed.
+    """
+    counts: dict[str, int] = {}
+    pairs: dict[tuple[str, str], int] = {}
+    last_pair_frame: dict[tuple[str, str], int] = {}
+    recent: list[GameEvent] = []
+    out: list[tuple[dict[str, Relationship], set[str]]] = []
+    for events in frames:
+        changed: set[str] = set()
+        for event in events:
+            key = event_key(event)
+            counts[key] = counts.get(key, 0) + 1
+            while recent and event.frame - recent[0].frame > window:
+                recent.pop(0)
+            for earlier in recent:
+                cause = event_key(earlier)
+                if cause == key:
+                    continue
+                both = earlier.frame == event.frame
+                for pair in [(cause, key)] + ([(key, cause)] if both else []):
+                    if last_pair_frame.get(pair) == event.frame:
+                        continue
+                    last_pair_frame[pair] = event.frame
+                    pairs[pair] = pairs.get(pair, 0) + 1
+                    changed.add(f"{pair[0]}->{pair[1]}")
+            recent.append(event)
+        whole = {
+            f"{c}->{e}": Relationship(
+                c, e, min(n, counts[c], counts[e]), counts[c], counts[e], window
+            )
+            for (c, e), n in pairs.items()
+        }
+        out.append((whole, changed))
+    return out
+
+
+_KINDS = [EventKind.PROGRESS, EventKind.SCORE_GAIN, EventKind.SETBACK, EventKind.FLAG_ON]
+_VARS = ["v1", "v2", "v3", None]
+
+
+@st.composite
+def _streams(draw: st.DrawFn) -> list[list[GameEvent]]:
+    """Frames of events: repeated keys, several events a frame, and gaps of any length."""
+    frames: list[list[GameEvent]] = []
+    frame = 0
+    for _ in range(draw(st.integers(0, 30))):
+        frame += draw(st.integers(0, 8))
+        n = draw(st.integers(1, 3))
+        frames.append(
+            [
+                GameEvent(draw(st.sampled_from(_KINDS)), frame, draw(st.sampled_from(_VARS)), "")
+                for _ in range(n)
+            ]
+        )
+    return frames
+
+
+@settings(max_examples=60, deadline=None)
+@given(frames=_streams(), window=st.integers(0, 6))
+def test_grown_pairs_are_exact_at_once_and_every_pair_after_a_flush(
+    frames: list[list[GameEvent]], window: int
+) -> None:
+    k = Knowledge("g")
+    f = RelationshipFinder(k, window=window, refresh_every=10_000)  # flushes only when asked
+    for events, (whole, changed_ids) in zip(frames, _old_rule(frames, window), strict=True):
+        changed = f.observe(events)
+        assert {r.id for r in changed} == changed_ids
+        for rel in changed:
+            assert rel == whole[rel.id]  # written with the counts as they stand after the frame
+        assert {r.id for r in k.relationships()} == whole.keys()
+    f.flush()
+    assert {r.id: r for r in k.relationships()} == whole if frames else k.relationships() == ()
+    assert f.flush() == 0  # nothing left to write
+
+
+def test_a_flush_runs_every_refresh_every_calls_and_before_a_save() -> None:
+    k = Knowledge("g")
+    f = RelationshipFinder(k, window=2, refresh_every=3)
+    assert f.refresh_every == 3
+    f.observe([ev(EventKind.PROGRESS, 0)])
+    f.observe([ev(EventKind.SCORE_GAIN, 1, "v2")])  # pair written: 1 of 1 progress
+    f.observe([ev(EventKind.PROGRESS, 10)])  # third call: flushed, so the count shows
+    assert k.relationship("progress:v1->score_gain:v2").cause_count == 2
+    f.observe([ev(EventKind.PROGRESS, 20)])
+    f.observe([ev(EventKind.PROGRESS, 30)])
+    assert k.relationship("progress:v1->score_gain:v2").cause_count == 2  # not yet
+    assert f.flush() == 1
+    assert k.relationship("progress:v1->score_gain:v2").cause_count == 4
+    with pytest.raises(ConfigurationError):
+        RelationshipFinder(k, refresh_every=0)
+
+
+def test_reset_forgets_the_index() -> None:
+    k = Knowledge("g")
+    f = RelationshipFinder(k, window=5)
+    f.observe([ev(EventKind.PROGRESS, 0), ev(EventKind.SCORE_GAIN, 0, "v2")])
+    f.reset()
+    k2 = Knowledge("h")
+    f2 = RelationshipFinder(k2, window=5)
+    # After a reset the finder behaves like a new one: the same stream writes the same counts.
+    for finder in (f, f2):
+        finder.observe([ev(EventKind.PROGRESS, 10)])
+        finder.observe([ev(EventKind.SCORE_GAIN, 12, "v2")])
+        finder.observe([ev(EventKind.PROGRESS, 30)])
+        finder.flush()
+    for rel in k2.relationships():
+        assert k.relationship(rel.id) == rel
+    assert k.relationship("progress:v1->score_gain:v2").cause_count == 2
+    # The pair the reset forgot stays in the knowledge as it was, untouched by the new stream.
+    stale = k.relationship("score_gain:v2->progress:v1")
+    assert (stale.support, stale.cause_count, stale.effect_count) == (1, 1, 1)
 
 
 # ------------------------------------------------ on the real toy racer
