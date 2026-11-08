@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import threading
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,6 +78,7 @@ log = logging.getLogger(__name__)
 DEFAULT_REVIEW_EVERY = 120
 DEFAULT_EXPERIMENT_EVERY = 600
 DEFAULT_CENSUS_EVERY = 25  # reviews between census lines in the log (T-919)
+SAVE_EVERY_S = 60.0  # the least time between two saves the AI makes on its own (T-949)
 CENSUS_MOST = 16  # bytes a census names: the ones with the most changes
 
 
@@ -188,9 +190,17 @@ class DiscoveryService:
         store: KnowledgeStore | None = None,
         moment_window: int = WINDOW_FRAMES,
         census_every: int = DEFAULT_CENSUS_EVERY,
+        save_every_s: float = SAVE_EVERY_S,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if review_every < 1:
             raise ValueError("review_every must be positive")
+        if save_every_s < 0:
+            raise ValueError("save_every_s cannot be negative")
+        self._save_every_s = save_every_s
+        self._clock = clock
+        self._last_save: float | None = None
+        self._dirty = False  # changes the store has not seen yet (T-949)
         if census_every < 1:
             raise ValueError("census_every must be positive")
         self._census_every = census_every
@@ -269,6 +279,16 @@ class DiscoveryService:
     @property
     def saves(self) -> int:
         return self._saves
+
+    @property
+    def pending_save(self) -> bool:
+        """Are there changes the store has not seen yet? (T-949)
+
+        The AI's own changes are written at most once every ``save_every_s``
+        while it plays; the rest wait here for the next due save, a stop, a
+        disconnect or an explicit :meth:`save`.
+        """
+        return self._dirty
 
     def can_experiment(self) -> bool:
         return self._harness is not None and self._harness.available()
@@ -602,7 +622,27 @@ class DiscoveryService:
                 self._finder.flush()  # rates the finder has not written yet (T-946)
             path = self._store.save(self._knowledge)
         self._saves += 1
+        self._dirty = False
+        self._last_save = self._clock()
         return path
+
+    def _save_soon(self) -> None:
+        """Note a change for the store; write it now if a save is due (T-949).
+
+        The user's log showed a 1.1 s save every 9 s of play, each one holding
+        the AI's step: every review and every changed guess wrote the whole
+        knowledge at once. Now the first change after a save waits until
+        ``save_every_s`` has passed since that save; a stop, a disconnect and
+        the Save button still write at once.
+        """
+        self._dirty = True
+        self._save_if_due()
+
+    def _save_if_due(self) -> None:
+        if not self._dirty or self._store is None or self._knowledge is None:
+            return
+        if self._last_save is None or self._clock() - self._last_save >= self._save_every_s:
+            self.save()
 
     def export_to(self, path: str | Path) -> Path:
         """Write the current knowledge anywhere, for sharing."""
@@ -1075,7 +1115,7 @@ class DiscoveryService:
             )
 
     def _on_disconnected(self, event: EmulatorDisconnected) -> None:
-        if self._enabled:
+        if self._enabled and (self._dirty or self._saves == 0):
             self.save()
         self._enabled = False
         self._harness = None
@@ -1107,6 +1147,7 @@ class DiscoveryService:
             self._narrow_at_restart()
         self._since_review += 1
         self._since_experiment += 1
+        self._save_if_due()
         if self._since_review >= self._review_every:
             with app_work.timed("discovery: review"):
                 self.review()
@@ -1140,13 +1181,14 @@ class DiscoveryService:
         if update.is_empty:
             return
         if update.added or update.changed:
-            self.save()
+            self._save_soon()
         self._bus.publish(update)
 
 
 __all__ = [
     "DEFAULT_EXPERIMENT_EVERY",
     "DEFAULT_REVIEW_EVERY",
+    "SAVE_EVERY_S",
     "DiscoveryProgress",
     "DiscoveryService",
     "DiscoveryUpdated",

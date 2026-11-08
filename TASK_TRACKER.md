@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-949 | The AI's own changes to the knowledge are saved at most once a minute while it plays (`save_every_s`, 60 s), the first change after a save waiting for the next due step; a stop, a disconnect and the Save button still write at once, and `pending_save` says whether anything waits; the user's stage log showed a 1.1 s save every 9 s, each holding the AI's step | 8 | Done | 2/2 | see PR |
 | T-948 | The knowledge counts changes to its confident relationships in `confident_relationships_version`, and the suggestions' `RelationshipWatch` compares that number instead of walking every relationship twice a step; the user's stage log put that walk at 56 ms of a 105 ms step | 8 | Done | 2/2 | see PR #203 |
 | T-947 | The AI's step is timed stage by stage for the "App work" log line (choose, emulator, observe, encode, learn) and so is the discovery service's share of the observe stage (track, events, long look, relationships, announce, review, experiment, save), so a slow step on a user's PC names its slow stage | 8 | Done | 2/2 | see PR #202 |
 | T-946 | The relationship finder writes a pair at once only when its support grows, and the pairs whose cause or effect merely happened again at a flush every 15 steps and before a save, instead of rebuilding every stored pair on every call | 8 | Done | 3/3 | see PR #201 |
@@ -3001,6 +3002,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; understanding + services + integration 241 passed; full suite 1358 passed, 10 skipped in 183.18s (0:03:03).
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
+
+### T-949 – The knowledge is saved at most once a minute
+- **Status:** Done
+- **Phase:** 8 (the user's stage log: `discovery: save` 124 × 1.1 s = 141 s of 18 minutes, every save holding the AI's step; a review every 120 steps and every changed guess wrote the whole knowledge, tens of thousands of relationships included, as readable JSON)
+- **Objective:** `DiscoveryService` notes a change (`_save_soon`) and writes it only when `save_every_s` (60 s) has passed since the last save, checking again on every step so a quiet step writes a due save; the first change ever is written at once. `save()` (the Save button, the wake-button finder) always writes; a disconnect writes what is pending (and a first save); the training service's `stop()` writes what is pending. `pending_save` tells.
+- **Scope:** `services/discovery.py`, `training/service.py` (stop). **Out of scope:** making a single save cheaper (a background write, a compact format), the review's own 1.5 s.
+- **Acceptance criteria:**
+  1. With a stub clock: the first change writes at once; later changes within the minute wait; the first step after the minute writes; an explicit save always writes; a disconnect writes only what is pending; a negative interval is refused.
+  2. A zero interval writes every change as before.
+  3. The discovery, training-service and Discovery-panel suites pass unchanged (a store-backed service still has `saves >= 1` after its first review that changed something).
+- **Expected changes:** the files above, `tests/unit/services/test_discovery.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_the_ai_saves_its_own_changes_at_most_once_an_interval`, `test_a_zero_interval_saves_every_change_as_before`; discovery, training-service and Discovery-panel suites; full suite.
+- **Results:** discovery, training-service and Discovery-panel suites 106 passed; full suite 1424 passed, 10 skipped (156.46s); ruff and mypy clean.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** pending.
 
 ### T-948 – The suggestions ask the knowledge whether anything moved
 - **Status:** Done
