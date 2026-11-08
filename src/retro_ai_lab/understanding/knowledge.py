@@ -536,6 +536,12 @@ class Knowledge:
         self.title = title
         self._variables: dict[str, Variable] = {}
         self._relationships: dict[str, Relationship] = {}
+        # The relationships that are not rejected and at least LOW, with their level
+        # and their place in insertion order (T-952): what the panel, the suggestions
+        # and the goals read, kept by every write instead of found by a walk.
+        self._confident: dict[str, tuple[Confidence, int, Relationship]] = {}
+        self._places: dict[str, int] = {}  # relationship id -> its place in insertion order
+        self._next_place = 0
         self._version = 0
         self._confident_version = 0  # a confident pair appeared, went or changed level (T-948)
         # Snapshots are observed on the play clock's worker and on the GUI thread
@@ -833,7 +839,10 @@ class Knowledge:
                     rel, confirmed=current.confirmed, rejected=current.rejected, notes=current.notes
                 )
             self._relationships[rel.id] = rel
-            self._note_confident(current, rel)
+            if current is None:
+                self._places[rel.id] = self._next_place
+                self._next_place += 1
+            self._note_confident(rel.id, current, rel)
         return rel
 
     def confirm_relationship(self, rel_id: str) -> Relationship:
@@ -841,7 +850,7 @@ class Knowledge:
             current = self.relationship(rel_id)
             rel = replace(current, confirmed=True, rejected=False)
             self._relationships[rel_id] = rel
-            self._note_confident(current, rel)
+            self._note_confident(rel_id, current, rel)
         return rel
 
     def reject_relationship(self, rel_id: str) -> Relationship:
@@ -849,14 +858,15 @@ class Knowledge:
             current = self.relationship(rel_id)
             rel = replace(current, rejected=True, confirmed=False)
             self._relationships[rel_id] = rel
-            self._note_confident(current, rel)
+            self._note_confident(rel_id, current, rel)
         return rel
 
     def remove_relationship(self, rel_id: str) -> None:
         with self._lock:
             current = self.relationship(rel_id)
             del self._relationships[rel_id]
-            self._note_confident(current, None)
+            del self._places[rel_id]
+            self._note_confident(rel_id, current, None)
 
     @staticmethod
     def _confident_level(rel: Relationship | None) -> Confidence | None:
@@ -866,19 +876,33 @@ class Knowledge:
         level = rel.confidence
         return level if level >= Confidence.LOW else None
 
-    def _note_confident(self, before: Relationship | None, after: Relationship | None) -> None:
-        if self._confident_level(before) != self._confident_level(after):
+    def _note_confident(
+        self, rel_id: str, before: Relationship | None, after: Relationship | None
+    ) -> None:
+        """Keep the confident index (T-952) and its version (T-948) in step with a write."""
+        level = self._confident_level(after)
+        if level is None or after is None:
+            self._confident.pop(rel_id, None)
+        else:
+            self._confident[rel_id] = (level, self._places[rel_id], after)
+        if self._confident_level(before) != level:
             self._confident_version += 1
 
     def confident_relationships(
         self, at_least: Confidence = Confidence.LOW
     ) -> tuple[Relationship, ...]:
+        """The relationships that are not rejected and at least ``at_least``, in insertion order.
+
+        Read from the index every write keeps (T-952) rather than by walking every
+        relationship and computing its confidence: the user's panel refresh spent
+        41 of its 47 ms in that walk over 20,000 relationships for the 3,000 it wanted.
+        """
         with self._lock:
-            return tuple(
-                r
-                for r in self._relationships.values()
-                if not r.rejected and at_least <= r.confidence
+            picked = sorted(
+                (entry for entry in self._confident.values() if at_least <= entry[0]),
+                key=lambda entry: entry[1],
             )
+        return tuple(entry[2] for entry in picked)
 
     # ------------------------------------------------------ serialisation
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from retro_ai_lab.core import ConfigurationError
@@ -593,3 +593,43 @@ def test_the_confident_relationships_version_moves_only_when_the_suggestions_wou
     k.remove_relationship("c->d")  # removing a confident pair does
     assert k.confident_relationships_version == v0 + 8
     assert k.version == 0  # the variables' version is a different number
+
+
+# --------------------------------------------- T-952 confident relationships index
+
+
+def _old_confident(k: Knowledge, at_least: Confidence) -> tuple[Relationship, ...]:
+    """The walk `confident_relationships` made before T-952."""
+    return tuple(r for r in k.relationships() if not r.rejected and at_least <= r.confidence)
+
+
+def _relationship_ops() -> st.SearchStrategy[tuple[str, ...]]:
+    keys = st.sampled_from(["a", "b", "c", "d", "e"])
+    pair = st.tuples(keys, keys).filter(lambda p: p[0] != p[1])
+    write = st.tuples(
+        st.just("set"), pair, st.integers(0, 15), st.integers(0, 15), st.integers(0, 15)
+    )
+    verdict = st.tuples(st.sampled_from(["confirm", "reject", "remove"]), pair)
+    return st.one_of(write, verdict)  # type: ignore[return-value]
+
+
+@given(st.lists(_relationship_ops(), min_size=1, max_size=60))
+@settings(max_examples=100, deadline=None)
+def test_the_confident_index_matches_the_old_walk_after_every_write(ops: list[tuple]) -> None:
+    """T-952: the index gives the walk's relationships, in the walk's order, every time."""
+    k = Knowledge("g")
+    for op in ops:
+        if op[0] == "set":
+            _, (cause, effect), support, extra_cause, extra_effect = op
+            k.set_relationship(
+                Relationship(
+                    cause, effect, support, support + extra_cause, support + extra_effect, 5
+                )
+            )
+        else:
+            rel_id = f"{op[1][0]}->{op[1][1]}"
+            if rel_id not in {r.id for r in k.relationships()}:
+                continue
+            getattr(k, f"{op[0]}_relationship")(rel_id)
+        for level in (Confidence.LOW, Confidence.MEDIUM, Confidence.HIGH, Confidence.CONFIRMED):
+            assert k.confident_relationships(level) == _old_confident(k, level)
