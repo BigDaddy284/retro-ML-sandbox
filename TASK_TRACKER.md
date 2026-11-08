@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-951 | `propose_candidates` looks each candidate's bytes up in a set of every byte the knowledge's variables span instead of comparing it with every variable; at the user's scale that was about a million comparisons a review and the review's largest share | 8 | Done | 1/1 | see PR |
 | T-950 | The big-region scan test takes the best of three runs and allows 50 ms or a plain Python pass over the same bytes, whichever is longer, instead of 50 ms on one run; it tripped twice on slow CI runners (64 ms, 65 ms) while the scan was fine | 8 | Done | 1/1 | see PR #205 |
 | T-949 | The AI's own changes to the knowledge are saved at most once a minute while it plays (`save_every_s`, 60 s), the first change after a save waiting for the next due step; a stop, a disconnect and the Save button still write at once, and `pending_save` says whether anything waits; the user's stage log showed a 1.1 s save every 9 s, each holding the AI's step | 8 | Done | 2/2 | see PR #204 |
 | T-948 | The knowledge counts changes to its confident relationships in `confident_relationships_version`, and the suggestions' `RelationshipWatch` compares that number instead of walking every relationship twice a step; the user's stage log put that walk at 56 ms of a 105 ms step | 8 | Done | 2/2 | see PR #203 |
@@ -3004,6 +3005,20 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
+### T-951 – Proposals look bytes up instead of comparing every pair
+- **Status:** Done
+- **Phase:** 8 (the user's stage log: `discovery: review` 77 × 2.7 s = 206 s of 18 minutes, each review holding the AI's step; a synthetic review at the user's scale, 904 candidates against 904 known variables, spent 150–265 ms of its 170–290 ms in `propose_candidates`, which asked `any(_overlaps(v, c) for v in knowledge)` for every candidate: 409,000 pair checks, each computing two widths through the encoding enum; with 1,600 guesses and as many candidates it is over a second)
+- **Objective:** `propose_candidates` builds `_covered_bytes(knowledge)`, the set of every (region, offset) a variable spans, once per call, and a candidate is skipped when any byte of its span is in the set; a candidate it adds puts its bytes in the set so the next candidate over them is skipped as before. The same candidates are added and skipped as before, in the same order.
+- **Scope:** `understanding/variables.py`. **Out of scope:** `rethink_candidates` (already a dict lookup), the rest of the review.
+- **Acceptance criteria:**
+  1. On random layouts of known variables (bytes, words, sized digit runs in two regions) and random candidates over them, the new rule adds exactly the variables the old rule added, in order, and the knowledges end up the same (a property test against a copy of the old check).
+  2. The understanding, linking and discovery suites pass unchanged.
+  3. The synthetic review's propose share falls from about 150 ms to a few ms.
+- **Expected changes:** `src/retro_ai_lab/understanding/variables.py`, `tests/unit/understanding/test_variables.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_proposals_skip_exactly_the_candidates_the_old_overlap_check_skipped` (property test, 100 examples); understanding, linking and discovery suites; full suite.
+- **Results:** property test 100 examples; understanding suite 156 passed; discovery and linking suites 41 passed; full suite 1423 passed, 10 skipped (161.23s); ruff and mypy clean; synthetic review propose share 150 ms → 0.9 ms (904 candidates against 904 known).
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** pending.
 ### T-950 – The scan timing test stops tripping on slow runners
 - **Status:** Done
 - **Phase:** 8 (PR #200 and PR #203 each had one CI job fail `test_a_big_region_scans_quickly` at 64 and 65 ms against a 50 ms bound; the job passed on re-run both times, and the scan itself was not touched by either diff)

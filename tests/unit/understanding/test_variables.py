@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.emulator.fake import ToyRacer
@@ -602,3 +604,73 @@ def test_a_slow_steady_countdown_is_not_a_mover_either() -> None:
     rows = [bytes([(200 - i // 6) & 0xFF]) for i in range(400)]  # one down every six steps
     (c,) = find_candidates(track(rows))
     assert c.kind is not VariableKind.POSITION
+
+
+# ------------------------------------------------- T-951 proposals skip covered bytes
+
+
+def _old_overlaps(v: Variable, c: Candidate) -> bool:
+    """The check before T-951: every candidate against every variable."""
+    if v.region != c.region:
+        return False
+    return v.offset < c.offset + c.width and c.offset < v.offset + v.width
+
+
+def _old_propose(knowledge: Knowledge, candidates: tuple[Candidate, ...]) -> list[str]:
+    added = []
+    for c in candidates:
+        if any(_old_overlaps(v, c) for v in knowledge):
+            continue
+        added.append(knowledge.propose(c.region, c.offset, encoding=c.encoding, kind=c.kind).id)
+    return added
+
+
+_REGIONS = ["ram", "wram"]
+
+
+@st.composite
+def _layouts(draw: st.DrawFn) -> tuple[list[tuple[str, int, Encoding, int]], list[Candidate]]:
+    """Variables already known (bytes, words and sized digit runs) and candidates over them."""
+    known = []
+    taken: set[tuple[str, int]] = set()
+    for _ in range(draw(st.integers(0, 12))):
+        region = draw(st.sampled_from(_REGIONS))
+        offset = draw(st.integers(0, 40))
+        encoding = draw(st.sampled_from([Encoding.U8, Encoding.U16LE, Encoding.DIGITS_BE]))
+        length = draw(st.integers(1, 4)) if encoding.sized else 0
+        width = length or encoding.width
+        span = {(region, offset + i) for i in range(width)}
+        if span & taken:
+            continue  # the knowledge itself refuses overlapping variables
+        taken |= span
+        known.append((region, offset, encoding, length))
+    candidates = [
+        Candidate(
+            draw(st.sampled_from(_REGIONS)),
+            draw(st.integers(0, 44)),
+            draw(st.sampled_from([Encoding.U8, Encoding.U16LE])),
+            VariableKind.COUNTER,
+            (),
+        )
+        for _ in range(draw(st.integers(0, 12)))
+    ]
+    return known, candidates
+
+
+@settings(max_examples=100, deadline=None)
+@given(layout=_layouts())
+def test_proposals_skip_exactly_the_candidates_the_old_overlap_check_skipped(
+    layout: tuple[list[tuple[str, int, Encoding, int]], list[Candidate]],
+) -> None:
+    known, candidates = layout
+    old, new = Knowledge("g"), Knowledge("g")
+    for region, offset, encoding, length in known:
+        for k in (old, new):
+            if encoding.sized:
+                k.propose(region, offset, encoding=encoding, length=length)
+            else:
+                k.propose(region, offset, encoding=encoding)
+    expected = _old_propose(old, tuple(candidates))
+    added = propose_candidates(new, tuple(candidates))
+    assert [v.id for v in added] == expected
+    assert {v.id for v in new} == {v.id for v in old}
