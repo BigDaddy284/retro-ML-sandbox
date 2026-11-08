@@ -596,6 +596,8 @@ class DiscoveryService:
         """Write the knowledge to the store (no store: nothing happens)."""
         if self._store is None or self._knowledge is None:
             return None
+        if self._finder is not None:
+            self._finder.flush()  # rates the finder has not written yet (T-946)
         path = self._store.save(self._knowledge)
         self._saves += 1
         return path
