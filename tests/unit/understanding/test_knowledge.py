@@ -559,3 +559,37 @@ def test_a_sized_variable_needs_a_length() -> None:
     assert Encoding.U16BE.describe(2) == "2 bytes, high first"
     assert Encoding.BCD_LE.describe(3) == "packed decimal, 3 bytes, low first"
     assert Encoding.FLAG.describe(1) == "1 byte (on or off)"
+
+
+# ------------------------------------------------- T-948 confident relationships version
+
+
+def test_the_confident_relationships_version_moves_only_when_the_suggestions_would_see_it() -> None:
+    k = Knowledge("g")
+    v0 = k.confident_relationships_version
+    k.set_relationship(Relationship("a", "b", 1, 1, 1, 5))  # UNKNOWN: not read by anyone
+    assert k.confident_relationships_version == v0
+    k.set_relationship(Relationship("a", "b", 2, 2, 2, 5))  # LOW: appears
+    assert k.confident_relationships_version == v0 + 1
+    k.set_relationship(Relationship("a", "b", 3, 3, 4, 5))  # still LOW: counts moved, level not
+    assert k.confident_relationships_version == v0 + 1
+    k.set_relationship(Relationship("a", "b", 6, 6, 6, 5))  # MEDIUM: level changed
+    assert k.confident_relationships_version == v0 + 2
+    k.set_relationship(Relationship("a", "b", 6, 60, 6, 5))  # rarely follows: UNKNOWN, gone
+    assert k.confident_relationships_version == v0 + 3
+    k.set_relationship(Relationship("a", "b", 12, 12, 12, 5))  # HIGH: back
+    assert k.confident_relationships_version == v0 + 4
+    k.confirm_relationship("a->b")  # CONFIRMED
+    assert k.confident_relationships_version == v0 + 5
+    k.set_relationship(Relationship("a", "b", 13, 13, 13, 5))  # verdict kept: still CONFIRMED
+    assert k.confident_relationships_version == v0 + 5
+    k.reject_relationship("a->b")  # gone from the confident ones
+    assert k.confident_relationships_version == v0 + 6
+    k.set_relationship(Relationship("a", "b", 14, 14, 14, 5))  # still rejected
+    assert k.confident_relationships_version == v0 + 6
+    k.remove_relationship("a->b")  # removing a rejected pair changes nothing visible
+    assert k.confident_relationships_version == v0 + 6
+    k.set_relationship(Relationship("c", "d", 2, 2, 2, 5))
+    k.remove_relationship("c->d")  # removing a confident pair does
+    assert k.confident_relationships_version == v0 + 8
+    assert k.version == 0  # the variables' version is a different number

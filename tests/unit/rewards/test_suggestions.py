@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
 from retro_ai_lab.emulator.fake import ToyRacer
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
 from retro_ai_lab.observation import MemorySnapshot
@@ -14,6 +17,7 @@ from retro_ai_lab.rewards import (
     rule_key,
     suggest_behaviours,
 )
+from retro_ai_lab.rewards.suggestions import RelationshipWatch
 from retro_ai_lab.understanding import (
     Confidence,
     Encoding,
@@ -261,3 +265,63 @@ def test_a_dismissed_rule_is_not_suggested_again() -> None:
     report = apply_suggestions(p, k)
     assert set(report.added) == {f"setback:{second.id}", "reset:*"}
     assert rule_key(EventKind.PROGRESS, VariableKind.PROGRESS) == "progress:<progress>"
+
+
+# ------------------------------------------------------------- T-948 relationship watch
+
+
+@st.composite
+def _relationship_edits(draw: st.DrawFn) -> list[tuple[str, str, int, int, int]]:
+    """Writes, confirms, rejects and removals on a few pairs, with watch reads between."""
+    edits = []
+    for _ in range(draw(st.integers(1, 40))):
+        op = draw(st.sampled_from(["set", "set", "set", "confirm", "reject", "remove", "read"]))
+        pair = draw(st.sampled_from(["a->b", "a->c", "b->c"]))
+        edits.append(
+            (op, pair, draw(st.integers(0, 12)), draw(st.integers(0, 12)), draw(st.integers(0, 12)))
+        )
+    return edits
+
+
+def _old_rule(k: Knowledge) -> frozenset[tuple[str, Confidence]]:
+    return frozenset((r.id, r.confidence) for r in k.confident_relationships())
+
+
+@settings(max_examples=80, deadline=None)
+@given(edits=_relationship_edits())
+def test_the_watch_reports_every_change_the_old_walk_found_and_no_more_than_the_edits_made(
+    edits: list[tuple[str, str, int, int, int]],
+) -> None:
+    k = Knowledge("g")
+    watch = RelationshipWatch()
+    assert watch.changed(k)  # a knowledge it has not seen
+    last_seen = _old_rule(k)
+    moved = False  # did any edit since the last read change what the suggestions read?
+    for op, pair, support, cause_count, effect_count in edits:
+        before = _old_rule(k)
+        cause, _, effect = pair.partition("->")
+        if op == "set":
+            cause_count = max(cause_count, support)
+            effect_count = max(effect_count, support)
+            k.set_relationship(Relationship(cause, effect, support, cause_count, effect_count, 5))
+        elif pair in {r.id for r in k.relationships()}:
+            if op == "confirm":
+                k.confirm_relationship(pair)
+            elif op == "reject":
+                k.reject_relationship(pair)
+            elif op == "remove":
+                k.remove_relationship(pair)
+        if op != "read":
+            moved = moved or _old_rule(k) != before
+            continue
+        now = _old_rule(k)
+        changed = watch.changed(k)
+        if now != last_seen:
+            assert changed  # the old walk would have said so
+        assert changed == moved  # and nothing says so unless an edit moved the confident ones
+        last_seen = now
+        moved = False
+    assert not watch.changed(k) or moved
+    watch.reset()
+    assert watch.changed(k)
+    assert watch.changed(Knowledge("g"))  # a fresh knowledge object counts as a change

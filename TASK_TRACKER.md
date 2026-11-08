@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-948 | The knowledge counts changes to its confident relationships in `confident_relationships_version`, and the suggestions' `RelationshipWatch` compares that number instead of walking every relationship twice a step; the user's stage log put that walk at 56 ms of a 105 ms step | 8 | Done | 2/2 | see PR |
 | T-947 | The AI's step is timed stage by stage for the "App work" log line (choose, emulator, observe, encode, learn) and so is the discovery service's share of the observe stage (track, events, long look, relationships, announce, review, experiment, save), so a slow step on a user's PC names its slow stage | 8 | Done | 2/2 | see PR #202 |
 | T-946 | The relationship finder writes a pair at once only when its support grows, and the pairs whose cause or effect merely happened again at a flush every 15 steps and before a save, instead of rebuilding every stored pair on every call | 8 | Done | 3/3 | see PR #201 |
 | T-945 | The change tracker counts every byte of a region in numpy arrays instead of a Python loop, and the diff finds changed bytes in one comparison; `ByteStats` is built from the arrays on request, so a reading is a fresh object | 8 | Done | 1/1 | see PR #200 |
@@ -3000,6 +3001,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; understanding + services + integration 241 passed; full suite 1358 passed, 10 skipped in 183.18s (0:03:03).
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
+
+### T-948 – The suggestions ask the knowledge whether anything moved
+- **Status:** Done
+- **Phase:** 8 (the user's first stage log, T-947 build, 18 minutes of Practise fast: 8,857 AI steps at 105 ms, of which `step: observe` was 78 ms and `discovery: announce` 94 ms × 5,221 = 492 s; the emulator 20 ms, learning 6.5 ms. An announce carries the step's events and relationships to the rewards and goals services, and each asked its `RelationshipWatch` whether the confident relationships had changed, which built a frozenset of (id, confidence) over every relationship in the knowledge, computing each pair's rates, twice a step, on a knowledge with tens of thousands of pairs)
+- **Objective:** `Knowledge.confident_relationships_version` goes up when a relationship becomes at least LOW or stops being, changes level, or is confirmed, rejected or removed, and stays put when a write only moves a pair's counts within its level (the finder's usual write). `RelationshipWatch.changed(knowledge)` compares the knowledge object and that number with what it saw last. It reports every change the old walk found; it can also report a change the old walk would have missed (a level that moved and moved back between two reads), which costs one extra rebuild and nothing else.
+- **Scope:** `understanding/knowledge.py`, `rewards/suggestions.py`. **Out of scope:** the save's cost (1.1 s each, 124 saves), the review's cost (2.7 s each), the Discovery panel's refresh (136 ms).
+- **Acceptance criteria:**
+  1. The version moves exactly on the writes that change what the suggestions read (a table of writes, confirms, rejects and removals).
+  2. On random edit streams with reads between, the watch says "changed" whenever the old walk would have, and only when an edit since the last read changed the confident set (a property test); a fresh knowledge object counts as a change; `reset()` forgets.
+  3. The rewards, goals and discovery suites pass unchanged.
+- **Expected changes:** the files above, `tests/unit/understanding/test_knowledge.py`, `tests/unit/rewards/test_suggestions.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_the_confident_relationships_version_moves_only_when_the_suggestions_would_see_it`, `test_the_watch_reports_every_change_the_old_walk_found_and_no_more_than_the_edits_made` (property test, 80 examples); knowledge, rewards, rewards-service, goals and discovery suites; full suite.
+- **Results:** knowledge, rewards, rewards-service, goals and discovery suites 164 passed (property test 80 examples); full suite 1422 passed, 10 skipped (162.51s); ruff and mypy clean.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** pending.
 
 ### T-947 – A step's stages in the log
 - **Status:** Done

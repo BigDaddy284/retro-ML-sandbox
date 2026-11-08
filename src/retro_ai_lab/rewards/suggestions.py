@@ -158,22 +158,33 @@ class RelationshipWatch:
     The finder reports changed relationships on most steps of a real game, but
     the suggestions only read which ones are at least LOW and how sure each is,
     and that moves rarely. Rebuilding 2,400 behaviours and 800 objectives on
-    every step cost the app more than the emulator's step itself.
+    every step cost the app more than the emulator's step itself; and walking
+    every relationship to find out whether to rebuild cost 56 ms a step once
+    the user's game had tens of thousands of them (T-948).
     """
 
     def __init__(self) -> None:
-        self._seen: frozenset[tuple[str, Confidence]] | None = None
+        self._knowledge: Knowledge | None = None
+        self._version: int | None = None
 
     def changed(self, knowledge: Knowledge) -> bool:
-        """True (once) when the confident relationships differ from the last call."""
-        now = frozenset((r.id, r.confidence) for r in knowledge.confident_relationships())
-        if now == self._seen:
+        """True (once) when the confident relationships moved since the last call.
+
+        The knowledge counts those moves in ``confident_relationships_version``
+        (T-948), so this is one comparison rather than a walk over every
+        relationship, which the user's log put at 56 ms of every step. A fresh
+        knowledge (a reconnect, a load) counts as a change.
+        """
+        version = knowledge.confident_relationships_version
+        if knowledge is self._knowledge and version == self._version:
             return False
-        self._seen = now
+        self._knowledge = knowledge
+        self._version = version
         return True
 
     def reset(self) -> None:
-        self._seen = None
+        self._knowledge = None
+        self._version = None
 
 
 @dataclass(frozen=True, slots=True)
