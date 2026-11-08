@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-950 | The big-region scan test takes the best of three runs and allows 50 ms or a plain Python pass over the same bytes, whichever is longer, instead of 50 ms on one run; it tripped twice on slow CI runners (64 ms, 65 ms) while the scan was fine | 8 | Done | 1/1 | see PR |
 | T-949 | The AI's own changes to the knowledge are saved at most once a minute while it plays (`save_every_s`, 60 s), the first change after a save waiting for the next due step; a stop, a disconnect and the Save button still write at once, and `pending_save` says whether anything waits; the user's stage log showed a 1.1 s save every 9 s, each holding the AI's step | 8 | Done | 2/2 | see PR #204 |
 | T-948 | The knowledge counts changes to its confident relationships in `confident_relationships_version`, and the suggestions' `RelationshipWatch` compares that number instead of walking every relationship twice a step; the user's stage log put that walk at 56 ms of a 105 ms step | 8 | Done | 2/2 | see PR #203 |
 | T-947 | The AI's step is timed stage by stage for the "App work" log line (choose, emulator, observe, encode, learn) and so is the discovery service's share of the observe stage (track, events, long look, relationships, announce, review, experiment, save), so a slow step on a user's PC names its slow stage | 8 | Done | 2/2 | see PR #202 |
@@ -3002,6 +3003,19 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; understanding + services + integration 241 passed; full suite 1358 passed, 10 skipped in 183.18s (0:03:03).
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
+
+### T-950 – The scan timing test stops tripping on slow runners
+- **Status:** Done
+- **Phase:** 8 (PR #200 and PR #203 each had one CI job fail `test_a_big_region_scans_quickly` at 64 and 65 ms against a 50 ms bound; the job passed on re-run both times, and the scan itself was not touched by either diff)
+- **Objective:** the test keeps guarding that the value search scans a 128 KB region with array work rather than a Python loop, without failing on a slow or busy runner: it takes the best of three runs (the first pays for page faults), and the bound is 50 ms or a plain Python pass over the same bytes timed in the same process, whichever is longer, so a slow machine slows the yardstick too. The count check runs on every run.
+- **Scope:** `tests/unit/observation/test_search.py`. **Out of scope:** the search itself.
+- **Acceptance criteria:**
+  1. The test passes repeatedly locally and keeps its count assertions.
+- **Expected changes:** `tests/unit/observation/test_search.py`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** the search suite three times; full suite.
+- **Results:** search suite 37 passed, three runs in a row; full suite 1420 passed, 10 skipped (160.14s); ruff and mypy clean.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** pending.
 
 ### T-949 – The knowledge is saved at most once a minute
 - **Status:** Done

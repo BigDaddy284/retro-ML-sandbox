@@ -190,16 +190,30 @@ def test_errors_leave_the_search_as_it_was() -> None:
 
 
 def test_a_big_region_scans_quickly() -> None:
+    """The scan is array work, not a Python loop over the bytes.
+
+    T-950: a fixed 50 ms bound on one run tripped twice on slow CI runners (64 ms,
+    65 ms) while the scan itself was fine: a first run pays for page faults and
+    whatever else the runner is doing. Now the best of three runs counts, and the
+    bound is 50 ms or a plain Python pass over the same bytes timed in the same
+    process, whichever is longer, so a slow machine slows the yardstick too.
+    """
     size = 128 * 1024
     a = snap(0, [i % 256 for i in range(size)])
     b = snap(1, [(i + (i % 3 == 0)) % 256 for i in range(size)])
-    s = ValueSearch()
+    runs = []
+    for _ in range(3):
+        s = ValueSearch()
+        started = time.perf_counter()
+        s.start(a)
+        s.refine(b, ScanKind.CHANGED)
+        runs.append(time.perf_counter() - started)
+        assert s.count == len([i for i in range(size) if i % 3 == 0])
     started = time.perf_counter()
-    s.start(a)
-    s.refine(b, ScanKind.CHANGED)
-    elapsed = time.perf_counter() - started
-    assert s.count == len([i for i in range(size) if i % 3 == 0])
-    assert elapsed < 0.05
+    ram_a, ram_b = a.regions["ram"], b.regions["ram"]
+    assert len([i for i in range(size) if ram_a[i] != ram_b[i]]) == s.count
+    python_pass = time.perf_counter() - started
+    assert min(runs) < max(0.05, python_pass), (runs, python_pass)
 
 
 def test_forms_name_how_each_pattern_is_held() -> None:

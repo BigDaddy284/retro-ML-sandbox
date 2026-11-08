@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-950: the big-region scan test takes the best of three runs and allows 50 ms or a plain Python pass over the same bytes, whichever is longer, after tripping twice on slow CI runners while the scan was fine.
 - T-949: the AI's own changes to the knowledge are saved at most once a minute while it plays instead of after every review and changed guess; a stop, a disconnect and the Save button still write at once. The user's stage log showed a 1.1 s save every 9 s, each one holding the AI's step.
 - T-948: the suggestions no longer walk every relationship twice a step to see whether a reward or goal suggestion should change; the knowledge counts changes to its confident relationships in `confident_relationships_version` and the watch compares that number. The user's stage log put the walk at 56 ms of a 105 ms step.
 - T-947: the "App work" log line times the AI's step stage by stage (`step: choose`, `step: emulator`, `step: observe`, `step: encode`, `step: learn`) and the discovery service's share of it (`observe: track`, `discovery: events`, `long look`, `relationships`, `announce`, `review`, `experiment`, `save`), so a slow step on a user's PC names its slow stage; the user's log showed 120 ms steps with the emulator at 19 ms and no line saying where the rest went.
