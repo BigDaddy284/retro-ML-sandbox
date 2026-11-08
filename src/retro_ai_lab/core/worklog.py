@@ -6,7 +6,13 @@ cost the emulator 70 ms of a 140 ms cycle: the other half is the app's own
 work on the GUI thread, which no line reported. A :class:`WorkLog` keeps
 named timings (``learn``, ``ai step``, ``picture``, ``GUI stall``) the same
 way the link keeps its calls, and the stall watch writes a summary line next
-to the link's.
+to the link's. Since T-947 the AI's step is timed stage by stage as well
+(``step: choose``, ``step: emulator``, ``step: observe``, ``step: encode``,
+``step: learn``) and so is the discovery service's share of the observe stage
+(``observe: track``, ``discovery: events``, ``discovery: long look``,
+``discovery: relationships``, ``discovery: announce``, ``discovery: review``,
+``discovery: experiment``, ``discovery: save``), so a slow step on a user's
+PC names its slow stage in the log.
 """
 
 from __future__ import annotations

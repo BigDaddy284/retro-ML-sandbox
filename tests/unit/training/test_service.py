@@ -200,8 +200,12 @@ def test_independent_run_records_goes_and_stops_cleanly(lab: Lab) -> None:
     t.start(Mode.INDEPENDENT)
     assert t.status is Status.RUNNING and t.mode is Mode.INDEPENDENT and t.ai_in_control
     assert not t.mode.allows_guidance and Mode.GUIDED.allows_guidance
+    stages = ("step: choose", "step: emulator", "step: observe", "step: encode", "step: learn")
+    staged = {name: app_work.stats.get(name, CallStats()).count for name in stages}
     assert t.step() and t.episode is not None and t.episode.steps == 1
     assert app_work.stats["ai step"].count == stepped + 1  # T-894: timed for the log
+    for name in stages:  # T-947: and every stage of it
+        assert app_work.stats[name].count == staged[name] + 1, name
     assert "Go 1: playing, step 1" in t.summary()
     while t.episodes < 2:
         assert t.step()

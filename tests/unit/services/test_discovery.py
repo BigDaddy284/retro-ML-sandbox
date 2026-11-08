@@ -9,6 +9,7 @@ import pytest
 
 from retro_ai_lab.core import Capabilities, ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
+from retro_ai_lab.core.worklog import CallStats, app_work
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import BUTTONS, LAYOUT
 from retro_ai_lab.emulator.registry import default_registry
@@ -141,6 +142,14 @@ def test_events_and_relationships_flow_while_playing(
     updates: list[DiscoveryUpdated],
 ) -> None:
     connection.connect("fake", seed=2)
+    stages = (
+        "observe: track",
+        "discovery: events",
+        "discovery: relationships",
+        "discovery: announce",
+        "discovery: review",
+    )
+    before = {name: app_work.stats.get(name, CallStats()).count for name in stages}
     play(connection, observation, 1200)
     assert discovery.events.total > 0
     kinds = {e.kind for e in discovery.events}
@@ -148,6 +157,9 @@ def test_events_and_relationships_flow_while_playing(
     k = discovery.knowledge
     assert k is not None and k.relationships()
     assert any(u.events for u in updates) and any(u.relationships for u in updates)
+    # T-947: every stage of the discovery's share of a step is timed for the log.
+    for name in stages:
+        assert app_work.stats[name].count > before[name], name
 
 
 def test_experiments_run_on_schedule_and_on_demand(
@@ -278,10 +290,12 @@ def test_knowledge_is_remembered_between_connections(
         connection, observation, bus, review_every=100, experiment_every=None, store=store
     )
     assert d.store is store and d.save() is None  # nothing to save yet
+    saves_timed = app_work.stats.get("discovery: save", CallStats()).count
     connection.connect("fake", seed=2)
     play(connection, observation, 100)
     k = d.knowledge
     assert k is not None and len(k) > 0 and d.saves >= 1
+    assert app_work.stats["discovery: save"].count == saves_timed + d.saves  # T-947
     first = next(iter(k))
     k.confirm(first.id)
     d.save()
