@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-954 | The Research window refreshes on a finished go, a training state change or a connection change only while it is visible; hidden, it waits for `showEvent`, which already refreshes it, instead of rebuilding its memory, situation and step-log tables at every go's end for nobody (part of `on EpisodeFinished` 524 ms × 14 in the user's log) | 8 | Done | 1/1 | see PR |
 | T-953 | `Knowledge.at(region, offset)` looks the location up in an index kept by `add`, `update` and `remove` instead of walking every variable; the hidden Research window asked it once per shown address at every go's end (1,800 walks over 1,600 guesses, 45 ms here, more on the user's PC under `on EpisodeFinished` 524 ms × 14) | 8 | Done | 1/1 | see PR #208 |
 | T-952 | The knowledge keeps its confident relationships in an index kept up to date by every write, so the panel, the suggestions and the goals read the few that matter instead of walking every pair and recomputing its confidence; the `discoveries refresh` was 136 ms × 585 on the GUI thread in the user's log | 8 | Done | 1/1 | see PR #207 |
 | T-951 | `propose_candidates` looks each candidate's bytes up in a set of every byte the knowledge's variables span instead of comparing it with every variable; at the user's scale that was about a million comparisons a review and the review's largest share | 8 | Done | 1/1 | see PR #206 |
@@ -3007,6 +3008,20 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
+### T-954 – The hidden Research window stops refreshing for nobody
+- **Status:** Done
+- **Phase:** 8 (the user's stage log: `on EpisodeFinished` 14 × 524 ms on the GUI thread; the Research window is built with the main window and subscribes to `EpisodeFinished`, `TrainingStateChanged`, `EmulatorConnected` and `EmulatorDisconnected`, refreshing every table on each, visible or not; a profile at the user's scale put its hidden refresh at 45 ms before T-953 and 6 ms after, 400 table rows built and thrown away)
+- **Objective:** `_on_changed` refreshes only while the window is visible. A hidden window does nothing on those events; `showEvent` already refreshes it and starts its ticker, so it is up to date the moment it is opened. A visible window behaves as before.
+- **Scope:** `ui/research_dialog.py`. **Out of scope:** the ticker's refresh rate while visible, the size of the memory table.
+- **Acceptance criteria:**
+  1. A hidden Research window does not refresh on a finished go, a state change or a connection change; showing it refreshes it once and its tables show the current log and memory.
+  2. A visible Research window still refreshes on each of those events.
+  3. The Research and main window suites pass unchanged.
+- **Expected changes:** `src/retro_ai_lab/ui/research_dialog.py`, `tests/ui/test_research_dialog.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_a_hidden_window_waits_to_be_shown_before_it_refreshes`, `test_a_visible_window_still_refreshes_on_events`; Research and main window suites; full suite.
+- **Results:** Research and main window suites 39 passed; full suite 1428 passed, 10 skipped (153.23s); ruff and mypy clean.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** `_on_changed` refreshes only while the window is visible; `showEvent` refreshes it when opened, as before; a `refreshes` counter proves a hidden window does nothing on events and a visible one still refreshes.
 ### T-953 – A guess is found by its address in an index, not by a walk
 - **Status:** Done
 - **Phase:** 8 (the user's stage log: `on EpisodeFinished` 14 × 524 ms on the GUI thread; the Research window refreshes on every finished go even while hidden, and its memory table asks `Knowledge.at` for each of up to 1,800 addresses; `at` walked every variable comparing region and offset, 1.4 million comparisons a refresh at 1,600 guesses, 41 of the refresh's 45 ms in a profile at that scale; the discovery service asks the same question when a person names a value, tells it about a moment, after an experiment and in the review's summary)

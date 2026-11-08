@@ -9,7 +9,16 @@ from pytestqt.qtbot import QtBot
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning import Settings
-from retro_ai_lab.training import COLUMNS, Mode, StepLog
+from retro_ai_lab.training import (
+    COLUMNS,
+    EpisodeFinished,
+    EpisodeRecord,
+    EpisodeResult,
+    Mode,
+    Status,
+    StepLog,
+    TrainingStateChanged,
+)
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.main_window import MainWindow
 from retro_ai_lab.ui.research_dialog import (
@@ -454,3 +463,35 @@ def test_a_value_over_several_bytes_is_one_row_and_one_reward(
         _poke(context, at + i, digit)
     latest = context.observation.latest
     assert latest is not None and var.decode(latest) == 1250
+
+
+# ------------------------------------ T-954: a hidden window does not refresh for nobody
+
+
+def _finished_go() -> EpisodeFinished:
+    result = EpisodeResult(steps=3, frames=12, reward=1.0, ended_by="stopped", states_seen=2)
+    return EpisodeFinished(EpisodeRecord(1, Mode.MANUAL, result, frame=12))
+
+
+def test_a_hidden_window_waits_to_be_shown_before_it_refreshes(
+    qtbot: QtBot, context: AppContext
+) -> None:
+    dialog = ResearchDialog(context)
+    qtbot.addWidget(dialog)
+    connect(context)
+    context.training.train(1)
+    before = dialog.refreshes
+    context.bridge.publish_local(_finished_go())
+    context.bridge.publish_local(TrainingStateChanged(Status.IDLE, Mode.MANUAL, "test"))
+    assert dialog.refreshes == before  # nobody is looking
+    assert not dialog.log_rows()
+    dialog.show()
+    assert dialog.refreshes == before + 1 and dialog.log_rows()  # up to date when opened
+
+
+def test_a_visible_window_still_refreshes_on_events(
+    dialog: ResearchDialog, context: AppContext
+) -> None:
+    before = dialog.refreshes
+    context.bridge.publish_local(_finished_go())
+    assert dialog.refreshes == before + 1
