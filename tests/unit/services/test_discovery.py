@@ -1169,3 +1169,70 @@ def test_the_summary_is_computed_once_per_change(
     connection.connect("fake", seed=2)
     before = walks
     assert discovery.summary().startswith("Watching") and walks == before + 1
+
+
+# --------------------------------------------------------------- T-949 saving less often
+
+
+def test_the_ai_saves_its_own_changes_at_most_once_an_interval(
+    connection: ConnectionService, observation: ObservationService, bus: EventBus, tmp_path: object
+) -> None:
+    from pathlib import Path
+
+    from retro_ai_lab.storage import KnowledgeStore
+
+    now = [1000.0]
+    store = KnowledgeStore(Path(str(tmp_path)) / "knowledge")
+    d = DiscoveryService(
+        connection,
+        observation,
+        bus,
+        review_every=20,
+        experiment_every=None,
+        store=store,
+        save_every_s=60.0,
+        clock=lambda: now[0],
+    )
+    connection.connect("fake", seed=2)
+    assert not d.pending_save and d.saves == 0
+    play(connection, observation, 100)  # several reviews: guesses added and changed
+    k = d.knowledge
+    assert k is not None and len(k) > 0 and d.reviews >= 5
+    assert d.saves == 1  # the first change was written at once, the rest in the same minute not
+    now[0] += 10.0
+    play(connection, observation, 100)
+    assert d.saves == 1  # still inside the minute
+    now[0] += 51.0  # a minute since the save: the next step writes what is pending
+    play(connection, observation, 100)
+    assert d.saves == 2
+    assert store.load("toyracer-2").version <= k.version
+    # an explicit save always writes, even with nothing pending
+    assert d.save() is not None and d.saves == 3 and not d.pending_save
+    play(connection, observation, 100)
+    pending = d.pending_save
+    connection.disconnect()  # a disconnect writes what was pending, and only that
+    assert d.saves == 3 + int(pending) and not d.pending_save
+    with pytest.raises(ValueError):
+        DiscoveryService(connection, observation, bus, save_every_s=-1.0)
+
+
+def test_a_zero_interval_saves_every_change_as_before(
+    connection: ConnectionService, observation: ObservationService, bus: EventBus, tmp_path: object
+) -> None:
+    from pathlib import Path
+
+    from retro_ai_lab.storage import KnowledgeStore
+
+    store = KnowledgeStore(Path(str(tmp_path)) / "knowledge")
+    d = DiscoveryService(
+        connection,
+        observation,
+        bus,
+        review_every=20,
+        experiment_every=None,
+        store=store,
+        save_every_s=0.0,
+    )
+    connection.connect("fake", seed=2)
+    play(connection, observation, 100)
+    assert d.reviews >= 5 and d.saves >= 1 and not d.pending_save  # nothing ever waits

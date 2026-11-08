@@ -637,6 +637,8 @@ class TrainingService:
         self._close_episode("stopped")
         self._status = Status.IDLE
         self._discovery.set_experiments_allowed(True)
+        if self._discovery.pending_save:
+            self._discovery.save()  # the AI's changes it had not written yet (T-949)
         self._apply_speed()
         self._announce("stop")
 
