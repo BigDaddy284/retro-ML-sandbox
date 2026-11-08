@@ -537,6 +537,7 @@ class Knowledge:
         self._variables: dict[str, Variable] = {}
         self._relationships: dict[str, Relationship] = {}
         self._version = 0
+        self._confident_version = 0  # a confident pair appeared, went or changed level (T-948)
         # Snapshots are observed on the play clock's worker and on the GUI thread
         # (T-818), so the finder may rewrite relationships while a handler on the
         # other thread walks them (T-847). Every walk and every edit takes this.
@@ -553,10 +554,22 @@ class Knowledge:
 
         Anything that keeps a list derived from the variables (the event detector's
         watch list, the long look's) rebuilds it only when this moves. Relationship
-        changes don't count: the finder rewrites every pair's rates on every event,
-        and nothing that caches by version reads them.
+        changes don't count: the finder rewrites pairs' rates on most events;
+        :attr:`confident_relationships_version` is the number for those.
         """
         return self._version
+
+    @property
+    def confident_relationships_version(self) -> int:
+        """Goes up when the confident relationships change (T-948).
+
+        That is when a relationship becomes at least LOW or stops being, changes
+        level, is confirmed, rejected or removed. A write that only moves a
+        pair's counts within its level leaves it alone, so the suggestions can
+        ask "did anything I read change?" in one comparison instead of walking
+        every relationship twice a step, which cost the user 56 ms of each step.
+        """
+        return self._confident_version
 
     def __len__(self) -> int:
         return len(self._variables)
@@ -820,24 +833,42 @@ class Knowledge:
                     rel, confirmed=current.confirmed, rejected=current.rejected, notes=current.notes
                 )
             self._relationships[rel.id] = rel
+            self._note_confident(current, rel)
         return rel
 
     def confirm_relationship(self, rel_id: str) -> Relationship:
         with self._lock:
-            rel = replace(self.relationship(rel_id), confirmed=True, rejected=False)
+            current = self.relationship(rel_id)
+            rel = replace(current, confirmed=True, rejected=False)
             self._relationships[rel_id] = rel
+            self._note_confident(current, rel)
         return rel
 
     def reject_relationship(self, rel_id: str) -> Relationship:
         with self._lock:
-            rel = replace(self.relationship(rel_id), rejected=True, confirmed=False)
+            current = self.relationship(rel_id)
+            rel = replace(current, rejected=True, confirmed=False)
             self._relationships[rel_id] = rel
+            self._note_confident(current, rel)
         return rel
 
     def remove_relationship(self, rel_id: str) -> None:
         with self._lock:
-            self.relationship(rel_id)
+            current = self.relationship(rel_id)
             del self._relationships[rel_id]
+            self._note_confident(current, None)
+
+    @staticmethod
+    def _confident_level(rel: Relationship | None) -> Confidence | None:
+        """The level the suggestions read, or None when they would not see the pair."""
+        if rel is None or rel.rejected:
+            return None
+        level = rel.confidence
+        return level if level >= Confidence.LOW else None
+
+    def _note_confident(self, before: Relationship | None, after: Relationship | None) -> None:
+        if self._confident_level(before) != self._confident_level(after):
+            self._confident_version += 1
 
     def confident_relationships(
         self, at_least: Confidence = Confidence.LOW
