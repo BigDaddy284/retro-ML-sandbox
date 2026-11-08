@@ -329,9 +329,14 @@ def propose_candidates(
     merely proposed, is left alone: the discovery engine never argues with
     a person and never duplicates itself.
     """
+    # Every byte a variable spans, looked up once per candidate byte (T-951): the
+    # old check compared each candidate with every variable, a million pairs a
+    # review at the user's scale, and took the review over a second.
+    covered = _covered_bytes(knowledge)
     added: list[Variable] = []
     for c in candidates:
-        if any(_overlaps(v, c) for v in knowledge):
+        span = [(c.region, c.offset + i) for i in range(c.width)]
+        if any(byte in covered for byte in span):
             continue
         added.append(
             knowledge.propose(
@@ -343,6 +348,7 @@ def propose_candidates(
                 judged=c.changes,
             )
         )
+        covered.update(span)  # a candidate added here blocks the next one over it
     return tuple(added)
 
 
@@ -438,10 +444,12 @@ def _rethinkable(v: Variable) -> bool:
     return not (v.kind is VariableKind.POSITION and INPUT_LINKED in kinds)
 
 
-def _overlaps(v: Variable, c: Candidate) -> bool:
-    if v.region != c.region:
-        return False
-    return v.offset < c.offset + c.width and c.offset < v.offset + v.width
+def _covered_bytes(knowledge: Knowledge) -> set[tuple[str, int]]:
+    """Every (region, offset) some variable, confirmed, rejected or proposed, spans."""
+    covered: set[tuple[str, int]] = set()
+    for v in knowledge:
+        covered.update((v.region, v.offset + i) for i in range(v.width))
+    return covered
 
 
 __all__ = [
