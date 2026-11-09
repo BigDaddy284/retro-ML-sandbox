@@ -144,9 +144,11 @@ the change statistics behind the "went up N times and down N" warnings skip
 it, so a life count that only ever drops in play is not told it bounces.
 If three goes running lose their first life at the same early step, the app
 checks whether the spot the goes start from loses it by itself (it runs the
-game from there holding nothing); when it does, the goes restart from just
-after that loss, once the game listens again, and the log says so. A life the
-AI loses by what it presses is left for it to learn from.
+game from there holding nothing, then holding each of the AI's buttons in
+turn); when the life goes whatever is held, the goes restart from just after
+that loss, once the game listens again, and the log says so. A life a held
+button keeps, or one the AI loses by what it presses, is left for it to learn
+from, and the start is moved at most three times from one checkpoint.
 
 ## Letting the AI start the game
 
