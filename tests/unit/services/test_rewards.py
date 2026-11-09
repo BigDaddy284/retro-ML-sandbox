@@ -492,3 +492,26 @@ def test_dismiss_takes_a_row_out_for_good_and_suggest_again_undoes_it(
     report = rewards.suggest_again()
     assert profile.dismissed == frozenset() and "reset:*" in report.added
     assert press_id("up") in profile and "reset:*" in profile
+
+
+def test_the_values_a_person_penalises_are_known(
+    rewards: RewardService,
+    connection: ConnectionService,
+    discovery: DiscoveryService,
+    bus: EventBus,
+) -> None:
+    """T-964: an own reward below zero names what a death is to the person."""
+    assert rewards.penalised() == frozenset()  # no profile yet
+    connection.connect("fake", seed=3)
+    k = teach(discovery, bus)
+    assert rewards.penalised() == frozenset()
+    lane = k.propose(RAM, LAYOUT.lane, kind=VariableKind.POSITION, evidence=SURE)
+    timer = k.propose(RAM, LAYOUT.timer, kind=VariableKind.COUNTER, evidence=SURE)
+    rewards.add_own(lane.id, goes_up=True, value=2.0)  # a prize, not a penalty
+    down = rewards.add_own(timer.id, goes_up=False, value=-3.0)
+    up = rewards.add_own(lane.id, goes_up=False, value=-1.0)
+    assert rewards.penalised() == frozenset({timer.id, lane.id})
+    rewards.set_enabled(up.id, False)
+    assert rewards.penalised() == frozenset({timer.id})
+    rewards.remove_own(down.id)
+    assert rewards.penalised() == frozenset()

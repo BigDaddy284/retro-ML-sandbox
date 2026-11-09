@@ -10,6 +10,7 @@ episode can start from the same checkpoint (DESIGN.md §9).
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -29,7 +30,9 @@ from retro_ai_lab.services.goals import ObjectiveCompleted, ObjectiveSetback
 from retro_ai_lab.services.observer import ButtonsHeld, ObservationService
 from retro_ai_lab.services.rewards import GoStarted, RewardEarned
 from retro_ai_lab.understanding.events import EventKind
-from retro_ai_lab.understanding.knowledge import VariableKind
+from retro_ai_lab.understanding.knowledge import Knowledge, VariableKind
+
+log = logging.getLogger(__name__)
 
 DEFAULT_FRAMES_PER_STEP = 4
 DEFAULT_MAX_STEPS = 600
@@ -286,6 +289,7 @@ class EpisodeRunner:
         settle_frames: int = DEFAULT_SETTLE_FRAMES,
         on_learned: Callable[[Transition], None] | None = None,
         lookahead: int = LOOKAHEAD_STEPS,
+        watched_setbacks: Callable[[], frozenset[str]] | None = None,
     ) -> None:
         if frames_per_step < 1:
             raise ConfigurationError("frames_per_step must be at least 1.")
@@ -310,6 +314,8 @@ class EpisodeRunner:
         self._on_learned = on_learned
         self._lookahead = lookahead
         self._pending: deque[tuple[State, int, float]] = deque()  # steps not yet learned
+        self._watched_setbacks = watched_setbacks  # the values a person penalises (T-964)
+        self._watched_last: frozenset[str] | None = None
         self._restored = False
         self._unsticks = 0
         self._same_state = 0
@@ -451,9 +457,7 @@ class EpisodeRunner:
             assert self._harness is not None
             self._harness.restore()
         self._encoder.refresh()
-        knowledge = self._encoder.knowledge
-        best = (knowledge.best(VariableKind.LIVES), knowledge.best(VariableKind.HEALTH))
-        self._signals.watch_setbacks(frozenset(v.id for v in best if v is not None))
+        self._watch_deaths(self._encoder.knowledge)
         # Observe before listening: putting the game back to the checkpoint looks like
         # a restart to the understanding engine, and that must not end the new episode.
         latest = self._observation.observe()
@@ -579,6 +583,35 @@ class EpisodeRunner:
             self._signals.stop()
             return False
         return True
+
+    def _watch_deaths(self, knowledge: Knowledge) -> None:
+        """Count this go's deaths on the values the person penalises, else the AI's best
+        life and health guesses (T-940, T-964); the log names them when they change."""
+        asked = self._watched_setbacks() if self._watched_setbacks is not None else frozenset()
+        yours = frozenset(i for i in asked if i in knowledge)
+        if yours:
+            ids = yours
+        else:
+            best = (knowledge.best(VariableKind.LIVES), knowledge.best(VariableKind.HEALTH))
+            ids = frozenset(v.id for v in best if v is not None)
+        self._signals.watch_setbacks(ids)
+        if ids == self._watched_last:
+            return
+        self._watched_last = ids
+        if not ids:
+            log.info("Lives lost are not counted: the AI has no life count or health guess yet.")
+            return
+        names = ", ".join(
+            v.display_name if not v.name else f"{v.name} at {v.region}[{v.offset}]"
+            for v in sorted((knowledge.get(i) for i in ids), key=lambda v: (v.region, v.offset))
+        )
+        log.info(
+            "Lives lost are counted on %s, %s.",
+            names,
+            "which your reward penalises"
+            if yours
+            else "the AI's best life count and health guesses",
+        )
 
     # ------------------------------------------------------------ learning (T-963)
 
