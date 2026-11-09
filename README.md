@@ -140,6 +140,11 @@ one), not of every guess of those kinds. Every go starts by putting the
 game back to its checkpoint, and that jump is the AI's doing, not the game's:
 the change statistics behind the "went up N times and down N" warnings skip
 it, so a life count that only ever drops in play is not told it bounces.
+If three goes running lose their first life at the same early step, the app
+checks whether the spot the goes start from loses it by itself (it runs the
+game from there holding nothing); when it does, the goes restart from just
+after that loss, once the game listens again, and the log says so. A life the
+AI loses by what it presses is left for it to learn from.
 
 ## Letting the AI start the game
 

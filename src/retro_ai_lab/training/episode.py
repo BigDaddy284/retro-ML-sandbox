@@ -333,6 +333,11 @@ class EpisodeRunner:
         return len(self._actions_seen) > 1
 
     @property
+    def restored(self) -> bool:
+        """True when this go began by putting the game back to the checkpoint (T-961)."""
+        return self._restored
+
+    @property
     def stuck_from_start(self) -> bool:
         """True when the go ended "stuck" without the screen ever changing.
 
