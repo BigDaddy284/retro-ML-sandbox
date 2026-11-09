@@ -252,3 +252,26 @@ def test_training_service_runs_a_dqn_and_restores_it(tmp_path: Path) -> None:
     brain = training.brain()
     assert brain is not None and brain.algorithm == "dqn"
     assert np.isfinite(again.value(State(), 0))
+
+
+def test_a_dqn_brain_saved_with_the_old_default_gamma_is_moved_to_the_new_one(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """T-962: the network brain is moved on as the Q-table one is; a chosen gamma is kept."""
+    import logging
+
+    agent = DQNLearner(
+        SPACE, Settings(gamma=0.95, epsilon=0.2, epsilon_min=0.2), seed=1, config=QUICK
+    )
+    agent.learn(A, 1, 1.0, B)
+    data = json.loads(json.dumps(agent.to_dict()))
+    assert data["settings"]["gamma"] == 0.95
+    caplog.set_level(logging.INFO)
+    again = DQNLearner.from_dict(data, space=SPACE)
+    assert again.settings.gamma == 0.99 and again.settings.epsilon == 0.2
+    assert "looks further ahead: the future counts 0.99 a step instead of 0.95" in caplog.text
+    caplog.clear()
+    chosen = DQNLearner(SPACE, Settings(gamma=0.9), seed=1, config=QUICK)
+    data = json.loads(json.dumps(chosen.to_dict()))
+    assert DQNLearner.from_dict(data, space=SPACE).settings.gamma == 0.9
+    assert "looks further ahead" not in caplog.text

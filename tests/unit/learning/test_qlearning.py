@@ -182,3 +182,48 @@ def test_round_trip_and_refusals() -> None:
     with pytest.raises(ConfigurationError):
         QLearningAgent.from_dict({**data, "table": {"actions": 3, "rows": {}}})
     assert QLearningAgent.from_dict({k: v for k, v in data.items() if k != "rng"}).updates == 1
+
+
+def test_the_future_counts_ninety_nine_hundredths_a_step() -> None:
+    """T-962: a horizon of about 100 steps, so a death seconds later still reaches its cause."""
+    from retro_ai_lab.learning.qlearning import OLD_GAMMA
+
+    assert Settings().gamma == 0.99 and OLD_GAMMA == 0.95
+    assert 0.99**45 * 20 > 12 > 0.95**45 * 20  # the user's log: the life counter drops 45 steps on
+
+
+def test_a_brain_saved_with_the_old_default_gamma_looks_further_ahead_when_loaded(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """T-962: the user's brain was saved with 0.95; picking it up moves it on and says so."""
+    import logging
+
+    agent = QLearningAgent(SPACE, Settings(gamma=0.95, epsilon=0.0, epsilon_min=0.0), seed=1)
+    agent.learn(A, RIGHT, 1.0, B)
+    data = json.loads(json.dumps(agent.to_dict()))
+    assert data["settings"]["gamma"] == 0.95
+    caplog.set_level(logging.INFO)
+    again = QLearningAgent.from_dict(data, space=SPACE)
+    assert again.settings.gamma == 0.99 and again.settings.epsilon == 0.0
+    assert "looks further ahead: the future counts 0.99 a step instead of 0.95" in caplog.text
+    # The update bootstraps with the new gamma: 0.1 * (0 + 0.99 * Q(B, best)) from a zero row.
+    best_b = again.learn(B, RIGHT, 10.0, A)  # 0.1 * (10 + 0.99 * Q(A, RIGHT) of 0.1)
+    assert best_b == pytest.approx(0.1 * (10.0 + 0.99 * 0.1))
+    assert again.learn(A, LEFT, 0.0, B) == pytest.approx(0.1 * 0.99 * best_b)
+    # A brain saved with no settings at all gets the default too, quietly.
+    caplog.clear()
+    del data["settings"]
+    assert QLearningAgent.from_dict(data, space=SPACE).settings.gamma == 0.99
+    assert "looks further ahead" not in caplog.text
+
+
+def test_a_chosen_gamma_survives_a_save_and_load(caplog: pytest.LogCaptureFixture) -> None:
+    """T-962: any other value was the person's choice in the Research window."""
+    import logging
+
+    caplog.set_level(logging.INFO)
+    for gamma in (0.9, 0.5, 0.99, 1.0):
+        agent = QLearningAgent(SPACE, Settings(gamma=gamma), seed=1)
+        again = QLearningAgent.from_dict(json.loads(json.dumps(agent.to_dict())), space=SPACE)
+        assert again.settings.gamma == gamma
+    assert "looks further ahead" not in caplog.text

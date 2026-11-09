@@ -24,7 +24,13 @@ from retro_ai_lab.learning.exploring import ResultsWatch
 from retro_ai_lab.learning.features import DEFAULT_WIDTH, FeatureMap
 from retro_ai_lab.learning.learner import Decision, Learner, register_learner
 from retro_ai_lab.learning.network import DEFAULT_LEARNING_RATE, Network
-from retro_ai_lab.learning.qlearning import QTable, Settings, _check, _rng_state
+from retro_ai_lab.learning.qlearning import (
+    QTable,
+    Settings,
+    _check,
+    _rng_state,
+    settings_from_saved,
+)
 from retro_ai_lab.learning.replay import DEFAULT_CAPACITY, ReplayBuffer, Transition
 from retro_ai_lab.learning.state import State
 
@@ -383,7 +389,7 @@ class DQNLearner:
                 )
             agent = cls(
                 saved,
-                Settings(**data.get("settings", {})),
+                settings_from_saved(data.get("settings")),
                 config=DQNConfig.from_dict(data.get("config", {})),
             )
             agent._epsilon = _check(data.get("epsilon", agent._epsilon), "epsilon", 0.0, 1.0)
