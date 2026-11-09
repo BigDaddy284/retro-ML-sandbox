@@ -149,11 +149,39 @@ def describe_survival(goes: Sequence[EpisodeRecord], window: int = DEFAULT_WINDO
         steps = [g.result.first_setback_step for g in part if g.result.first_setback_step]
         return f"{sum(steps) / len(steps):.0f} steps" if steps else "never"
 
+    def points(part: Sequence[EpisodeRecord]) -> float:
+        return sum(g.result.reward for g in part) / len(part)
+
     return (
         f"Survival over the last {window} goes: lives lost per go {per_go(latest):.1f} "
         f"(was {per_go(earlier):.1f} over the {window} before); the first life lost after "
-        f"{first_loss(latest)} on average (was {first_loss(earlier)})."
+        f"{first_loss(latest)} on average (was {first_loss(earlier)}). Points per go "
+        f"{points(latest):+,.1f} (was {points(earlier):+,.1f}){describe_cost(latest, earlier)}."
     )
+
+
+def describe_cost(latest: Sequence[EpisodeRecord], earlier: Sequence[EpisodeRecord]) -> str:
+    """ "; what moved most is x position goes down, -84.0 a go (was -26.0)": the earner whose
+    average over the latest goes differs most from its average over the earlier ones (T-966).
+    Empty when no go in either window earned anything."""
+    if not latest or not earlier:
+        raise ConfigurationError("describe_cost needs goes in both windows.")
+
+    def per_go(part: Sequence[EpisodeRecord]) -> dict[str, tuple[str, float]]:
+        totals: dict[str, tuple[str, float]] = {}
+        for g in part:
+            for e in g.result.earned:
+                name, amount = totals.get(e.id, (e.name, 0.0))
+                totals[e.id] = (name, amount + e.amount)
+        return {i: (n, a / len(part)) for i, (n, a) in totals.items()}
+
+    now, before = per_go(latest), per_go(earlier)
+    if not now and not before:
+        return ""
+    names = {i: n for i, (n, _) in (*before.items(), *now.items())}
+    moved = max(names, key=lambda i: abs(now.get(i, ("", 0.0))[1] - before.get(i, ("", 0.0))[1]))
+    was, is_now = before.get(moved, ("", 0.0))[1], now.get(moved, ("", 0.0))[1]
+    return f"; what moved most is {names[moved]}, {is_now:+,.1f} a go (was {was:+,.1f})"
 
 
 __all__ = [
@@ -164,5 +192,6 @@ __all__ = [
     "TOO_EARLY",
     "CurvePoint",
     "LearningCurve",
+    "describe_cost",
     "describe_survival",
 ]

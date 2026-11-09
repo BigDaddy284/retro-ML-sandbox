@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-966: the survival line also gives the points per go and names the reward that moved most against the ten goes before, so a survival bought by hanging back shows up as the trade it is.
 - T-965: the check of a start spot that loses a life by itself now runs the same steps holding each of the AI's buttons in turn, so a loss a button avoids (a player who stands still getting hit) is left for the AI to learn around and only a loss that comes whatever is held moves the goes' start; the start moves at most three times from one checkpoint.
 - T-964: when your own reward penalises a value ("Lifes goes down", below zero), the goes count their deaths on that value, and the check of a start spot that loses a life by itself reads it too; the AI's best life-count and health guesses are the fallback, and the log names what is counted whenever that changes. The user's log had "lost a life 5 times" beside their own reward firing twice: the count was following a guess of the AI's.
 - T-963: the AI learns each step from the rewards of the next eight steps added up (discounted) and the situation after them, instead of one step at a time, so a penalty reaches the move that caused it in a fifth of the passes (n-step returns; a reset or the end of a go settles the pending steps).
