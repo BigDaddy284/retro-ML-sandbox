@@ -305,6 +305,83 @@ class _RegionStats:
         self.carry_ins += changed & carry
         self._note(values)
 
+    def all_stats(self) -> list[ByteStats]:
+        """Every byte's statistics, built from the arrays in one pass (T-957).
+
+        The same objects :meth:`stats` builds one at a time; the review asked
+        for all 2,048 at once and paid 20 ms in per-byte numpy calls.
+        """
+        rows, cols = np.nonzero(self.seen)
+        starts = np.searchsorted(rows, np.arange(self.size + 1))
+        values = cols.tolist()
+        distinct = [set(values[starts[i] : starts[i + 1]]) for i in range(self.size)]
+        columns = zip(
+            self.samples.tolist(),
+            self.changes.tolist(),
+            self.ups.tolist(),
+            self.downs.tolist(),
+            self.minimum.tolist(),
+            self.maximum.tolist(),
+            self.last.tolist(),
+            self.wraps.tolist(),
+            self.carry_ins.tolist(),
+            self.unit_steps.tolist(),
+            self.max_step.tolist(),
+            self.max_hop.tolist(),
+            self.min_hop.tolist(),
+            self.small_hops.tolist(),
+            self.unit_hops.tolist(),
+            self.last_hop.tolist(),
+            self.same_hops.tolist(),
+            self.usual_hop.tolist(),
+            distinct,
+            strict=True,
+        )
+        return [
+            ByteStats(
+                samples=samples,
+                changes=changes,
+                ups=ups,
+                downs=downs,
+                minimum=minimum,
+                maximum=maximum,
+                last=last,
+                distinct=seen,
+                wraps=wraps,
+                carry_ins=carry_ins,
+                unit_steps=unit_steps,
+                max_step=max_step,
+                max_hop=max_hop,
+                min_hop=min_hop,
+                small_hops=small_hops,
+                unit_hops=unit_hops,
+                last_hop=last_hop,
+                same_hops=same_hops,
+                usual_hop=usual_hop,
+            )
+            for (
+                samples,
+                changes,
+                ups,
+                downs,
+                minimum,
+                maximum,
+                last,
+                wraps,
+                carry_ins,
+                unit_steps,
+                max_step,
+                max_hop,
+                min_hop,
+                small_hops,
+                unit_hops,
+                last_hop,
+                same_hops,
+                usual_hop,
+                seen,
+            ) in columns
+        ]
+
     def stats(self, offset: int) -> ByteStats:
         return ByteStats(
             samples=int(self.samples[offset]),
@@ -403,9 +480,9 @@ class ChangeTracker:
 
     def all_stats(self) -> Mapping[tuple[str, int], ByteStats]:
         return {
-            (name, offset): region.stats(offset)
+            (name, offset): stats
             for name, region in self._regions.items()
-            for offset in range(region.size)
+            for offset, stats in enumerate(region.all_stats())
         }
 
     def classify(

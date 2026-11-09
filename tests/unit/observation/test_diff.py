@@ -382,5 +382,25 @@ def test_the_arrays_count_exactly_as_the_byte_loop_did(
     for offset in range(width):
         assert t.stats("ram", offset) == expected[offset], f"byte {offset}"
     assert t.transitions == steps - len(jumps)
-    assert set(t.all_stats()) == {("ram", i) for i in range(width)}
-    assert t.all_stats()[("ram", 0)] == expected[0]
+    # T-957: the one-pass build gives the same object for every byte as stats() does
+    assert t.all_stats() == {("ram", i): t.stats("ram", i) for i in range(width)}
+
+
+def test_all_stats_covers_every_region_in_one_pass() -> None:
+    """T-957: two regions, a jump in between; every byte's object equals the one-byte build."""
+    t = ChangeTracker()
+    frames = [
+        {"ram": bytes([0, 10, 255, 7]), "sram": bytes([1, 1])},
+        {"ram": bytes([1, 10, 0, 9]), "sram": bytes([1, 2])},
+        {"ram": bytes([2, 11, 1, 9]), "sram": bytes([3, 2])},
+        {"ram": bytes([9, 11, 1, 3]), "sram": bytes([3, 0])},
+        {"ram": bytes([10, 12, 2, 3]), "sram": bytes([4, 0])},
+    ]
+    for n, regions in enumerate(frames):
+        if n == 3:
+            t.expect_jump()
+        t.observe(MemorySnapshot(n, regions))
+    everything = t.all_stats()
+    assert set(everything) == {("ram", i) for i in range(4)} | {("sram", i) for i in range(2)}
+    assert everything == {loc: t.stats(*loc) for loc in everything}
+    assert everything[("ram", 0)].distinct == {0, 1, 2, 9, 10}

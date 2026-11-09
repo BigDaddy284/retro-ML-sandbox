@@ -683,3 +683,43 @@ def test_at_reads_the_index_and_answers_like_the_old_walk(ops: list[tuple]) -> N
             getattr(k, op[0])(ids[op[1] % len(ids)])
         for region, offset in _GRID:
             assert k.at(region, offset) == _old_at(k, region, offset)
+
+
+# ------------------------------------------------------------- T-957 new_id keeps a floor
+
+
+def _old_new_id(k: Knowledge) -> str:
+    """The scan from v1 `new_id` made before T-957."""
+    n = 1
+    while f"v{n}" in k:
+        n += 1
+    return f"v{n}"
+
+
+def _id_ops() -> st.SearchStrategy[tuple]:
+    propose = st.tuples(st.just("propose"), st.integers(0, 40))
+    foreign = st.tuples(st.just("add"), st.sampled_from(["v3", "v7", "v10", "x1", "v01"]))
+    remove = st.tuples(st.just("remove"), st.integers(0, 12))
+    return st.one_of(propose, foreign, remove)
+
+
+@given(st.lists(_id_ops(), min_size=1, max_size=40))
+@settings(max_examples=100, deadline=None)
+def test_new_id_is_the_lowest_free_id_as_the_old_scan_gave(ops: list[tuple]) -> None:
+    """T-957: the floor only skips ids that are taken; removals reopen lower ones."""
+    k = Knowledge("g")
+    offset = 0
+    for op in ops:
+        if op[0] == "propose":
+            k.propose("ram", offset)
+            offset += 1
+        elif op[0] == "add":
+            if op[1] not in k and k.at("ram", offset) is None:
+                k.add(Variable(op[1], "ram", offset))
+                offset += 1
+        else:
+            ids = [v.id for v in k]
+            if ids:
+                k.remove(ids[op[1] % len(ids)])
+        assert k.new_id() == _old_new_id(k)
+        assert k.new_id() not in k

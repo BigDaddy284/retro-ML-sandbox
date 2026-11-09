@@ -538,6 +538,7 @@ class Knowledge:
         # (region, offset) -> the ids of the variables that start there, in insertion
         # order (T-953): what `at` reads instead of walking every variable.
         self._at: dict[tuple[str, int], list[str]] = {}
+        self._id_floor = 1  # the lowest ``vN`` that might be free (T-957)
         self._relationships: dict[str, Relationship] = {}
         # The relationships that are not rejected and at least LOW, with their level
         # and their place in insertion order (T-952): what the panel, the suggestions
@@ -727,14 +728,22 @@ class Knowledge:
                 )
             self._variables[variable.id] = variable
             self._index_add(variable)
+            while f"v{self._id_floor}" in self._variables:
+                self._id_floor += 1
             self._version += 1
         return variable
 
     def new_id(self) -> str:
-        """The next free ``vN`` id (nothing is reserved until ``add`` succeeds)."""
-        n = 1
+        """The lowest free ``vN`` id (nothing is reserved until ``add`` succeeds).
+
+        Scans up from a floor every ``add`` raises and every ``remove`` may lower
+        (T-957), not from ``v1``: a review proposing 252 guesses over 1,500 ids
+        spent 34 ms, a quarter of its time, on that walk.
+        """
+        n = self._id_floor
         while f"v{n}" in self._variables:
             n += 1
+        self._id_floor = n
         return f"v{n}"
 
     def propose(
@@ -842,6 +851,8 @@ class Knowledge:
         with self._lock:
             self._index_remove(self.get(var_id))
             del self._variables[var_id]
+            if var_id.startswith("v") and var_id[1:].isdigit():
+                self._id_floor = min(self._id_floor, max(int(var_id[1:]), 1))
             self._version += 1
 
     # ----------------------------------------------------- relationships
