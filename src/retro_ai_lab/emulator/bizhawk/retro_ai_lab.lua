@@ -769,7 +769,9 @@ function handlers.step(req)
   run_frames(frames, seen, took)
   local body = {}
   if req.reads ~= nil then
+    local started = now()
     body.reads = serve_reads(req.reads)
+    took.reads = now() - started
   end
   if req.screenshot then
     screenshot_body(req, body)
@@ -777,9 +779,13 @@ function handlers.step(req)
   if seen then
     body.pressed = pressed_names(seen)
   end
-  -- Seconds spent waiting for the pad-latching turn and running the frames,
-  -- so the app's link log can say which turn of EmuHawk's loop costs what.
+  -- Seconds spent waiting for the pad-latching turn, running the frames and
+  -- reading memory (T-960), so the app's link log can say which part of a
+  -- step costs what; serve_line adds the whole serve.
   body.took = { latch = took.latch or 0, frames = took.frames or 0 }
+  if took.reads ~= nil then
+    body.took.reads = took.reads
+  end
   return body
 end
 
@@ -847,6 +853,7 @@ local function drop_app()
 end
 
 local function serve_line(line)
+  local started = now()
   local ok, req = pcall(json.decode, line)
   if not ok or type(req) ~= "table" then
     fail(nil, "That was not a JSON object.")
@@ -865,6 +872,11 @@ local function serve_line(line)
   body.id = req.id
   body.ok = true
   body.frame = emu.framecount()
+  if type(body.took) == "table" then
+    -- The whole serve, from the request's decoding to here (T-960): what the
+    -- app measures beyond it is the wire and its own encoding and decoding.
+    body.took.serve = now() - started
+  end
   send(body)
   if closing then
     drop_app()

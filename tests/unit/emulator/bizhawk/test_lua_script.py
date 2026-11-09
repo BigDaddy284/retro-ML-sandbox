@@ -655,7 +655,8 @@ def test_a_step_costs_its_frames_in_turns_and_requests_share_a_turn() -> None:
         second = json.loads(channel.receive_line(5.0))
         assert first["ok"] and second["ok"] and host.frames == before + 8
         assert host.answered_at[-1] - host.answered_at[-2] == 4  # only its frames
-        assert set(second["took"]) == {"latch", "frames"} and second["took"]["frames"] >= 0
+        assert set(second["took"]) == {"latch", "frames", "serve"}
+        assert 0 <= second["took"]["frames"] <= second["took"]["serve"]
         assert json.loads(channel.receive_line(5.0))["ok"] is True  # the third
         assert host.on_select is None  # it was sent from inside the wait
         assert host.answered_at[-1] - host.answered_at[-2] == 4
@@ -677,10 +678,16 @@ def test_the_link_log_keeps_the_scripts_step_timing() -> None:
         adapter = BizHawkAdapter(port=host.port, call_timeout_s=5.0)
         adapter.connect(timeout_s=5.0)
         adapter.step(2)
-        adapter.step(3)
+        region = adapter.memory_regions()[0]
+        adapter.step(3, reads=[(region.name, 0, 8)])
         summary = adapter.link_summary
         assert "step \u00d72" in summary
         assert "step:latch \u00d72" in summary and "step:frames \u00d72" in summary
+        # T-960: the reads' share, only for a step that read, and the whole serve
+        assert "step:reads \u00d71" in summary and "step:serve \u00d72" in summary
+        stats = adapter.link_totals
+        assert stats["step:serve"].total_s >= stats["step:frames"].total_s
+        assert stats["step"].total_s >= stats["step:serve"].total_s
         adapter.disconnect()
         assert host.error is None
 
