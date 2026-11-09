@@ -63,3 +63,25 @@ def test_quiet_work_is_left_out_of_the_line() -> None:
     assert summary == f"on DiscoveryUpdated {X}1 avg 100 ms max 100 ms"
     with pytest.raises(ValueError, match="cannot be negative"):
         work.summary(quiet_under_s=-1)
+
+
+def test_notes_from_several_threads_are_all_counted() -> None:
+    """T-956: the save writer is a third thread timing into the app's log."""
+    import threading
+
+    log = WorkLog()
+    rounds = 2000
+
+    def hammer(name: str) -> None:
+        for _ in range(rounds):
+            log.note(name, 0.001)
+            log.note("shared", 0.001)
+
+    threads = [threading.Thread(target=hammer, args=(f"t{i}",)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    stats = log.stats
+    assert stats["shared"].count == 4 * rounds
+    assert all(stats[f"t{i}"].count == rounds for i in range(4))

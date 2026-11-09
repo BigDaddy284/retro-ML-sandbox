@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -21,6 +24,7 @@ from retro_ai_lab.services import (
     ObservationService,
 )
 from retro_ai_lab.services.discovery import BOUNCES, BUSY, MOVES_ALONE, PLAYED, game_id_for
+from retro_ai_lab.storage import KnowledgeStore
 from retro_ai_lab.understanding import (
     Confidence,
     Encoding,
@@ -1235,12 +1239,15 @@ def test_the_ai_saves_its_own_changes_at_most_once_an_interval(
     k = d.knowledge
     assert k is not None and len(k) > 0 and d.reviews >= 5
     assert d.saves == 1  # the first change was written at once, the rest in the same minute not
+    d.wait_for_save()  # the periodic save writes its file on a worker (T-956)
     now[0] += 10.0
     play(connection, observation, 100)
     assert d.saves == 1  # still inside the minute
+    d.wait_for_save()
     now[0] += 51.0  # a minute since the save: the next step writes what is pending
     play(connection, observation, 100)
     assert d.saves == 2
+    d.wait_for_save()
     assert store.load("toyracer-2").version <= k.version
     # an explicit save always writes, even with nothing pending
     assert d.save() is not None and d.saves == 3 and not d.pending_save
@@ -1250,6 +1257,106 @@ def test_the_ai_saves_its_own_changes_at_most_once_an_interval(
     assert d.saves == 3 + int(pending) and not d.pending_save
     with pytest.raises(ValueError):
         DiscoveryService(connection, observation, bus, save_every_s=-1.0)
+
+
+class _GatedStore(KnowledgeStore):
+    """A store whose writes wait at a gate, so a test can watch a save in flight (T-956)."""
+
+    def __init__(self, folder: Path) -> None:
+        super().__init__(folder)
+        self.gate = threading.Event()
+        self.writes: list[tuple[str, int]] = []  # (thread name, variables in the snapshot)
+
+    def save_dict(self, game_id: str, data: dict[str, Any]) -> Path:
+        self.gate.wait(5.0)
+        self.writes.append((threading.current_thread().name, len(data["variables"])))
+        return super().save_dict(game_id, data)
+
+
+def _gated_service(
+    connection: ConnectionService,
+    observation: ObservationService,
+    bus: EventBus,
+    tmp_path: object,
+    now: list[float],
+) -> tuple[DiscoveryService, _GatedStore]:
+    store = _GatedStore(Path(str(tmp_path)) / "knowledge")
+    d = DiscoveryService(
+        connection,
+        observation,
+        bus,
+        review_every=20,
+        experiment_every=None,
+        store=store,
+        save_every_s=60.0,
+        clock=lambda: now[0],
+    )
+    return d, store
+
+
+def test_a_due_save_writes_its_file_in_the_background(
+    connection: ConnectionService,
+    observation: ObservationService,
+    bus: EventBus,
+    tmp_path: object,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """T-956: the user's 1.2 s saves held the AI's step; only the snapshot needs it now."""
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
+    now = [1000.0]
+    d, store = _gated_service(connection, observation, bus, tmp_path, now)
+    connection.connect("fake", seed=2)
+    play(connection, observation, 100)  # the first change is saved at once: snapshot, then write
+    k = d.knowledge
+    assert k is not None and d.saves == 1 and d.writing
+    assert not store.exists("toyracer-2")  # the write waits at the gate while the AI plays on
+    assert not any(m.startswith("Saved what the AI learned") for m in caplog.messages)
+    store.gate.set()
+    d.wait_for_save()
+    assert not d.writing and len(store.writes) == 1
+    name, snapshot_size = store.writes[0]
+    assert name == "knowledge-save" and 0 < snapshot_size <= len(k)  # the state when it was taken
+    saved = next(m for m in caplog.messages if m.startswith("Saved what the AI learned"))
+    assert f"{snapshot_size:,} guesses" in saved and saved.endswith(" ms.")
+    assert len(store.load("toyracer-2")) == snapshot_size
+
+
+def test_an_explicit_save_waits_for_the_running_write_and_writes_the_newest_state(
+    connection: ConnectionService, observation: ObservationService, bus: EventBus, tmp_path: object
+) -> None:
+    now = [1000.0]
+    d, store = _gated_service(connection, observation, bus, tmp_path, now)
+    connection.connect("fake", seed=2)
+    play(connection, observation, 100)
+    k = d.knowledge
+    assert k is not None and d.writing
+    first = next(iter(k))
+    k.confirm(first.id)  # newer than the snapshot in flight
+    threading.Timer(0.2, store.gate.set).start()
+    path = d.save()  # waits for the background write, then writes the newest state
+    assert path is not None and not d.writing and d.saves == 2
+    assert [name for name, _ in store.writes] == ["knowledge-save", "MainThread"]
+    assert store.load("toyracer-2").get(first.id).confirmed
+
+
+def test_no_second_write_starts_while_one_is_running(
+    connection: ConnectionService, observation: ObservationService, bus: EventBus, tmp_path: object
+) -> None:
+    now = [1000.0]
+    d, store = _gated_service(connection, observation, bus, tmp_path, now)
+    connection.connect("fake", seed=2)
+    play(connection, observation, 100)
+    assert d.saves == 1 and d.writing
+    now[0] += 61.0  # a save falls due while the first write is still at the gate
+    play(connection, observation, 100)
+    assert d.saves == 1 and d.pending_save  # left pending, not piled onto the slow disk
+    store.gate.set()
+    d.wait_for_save()
+    play(connection, observation, 20)  # the next due step writes what was pending
+    assert d.saves == 2
+    d.wait_for_save()
+    assert len(store.writes) == 2 and not d.pending_save
+    connection.disconnect()  # nothing pending: no third write
 
 
 def test_a_zero_interval_saves_every_change_as_before(
@@ -1271,4 +1378,14 @@ def test_a_zero_interval_saves_every_change_as_before(
     )
     connection.connect("fake", seed=2)
     play(connection, observation, 100)
-    assert d.reviews >= 5 and d.saves >= 1 and not d.pending_save  # nothing ever waits
+    k = d.knowledge
+    assert k is not None and d.reviews >= 5 and d.saves >= 1
+    # A change that lands while the writer is busy waits only for that write (T-956);
+    # the next step after it writes the change, with no interval in between.
+    for _ in range(20):
+        if not d.pending_save:
+            break
+        d.wait_for_save()
+        play(connection, observation, 1)
+    d.wait_for_save()
+    assert not d.pending_save and store.load("toyracer-2").to_dict() == k.to_dict()

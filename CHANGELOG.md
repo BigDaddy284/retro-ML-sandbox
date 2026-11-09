@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-956: the once-a-minute save takes its snapshot on the AI's thread and writes the 27 MB file on a worker thread, in pieces the interpreter can switch away from, so the AI no longer stands still for the 1.2 s the write takes; a stop, a disconnect and the Save button still write at once.
 - T-955: the log says how big the knowledge is, once when a game's knowledge is picked up and once per save, with the time the save took.
 - T-954: the Research window refreshes on a finished go or a state change only while it is open; closed, it waits to be opened, which already refreshes it, instead of rebuilding its tables at every go's end for nobody.
 - T-953: a guess is found by its address through an index the knowledge keeps, instead of a walk over every guess; the Research window's memory table asked that question 1,800 times at every go's end.
