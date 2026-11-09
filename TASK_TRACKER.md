@@ -3025,7 +3025,7 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
   4. The learning suite passes unchanged.
 - **Expected changes:** `src/retro_ai_lab/learning/features.py`, `tests/unit/learning/test_features.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
 - **Test plan:** `test_a_situations_row_is_built_once_and_read_back_until_a_slot_changes_hands`, `test_the_cache_changes_no_vector_slot_or_count` (property test, 100 examples); learning suite; full suite; the learn profile before and after.
-- **Results:** two tests, the property test 100 examples; learning suite 78 passed; full suite 1443 passed, 10 skipped (151.45s); ruff and mypy clean; `DQNLearner.learn` at the user's scale 2.99 ms → 1.12 ms.
+- **Results:** two tests, the property test 100 examples; learning suite 78 passed; full suite 1443 passed, 10 skipped (151.45s); ruff and mypy clean; `DQNLearner.learn` at the user's scale 2.99 ms → 1.12 ms; the policy snapshot `_record` takes at every go's end over the 10,000 remembered situations, which encodes them all, 103 ms → 37 ms.
 - **Commit:** see PR. **PR:** pending.
 - **Completion report:** `FeatureMap._fill` reads a cached row by `state.parts` and only refreshes the last-seen record; `_place` clears the cache; `ROW_CACHE_MOST` bounds it at 20,000 rows; `learn` at the user's scale 2.99 ms → 1.12 ms here.
 ### T-958 – The diff builds its byte changes only when they are read
