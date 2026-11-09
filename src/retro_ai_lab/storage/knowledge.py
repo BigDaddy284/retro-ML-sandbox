@@ -8,6 +8,7 @@ text editor, and ``export`` writes the same thing anywhere for sharing.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.storage.jsonfiles import (
@@ -39,9 +40,15 @@ class KnowledgeStore:
         return self.path_for(game_id).exists()
 
     def save(self, knowledge: Knowledge) -> Path:
-        path = self.path_for(knowledge.game_id)
-        export(knowledge, path)
-        return path
+        return self.save_dict(knowledge.game_id, knowledge.to_dict())
+
+    def save_dict(self, game_id: str, data: dict[str, Any]) -> Path:
+        """Write a knowledge snapshot (``Knowledge.to_dict``) taken earlier (T-956).
+
+        The discovery service takes the snapshot on the AI's thread and calls
+        this from a worker, so the AI does not stand still for the write.
+        """
+        return write_json(self.path_for(game_id), data, "knowledge")
 
     def load(self, game_id: str) -> Knowledge:
         path = self.path_for(game_id)

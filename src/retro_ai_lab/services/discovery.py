@@ -29,6 +29,7 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from retro_ai_lab.core import ConfigurationError, EmulatorError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
@@ -142,14 +143,12 @@ class DiscoveryUpdated:
 RESTARTS_WEIGHT = 9.0  # the AI's own restart finding outranks a planted or classified guess (T-904)
 
 
-def _size_words(knowledge: Knowledge, path: Path) -> str:
+def _size_words(guesses: int, relationships: int, path: Path) -> str:
     """``"1,600 guesses, 20,000 relationships, 6.4 MB"`` for the log (T-955)."""
     try:
         size = path.stat().st_size
     except OSError:
         size = 0
-    guesses = len(knowledge)
-    relationships = len(knowledge.relationships())
     return (
         f"{guesses:,} guess{'es' if guesses != 1 else ''}, "
         f"{relationships:,} relationship{'s' if relationships != 1 else ''}, "
@@ -216,6 +215,7 @@ class DiscoveryService:
         self._clock = clock
         self._last_save: float | None = None
         self._dirty = False  # changes the store has not seen yet (T-949)
+        self._writer: threading.Thread | None = None  # the save's file writer (T-956)
         if census_every < 1:
             raise ValueError("census_every must be positive")
         self._census_every = census_every
@@ -629,24 +629,85 @@ class DiscoveryService:
     # ------------------------------------------------------------ actions
 
     def save(self) -> Path | None:
-        """Write the knowledge to the store (no store: nothing happens)."""
+        """Write the knowledge to the store now (no store: nothing happens).
+
+        A write still running from :meth:`save_in_background` finishes first, so
+        the file always ends with the newest state.
+        """
         if self._store is None or self._knowledge is None:
             return None
+        self.wait_for_save()
         started = time.perf_counter()
         with app_work.timed("discovery: save"):
-            if self._finder is not None:
-                self._finder.flush()  # rates the finder has not written yet (T-946)
-            path = self._store.save(self._knowledge)
-        log.info(
-            "Saved what the AI learned about %s: %s in %d ms.",
-            self._knowledge.title or self._knowledge.game_id,
-            _size_words(self._knowledge, path),
-            round((time.perf_counter() - started) * 1000),
-        )
+            data = self._snapshot()
+            path = self._store.save_dict(self._knowledge.game_id, data)
+        self._log_saved(self._knowledge.title or self._knowledge.game_id, data, path, started)
+        self._note_saved()
+        return path
+
+    def save_in_background(self) -> bool:
+        """Take the snapshot now and write the file on a worker thread (T-956).
+
+        The user's knowledge is 27 MB and a save took 1.2 s on the AI's thread,
+        20 s of a 16-minute run. Only the snapshot (``to_dict``) needs the
+        knowledge; encoding and writing it need nothing from the AI. Returns
+        False, leaving the changes pending, while an earlier write still runs.
+        """
+        if self._store is None or self._knowledge is None or self.writing:
+            return False
+        store, knowledge = self._store, self._knowledge
+        started = time.perf_counter()
+        with app_work.timed("discovery: save"):
+            data = self._snapshot()
+        title = knowledge.title or knowledge.game_id
+        game_id = knowledge.game_id
+
+        def write() -> None:
+            try:
+                with app_work.timed("discovery: save write"):
+                    path = store.save_dict(game_id, data)
+            except ConfigurationError as exc:
+                log.warning("%s The AI will try again at the next save.", exc)
+                self._dirty = True
+                return
+            self._log_saved(title, data, path, started)
+
+        self._writer = threading.Thread(target=write, name="knowledge-save", daemon=True)
+        self._writer.start()
+        self._note_saved()
+        return True
+
+    @property
+    def writing(self) -> bool:
+        """Is a background save still writing its file? (T-956)"""
+        writer = self._writer
+        return writer is not None and writer.is_alive()
+
+    def wait_for_save(self, timeout: float | None = None) -> None:
+        """Wait for a background save's file to be on disk (T-956)."""
+        writer = self._writer
+        if writer is not None and writer is not threading.current_thread():
+            writer.join(timeout)
+
+    def _snapshot(self) -> dict[str, Any]:
+        if self._finder is not None:
+            self._finder.flush()  # rates the finder has not written yet (T-946)
+        assert self._knowledge is not None
+        return self._knowledge.to_dict()
+
+    def _note_saved(self) -> None:
         self._saves += 1
         self._dirty = False
         self._last_save = self._clock()
-        return path
+
+    @staticmethod
+    def _log_saved(title: str, data: dict[str, Any], path: Path, started: float) -> None:
+        log.info(
+            "Saved what the AI learned about %s: %s in %d ms.",
+            title,
+            _size_words(len(data["variables"]), len(data["relationships"]), path),
+            round((time.perf_counter() - started) * 1000),
+        )
 
     def _save_soon(self) -> None:
         """Note a change for the store; write it now if a save is due (T-949).
@@ -664,7 +725,7 @@ class DiscoveryService:
         if not self._dirty or self._store is None or self._knowledge is None:
             return
         if self._last_save is None or self._clock() - self._last_save >= self._save_every_s:
-            self.save()
+            self.save_in_background()
 
     def export_to(self, path: str | Path) -> Path:
         """Write the current knowledge anywhere, for sharing."""
@@ -1113,7 +1174,11 @@ class DiscoveryService:
                 log.info(
                     "Picked up what the AI learned about %s: %s.",
                     info.title or game_id,
-                    _size_words(knowledge, self._store.path_for(game_id)),
+                    _size_words(
+                        len(knowledge),
+                        len(knowledge.relationships()),
+                        self._store.path_for(game_id),
+                    ),
                 )
             else:
                 log.info(

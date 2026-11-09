@@ -17,6 +17,7 @@ PC names its slow stage in the log.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
@@ -54,10 +55,14 @@ class WorkLog:
         self._clock = clock
         self._stats: dict[str, CallStats] = {}
         self._window_started = clock()
+        # The GUI thread, the AI's thread and the save writer (T-956) all time into
+        # the app's log; a note and the window's reset must not interleave.
+        self._lock = threading.Lock()
 
     @property
     def stats(self) -> Mapping[str, CallStats]:
-        return dict(self._stats)
+        with self._lock:
+            return dict(self._stats)
 
     @property
     def window_s(self) -> float:
@@ -69,7 +74,8 @@ class WorkLog:
             raise ValueError("A timing needs a name.")
         if elapsed_s < 0:
             raise ValueError("A timing cannot be negative.")
-        self._stats.setdefault(name, CallStats()).add(elapsed_s)
+        with self._lock:
+            self._stats.setdefault(name, CallStats()).add(elapsed_s)
 
     @contextmanager
     def timed(self, name: str) -> Iterator[None]:
@@ -89,7 +95,8 @@ class WorkLog:
         """
         if quiet_under_s < 0:
             raise ValueError("quiet_under_s cannot be negative")
-        loud = {n: s for n, s in self._stats.items() if s.max_s >= quiet_under_s}
+        with self._lock:
+            loud = {n: s for n, s in self._stats.items() if s.max_s >= quiet_under_s}
         if not loud:
             return "nothing"
         ordered = sorted(loud.items(), key=lambda item: item[1].total_s, reverse=True)
@@ -100,8 +107,9 @@ class WorkLog:
         now = self._clock()
         window = now - self._window_started
         summary = self.summary(quiet_under_s=quiet_under_s)
-        self._stats = {}
-        self._window_started = now
+        with self._lock:
+            self._stats = {}
+            self._window_started = now
         return window, summary
 
 
