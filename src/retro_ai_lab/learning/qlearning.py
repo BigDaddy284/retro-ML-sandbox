@@ -9,7 +9,9 @@ step nudges the score towards what actually happened.
 
 from __future__ import annotations
 
+import logging
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from random import Random
 from typing import Any, ClassVar
@@ -19,6 +21,8 @@ from retro_ai_lab.learning.actions import ActionSpace
 from retro_ai_lab.learning.exploring import ResultsWatch
 from retro_ai_lab.learning.learner import Q_TABLE, Decision, Learner, register_learner
 from retro_ai_lab.learning.state import State
+
+log = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 
@@ -43,10 +47,16 @@ def _whole(value: object, what: str) -> int:
     return int(number)
 
 
+OLD_GAMMA = 0.95  # the default until T-962; a saved brain still on it is moved on
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     alpha: float = 0.1  # learning rate: how far to move towards what happened
-    gamma: float = 0.95  # how much the future counts
+    # How much the future counts: 0.99 a step is a horizon of about 100 steps, seven
+    # seconds at four frames a step (T-962; the user's log had a death's -20 land 45 steps
+    # after the mistake, which 0.95 shrank to 2 by the time it reached the cause).
+    gamma: float = 0.99
     epsilon: float = 1.0  # starting chance of trying something random
     epsilon_min: float = 0.05
     epsilon_decay: float = 0.995  # multiplied in at the end of every episode
@@ -88,6 +98,24 @@ class Settings:
         if updates >= self.explore_steps:
             return self.epsilon_min
         return self.epsilon - (self.epsilon - self.epsilon_min) * updates / self.explore_steps
+
+
+def settings_from_saved(data: Mapping[str, Any] | None) -> Settings:
+    """The settings a saved brain learns with, moved on from the old defaults (T-962).
+
+    A brain saved while the future counted ``OLD_GAMMA`` a step gets the current
+    default instead, with a log line; any other saved value was the person's
+    choice and is kept.
+    """
+    saved = dict(data or {})
+    if saved.get("gamma") == OLD_GAMMA:
+        saved["gamma"] = Settings().gamma
+        log.info(
+            "The brain now looks further ahead: the future counts %.2f a step instead of %.2f.",
+            saved["gamma"],
+            OLD_GAMMA,
+        )
+    return Settings(**saved)
 
 
 class QTable:
@@ -319,7 +347,7 @@ class QLearningAgent:
                 raise ConfigurationError(
                     "This brain was trained with different controls than this game has."
                 )
-            agent = cls(saved, Settings(**data.get("settings", {})))
+            agent = cls(saved, settings_from_saved(data.get("settings")))
             agent._epsilon = _check(data.get("epsilon", agent._epsilon), "epsilon", 0.0, 1.0)
             agent._updates = int(data.get("updates", 0))
             agent._episodes = int(data.get("episodes", 0))
@@ -340,4 +368,12 @@ def _rng_state(saved: Any) -> tuple[int, tuple[int, ...], None]:
     return int(version), tuple(int(x) for x in internal), None if gauss is None else gauss
 
 
-__all__ = ["SCHEMA_VERSION", "Decision", "QLearningAgent", "QTable", "Settings"]
+__all__ = [
+    "OLD_GAMMA",
+    "SCHEMA_VERSION",
+    "Decision",
+    "QLearningAgent",
+    "QTable",
+    "Settings",
+    "settings_from_saved",
+]
