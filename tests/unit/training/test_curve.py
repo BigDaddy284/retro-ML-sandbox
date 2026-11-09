@@ -102,12 +102,67 @@ def test_describe_survival() -> None:
     goes.append(lost(4, 3, 80))
     assert describe_survival(goes, window=2) == (
         "Survival over the last 2 goes: lives lost per go 2.5 (was 0.5 over the 2 before); "
-        "the first life lost after 90 steps on average (was 300 steps)."
+        "the first life lost after 90 steps on average (was 300 steps). Points per go +0.0 "
+        "(was +0.0)."
     )
     never = [lost(1, 0, None), lost(2, 0, None), lost(3, 1, 120), lost(4, 0, None)]
     assert describe_survival(never, window=2) == (
         "Survival over the last 2 goes: lives lost per go 0.5 (was 0.0 over the 2 before); "
-        "the first life lost after 120 steps on average (was never)."
+        "the first life lost after 120 steps on average (was never). Points per go +0.0 "
+        "(was +0.0)."
     )
     with pytest.raises(ConfigurationError):
         describe_survival(goes, window=0)
+
+
+def test_the_survival_line_says_what_surviving_cost() -> None:
+    """T-966: the user's AI halved its deaths while its points fell from +14 to -30 a go,
+    nearly all of it from one penalty; the line names the earner that moved most."""
+    from retro_ai_lab.training.curve import describe_cost
+    from retro_ai_lab.training.episode import Earning
+
+    def played(n: int, setbacks: int, *earned: tuple[str, str, int, float]) -> EpisodeRecord:
+        items = tuple(Earning(i, name, count, amount) for i, name, count, amount in earned)
+        result = EpisodeResult(
+            600,
+            2400,
+            sum(e.amount for e in items),
+            "max_steps",
+            2,
+            earned=items,
+            setbacks=setbacks,
+            first_setback_step=60 if setbacks else None,
+        )
+        return EpisodeRecord(n, Mode.INDEPENDENT, result, n * 2400)
+
+    up, down, life = (
+        ("up", "x position goes up"),
+        ("down", "x position goes down"),
+        ("l", "Lifes goes down"),
+    )
+    earlier = [
+        played(1, 6, (*up, 270, 54.0), (*down, 13, -26.0), (*life, 2, -40.0)),
+        played(2, 6, (*up, 280, 56.0), (*down, 13, -26.0), (*life, 2, -40.0)),
+    ]
+    latest = [
+        played(3, 3, (*up, 200, 40.0), (*down, 42, -84.0), (*life, 1, -20.0)),
+        played(4, 3, (*up, 210, 42.0), (*down, 42, -84.0), (*life, 1, -20.0)),
+    ]
+    assert describe_survival(earlier + latest, window=2) == (
+        "Survival over the last 2 goes: lives lost per go 3.0 (was 6.0 over the 2 before); "
+        "the first life lost after 60 steps on average (was 60 steps). Points per go -63.0 "
+        "(was -11.0); what moved most is x position goes down, -84.0 a go (was -26.0)."
+    )
+    # An earner only one window has still counts, from or to nothing.
+    newcomer = [played(5, 0, (*up, 100, 20.0), ("s", "Score goes up", 3, 300.0))]
+    assert describe_cost(newcomer, latest) == (
+        "; what moved most is Score goes up, +300.0 a go (was +0.0)"
+    )
+    assert describe_cost(latest, newcomer) == (
+        "; what moved most is Score goes up, +0.0 a go (was +300.0)"
+    )
+    # Goes that earned nothing at all say nothing about a cost.
+    quiet = [played(6, 0), played(7, 1)]
+    assert describe_cost(quiet, quiet) == ""
+    with pytest.raises(ConfigurationError):
+        describe_cost([], latest)

@@ -134,7 +134,10 @@ it could see of the game. A go that lost lives says so on its line (", lost a
 life 2 times, the first at step 120"), and every tenth go from the twentieth a
 "Survival over the last 10 goes" line compares lives lost per go, and how many
 steps the first loss took, with the ten goes before: the plain measure of
-whether the AI is getting past what kills it. Both count the drops of the
+whether the AI is getting past what kills it. The same line gives the points
+per go and names the reward that moved most between the two windows, so a
+survival bought by hanging back ("x position goes down, -84.0 a go, was
+-26.0") shows up as the trade it is. The counts are of the drops of the
 value your own reward penalises, if you made one ("Lives goes down", below
 zero), else of the AI's best life count and best health (yours first, if you
 confirmed one), not of every guess of those kinds; the log names what is
