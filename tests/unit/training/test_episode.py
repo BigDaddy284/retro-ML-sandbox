@@ -589,3 +589,37 @@ def test_a_reset_flushes_the_pending_steps_as_final(
     assert [c["steps"] for c in calls] == [3, 2, 1] and all(c["done"] for c in calls)
     assert all(c["next"] == r.state for c in calls)
     assert r.finish().ended_by == "reset" and len(calls) == 3
+
+
+def test_a_drop_of_the_value_you_penalise_counts_as_a_death(lab: Lab) -> None:
+    """T-967: the user's survival line said 0.0 lives lost a go while "Lifes goes down"
+    fired 1.3 times a go: a person's value drops as a DOWN event, not as a SETBACK, which
+    only the AI's life-count and health guesses raise."""
+    lab.connection.connect("fake", seed=3)
+    k = teach(lab)
+    lives = k.at(RAM, LAYOUT.lives)
+    assert lives is not None
+    fuel = k.propose(RAM, LAYOUT.timer, kind=VariableKind.COUNTER, evidence=SURE)  # the person's
+    r = runner(lab, frames_per_step=4, max_steps=6)
+    r.begin()
+    r.signals.watch_setbacks(frozenset({fuel.id}))
+    r.signals.take_setbacks()
+    fell = GameEvent(EventKind.DOWN, 20, fuel.id, "", 9, 8)
+    rose = GameEvent(EventKind.UP, 20, fuel.id, "", 8, 9)
+    other = GameEvent(EventKind.DOWN, 20, lives.id, "", 3, 2)
+    setback = GameEvent(EventKind.SETBACK, 20, fuel.id, "", 9, 8)
+    lab.bus.publish(DiscoveryUpdated((), (), (fell, rose, other), ()))
+    assert r.signals.take_setbacks() == 1  # the drop counts; a rise and another value do not
+    # A value the AI also takes for a life count drops as both events: one death.
+    lab.bus.publish(DiscoveryUpdated((), (), (fell, setback), ()))
+    assert r.signals.take_setbacks() == 1
+    # Two updates, two deaths.
+    lab.bus.publish(DiscoveryUpdated((), (), (fell,), ()))
+    lab.bus.publish(DiscoveryUpdated((), (), (fell,), ()))
+    assert r.signals.take_setbacks() == 2
+    # Left to its own guesses, the count follows SETBACK events only, as before.
+    r.signals.watch_setbacks(None)
+    lab.bus.publish(DiscoveryUpdated((), (), (fell, other), ()))
+    assert r.signals.take_setbacks() == 0
+    lab.bus.publish(DiscoveryUpdated((), (), (setback,), ()))
+    assert r.signals.take_setbacks() == 1

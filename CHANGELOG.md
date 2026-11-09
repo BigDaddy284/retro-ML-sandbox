@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-967: a death is the value your rewards penalise most heavily (a life count or health value you penalise first, however lightly), not every penalised value, and its drops are counted as deaths whether or not the AI takes it for a life count; before, "x position goes down" counted as a death and your "Lifes" drops did not count at all.
 - T-966: the survival line also gives the points per go and names the reward that moved most against the ten goes before, so a survival bought by hanging back shows up as the trade it is.
 - T-965: the check of a start spot that loses a life by itself now runs the same steps holding each of the AI's buttons in turn, so a loss a button avoids (a player who stands still getting hit) is left for the AI to learn around and only a loss that comes whatever is held moves the goes' start; the start moves at most three times from one checkpoint.
 - T-964: when your own reward penalises a value ("Lifes goes down", below zero), the goes count their deaths on that value, and the check of a start spot that loses a life by itself reads it too; the AI's best life-count and health guesses are the fallback, and the log names what is counted whenever that changes. The user's log had "lost a life 5 times" beside their own reward firing twice: the count was following a guess of the AI's.

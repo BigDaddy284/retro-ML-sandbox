@@ -138,8 +138,10 @@ whether the AI is getting past what kills it. The same line gives the points
 per go and names the reward that moved most between the two windows, so a
 survival bought by hanging back ("x position goes down, -84.0 a go, was
 -26.0") shows up as the trade it is. The counts are of the drops of the
-value your own reward penalises, if you made one ("Lives goes down", below
-zero), else of the AI's best life count and best health (yours first, if you
+value your own rewards penalise most, if you made one ("Lives goes down",
+below zero; a life count or health value you penalise comes first, however
+lightly, so "x position goes down" at -2 is a step back and not a death),
+else of the AI's best life count and best health (yours first, if you
 confirmed one), not of every guess of those kinds; the log names what is
 counted whenever that changes. Every go starts by putting the
 game back to its checkpoint, and that jump is the AI's doing, not the game's:

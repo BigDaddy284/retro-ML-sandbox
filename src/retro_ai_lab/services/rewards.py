@@ -36,7 +36,7 @@ from retro_ai_lab.services.discovery import DiscoveryService, DiscoveryUpdated, 
 from retro_ai_lab.services.observer import ButtonsHeld
 from retro_ai_lab.storage.rewards import RewardStore
 from retro_ai_lab.understanding.events import EventKind, GameEvent
-from retro_ai_lab.understanding.knowledge import plain_names
+from retro_ai_lab.understanding.knowledge import VariableKind, plain_names
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,17 +180,35 @@ class RewardService:
         return tuple(b for b in profile if is_own(b.id))
 
     def penalised(self) -> frozenset[str]:
-        """The values a person's own rewards penalise: what a death is to them (T-964).
+        """The values a person's own rewards penalise most: what a death is to them (T-964).
 
         An own reward with a value below zero on a value going down (or up) names
-        the byte the person watches for harm; the survival count and the check of
-        a start spot that loses a life by itself follow it before any guess.
+        a byte the person watches for harm. Of those, the life counts and health
+        values (by the AI's kind guess) are the deaths; when none is life-like, the
+        value with the heaviest penalty is (T-967: the user's "x position goes down"
+        at -2 beside "Lifes goes down" at -20 made every step back a death). The
+        survival count and the check of a start spot that loses a life by itself
+        follow the answer before any guess.
         """
-        return frozenset(
-            b.trigger.variable_id
-            for b in self.own()
-            if b.enabled and b.value < 0 and b.trigger.variable_id
+        penalties: dict[str, float] = {}
+        for b in self.own():
+            variable_id = b.trigger.variable_id
+            if b.enabled and b.value < 0 and variable_id:
+                penalties[variable_id] = min(penalties.get(variable_id, 0.0), b.value)
+        if not penalties:
+            return frozenset()
+        knowledge = self._discovery.knowledge
+        life_like = frozenset(
+            i
+            for i in penalties
+            if knowledge is not None
+            and i in knowledge
+            and knowledge.get(i).kind in (VariableKind.LIVES, VariableKind.HEALTH)
         )
+        if life_like:
+            return life_like
+        heaviest = min(penalties.values())
+        return frozenset(i for i, value in penalties.items() if value == heaviest)
 
     def add_own(
         self, variable_id: str, *, goes_up: bool, value: float, name: str | None = None

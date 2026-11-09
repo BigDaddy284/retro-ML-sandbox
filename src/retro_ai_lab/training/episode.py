@@ -202,15 +202,24 @@ class EpisodeSignals:
     def _on_discovery(self, update: DiscoveryUpdated) -> None:
         if not self._listening:
             return
+        dropped: set[str] = set()  # watched values that fell this update (T-967)
         for event in update.events:
             if event.kind is EventKind.RESET:
                 self._resets += 1
                 self._last_reset = f"{event.detail} (frame {event.frame})"
                 self._last_reset_ids = event.variables
-            elif event.kind is EventKind.SETBACK and (
-                self._watched is None or event.variable_id in self._watched
+            elif self._watched is None:
+                if event.kind is EventKind.SETBACK:
+                    self._setbacks += 1
+            elif (
+                event.kind in (EventKind.SETBACK, EventKind.DOWN)
+                and event.variable_id is not None
+                and event.variable_id in self._watched
             ):
-                self._setbacks += 1
+                # A person's value drops as a DOWN event (its reward's trigger) and, when
+                # the AI also takes it for a life count, as a SETBACK too: one death (T-967).
+                dropped.add(event.variable_id)
+        self._setbacks += len(dropped)
 
 
 @dataclass(frozen=True, slots=True)
