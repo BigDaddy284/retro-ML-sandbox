@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-958: the memory diff the tracker makes on every step no longer builds an object per changed byte up front; the objects are built the first time something reads them, which nothing on the AI's step does (the step's largest Python loop at the user's scale, for nobody).
 - T-957: the AI's review no longer scans every id to name a new guess, nor builds each byte's statistics one numpy call at a time; both walks were a half of a review at the user's scale.
 - T-956: the once-a-minute save takes its snapshot on the AI's thread and writes the 27 MB file on a worker thread, in pieces the interpreter can switch away from, so the AI no longer stands still for the 1.2 s the write takes; a stop, a disconnect and the Save button still write at once.
 - T-955: the log says how big the knowledge is, once when a game's knowledge is picked up and once per save, with the time the save took.

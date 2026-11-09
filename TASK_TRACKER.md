@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-958 | The change tracker diffs memory on every step and nothing on the AI's step reads the byte changes, yet `diff_snapshots` built a `ByteChange` object per changed byte: at the user's scale the step's largest Python loop, for nobody. `SnapshotDiff` now keeps the changed offsets as arrays and builds the objects the first time `changes` is read; counts, emptiness and offsets answer from the arrays | 8 | Done | 1/1 | see PR |
 | T-957 | The review's two remaining walks go: `Knowledge.new_id` scans from a remembered floor instead of from `v1` every time (252 proposals cost 34 ms, a quarter of a review), and the tracker builds every byte's statistics from its arrays in one pass instead of 2,048 per-byte numpy calls (20 ms a review); the user's reviews took 285 ms × 290 | 8 | Done | 1/1 | see PR #212 |
 | T-956 | The once-a-minute save takes its snapshot of the knowledge on the AI's thread and writes the file on a worker thread; the user's saves took 1.2 s each (27 MB, 100,000 relationships) and held the AI's step for all of it; a stop, a disconnect and the Save button still write at once and wait for a running write first | 8 | Done | 1/1 | see PR #211 |
 | T-955 | The log says how big the knowledge is: one line when a game's knowledge is picked up (guesses, relationships, file size) and one per save (the same plus the time it took); the user's saves took 1.1 s where the same work takes 46 ms here, and nothing in the log said whether the file was 6 MB or 60 | 8 | Done | 1/1 | see PR #210 |
@@ -3011,6 +3012,22 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
+### T-958 – The diff builds its byte changes only when they are read
+- **Status:** Done
+- **Phase:** 8 (the user's 9 Nov log: 18 ms a step, of which the emulator 10 ms, `observe: track` 1.2 ms ×255,000; a profile of the whole step at the user's scale here spent 0.7 of the tracker's 1.05 ms in `diff_snapshots` building a `ByteChange` per changed byte, 1,000 a step, which nothing on the step reads: `MemoryObserved.diff` has no reader in the app, the detector and the finder work from the snapshot and the believed guesses)
+- **Objective:** `SnapshotDiff` keeps, per region, the two byte strings and the array of differing offsets, and builds the `ByteChange` tuple the first time `changes` is read, keeping it afterwards. `changed_count`, `is_empty` and `offsets` answer from the arrays. The class stays immutable and compares equal to a diff built with the same frames and changes.
+- **Scope:** `observation/diff.py`. **Out of scope:** the counting arrays (`_RegionStats.count`), the detector, the long look.
+- **Acceptance criteria:**
+  1. Diffing two snapshots builds no `ByteChange` until `changes` is read; `changed_count`, `is_empty` and `offsets` do not build them; a second read gets the same tuple.
+  2. On random pairs of two-region snapshots, the count, the emptiness and the offsets read before the changes are built equal those of a diff built from the changes, and the two compare and hash equal (a property test).
+  3. `SnapshotDiff(0, 1, ())` and the existing diff tests behave as before; assigning any attribute raises.
+  4. The profiled step at the user's scale: `observe: track` from 1.05 ms to a few tenths.
+  5. The observation, services and understanding suites pass unchanged.
+- **Expected changes:** `src/retro_ai_lab/observation/diff.py`, `tests/unit/observation/test_diff.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_a_diff_builds_its_byte_changes_only_when_they_are_read`, `test_counts_and_offsets_agree_with_the_changes_before_they_are_built` (property test, 60 examples), `test_snapshot_diff_is_immutable` (extended); observation, services and understanding suites; full suite; the step profile before and after.
+- **Results:** three tests, the property test 60 examples; observation, services and understanding suites 445 passed; full suite 1441 passed, 10 skipped (153.14s); ruff and mypy clean; profiled step at the user's scale: `observe: track` 1.05 ms → 0.21 ms a step, the step 9.42 ms → 7.94 ms.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** `SnapshotDiff` is a slotted immutable class with lazy `changes`; `diff_snapshots` hands it the differing offsets per region; the tracker's share of a step at the user's scale fell from 1.05 ms to 0.21 ms here.
 ### T-957 – The review stops walking for ids and byte statistics
 - **Status:** Done
 - **Phase:** 8 (the user's log after T-951: `discovery: review` 290 × 285 ms = 83 s of a 16-minute run, every review holding the AI's step; a profile of a review at the user's scale here spent 34 of its 100 ms in `Knowledge.new_id`, which scans `v1, v2, …` from the start for every proposal (252 proposals over 1,500 ids: a quadratic walk), and 20 ms in `ChangeTracker.all_stats`, which builds the 2,048 `ByteStats` one numpy call at a time)

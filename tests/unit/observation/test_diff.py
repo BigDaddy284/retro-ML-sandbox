@@ -71,6 +71,59 @@ def test_snapshot_diff_is_immutable() -> None:
     d = SnapshotDiff(0, 1, ())
     with pytest.raises(AttributeError):
         d.changes = (ByteChange("ram", 0, 0, 1),)  # type: ignore[misc]
+    with pytest.raises(AttributeError):
+        d.before_frame = 2  # type: ignore[misc]
+
+
+# T-958: the tracker diffs every step and nothing on the AI's step reads the
+# byte changes, so they are built only when someone asks for them.
+
+
+def test_a_diff_builds_its_byte_changes_only_when_they_are_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import retro_ai_lab.observation.diff as diff_module
+
+    built: list[int] = []
+
+    class Counted(ByteChange):
+        def __init__(self, region: str, offset: int, old: int, new: int) -> None:
+            built.append(offset)
+            super().__init__(region, offset, old, new)
+
+    monkeypatch.setattr(diff_module, "ByteChange", Counted)
+    before = snap(0, bytes(1000), vram=bytes(16))
+    after = snap(1, bytes([1]) * 1000, vram=bytes(15) + b"\x07")
+    d = diff_snapshots(before, after)
+    assert d.changed_count == 1001
+    assert not d.is_empty
+    assert d.offsets("ram") == tuple(range(1000))
+    assert d.offsets("vram") == (15,)
+    assert d.offsets("oam") == ()
+    assert built == []  # nothing read the changes yet
+    changes = d.changes
+    assert len(changes) == 1001 and len(built) == 1001
+    assert d.changes is changes and len(built) == 1001  # built once, kept
+    (only,) = d.by_region()["vram"]
+    assert (only.region, only.offset, only.old, only.new) == ("vram", 15, 0, 7)
+
+
+@settings(max_examples=60)
+@given(a=st.binary(min_size=1, max_size=48), c=st.binary(min_size=1, max_size=48), data=st.data())
+def test_counts_and_offsets_agree_with_the_changes_before_they_are_built(
+    a: bytes, c: bytes, data: st.DataObject
+) -> None:
+    b = data.draw(st.binary(min_size=len(a), max_size=len(a)))
+    e = data.draw(st.binary(min_size=len(c), max_size=len(c)))
+    lazy = diff_snapshots(snap(0, a, vram=c), snap(1, b, vram=e))
+    count, empty = lazy.changed_count, lazy.is_empty
+    ram, vram, none = lazy.offsets("ram"), lazy.offsets("vram"), lazy.offsets("oam")
+    eager = SnapshotDiff(0, 1, lazy.changes)  # reading them builds them
+    assert count == eager.changed_count == len(eager.changes)
+    assert empty == eager.is_empty
+    assert (ram, vram, none) == (eager.offsets("ram"), eager.offsets("vram"), ())
+    assert lazy == eager and hash(lazy) == hash(eager)
+    assert lazy != SnapshotDiff(0, 2, lazy.changes)
 
 
 # ------------------------------------------------------------- tracker
