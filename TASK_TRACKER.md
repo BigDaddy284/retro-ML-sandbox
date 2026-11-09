@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-959 | The brain's learning step encodes 65 situations a step (a batch of 32 before and after, and the one it is in) and the feature map worked every row out part by part, 1,560 Python iterations a step: at the user's scale 73% of `step: learn`, the step's second cost. The map now keeps a finished row per situation while no slot changes hands and reads it back | 8 | Done | 1/1 | see PR |
 | T-958 | The change tracker diffs memory on every step and nothing on the AI's step reads the byte changes, yet `diff_snapshots` built a `ByteChange` object per changed byte: at the user's scale the step's largest Python loop, for nobody. `SnapshotDiff` now keeps the changed offsets as arrays and builds the objects the first time `changes` is read; counts, emptiness and offsets answer from the arrays | 8 | Done | 1/1 | see PR #213 |
 | T-957 | The review's two remaining walks go: `Knowledge.new_id` scans from a remembered floor instead of from `v1` every time (252 proposals cost 34 ms, a quarter of a review), and the tracker builds every byte's statistics from its arrays in one pass instead of 2,048 per-byte numpy calls (20 ms a review); the user's reviews took 285 ms × 290 | 8 | Done | 1/1 | see PR #212 |
 | T-956 | The once-a-minute save takes its snapshot of the knowledge on the AI's thread and writes the file on a worker thread; the user's saves took 1.2 s each (27 MB, 100,000 relationships) and held the AI's step for all of it; a stop, a disconnect and the Save button still write at once and wait for a running write first | 8 | Done | 1/1 | see PR #211 |
@@ -3012,6 +3013,21 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
+### T-959 – The feature map keeps a finished row per situation
+- **Status:** Done
+- **Phase:** 8 (the user's 9 Nov log: `step: learn` 3.7 ms ×251,000, a fifth of the 18 ms step; a profile of `DQNLearner.learn` at the user's scale here (24-value situations, a full 10,000-transition memory) spent 2.2 of its 3.0 ms in `FeatureMap._fill`, 65 rows of 24 parts each worked out in Python with two `min`/`max` a part, for situations the replay memory hands back over and over)
+- **Objective:** `FeatureMap` keeps the finished row of every situation it has encoded, keyed by the situation's parts, and reads it back while the slot layout is the one the row was built under; a slot changing hands or a newcomer taking a free slot clears the cache. The record of when each variable was last seen moves on at a hit as before, so slots change hands exactly as they did. `built` counts the rows worked out part by part.
+- **Scope:** `learning/features.py`. **Out of scope:** the network's arithmetic, the replay memory's sampling, the batch size.
+- **Acceptance criteria:**
+  1. A situation's row is built once and read back until a slot changes hands; after that it is built again under the new layout.
+  2. On random sequences of situations over more variables than the map has slots, a cached map's vectors, slot order, evictions and drops equal an uncached map's (a property test).
+  3. `DQNLearner.learn` at the user's scale: from 3.0 ms to about 1 ms here.
+  4. The learning suite passes unchanged.
+- **Expected changes:** `src/retro_ai_lab/learning/features.py`, `tests/unit/learning/test_features.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_a_situations_row_is_built_once_and_read_back_until_a_slot_changes_hands`, `test_the_cache_changes_no_vector_slot_or_count` (property test, 100 examples); learning suite; full suite; the learn profile before and after.
+- **Results:** two tests, the property test 100 examples; learning suite 78 passed; full suite 1443 passed, 10 skipped (151.45s); ruff and mypy clean; `DQNLearner.learn` at the user's scale 2.99 ms → 1.12 ms; the policy snapshot `_record` takes at every go's end over the 10,000 remembered situations, which encodes them all, 103 ms → 37 ms.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** `FeatureMap._fill` reads a cached row by `state.parts` and only refreshes the last-seen record; `_place` clears the cache; `ROW_CACHE_MOST` bounds it at 20,000 rows; `learn` at the user's scale 2.99 ms → 1.12 ms here.
 ### T-958 – The diff builds its byte changes only when they are read
 - **Status:** Done
 - **Phase:** 8 (the user's 9 Nov log: 18 ms a step, of which the emulator 10 ms, `observe: track` 1.2 ms ×255,000; a profile of the whole step at the user's scale here spent 0.7 of the tracker's 1.05 ms in `diff_snapshots` building a `ByteChange` per changed byte, 1,000 a step, which nothing on the step reads: `MemoryObserved.diff` has no reader in the app, the detector and the finder work from the snapshot and the believed guesses)
