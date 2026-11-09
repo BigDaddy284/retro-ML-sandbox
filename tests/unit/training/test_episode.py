@@ -12,7 +12,7 @@ from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import BUTTONS, LAYOUT
 from retro_ai_lab.emulator.registry import default_registry
-from retro_ai_lab.learning import ActionSpace, QLearningAgent, Settings, StateEncoder
+from retro_ai_lab.learning import ActionSpace, QLearningAgent, Settings, State, StateEncoder
 from retro_ai_lab.rewards import Trigger
 from retro_ai_lab.services import (
     ConnectionService,
@@ -514,3 +514,78 @@ def test_earnings_are_worded_and_saved() -> None:
     assert EpisodeResult.from_dict(old).earned == ()
     with pytest.raises(ConfigurationError):
         EpisodeResult.from_dict({**old, "earned": [{"id": "x"}]})
+
+
+def _recording(agent: QLearningAgent, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    calls: list[dict[str, object]] = []
+    real = agent.learn
+
+    def learn(
+        state: State, action: int, reward: float, next_state: State, done: bool = False, **kw: int
+    ) -> float:
+        calls.append(
+            dict(state=state, action=action, reward=reward, next=next_state, done=done, **kw)
+        )
+        return real(state, action, reward, next_state, done, **kw)
+
+    monkeypatch.setattr(agent, "learn", learn)
+    return calls
+
+
+def test_the_runner_learns_each_step_from_the_return_over_the_lookahead(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-963: n-step returns, flushed with shorter spans when the go ends."""
+    from retro_ai_lab.learning import Transition
+    from retro_ai_lab.training.episode import LOOKAHEAD_STEPS
+
+    assert LOOKAHEAD_STEPS == 8
+    lab.connection.connect("fake", seed=3)
+    teach(lab)
+    with pytest.raises(ConfigurationError):
+        runner(lab, lookahead=0)
+    steps: list[Transition] = []
+    r = runner(lab, frames_per_step=4, max_steps=5, lookahead=3, on_learned=steps.append)
+    agent = r._agent
+    assert isinstance(agent, QLearningAgent)
+    g = agent.settings.gamma
+    calls = _recording(agent, monkeypatch)
+    r.begin()
+    assert r.step() and r.step() and calls == [] and len(steps) == 2  # pending
+    assert r.step() and len(calls) == 1  # the lookahead is full: the first step is learned
+    while r.step():
+        pass
+    assert len(calls) == 3 and agent.updates == 3
+    r.finish()
+    assert len(calls) == 5 and agent.updates == 5  # the last two, over 2 and 1 steps
+    spans = (3, 3, 3, 2, 1)
+    for i, (call, span) in enumerate(zip(calls, spans, strict=True)):
+        covered = steps[i : i + span]
+        assert call["state"] == steps[i].state and call["action"] == steps[i].action
+        assert call["steps"] == span and call["done"] is False
+        assert call["next"] == covered[-1].next_state
+        assert call["reward"] == pytest.approx(sum(g**k * t.reward for k, t in enumerate(covered)))
+    # A lookahead of 1 learns every step at once, as before.
+    r1 = runner(lab, frames_per_step=4, max_steps=3, lookahead=1)
+    calls1 = _recording(r1._agent, monkeypatch)  # type: ignore[arg-type]
+    r1.begin()
+    assert r1.step() and len(calls1) == 1 and calls1[0]["steps"] == 1
+
+
+def test_a_reset_flushes_the_pending_steps_as_final(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-963: the game starting over ends every pending step's return, with no future."""
+    lab.connection.connect("fake", seed=3)
+    teach(lab)
+    r = runner(lab, frames_per_step=4, max_steps=30, lookahead=5)
+    calls = _recording(r._agent, monkeypatch)  # type: ignore[arg-type]
+    r.begin()
+    assert r.step() and r.step() and calls == []
+    lab.bus.publish(
+        DiscoveryUpdated((), (), (GameEvent(EventKind.RESET, 42, None, WENT_HOME),), ())
+    )
+    assert not r.step()
+    assert [c["steps"] for c in calls] == [3, 2, 1] and all(c["done"] for c in calls)
+    assert all(c["next"] == r.state for c in calls)
+    assert r.finish().ended_by == "reset" and len(calls) == 3

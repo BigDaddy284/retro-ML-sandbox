@@ -77,8 +77,16 @@ def test_rehearse_feeds_every_demonstration_again_in_order() -> None:
 
     class Spy:
         def learn(
-            self, state: State, action: int, reward: float, next_state: State, done: bool = False
+            self,
+            state: State,
+            action: int,
+            reward: float,
+            next_state: State,
+            done: bool = False,
+            *,
+            steps: int = 1,
         ) -> float:
+            assert steps == 1  # the child's moves are one-step lessons (T-963)
             seen.append((state.key, action, reward))
             return 0.0
 

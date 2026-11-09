@@ -279,8 +279,11 @@ def test_manual_mode_leaves_the_controls_with_the_child(qtbot: QtBot, context: A
     for _ in range(t.frames_per_step * 3):
         game.clock.tick()
     game.pad.release("up")
-    assert agent.updates == 3
+    # Three steps of the child's are pending behind the lookahead (T-963); closing the go
+    # learns them all.
+    assert t.episode is not None and t.episode.steps == 3 and agent.updates == 0
     learning.choose_mode(Mode.GUIDED)  # mid-go: closes the go, the AI takes over
+    assert agent.updates == 3
     assert game.pad.locked and len(learning.go_rows()) == 1
     assert learning.go_rows()[0][1] == "You play"
     assert learning.go_rows()[0][4] == ENDED_BY["mode change"]

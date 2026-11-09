@@ -96,8 +96,18 @@ class Learner(Protocol):
         ...
 
     def learn(
-        self, state: State, action: int, reward: float, next_state: State, done: bool = False
-    ) -> float: ...
+        self,
+        state: State,
+        action: int,
+        reward: float,
+        next_state: State,
+        done: bool = False,
+        *,
+        steps: int = 1,
+    ) -> float:
+        """Learn one step; ``reward`` may be the return over ``steps`` steps, with
+        ``next_state`` the situation after them (T-963)."""
+        ...
 
     def end_episode(self, reward: float | None = None) -> float:
         """Count a finished go; with its ``reward``, exploring can follow results (T-932)."""

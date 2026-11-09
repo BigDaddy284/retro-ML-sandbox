@@ -61,6 +61,7 @@ from retro_ai_lab.training.episode import (
     DEFAULT_FRAMES_PER_STEP,
     DEFAULT_MAX_STEPS,
     DEFAULT_UNSTICK_AFTER,
+    LOOKAHEAD_STEPS,
     EpisodeResult,
     EpisodeRunner,
     describe_earned,
@@ -176,8 +177,11 @@ class TrainingService:
         algorithm: str = AUTO,
         promote_at: int = DEFAULT_PROMOTE_AT,
         goals: GoalService | None = None,
+        lookahead: int = LOOKAHEAD_STEPS,
     ) -> None:
         _check_algorithm(algorithm)
+        if lookahead < 1:
+            raise ConfigurationError("lookahead must be at least 1.")
         if promote_at < 1:
             raise ConfigurationError("promote_at must be at least 1.")
         if frames_per_step < 1:
@@ -192,6 +196,7 @@ class TrainingService:
         self._bus = bus
         self._frames_per_step = frames_per_step
         self._max_steps = max_steps
+        self._lookahead = lookahead  # steps a return spans when the AI learns (T-963)
         self._default_max_steps = max_steps  # a game with no choice of its own uses these (T-873)
         self._default_unstick_after = unstick_after
         self._use_checkpoint = checkpoint
@@ -1015,6 +1020,7 @@ class TrainingService:
                 unstick_after=self._unstick_after,
                 unstick_buttons=(self._wake_button,) if self._wake_button else (),
                 on_learned=self._on_learned,
+                lookahead=self._lookahead,
             )
         self._busy = True
         try:

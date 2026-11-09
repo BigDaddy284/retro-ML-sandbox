@@ -32,8 +32,11 @@ class Transition:
     next_state: State
     done: bool
     source: str = "ai"  # who drove the step: "ai" or "child"
+    steps: int = 1  # how many steps ``reward`` spans, ``next_state`` being after them (T-963)
 
     def __post_init__(self) -> None:
+        if isinstance(self.steps, bool) or not isinstance(self.steps, int) or self.steps < 1:
+            raise ConfigurationError("A transition's steps must be a whole number of 1 or more.")
         if not isinstance(self.state, State) or not isinstance(self.next_state, State):
             raise ConfigurationError("A transition needs a State before and after.")
         if not isinstance(self.action, int) or self.action < 0:
@@ -53,6 +56,7 @@ class Transition:
             "next_state": self.next_state.key,
             "done": self.done,
             "source": self.source,
+            "steps": self.steps,
         }
 
     @classmethod
@@ -65,6 +69,7 @@ class Transition:
                 State.from_key(str(data["next_state"])),
                 bool(data["done"]),
                 str(data.get("source", "ai")),
+                int(data.get("steps", 1)),
             )
         except (KeyError, TypeError, ValueError, AttributeError) as exc:
             raise ConfigurationError(f"Bad transition data: {exc}") from exc
