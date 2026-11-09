@@ -1582,3 +1582,121 @@ def test_practising_fast_names_fast_training_in_an_ai_mode(lab: Lab) -> None:
     assert t.practising_fast
     t.stop()
     assert not t.practising_fast
+
+
+def _goes_lose_their_first_life_at(
+    monkeypatch: pytest.MonkeyPatch, steps: list[int | None]
+) -> None:
+    """The next goes report these first-loss steps, whatever happened in them (T-961)."""
+    from retro_ai_lab.training.episode import EpisodeResult, EpisodeRunner
+
+    real = EpisodeRunner.finish
+    queue = list(steps)
+
+    def finish(self: EpisodeRunner, *, ended_by: str | None = None) -> EpisodeResult:
+        result = real(self, ended_by=ended_by)
+        if not queue:
+            return result
+        step = queue.pop(0)
+        return replace(result, first_setback_step=step, setbacks=0 if step is None else 1)
+
+    monkeypatch.setattr(EpisodeRunner, "finish", finish)
+
+
+def _run_goes(lab: Lab, count: int) -> None:
+    t = lab.training
+    while t.episodes < count:
+        assert t.step()
+
+
+def test_a_start_that_loses_a_life_by_itself_moves_the_goes_past_the_loss(
+    lab: Lab, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-961: the user's checkpoint was a dying moment; every go opened with a -10."""
+    from retro_ai_lab.training.service import DOOMED_GOES, DOOMED_START_STEPS, DOOMED_STEP_SLACK
+
+    assert (DOOMED_GOES, DOOMED_START_STEPS, DOOMED_STEP_SLACK) == (3, 75, 2)
+    lab.connect()
+    lab.play(["up"], 3)  # speed 3 with an obstacle ahead: holding nothing crashes at step 6
+    game = lab.adapter().game
+    lives, position = game.state.lives, game.state.position
+    t = lab.training
+    caplog.set_level(logging.INFO)
+    t.start(Mode.INDEPENDENT)  # the checkpoint is that doomed moment
+    _goes_lose_their_first_life_at(monkeypatch, [6, 7, 6])  # within the slack of one another
+    _run_goes(lab, 2)
+    assert t.step() and game.state.lives == lives  # two goes: no suspicion yet
+    _run_goes(lab, 3)
+    assert "loses a life by itself" not in caplog.text  # checked when the next go starts
+    assert t.step() and t.episode is not None and t.episode.steps == 1
+    assert (
+        "The spot the goes start from loses a life by itself, 6 steps in (the last 3 goes "
+        "all lost one there): the goes now start 6 steps later, where the game listens to "
+        "the AI again." in caplog.text
+    )
+    # Go 4 started after the crash: a life down, past the obstacle, stopped.
+    assert game.state.lives == lives - 1 and game.state.position > position
+    assert t.last is not None and t.last.result.first_setback_step == 6
+    # The goes after it start there too.
+    _run_goes(lab, 4)
+    assert t.step() and game.state.lives == lives - 1
+    t.stop()
+
+
+def test_a_loss_the_ai_causes_leaves_the_start_where_it_is(
+    lab: Lab, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-961: a car standing still loses nothing holding nothing; the losses were the AI's."""
+    lab.connect()
+    game = lab.adapter().game
+    lives, position = game.state.lives, game.state.position
+    t = lab.training
+    caplog.set_level(logging.INFO)
+    t.start(Mode.INDEPENDENT)
+    _goes_lose_their_first_life_at(monkeypatch, [6, 6, 6])
+    _run_goes(lab, 3)
+    assert t.step() and t.episode is not None and t.episode.steps == 1
+    assert (
+        "The spot the goes start from keeps its lives for 8 steps holding nothing: the "
+        "life the last 3 goes lost at step 6 is the AI's doing." in caplog.text
+    )
+    assert "loses a life by itself" not in caplog.text
+    assert game.state.lives == lives and game.state.position == position
+    t.stop()
+
+
+def test_losses_at_different_steps_or_late_raise_no_suspicion(
+    lab: Lab, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-961: only the same early step three goes running says anything about the start."""
+    lab.connect()
+    lab.play(["up"], 3)  # the doomed start of the first test
+    game = lab.adapter().game
+    lives = game.state.lives
+    t = lab.training
+    caplog.set_level(logging.INFO)
+    t.start(Mode.INDEPENDENT)
+    # 6 and 9 are too far apart; a go with no loss starts the count again; 80 is too late.
+    _goes_lose_their_first_life_at(monkeypatch, [6, 9, 6, None, 6, 6, 80, 80, 80])
+    for goes in range(1, 10):
+        _run_goes(lab, goes)
+        assert t.step() and game.state.lives == lives
+    assert "The spot the goes start from" not in caplog.text
+    t.stop()
+
+
+def test_goes_without_a_checkpoint_do_not_count_as_a_doomed_start(
+    lab: Lab, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-961: without save states the goes carry on from wherever the game is."""
+    lab.connect()
+    lab.play(["up"], 3)
+    t = lab.training
+    t._harness = None  # an emulator without save states
+    caplog.set_level(logging.INFO)
+    t.start(Mode.INDEPENDENT)
+    _goes_lose_their_first_life_at(monkeypatch, [6, 6, 6])
+    _run_goes(lab, 3)
+    assert t.step()
+    assert "The spot the goes start from" not in caplog.text
+    t.stop()

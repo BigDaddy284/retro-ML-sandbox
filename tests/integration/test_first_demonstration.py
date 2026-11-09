@@ -25,7 +25,7 @@ from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.understanding import EventKind, VariableKind
 
 BY_NAME = {b.name: b for b in BUTTONS}
-EXPLORE_FRAMES = 2400
+EXPLORE_FRAMES = 2500  # and a brake: the AI's checkpoint must not be a dying moment (T-961)
 GOES = 30
 MAX_STEPS = 150
 WINDOW = 10
@@ -62,6 +62,12 @@ def explore(ctx: AppContext, frames: int) -> None:
         ctx.observation.record_input([b.name for b in held])
         ctx.connection.call(lambda a: a.advance_frames(1))
         ctx.observation.advance(1)
+    # The child brakes before handing over: a car still moving when the AI's checkpoint
+    # is taken crashes on its own at step 1, and the AI would start past that (T-961).
+    ctx.connection.call(lambda a: a.set_input([BY_NAME["b"]]))
+    ctx.observation.record_input(["b"])
+    ctx.connection.call(lambda a: a.advance_frames(1))
+    ctx.observation.advance(1)
 
 
 @dataclass

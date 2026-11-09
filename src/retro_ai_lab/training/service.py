@@ -41,6 +41,7 @@ from retro_ai_lab.learning.qlearning import QLearningAgent, Settings
 from retro_ai_lab.learning.replay import Transition
 from retro_ai_lab.learning.skills import SkillsLearner
 from retro_ai_lab.learning.state import State, StateEncoder
+from retro_ai_lab.observation.memory import MemoryCapture
 from retro_ai_lab.rewards.exploitation import ExploitWarning
 from retro_ai_lab.rewards.goals import Goal
 from retro_ai_lab.rewards.model import RewardProfile
@@ -72,6 +73,7 @@ from retro_ai_lab.training.insights import (
     suggest_experiments,
 )
 from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
+from retro_ai_lab.understanding.knowledge import VariableKind
 from retro_ai_lab.understanding.wakeup import find_wake_button, probe_inputs
 
 CHECKPOINT_SLOT = "training"
@@ -84,6 +86,18 @@ IDENTICAL_GO_STEPS = 8
 # steps until T-867, when two flags ended 88 goes of 7 to 80 steps in a row).
 RESET_SUSPECT_STEPS = 120
 RESET_SUSPECT_GOES = 3
+# Goes that restart from the checkpoint and lose their first life this early, this many
+# goes in a row at the same step (give or take the slack), may start from a spot that loses
+# it by itself: the checkpoint landed in a dying moment (T-961; the user's log lost one at
+# step 32 in 177 of 179 goes, whatever the AI pressed). The game is then stepped from the
+# checkpoint holding nothing; a loss seen that way moves the goes' start past it, to where
+# the AI's buttons matter again, checked every DOOMED_LISTEN_STEPS steps, DOOMED_LISTEN_MOST
+# times at most.
+DOOMED_START_STEPS = 75
+DOOMED_GOES = 3
+DOOMED_STEP_SLACK = 2
+DOOMED_LISTEN_STEPS = 8
+DOOMED_LISTEN_MOST = 20
 log = logging.getLogger(__name__)
 
 DEAF_TRIES = 3  # searches for a wake button before training stops (T-852)
@@ -216,6 +230,9 @@ class TrainingService:
         self._probe_listening = False  # ask the game directly at the next go start (T-848)
         self._last_go: tuple[tuple[str, ...], bool] | None = None
         self._short_resets: list[tuple[str, ...]] = []
+        self._early_losses: list[int] = []  # first-loss steps of restored goes (T-961)
+        self._doomed_suspect: int | None = None  # check the start at the next go (T-961)
+        self._doomed_cleared: int | None = None  # a step the start was cleared of (T-961)
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
         bus.subscribe(MemoryObserved, self._on_memory)
@@ -888,6 +905,9 @@ class TrainingService:
         self._probe_listening = False
         self._last_go = None
         self._short_resets = []
+        self._early_losses = []
+        self._doomed_suspect = None
+        self._doomed_cleared = None
 
     def _on_disconnected(self, event: EmulatorDisconnected) -> None:
         was_running = self._status is not Status.IDLE
@@ -1011,6 +1031,10 @@ class TrainingService:
                     woken = self._wake_up_or_wait()
                 if not woken:
                     return None  # training stopped: no go on a game that ignores the AI
+            if self._doomed_suspect is not None and self._mode.ai_plays:
+                suspect, self._doomed_suspect = self._doomed_suspect, None
+                with self._flat_out():
+                    self._move_start_past_loss(suspect)
             self._runner.begin(restore=self._mode.ai_plays)
             self._discovery.begin_go()  # what moves from here on was moved by play (T-870)
         except EmulatorError:
@@ -1141,6 +1165,8 @@ class TrainingService:
             if self._harness.available():
                 self._restore_spot()  # a pinned spot is where every go starts
                 self._harness.checkpoint()
+                self._early_losses = []
+                self._doomed_cleared = None
         except EmulatorError:
             pass  # link loss is announced by the connection service
 
@@ -1190,6 +1216,7 @@ class TrainingService:
         if not self._needs_wake:  # a go the game ignored says nothing about play (T-870)
             self._discovery.credit_played(frame=self._observation.frame)
         self._note_short_reset(result)
+        self._note_doomed_start(result)
         if result.ended_by in ("stuck", "reset"):
             self._probe_listening = True  # ask the game directly next time (T-848)
         if self._agent is not None:
@@ -1231,6 +1258,98 @@ class TrainingService:
             self._discovery.doubt_reset(ids)
         except (ConfigurationError, UnsupportedCapabilityError) as exc:
             log.warning("Couldn't note the cycling values: %s", exc)
+
+    def _note_doomed_start(self, result: EpisodeResult) -> None:
+        """Three restored goes in a row losing their first life at the same early step:
+        the spot they start from may lose it by itself; check at the next go (T-961)."""
+        runner = self._runner
+        step = result.first_setback_step
+        if (
+            runner is None
+            or not runner.restored
+            or not self._mode.ai_plays
+            or step is None
+            or step > DOOMED_START_STEPS
+        ):
+            self._early_losses = []
+            return
+        if self._early_losses and abs(self._early_losses[-1] - step) > DOOMED_STEP_SLACK:
+            self._early_losses = []
+        self._early_losses.append(step)
+        if len(self._early_losses) < DOOMED_GOES:
+            return
+        suspect = max(self._early_losses)
+        self._early_losses = []
+        cleared = self._doomed_cleared
+        if cleared is not None and abs(cleared - suspect) <= DOOMED_STEP_SLACK:
+            return  # the start was already cleared of a loss at this step
+        self._doomed_suspect = suspect
+
+    def _move_start_past_loss(self, steps: int) -> None:
+        """Does the goes' start spot lose a life holding nothing? Then start after it (T-961).
+
+        Runs from the checkpoint, holding no button, for ``steps`` steps (plus the
+        slack), reading the AI's best life and health guesses each step. No drop
+        means the loss the goes had is the AI's doing, and nothing changes. A drop
+        means the checkpoint was taken in a dying moment: the game is stepped on,
+        still holding nothing, until the AI's buttons change something again, and
+        that spot becomes the checkpoint. The go about to begin restores it.
+        """
+        harness = self._harness
+        knowledge = self._discovery.knowledge
+        if (
+            harness is None
+            or knowledge is None
+            or not harness.has_checkpoint
+            or not harness.available()
+        ):
+            return
+        best = (knowledge.best(VariableKind.LIVES), knowledge.best(VariableKind.HEALTH))
+        watched = tuple(v for v in best if v is not None)
+        if not watched:
+            return
+        frames = self._frames_per_step
+        capture = MemoryCapture(self._connection)
+        harness.restore()
+        values = [v.decode(capture.capture(0)) for v in watched]
+        lost_at = None
+        for step in range(1, steps + DOOMED_STEP_SLACK + 1):
+            self._connection.call(lambda a: a.step(frames, pressed=()))
+            snapshot = capture.capture(step * frames)
+            now = [v.decode(snapshot) for v in watched]
+            if any(n < was for n, was in zip(now, values, strict=True)):
+                lost_at = step
+                break
+            values = now
+        if lost_at is None:
+            self._doomed_cleared = steps
+            log.info(
+                "The spot the goes start from keeps its lives for %d steps holding nothing: "
+                "the life the last %d goes lost at step %d is the AI's doing.",
+                steps + DOOMED_STEP_SLACK,
+                DOOMED_GOES,
+                steps,
+            )
+            return
+        waited = 0
+        for _ in range(DOOMED_LISTEN_MOST):
+            try:
+                if probe_inputs(self._connection, self._playing_buttons()).matters:
+                    break
+            except ConfigurationError:
+                break
+            self._connection.call(lambda a: a.step(frames * DOOMED_LISTEN_STEPS, pressed=()))
+            waited += DOOMED_LISTEN_STEPS
+        harness.checkpoint()
+        self._doomed_cleared = None  # a new start: its losses are its own to check
+        log.info(
+            "The spot the goes start from loses a life by itself, %d steps in (the last %d "
+            "goes all lost one there): the goes now start %d steps later, where the game "
+            "listens to the AI again.",
+            lost_at,
+            DOOMED_GOES,
+            lost_at + waited,
+        )
 
     def _announce(self, reason: str) -> None:
         self._bus.publish(TrainingStateChanged(self._status, self._mode, reason))

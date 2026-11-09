@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-961: when three goes in a row lose their first life at the same early step, the app checks from the checkpoint, holding nothing, whether the game loses it by itself; when it does, the goes restart from just after the loss, once the game listens to the AI again. The user's log had 177 of 179 goes lose a life at step 32 whatever the AI pressed: the checkpoint was a dying moment, and every go opened with a −10 nobody could avoid.
 - T-960: the emulator link's log line says what the BizHawk script's memory reads and its whole serve of a step cost (`step:reads`, `step:serve`) beside the frames, so a slow step on a user's PC names its slow part.
 - T-959: the brain's learning step no longer works every situation's feature row out part by part; the feature map keeps a finished row per situation while its slots stay put, so the 65 rows a training step needs are mostly read back (a learning step at the user's scale: 3.0 ms → 1.1 ms here).
 - T-958: the memory diff the tracker makes on every step no longer builds an object per changed byte up front; the objects are built the first time something reads them, which nothing on the AI's step does (the step's largest Python loop at the user's scale, for nobody).
