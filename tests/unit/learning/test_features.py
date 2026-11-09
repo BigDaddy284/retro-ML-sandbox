@@ -7,6 +7,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+import retro_ai_lab.learning.features as features_module
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning import DEFAULT_BINS, FeatureMap, State, bucket
 from retro_ai_lab.learning.features import DEFAULT_WIDTH, SCHEMA_VERSION
@@ -139,3 +140,48 @@ def test_a_full_map_gives_an_absent_slot_to_a_newcomer() -> None:
     assert again.ids == fm.ids and [again.slot_of(i) for i in fm.ids] == [
         fm.slot_of(i) for i in fm.ids
     ]
+
+
+# T-959: a training step encodes 65 situations from the replay memory, nearly all
+# seen before; a finished row is kept by situation while no slot changes hands.
+
+
+def test_a_situations_row_is_built_once_and_read_back_until_a_slot_changes_hands() -> None:
+    fm = FeatureMap(width=2)
+    first = fm.vector(A)
+    assert fm.built == 1
+    again = fm.vector(A)
+    assert fm.built == 1 and np.array_equal(first, again) and again is not first
+    b_row = fm.vector(B)
+    assert np.array_equal(fm.batch([A, B, A, B]), np.stack([first, b_row, first, b_row]))
+    assert fm.built == 2  # B once; every A came from the cache
+    fm.vector(C)  # "lives" takes "speed"'s slot: every cached row is stale
+    assert fm.evicted == 1
+    assert fm.built == 3
+    fm.vector(A)
+    assert fm.built == 4  # built again under the new layout
+    # "speed" took a slot back during that build; the row cached at its end is laid
+    # out the new way, so the next A is a hit again.
+    assert fm.vector(A)[fm.slot_of("speed") * 3] == 1.0 and fm.built == 4
+
+
+@given(
+    st.lists(
+        st.lists(st.tuples(st.sampled_from(list("abcdefg")), st.integers(0, 40)), max_size=5)
+        .map(lambda ps: dict(ps))
+        .map(lambda d: State(tuple(sorted(d.items())))),
+        min_size=1,
+        max_size=40,
+    )
+)
+def test_the_cache_changes_no_vector_slot_or_count(states: list[State]) -> None:
+    cached = FeatureMap(width=3)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(features_module, "ROW_CACHE_MOST", 0)
+        plain = FeatureMap(width=3)
+        plain_rows = [plain.vector(s) for s in states]
+    rows = [cached.vector(s) for s in states]
+    assert all(np.array_equal(a, b) for a, b in zip(rows, plain_rows, strict=True))
+    assert cached.ids == plain.ids
+    assert (cached.evicted, cached.dropped) == (plain.evicted, plain.dropped)
+    assert cached.built <= len(states) and plain.built == len(states)

@@ -33,6 +33,9 @@ from retro_ai_lab.learning.state import DEFAULT_BINS, State
 SCHEMA_VERSION = 1
 DEFAULT_WIDTH = 32  # believed variables the vector has room for
 SLOTS_PER_VARIABLE = 3
+# Finished rows kept by situation (T-959): a training step encodes 65 situations from
+# the replay memory, nearly all seen before; past this many the cache starts over.
+ROW_CACHE_MOST = 20_000
 
 
 class FeatureMap:
@@ -49,6 +52,9 @@ class FeatureMap:
         self._seen: dict[str, int] = {}  # id -> the fill it was last present in (T-908)
         self._fills = 0
         self._evicted = 0
+        # parts -> the finished row, valid while no slot changes hands (T-959)
+        self._rows: dict[tuple[tuple[str, int], ...], NDArray[np.float32]] = {}
+        self._built = 0
 
     # ------------------------------------------------------------ queries
 
@@ -80,6 +86,11 @@ class FeatureMap:
         """Slots that changed hands to a newcomer (T-908)."""
         return self._evicted
 
+    @property
+    def built(self) -> int:
+        """Rows worked out part by part; the rest were read back from the cache (T-959)."""
+        return self._built
+
     def slot_of(self, variable_id: str) -> int:
         try:
             return self._slots[variable_id]
@@ -102,9 +113,20 @@ class FeatureMap:
 
     def _fill(self, row: NDArray[np.float32], state: State) -> None:
         self._fills += 1
-        present = {vid for vid, _ in state.parts}
-        for vid, b in state.parts:
-            self._seen[vid] = self._fills
+        fills = self._fills
+        parts = state.parts
+        cached = self._rows.get(parts)
+        if cached is not None:
+            # The same situation with the same slots gives the same row (T-959); only
+            # the record of when each variable was last seen moves on.
+            for vid, _ in parts:
+                self._seen[vid] = fills
+            row[:] = cached
+            return
+        self._built += 1
+        present = {vid for vid, _ in parts}
+        for vid, b in parts:
+            self._seen[vid] = fills
             slot = self._slots.get(vid)
             if slot is None:
                 slot = self._place(vid, present)
@@ -116,9 +138,14 @@ class FeatureMap:
             row[base] = 1.0
             row[base + 1] = max(-1.0, min(1.0, b / self._bins))  # fine: exact small values
             row[base + 2] = max(-1.0, min(1.0, b / self._span))  # coarse: the whole range
+        if ROW_CACHE_MOST > 0:
+            if len(self._rows) >= ROW_CACHE_MOST:
+                self._rows.clear()
+            self._rows[parts] = row.copy()
 
     def _place(self, vid: str, present: set[str]) -> int | None:
         """A slot for a newcomer: a free one, else an absent holder's; None when none."""
+        self._rows.clear()  # every cached row was laid out without this newcomer (T-959)
         if len(self._slots) < self._width:
             slot = self._slots[vid] = len(self._slots)
             return slot
