@@ -16,7 +16,7 @@ import logging
 import os
 import re
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar
@@ -33,6 +33,7 @@ from retro_ai_lab.core import (
     ProtocolError,
     StepResult,
 )
+from retro_ai_lab.core.worklog import CallStats
 from retro_ai_lab.emulator.base import EmulatorAdapter
 from retro_ai_lab.emulator.bizhawk.description import Description
 from retro_ai_lab.emulator.bizhawk.image import decode_image
@@ -196,6 +197,11 @@ class BizHawkAdapter(EmulatorAdapter):
     def link_summary(self) -> str:
         """What every call since connect cost, slowest command first (T-830)."""
         return "no calls" if self._link is None else self._link.summary(lifetime=True)
+
+    @property
+    def link_totals(self) -> Mapping[str, CallStats]:
+        """Per-command timings since connect, by name (T-960); empty when not connected."""
+        return {} if self._link is None else self._link.totals
 
     @property
     def image_path(self) -> str:
@@ -386,15 +392,17 @@ class BizHawkAdapter(EmulatorAdapter):
     def _note_took(self, answer: dict[str, Any]) -> None:
         """Keep the script's own timing of a step in the link log (T-890).
 
-        ``step:latch`` is the wait for the turn that latches the pad and
-        ``step:frames`` the frames themselves, so the log says which part of
-        EmuHawk's loop a step pays for.
+        ``step:latch`` is the wait for the turn that latches the pad,
+        ``step:frames`` the frames themselves, ``step:reads`` the memory reads
+        and their encoding and ``step:serve`` the script's whole serve of the
+        request (T-960), so the log says which part of a step costs what: the
+        gap from ``step:serve`` to ``step`` is the wire and this side's work.
         """
         took = answer.get("took")
         link = self._link
         if not isinstance(took, dict) or link is None:
             return
-        for part in ("latch", "frames"):
+        for part in ("latch", "frames", "reads", "serve"):
             seconds = took.get(part)
             if isinstance(seconds, int | float) and not isinstance(seconds, bool) and seconds >= 0:
                 link.note(f"step:{part}", float(seconds))
