@@ -1612,6 +1612,30 @@ def _run_goes(lab: Lab, count: int) -> None:
         assert t.step()
 
 
+def _the_game_takes_a_life_every(lab: Lab, steps: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    """From the frame the game is at, a life goes every ``steps`` steps whatever is held: a
+    dying moment, or a timed hazard (T-965). Lives are topped up so the game never ends, and
+    the life count is confirmed so the losses do not make the AI doubt it."""
+    game = lab.adapter().game
+    ram = game._ram
+    ram[LAYOUT.lives] = 200
+    k = lab.discovery.knowledge
+    assert k is not None
+    lives = k.at(RAM, LAYOUT.lives)
+    assert lives is not None
+    k.confirm(lives.id)
+    every = steps * lab.training.frames_per_step
+    first = game._u16(LAYOUT.frame)
+    real = game._simulate
+
+    def simulate(held: frozenset[str]) -> None:
+        real(held)
+        if (game._u16(LAYOUT.frame) + 1 - first) % every == 0 and ram[LAYOUT.lives] > 0:
+            ram[LAYOUT.lives] -= 1
+
+    monkeypatch.setattr(game, "_simulate", simulate)
+
+
 def test_a_start_that_loses_a_life_by_itself_moves_the_goes_past_the_loss(
     lab: Lab, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1620,7 +1644,7 @@ def test_a_start_that_loses_a_life_by_itself_moves_the_goes_past_the_loss(
 
     assert (DOOMED_GOES, DOOMED_START_STEPS, DOOMED_STEP_SLACK) == (3, 75, 2)
     lab.connect()
-    lab.play(["up"], 3)  # speed 3 with an obstacle ahead: holding nothing crashes at step 6
+    _the_game_takes_a_life_every(lab, 6, monkeypatch)  # the car stands still; it dies anyway
     game = lab.adapter().game
     lives, position = game.state.lives, game.state.position
     t = lab.training
@@ -1633,16 +1657,83 @@ def test_a_start_that_loses_a_life_by_itself_moves_the_goes_past_the_loss(
     assert "loses a life by itself" not in caplog.text  # checked when the next go starts
     assert t.step() and t.episode is not None and t.episode.steps == 1
     assert (
-        "The spot the goes start from loses a life by itself, 6 steps in (the last 3 goes "
-        "all lost one there): the goes now start 6 steps later, where the game listens to "
-        "the AI again." in caplog.text
+        "The spot the goes start from loses a life by itself, 6 steps in, whatever is held "
+        "(the last 3 goes all lost one there): the goes now start 6 steps later, where the "
+        "game listens to the AI again." in caplog.text
     )
-    # Go 4 started after the crash: a life down, past the obstacle, stopped.
-    assert game.state.lives == lives - 1 and game.state.position > position
+    # Go 4 started after the loss: a life down, the car where it stood, stopped.
+    assert game.state.lives == lives - 1 and game.state.position == position
     assert t.last is not None and t.last.result.first_setback_step == 6
     # The goes after it start there too.
     _run_goes(lab, 4)
     assert t.step() and game.state.lives == lives - 1
+    t.stop()
+
+
+def test_a_loss_a_held_button_avoids_leaves_the_start_where_it_is(
+    lab: Lab, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-965: the user's start lost a life every 60 steps to a player who held nothing, and
+    the check moved the goes past it 14 times; a loss a button avoids is the AI's."""
+    lab.connect()
+    lab.play(["up"], 3)  # speed 3 with an obstacle ahead: holding nothing crashes at step 6
+    game = lab.adapter().game
+    lives, position = game.state.lives, game.state.position
+    t = lab.training
+    caplog.set_level(logging.INFO)
+    t.start(Mode.INDEPENDENT)
+    _goes_lose_their_first_life_at(monkeypatch, [6, 6, 6, 6, 6, 6])
+    _run_goes(lab, 3)
+    assert t.step() and t.episode is not None and t.episode.steps == 1
+    assert (
+        "The spot the goes start from loses a life 6 steps in holding nothing, but keeps it "
+        "holding Down: the life the last 3 goes lost at step 6 is the AI's to avoid." in caplog.text
+    )
+    assert "loses a life by itself" not in caplog.text
+    # Go 4 started where the others did: no life down, one step of speed 3 driven.
+    assert game.state.lives == lives
+    assert game.state.position == position + 3 * t.frames_per_step
+    _run_goes(lab, 6)  # three more goes losing it at step 6: cleared, not checked again
+    assert t.step() and game.state.lives == lives
+    assert caplog.text.count("the AI's to avoid") == 1
+    t.stop()
+
+
+def test_the_start_is_moved_three_times_at_most(
+    lab: Lab, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-965: a game that takes a life every few steps whatever is held is not escaped by
+    moving the start on and on; after three moves the start stays."""
+    from retro_ai_lab.training.service import DOOMED_MOVES_MOST
+
+    assert DOOMED_MOVES_MOST == 3
+    lab.connect()
+    _the_game_takes_a_life_every(lab, 6, monkeypatch)
+    game = lab.adapter().game
+    lives = game.state.lives
+    t = lab.training
+    caplog.set_level(logging.INFO)
+    t.start(Mode.INDEPENDENT)
+    _goes_lose_their_first_life_at(monkeypatch, [6] * 40)
+    for moves in range(1, 4):  # goes 4, 7 and 10 start one life further on
+        _run_goes(lab, 3 * moves)
+        assert t.step() and game.state.lives == lives - moves
+    _run_goes(lab, 12)
+    assert t.step() and game.state.lives == lives - 3  # the fourth loss moves nothing
+    assert (
+        "The goes' start has been moved 3 times since this checkpoint was taken and the "
+        "last 3 goes still lost a life 6 steps in: the game takes lives here whatever is "
+        "held, so the start stays and the loss is the AI's to learn around." in caplog.text
+    )
+    _run_goes(lab, 15)
+    assert t.step() and game.state.lives == lives - 3
+    assert caplog.text.count("whatever is held (the last") == 3
+    assert caplog.text.count("the start stays") == 1
+    t.stop()
+    t.start(Mode.INDEPENDENT)  # a new checkpoint: its start may be moved again
+    _run_goes(lab, 19)  # the stop ended go 16; goes 17 to 19 start from the new checkpoint
+    assert t.step()
+    assert caplog.text.count("whatever is held (the last") == 4
     t.stop()
 
 

@@ -23,6 +23,7 @@ from typing import Any, TypeVar
 
 from retro_ai_lab.core import ConfigurationError, EmulatorError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
+from retro_ai_lab.core.types import Button
 from retro_ai_lab.core.worklog import app_work
 from retro_ai_lab.learning.actions import ActionSpace
 from retro_ai_lab.learning.demonstrations import CHILD, Demonstrations
@@ -75,7 +76,7 @@ from retro_ai_lab.training.insights import (
     suggest_experiments,
 )
 from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
-from retro_ai_lab.understanding.knowledge import VariableKind
+from retro_ai_lab.understanding.knowledge import Variable, VariableKind
 from retro_ai_lab.understanding.wakeup import find_wake_button, probe_inputs
 
 CHECKPOINT_SLOT = "training"
@@ -94,12 +95,19 @@ RESET_SUSPECT_GOES = 3
 # step 32 in 177 of 179 goes, whatever the AI pressed). The game is then stepped from the
 # checkpoint holding nothing; a loss seen that way moves the goes' start past it, to where
 # the AI's buttons matter again, checked every DOOMED_LISTEN_STEPS steps, DOOMED_LISTEN_MOST
-# times at most.
+# times at most. A loss holding nothing is not yet the game's doing: a player who stands
+# still is what many games punish (T-965; the user's log moved the start 14 times in 25
+# minutes, 60 steps at a time, past a loss a standing player had every 60 steps). So the
+# same steps are run again holding each of the AI's buttons in turn, and only a loss that
+# comes whatever is held moves the start; one a held button avoids is the AI's to learn
+# around. The start is moved at most DOOMED_MOVES_MOST times from one checkpoint: a game
+# that takes a life again and again whatever is held is not escaped by moving on.
 DOOMED_START_STEPS = 75
 DOOMED_GOES = 3
 DOOMED_STEP_SLACK = 2
 DOOMED_LISTEN_STEPS = 8
 DOOMED_LISTEN_MOST = 20
+DOOMED_MOVES_MOST = 3
 log = logging.getLogger(__name__)
 
 DEAF_TRIES = 3  # searches for a wake button before training stops (T-852)
@@ -241,6 +249,7 @@ class TrainingService:
         self._early_losses: list[int] = []  # first-loss steps of restored goes (T-961)
         self._doomed_suspect: int | None = None  # check the start at the next go (T-961)
         self._doomed_cleared: int | None = None  # a step the start was cleared of (T-961)
+        self._start_moves = 0  # times the start moved since the checkpoint (T-965)
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
         bus.subscribe(MemoryObserved, self._on_memory)
@@ -916,6 +925,7 @@ class TrainingService:
         self._early_losses = []
         self._doomed_suspect = None
         self._doomed_cleared = None
+        self._start_moves = 0
 
     def _on_disconnected(self, event: EmulatorDisconnected) -> None:
         was_running = self._status is not Status.IDLE
@@ -1177,6 +1187,7 @@ class TrainingService:
                 self._harness.checkpoint()
                 self._early_losses = []
                 self._doomed_cleared = None
+                self._start_moves = 0
         except EmulatorError:
             pass  # link loss is announced by the connection service
 
@@ -1300,14 +1311,19 @@ class TrainingService:
         return self._rewards.penalised() if self._rewards is not None else frozenset()
 
     def _move_start_past_loss(self, steps: int) -> None:
-        """Does the goes' start spot lose a life holding nothing? Then start after it (T-961).
+        """Does the goes' start spot lose a life whatever is held? Then start after it (T-961).
 
         Runs from the checkpoint, holding no button, for ``steps`` steps (plus the
-        slack), reading the AI's best life and health guesses each step. No drop
+        slack), reading the values the deaths are counted on each step. No drop
         means the loss the goes had is the AI's doing, and nothing changes. A drop
-        means the checkpoint was taken in a dying moment: the game is stepped on,
-        still holding nothing, until the AI's buttons change something again, and
-        that spot becomes the checkpoint. The go about to begin restores it.
+        is run again holding each of the AI's buttons in turn (T-965): a button that
+        keeps the life says the loss is the AI's to avoid, and nothing changes. A
+        loss that comes whatever is held means the checkpoint was taken in a dying
+        moment: the game is stepped on, holding nothing, until the AI's buttons
+        change something again, and that spot becomes the checkpoint. The go about
+        to begin restores it. After ``DOOMED_MOVES_MOST`` moves from one checkpoint
+        the start stays put: a game that takes a life again and again whatever is
+        held is not escaped by moving on.
         """
         harness = self._harness
         knowledge = self._discovery.knowledge
@@ -1323,19 +1339,19 @@ class TrainingService:
         watched = yours or tuple(v for v in best if v is not None)
         if not watched:
             return
-        frames = self._frames_per_step
+        if self._start_moves >= DOOMED_MOVES_MOST:
+            self._doomed_cleared = steps
+            log.info(
+                "The goes' start has been moved %d times since this checkpoint was taken and "
+                "the last %d goes still lost a life %d steps in: the game takes lives here "
+                "whatever is held, so the start stays and the loss is the AI's to learn around.",
+                self._start_moves,
+                DOOMED_GOES,
+                steps,
+            )
+            return
         capture = MemoryCapture(self._connection)
-        harness.restore()
-        values = [v.decode(capture.capture(0)) for v in watched]
-        lost_at = None
-        for step in range(1, steps + DOOMED_STEP_SLACK + 1):
-            self._connection.call(lambda a: a.step(frames, pressed=()))
-            snapshot = capture.capture(step * frames)
-            now = [v.decode(snapshot) for v in watched]
-            if any(n < was for n, was in zip(now, values, strict=True)):
-                lost_at = step
-                break
-            values = now
+        lost_at = self._loss_holding(capture, watched, (), steps + DOOMED_STEP_SLACK)
         if lost_at is None:
             self._doomed_cleared = steps
             log.info(
@@ -1346,6 +1362,24 @@ class TrainingService:
                 steps,
             )
             return
+        playing = set(self._playing_buttons())
+        buttons = [b for b in self._connection.call(lambda a: a.buttons()) if b.name in playing]
+        for button in buttons:
+            if self._loss_holding(capture, watched, (button,), lost_at + DOOMED_STEP_SLACK) is None:
+                self._doomed_cleared = steps
+                log.info(
+                    "The spot the goes start from loses a life %d steps in holding nothing, "
+                    "but keeps it holding %s: the life the last %d goes lost at step %d is "
+                    "the AI's to avoid.",
+                    lost_at,
+                    button.label,
+                    DOOMED_GOES,
+                    steps,
+                )
+                return
+        harness.restore()
+        frames = self._frames_per_step
+        self._connection.call(lambda a: a.step(frames * lost_at, pressed=()))
         waited = 0
         for _ in range(DOOMED_LISTEN_MOST):
             try:
@@ -1357,14 +1391,38 @@ class TrainingService:
             waited += DOOMED_LISTEN_STEPS
         harness.checkpoint()
         self._doomed_cleared = None  # a new start: its losses are its own to check
+        self._start_moves += 1
         log.info(
-            "The spot the goes start from loses a life by itself, %d steps in (the last %d "
-            "goes all lost one there): the goes now start %d steps later, where the game "
-            "listens to the AI again.",
+            "The spot the goes start from loses a life by itself, %d steps in, whatever is "
+            "held (the last %d goes all lost one there): the goes now start %d steps later, "
+            "where the game listens to the AI again.",
             lost_at,
             DOOMED_GOES,
             lost_at + waited,
         )
+
+    def _loss_holding(
+        self,
+        capture: MemoryCapture,
+        watched: Sequence[Variable],
+        held: tuple[Button, ...],
+        steps: int,
+    ) -> int | None:
+        """From the checkpoint, holding ``held``: the step a watched value first drops at,
+        within ``steps``; None when none does. Leaves the game where the run ended."""
+        harness = self._harness
+        assert harness is not None
+        frames = self._frames_per_step
+        harness.restore()
+        values = [v.decode(capture.capture(0)) for v in watched]
+        for step in range(1, steps + 1):
+            self._connection.call(lambda a: a.step(frames, pressed=held))
+            snapshot = capture.capture(step * frames)
+            now = [v.decode(snapshot) for v in watched]
+            if any(n < was for n, was in zip(now, values, strict=True)):
+                return step
+            values = now
+        return None
 
     def _announce(self, reason: str) -> None:
         self._bus.publish(TrainingStateChanged(self._status, self._mode, reason))
