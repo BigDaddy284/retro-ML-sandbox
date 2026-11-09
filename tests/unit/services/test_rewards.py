@@ -510,8 +510,24 @@ def test_the_values_a_person_penalises_are_known(
     rewards.add_own(lane.id, goes_up=True, value=2.0)  # a prize, not a penalty
     down = rewards.add_own(timer.id, goes_up=False, value=-3.0)
     up = rewards.add_own(lane.id, goes_up=False, value=-1.0)
-    assert rewards.penalised() == frozenset({timer.id, lane.id})
+    # T-967: neither is life-like, so the heaviest penalty is the death, not every penalty
+    # (the user's "x position goes down" at -2 counted as one beside "Lifes" at -20).
+    assert rewards.penalised() == frozenset({timer.id})
+    rewards.set_enabled(down.id, False)
+    assert rewards.penalised() == frozenset({lane.id})
+    rewards.set_enabled(down.id, True)
     rewards.set_enabled(up.id, False)
     assert rewards.penalised() == frozenset({timer.id})
+    # A life count or health value the person penalises is the death however light the
+    # penalty; two equally heavy penalties on other values are both deaths.
+    lives = k.at(RAM, LAYOUT.lives)
+    assert lives is not None and lives.kind is VariableKind.LIVES
+    light = rewards.add_own(lives.id, goes_up=False, value=-0.5)
+    assert rewards.penalised() == frozenset({lives.id})
+    rewards.remove_own(light.id)
+    rewards.set_enabled(up.id, True)
+    rewards.set_value(up.id, -3.0)
+    assert rewards.penalised() == frozenset({timer.id, lane.id})
     rewards.remove_own(down.id)
+    rewards.remove_own(up.id)
     assert rewards.penalised() == frozenset()

@@ -1834,6 +1834,9 @@ def test_deaths_are_counted_on_the_value_your_reward_penalises(
     assert lives is not None
     stray = k.propose(RAM, LAYOUT.timer, kind=VariableKind.LIVES, evidence=SURE)  # the AI's guess
     own = lab.rewards.add_own(stray.id, goes_up=False, value=-5.0, name="Fuel")
+    speed = k.at(RAM, LAYOUT.speed)
+    assert speed is not None
+    back = lab.rewards.add_own(speed.id, goes_up=False, value=-2.0)  # slowing down: no death
     t = lab.training
     caplog.set_level(logging.INFO)
     t.start(Mode.INDEPENDENT)
@@ -1855,6 +1858,7 @@ def test_deaths_are_counted_on_the_value_your_reward_penalises(
     t.stop()
     # The reward gone, the next go counts the AI's best guesses again, and says so once.
     lab.rewards.remove_own(own.id)
+    lab.rewards.remove_own(back.id)
     caplog.clear()
     t.start(Mode.INDEPENDENT)
     assert t.step() and t.step() and t.episode is not None
