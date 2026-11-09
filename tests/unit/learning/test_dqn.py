@@ -275,3 +275,26 @@ def test_a_dqn_brain_saved_with_the_old_default_gamma_is_moved_to_the_new_one(
     data = json.loads(json.dumps(chosen.to_dict()))
     assert DQNLearner.from_dict(data, space=SPACE).settings.gamma == 0.9
     assert "looks further ahead" not in caplog.text
+
+
+def test_the_network_discounts_a_return_by_the_steps_it_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T-963: a remembered three-step return is trained with gamma cubed on the future."""
+    agent = DQNLearner(
+        SPACE, Settings(gamma=0.9, epsilon=0.0, epsilon_min=0.0), seed=1, config=QUICK
+    )
+    seen: list[np.ndarray] = []
+    real = agent._net.train_step
+
+    def train_step(x: np.ndarray, targets: np.ndarray, mask: np.ndarray) -> float:
+        seen.append(targets.copy())
+        return real(x, targets, mask)
+
+    monkeypatch.setattr(agent._net, "train_step", train_step)
+    for _ in range(QUICK.warmup):  # the whole memory is this one three-step return
+        agent.learn(A, 1, 2.0, B, steps=3)
+    assert len(seen) == 1
+    future = agent._target.forward(agent._features.batch([B])).max(axis=1)[0]
+    assert seen[0][:, 1] == pytest.approx(2.0 + 0.9**3 * future)
+    assert agent._replay.sample(1)[0].steps == 3

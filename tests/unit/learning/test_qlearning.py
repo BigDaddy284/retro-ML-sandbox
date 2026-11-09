@@ -227,3 +227,14 @@ def test_a_chosen_gamma_survives_a_save_and_load(caplog: pytest.LogCaptureFixtur
         again = QLearningAgent.from_dict(json.loads(json.dumps(agent.to_dict())), space=SPACE)
         assert again.settings.gamma == gamma
     assert "looks further ahead" not in caplog.text
+
+
+def test_a_q_update_bootstraps_over_the_steps_it_spans() -> None:
+    """T-963: a return over three steps discounts the future by gamma cubed."""
+    agent = QLearningAgent(SPACE, Settings(alpha=0.5, gamma=0.9, epsilon=0.0, epsilon_min=0.0))
+    agent.learn(B, RIGHT, 2.0, A)  # Q(B, RIGHT) = 1.0
+    assert agent.learn(A, LEFT, 0.6, B, steps=3) == pytest.approx(0.5 * (0.6 + 0.9**3 * 1.0))
+    assert agent.learn(A, RIGHT, 0.6, B, done=True, steps=3) == pytest.approx(0.5 * 0.6)
+    for bad in (0, -2, 1.5, True):
+        with pytest.raises(ConfigurationError):
+            agent.learn(A, LEFT, 0.0, B, steps=bad)  # type: ignore[arg-type]

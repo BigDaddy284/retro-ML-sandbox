@@ -23,7 +23,14 @@ CHILD = "child"
 
 class _Learns(Protocol):
     def learn(
-        self, state: State, action: int, reward: float, next_state: State, done: bool = False
+        self,
+        state: State,
+        action: int,
+        reward: float,
+        next_state: State,
+        done: bool = False,
+        *,
+        steps: int = 1,
     ) -> float: ...
 
 
@@ -75,7 +82,7 @@ class Demonstrations:
         steps = 0
         for _ in range(passes):
             for t in self._buffer:
-                learner.learn(t.state, t.action, t.reward, t.next_state, t.done)
+                learner.learn(t.state, t.action, t.reward, t.next_state, t.done, steps=t.steps)
                 steps += 1
         return steps
 

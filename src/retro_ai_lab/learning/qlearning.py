@@ -100,6 +100,11 @@ class Settings:
         return self.epsilon - (self.epsilon - self.epsilon_min) * updates / self.explore_steps
 
 
+def _check_steps(steps: int) -> None:
+    if isinstance(steps, bool) or not isinstance(steps, int) or steps < 1:
+        raise ConfigurationError("steps must be a whole number of 1 or more.")
+
+
 def settings_from_saved(data: Mapping[str, Any] | None) -> Settings:
     """The settings a saved brain learns with, moved on from the old defaults (T-962).
 
@@ -256,15 +261,27 @@ class QLearningAgent:
     # ------------------------------------------------------------ learning
 
     def learn(
-        self, state: State, action: int, reward: float, next_state: State, done: bool = False
+        self,
+        state: State,
+        action: int,
+        reward: float,
+        next_state: State,
+        done: bool = False,
+        *,
+        steps: int = 1,
     ) -> float:
-        """One Q update; returns the new value."""
+        """One Q update; returns the new value.
+
+        ``reward`` is the return over ``steps`` steps and ``next_state`` the situation
+        after them (T-963), so the future is discounted by gamma to that power.
+        """
         self._space[action]  # validates the index
         if not math.isfinite(reward):
             raise ConfigurationError("reward must be a finite number.")
+        _check_steps(steps)
         row = self._table.row(state)
         future = 0.0 if done else max(self._table.values(next_state))
-        target = reward + self._settings.gamma * future
+        target = reward + self._settings.gamma**steps * future
         row[action] += self._settings.alpha * (target - row[action])
         self._updates += 1
         self._epsilon = self._scheduled(self._epsilon)

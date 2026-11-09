@@ -65,7 +65,14 @@ class GreedyPlayer:
         """A race is played as the AI is; its settings are not touched."""
 
     def learn(
-        self, state: State, action: int, reward: float, next_state: State, done: bool = False
+        self,
+        state: State,
+        action: int,
+        reward: float,
+        next_state: State,
+        done: bool = False,
+        *,
+        steps: int = 1,
     ) -> float:
         return 0.0  # a race is not a lesson
 

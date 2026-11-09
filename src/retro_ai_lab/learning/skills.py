@@ -170,9 +170,16 @@ class SkillsLearner:
         return self._current.greedy(state)
 
     def learn(
-        self, state: State, action: int, reward: float, next_state: State, done: bool = False
+        self,
+        state: State,
+        action: int,
+        reward: float,
+        next_state: State,
+        done: bool = False,
+        *,
+        steps: int = 1,
     ) -> float:
-        return self._current.learn(state, action, reward, next_state, done)
+        return self._current.learn(state, action, reward, next_state, done, steps=steps)
 
     def end_episode(self, reward: float | None = None) -> float:
         self._episodes += 1

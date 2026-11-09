@@ -97,3 +97,16 @@ def test_buffer_holds_exactly_the_tail(capacity: int, rewards: list[int]) -> Non
         buf.append(Transition(A, 0, float(r), B, False))
     assert len(buf) == min(len(rewards), capacity) and buf.added == len(rewards)
     assert [x.reward for x in buf] == [float(r) for r in rewards[-capacity:]]
+
+
+def test_a_transition_carries_the_steps_its_return_spans() -> None:
+    """T-963: an n-step return remembers how many steps it covers; 1 when not said."""
+    one = Transition(A, 0, 1.0, B, False)
+    assert one.steps == 1 and one.to_dict()["steps"] == 1
+    three = Transition(A, 0, 2.5, B, False, steps=3)
+    assert Transition.from_dict(json.loads(json.dumps(three.to_dict()))) == three
+    saved_before = {k: v for k, v in one.to_dict().items() if k != "steps"}
+    assert Transition.from_dict(saved_before) == one  # a memory saved before T-963
+    for bad in (0, -1, 2.5, True):
+        with pytest.raises(ConfigurationError):
+            Transition(A, 0, 1.0, B, False, steps=bad)  # type: ignore[arg-type]

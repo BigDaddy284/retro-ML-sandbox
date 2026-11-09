@@ -250,13 +250,26 @@ class DQNLearner:
             del self._seen[next(iter(self._seen))]
 
     def learn(
-        self, state: State, action: int, reward: float, next_state: State, done: bool = False
+        self,
+        state: State,
+        action: int,
+        reward: float,
+        next_state: State,
+        done: bool = False,
+        *,
+        steps: int = 1,
     ) -> float:
-        """Store the step and train on a batch from memory; returns the new value."""
+        """Store the step and train on a batch from memory; returns the new value.
+
+        ``reward`` is the return over ``steps`` steps and ``next_state`` the situation
+        after them (T-963); the memory keeps the span, and training discounts by it.
+        """
         self._space[action]  # validates the index
         if not isinstance(reward, int | float) or not math.isfinite(reward):
             raise ConfigurationError("reward must be a finite number.")
-        self._replay.append(Transition(state, action, float(reward), next_state, bool(done)))
+        self._replay.append(
+            Transition(state, action, float(reward), next_state, bool(done), steps=steps)
+        )
         self._remember(state, next_state)
         self._updates += 1
         self._epsilon = self._scheduled(self._epsilon)
@@ -273,7 +286,7 @@ class DQNLearner:
         mask = np.zeros_like(targets)
         gamma = self._settings.gamma
         for i, t in enumerate(batch):
-            targets[i, t.action] = t.reward + (0.0 if t.done else gamma * future[i])
+            targets[i, t.action] = t.reward + (0.0 if t.done else gamma**t.steps * future[i])
             mask[i, t.action] = 1.0
         self._net.train_step(x, targets, mask)
         self._trained += 1

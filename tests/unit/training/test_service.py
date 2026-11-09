@@ -102,6 +102,7 @@ def lab(tmp_path: Path) -> Lab:
         settings=Settings(epsilon=0.5),
         seed=1,
         store=BrainStore(tmp_path / "b"),
+        lookahead=1,  # these tests count updates step by step; the lookahead has its own (T-963)
     )
     finished: list[EpisodeFinished] = []
     changes: list[TrainingStateChanged] = []
@@ -1025,6 +1026,7 @@ def test_the_goal_step_picks_the_skill(lab: Lab, tmp_path: Path) -> None:
         store=BrainStore(tmp_path / "skills"),
         algorithm=SKILLS,
         goals=lab.goals,
+        lookahead=1,  # updates are counted step by step below (T-963)
     )
     lab.connect()
     agent = t.agent
@@ -1700,3 +1702,32 @@ def test_goes_without_a_checkpoint_do_not_count_as_a_doomed_start(
     assert t.step()
     assert "The spot the goes start from" not in caplog.text
     t.stop()
+
+
+def test_the_service_hands_the_runner_its_lookahead(lab: Lab, tmp_path: Path) -> None:
+    """T-963: the app's goes learn each step from the return over the next eight."""
+    from retro_ai_lab.training import LOOKAHEAD_STEPS
+
+    assert LOOKAHEAD_STEPS == 8
+    with pytest.raises(ConfigurationError):
+        TrainingService(lab.connection, lab.observation, lab.discovery, lab.bus, lookahead=0)
+    t = TrainingService(
+        lab.connection,
+        lab.observation,
+        lab.discovery,
+        lab.bus,
+        frames_per_step=4,
+        max_steps=50,
+        settings=Settings(epsilon=0.5),
+        seed=1,
+        store=BrainStore(tmp_path / "b2"),
+        lookahead=3,
+    )
+    lab.connect()
+    t.start(Mode.INDEPENDENT)
+    agent = t.agent
+    assert agent is not None
+    assert t.step() and t.step() and agent.updates == 0  # two steps pending
+    assert t.step() and agent.updates == 1  # the first step learned from the three
+    t.stop()  # the go ends: the pending steps are learned too
+    assert agent.updates == 3 and t.total_steps == 3

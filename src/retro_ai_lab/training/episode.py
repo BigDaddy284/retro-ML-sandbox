@@ -10,6 +10,7 @@ episode can start from the same checkpoint (DESIGN.md §9).
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -18,6 +19,7 @@ from retro_ai_lab.core import Button, ConfigurationError, EmulatorError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.core.worklog import app_work
 from retro_ai_lab.learning.learner import Learner
+from retro_ai_lab.learning.qlearning import Settings
 from retro_ai_lab.learning.replay import Transition
 from retro_ai_lab.learning.state import State, StateEncoder
 from retro_ai_lab.services.connection import ConnectionService
@@ -36,6 +38,10 @@ DEFAULT_UNSTICK_AFTER = 25  # steps with nothing changing before the go counts a
 # button it found by experiment, and a stuck go with none known ends "stuck".
 DEFAULT_UNSTICK_BUTTONS: tuple[str, ...] = ()
 FINGERPRINT_STEPS = 64  # state keys a go remembers, for spotting two identical goes
+# Each step is learned from the rewards of this many steps added up (discounted) and
+# the situation after them, so a penalty reaches its cause this many steps a pass
+# instead of one (n-step returns, T-963). Half a second at four frames a step.
+LOOKAHEAD_STEPS = 8
 DEFAULT_SETTLE_FRAMES = 5  # the understanding engine's event window
 
 
@@ -279,9 +285,12 @@ class EpisodeRunner:
         unstick_buttons: tuple[str, ...] = DEFAULT_UNSTICK_BUTTONS,
         settle_frames: int = DEFAULT_SETTLE_FRAMES,
         on_learned: Callable[[Transition], None] | None = None,
+        lookahead: int = LOOKAHEAD_STEPS,
     ) -> None:
         if frames_per_step < 1:
             raise ConfigurationError("frames_per_step must be at least 1.")
+        if lookahead < 1:
+            raise ConfigurationError("lookahead must be at least 1.")
         if max_steps < 1:
             raise ConfigurationError("max_steps must be at least 1.")
         if unstick_after is not None and unstick_after < 1:
@@ -299,6 +308,8 @@ class EpisodeRunner:
         self._unstick_buttons = unstick_buttons
         self._settle_frames = settle_frames
         self._on_learned = on_learned
+        self._lookahead = lookahead
+        self._pending: deque[tuple[State, int, float]] = deque()  # steps not yet learned
         self._restored = False
         self._unsticks = 0
         self._same_state = 0
@@ -433,6 +444,7 @@ class EpisodeRunner:
         self._setbacks = 0
         self._first_setback_step = None
         self._actions_seen = set()
+        self._pending.clear()
         self._buttons = {b.name: b for b in self._connection.call(lambda a: a.buttons())}
         self._restored = restore and self._harness is not None and self._harness.has_checkpoint
         if self._restored:
@@ -543,9 +555,11 @@ class EpisodeRunner:
         with app_work.timed("step: encode"):
             next_state = self._encoder.encode(snapshot) if snapshot is not None else state
         done = resets > 0
-        if action is not None:
-            with app_work.timed("step: learn"):
-                self._agent.learn(state, action, reward, next_state, done)
+        with app_work.timed("step: learn"):
+            if action is None:
+                self._flush(state, done=False)  # an unstick step is nobody's lesson (T-963)
+            else:
+                self._learn(state, action, reward, next_state, done)
                 if self._on_learned is not None:
                     self._on_learned(Transition(state, action, reward, next_state, done, source))
         self._reward += reward
@@ -566,6 +580,42 @@ class EpisodeRunner:
             return False
         return True
 
+    # ------------------------------------------------------------ learning (T-963)
+
+    def _learn(
+        self, state: State, action: int, reward: float, next_state: State, done: bool
+    ) -> None:
+        """Queue the step; learn the oldest queued step once the lookahead is full.
+
+        Each step is learned from the discounted sum of the rewards of the steps
+        queued after it and the situation after them, so credit travels the whole
+        lookahead in one pass. A reset settles every queued step as final.
+        """
+        self._pending.append((state, action, reward))
+        if done:
+            self._flush(next_state, done=True)
+        elif len(self._pending) >= self._lookahead or self._gamma() is None:
+            self._learn_oldest(next_state, done=False)
+
+    def _flush(self, next_state: State, *, done: bool) -> None:
+        while self._pending:
+            self._learn_oldest(next_state, done=done)
+
+    def _learn_oldest(self, next_state: State, *, done: bool) -> None:
+        gamma = self._gamma()
+        spanned = len(self._pending) if gamma is not None else 1
+        total, weight = 0.0, 1.0
+        for _, _, reward in list(self._pending)[:spanned]:
+            total += weight * reward
+            weight *= gamma if gamma is not None else 1.0
+        state, action, _ = self._pending.popleft()
+        self._agent.learn(state, action, total, next_state, done, steps=spanned)
+
+    def _gamma(self) -> float | None:
+        """The agent's discount, or None for one that learns no returns (a race's player)."""
+        settings = getattr(self._agent, "settings", None)
+        return settings.gamma if isinstance(settings, Settings) else None
+
     def finish(self, *, ended_by: str | None = None) -> EpisodeResult:
         """Release the buttons, count the episode, and report."""
         if self._state is None:
@@ -579,6 +629,9 @@ class EpisodeRunner:
                 self._observation.record_input([], "ai")
             except EmulatorError:
                 pass  # the connection service reports link loss
+        if self._pending:  # the go ended without a reset: the last steps bootstrap on (T-963)
+            assert self._state is not None
+            self._flush(self._state, done=False)
         self._agent.end_episode(self._reward)  # exploring follows results (T-932)
         self._last_buttons = frozenset()
         result = EpisodeResult(
@@ -606,6 +659,7 @@ __all__ = [
     "DEFAULT_FRAMES_PER_STEP",
     "DEFAULT_MAX_STEPS",
     "DEFAULT_SETTLE_FRAMES",
+    "LOOKAHEAD_STEPS",
     "Earning",
     "EpisodeResult",
     "EpisodeRunner",

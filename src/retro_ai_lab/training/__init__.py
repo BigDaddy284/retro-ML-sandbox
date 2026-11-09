@@ -5,6 +5,7 @@ from retro_ai_lab.training.curve import CurvePoint, LearningCurve, describe_surv
 from retro_ai_lab.training.episode import (
     DEFAULT_MAX_STEPS,
     DEFAULT_UNSTICK_AFTER,
+    LOOKAHEAD_STEPS,
     Earning,
     EpisodeResult,
     EpisodeRunner,
@@ -33,6 +34,7 @@ __all__ = [
     "COLUMNS",
     "DEFAULT_MAX_STEPS",
     "DEFAULT_UNSTICK_AFTER",
+    "LOOKAHEAD_STEPS",
     "NOT_LISTENING",
     "ActionValue",
     "BehaviourChange",
