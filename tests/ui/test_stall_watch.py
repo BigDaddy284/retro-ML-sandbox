@@ -86,17 +86,24 @@ def test_the_line_leaves_out_work_under_a_millisecond(
     assert DEFAULT_QUIET_S == 0.001
     work = WorkLog()
     watch = StallWatch(work, interval_ms=5, report_every_s=0.05)
+    # Names of this test's own, so the line read back is this watch's: a window an
+    # earlier test left behind writes "App work" lines of its own on a slow CI runner,
+    # and the first such line was once that window's (T-962's CI run).
     for _ in range(300):
-        work.note("on MemoryObserved", 0.0001)
-    work.note("on DiscoveryUpdated", 0.002)
+        work.note("on QuietTestEvent", 0.0001)
+    work.note("on LoudTestEvent", 0.002)
     watch.start()
     with caplog.at_level(logging.INFO, logger="retro_ai_lab.ui.stall_watch"):
         qtbot.waitUntil(lambda: watch.reports >= 1, timeout=2000)
     watch.stop()
-    line = next(r.message for r in caplog.records if r.message.startswith("App work"))
-    assert f"on DiscoveryUpdated {X}1 avg 2 ms" in line and "MemoryObserved" not in line
+    line = next(
+        r.message
+        for r in caplog.records
+        if r.message.startswith("App work") and "LoudTestEvent" in r.message
+    )
+    assert f"on LoudTestEvent {X}1 avg 2 ms" in line and "QuietTestEvent" not in line
     # Only quiet work: no line at all.
-    work.note("on MemoryObserved", 0.0001)
+    work.note("on QuietTestEvent", 0.0001)
     watch = StallWatch(work, interval_ms=5, report_every_s=0.05)
     watch.start()
     qtbot.wait(150)
