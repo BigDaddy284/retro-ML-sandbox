@@ -35,30 +35,108 @@ class ByteChange:
         return self.new - self.old
 
 
-@dataclass(frozen=True, slots=True)
 class SnapshotDiff:
-    """Byte-level differences from ``before`` to ``after``."""
+    """Byte-level differences from ``before`` to ``after``.
 
-    before_frame: int
-    after_frame: int
-    changes: tuple[ByteChange, ...]
+    The :class:`ByteChange` objects are built the first time :attr:`changes` is
+    read (T-958). The tracker makes a diff on every step of the game and nothing
+    on the AI's step reads it, while a game changes hundreds of bytes a step: an
+    object per changed byte was the step's largest Python loop, for nobody.
+    :attr:`changed_count`, :attr:`is_empty` and :meth:`offsets` answer from the
+    arrays without building anything. A diff compares equal to another with the
+    same frames and the same changes, however they were made.
+    """
+
+    __slots__ = ("_after_frame", "_before_frame", "_changes", "_pending")
+
+    _before_frame: int
+    _after_frame: int
+    _changes: tuple[ByteChange, ...] | None
+    _pending: tuple[tuple[str, bytes, bytes, NDArray[np.intp]], ...]
+
+    def __init__(
+        self,
+        before_frame: int,
+        after_frame: int,
+        changes: tuple[ByteChange, ...] | None = None,
+        *,
+        pending: tuple[tuple[str, bytes, bytes, NDArray[np.intp]], ...] = (),
+    ) -> None:
+        if changes is not None and pending:
+            raise ConfigurationError("A SnapshotDiff takes its changes or what to build them from.")
+        object.__setattr__(self, "_before_frame", before_frame)
+        object.__setattr__(self, "_after_frame", after_frame)
+        object.__setattr__(self, "_changes", () if changes is None and not pending else changes)
+        object.__setattr__(self, "_pending", pending)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError(f"SnapshotDiff is immutable; cannot set {name!r}.")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError(f"SnapshotDiff is immutable; cannot delete {name!r}.")
+
+    @property
+    def before_frame(self) -> int:
+        return self._before_frame
+
+    @property
+    def after_frame(self) -> int:
+        return self._after_frame
+
+    @property
+    def changes(self) -> tuple[ByteChange, ...]:
+        """One :class:`ByteChange` per changed byte, in region then offset order."""
+        changes = self._changes
+        if changes is None:
+            changes = tuple(
+                ByteChange(name, i, a[i], b[i])
+                for name, a, b, differ in self._pending
+                for i in differ.tolist()
+            )
+            object.__setattr__(self, "_changes", changes)
+            object.__setattr__(self, "_pending", ())
+        return changes
 
     @property
     def changed_count(self) -> int:
-        return len(self.changes)
+        if self._changes is None:
+            return sum(len(differ) for _, _, _, differ in self._pending)
+        return len(self._changes)
 
     @property
     def is_empty(self) -> bool:
-        return not self.changes
+        return self.changed_count == 0
 
     def offsets(self, region: str) -> tuple[int, ...]:
-        return tuple(c.offset for c in self.changes if c.region == region)
+        if self._changes is None:
+            return tuple(
+                i for name, _, _, differ in self._pending if name == region for i in differ.tolist()
+            )
+        return tuple(c.offset for c in self._changes if c.region == region)
 
     def by_region(self) -> dict[str, tuple[ByteChange, ...]]:
         out: dict[str, list[ByteChange]] = {}
         for c in self.changes:
             out.setdefault(c.region, []).append(c)
         return {k: tuple(v) for k, v in out.items()}
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, SnapshotDiff):
+            return NotImplemented
+        return (self.before_frame, self.after_frame, self.changes) == (
+            other.before_frame,
+            other.after_frame,
+            other.changes,
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.before_frame, self.after_frame, self.changes))
+
+    def __repr__(self) -> str:
+        return (
+            f"SnapshotDiff(before_frame={self.before_frame}, after_frame={self.after_frame}, "
+            f"changes={self.changes!r})"
+        )
 
 
 def diff_snapshots(before: MemorySnapshot, after: MemorySnapshot) -> SnapshotDiff:
@@ -67,7 +145,7 @@ def diff_snapshots(before: MemorySnapshot, after: MemorySnapshot) -> SnapshotDif
         raise ConfigurationError(
             f"Snapshots cover different regions: {before.region_names} vs {after.region_names}."
         )
-    changes: list[ByteChange] = []
+    pending: list[tuple[str, bytes, bytes, NDArray[np.intp]]] = []
     for name in before.region_names:
         a = before.regions[name]
         b = after.regions[name]
@@ -77,13 +155,13 @@ def diff_snapshots(before: MemorySnapshot, after: MemorySnapshot) -> SnapshotDif
             )
         if a == b:
             continue
-        # The bytes that differ are found in one array comparison (T-945); only
-        # those become objects.
+        # The bytes that differ are found in one array comparison (T-945); they
+        # become objects only if someone reads them (T-958).
         differ = np.flatnonzero(
             np.frombuffer(a, dtype=np.uint8) != np.frombuffer(b, dtype=np.uint8)
         )
-        changes.extend(ByteChange(name, i, a[i], b[i]) for i in differ.tolist())
-    return SnapshotDiff(before.frame, after.frame, tuple(changes))
+        pending.append((name, a, b, differ))
+    return SnapshotDiff(before.frame, after.frame, pending=tuple(pending))
 
 
 SMALL_HOP = 8  # a thing on screen moves by at most this many between observations (T-911)
