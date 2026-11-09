@@ -179,6 +179,19 @@ class RewardService:
             return ()
         return tuple(b for b in profile if is_own(b.id))
 
+    def penalised(self) -> frozenset[str]:
+        """The values a person's own rewards penalise: what a death is to them (T-964).
+
+        An own reward with a value below zero on a value going down (or up) names
+        the byte the person watches for harm; the survival count and the check of
+        a start spot that loses a life by itself follow it before any guess.
+        """
+        return frozenset(
+            b.trigger.variable_id
+            for b in self.own()
+            if b.enabled and b.value < 0 and b.trigger.variable_id
+        )
+
     def add_own(
         self, variable_id: str, *, goes_up: bool, value: float, name: str | None = None
     ) -> Behaviour:

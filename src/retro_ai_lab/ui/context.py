@@ -64,6 +64,7 @@ class AppContext:
             self.bus,
             store=self.brain_store,
             goals=self.goals,
+            rewards=self.rewards,
         )
         self.saved_ai_store = SavedAiStore(self.data_dir / "saved_ais")
         self.saved_ais = SavedAiService(

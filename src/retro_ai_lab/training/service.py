@@ -54,6 +54,7 @@ from retro_ai_lab.services.discovery import DiscoveryService, game_id_for
 from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.goals import GoalService
 from retro_ai_lab.services.observer import MemoryObserved, ObservationService
+from retro_ai_lab.services.rewards import RewardService
 from retro_ai_lab.storage.brains import BrainStore
 from retro_ai_lab.training.brain import Brain
 from retro_ai_lab.training.curve import DEFAULT_WINDOW, LearningCurve, describe_survival
@@ -178,6 +179,7 @@ class TrainingService:
         promote_at: int = DEFAULT_PROMOTE_AT,
         goals: GoalService | None = None,
         lookahead: int = LOOKAHEAD_STEPS,
+        rewards: RewardService | None = None,
     ) -> None:
         _check_algorithm(algorithm)
         if lookahead < 1:
@@ -208,6 +210,7 @@ class TrainingService:
         self._last_change = ""
         self._demonstrations = Demonstrations(seed=seed)
         self._goals = goals
+        self._rewards = rewards  # whose own rewards say what a death is (T-964)
         self._store = store
         self._history: deque[EpisodeRecord] = deque(maxlen=history)
         self._policies: deque[tuple[int, dict[str, int]]] = deque(maxlen=DEFAULT_WINDOW + 1)
@@ -1021,6 +1024,7 @@ class TrainingService:
                 unstick_buttons=(self._wake_button,) if self._wake_button else (),
                 on_learned=self._on_learned,
                 lookahead=self._lookahead,
+                watched_setbacks=self._penalised,
             )
         self._busy = True
         try:
@@ -1291,6 +1295,10 @@ class TrainingService:
             return  # the start was already cleared of a loss at this step
         self._doomed_suspect = suspect
 
+    def _penalised(self) -> frozenset[str]:
+        """The values the person's own rewards penalise: what a death is (T-964)."""
+        return self._rewards.penalised() if self._rewards is not None else frozenset()
+
     def _move_start_past_loss(self, steps: int) -> None:
         """Does the goes' start spot lose a life holding nothing? Then start after it (T-961).
 
@@ -1310,8 +1318,9 @@ class TrainingService:
             or not harness.available()
         ):
             return
+        yours = tuple(knowledge.get(i) for i in sorted(self._penalised()) if i in knowledge)
         best = (knowledge.best(VariableKind.LIVES), knowledge.best(VariableKind.HEALTH))
-        watched = tuple(v for v in best if v is not None)
+        watched = yours or tuple(v for v in best if v is not None)
         if not watched:
             return
         frames = self._frames_per_step

@@ -103,6 +103,7 @@ def lab(tmp_path: Path) -> Lab:
         seed=1,
         store=BrainStore(tmp_path / "b"),
         lookahead=1,  # these tests count updates step by step; the lookahead has its own (T-963)
+        rewards=rewards,
     )
     finished: list[EpisodeFinished] = []
     changes: list[TrainingStateChanged] = []
@@ -1731,3 +1732,43 @@ def test_the_service_hands_the_runner_its_lookahead(lab: Lab, tmp_path: Path) ->
     assert t.step() and agent.updates == 1  # the first step learned from the three
     t.stop()  # the go ends: the pending steps are learned too
     assert agent.updates == 3 and t.total_steps == 3
+
+
+def test_deaths_are_counted_on_the_value_your_reward_penalises(
+    lab: Lab, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T-964: the user's "Lifes goes down" fired twice a go while the count said five."""
+    k = lab.connect()
+    lives = k.at(RAM, LAYOUT.lives)
+    assert lives is not None
+    stray = k.propose(RAM, LAYOUT.timer, kind=VariableKind.LIVES, evidence=SURE)  # the AI's guess
+    own = lab.rewards.add_own(stray.id, goes_up=False, value=-5.0, name="Fuel")
+    t = lab.training
+    caplog.set_level(logging.INFO)
+    t.start(Mode.INDEPENDENT)
+    assert t.step() and t.episode is not None
+    assert t.episode.signals.watched == frozenset({stray.id})
+    assert (  # the guess is unnamed, so its kind and place name it
+        f"Lives lost are counted on Lives at {RAM}[{LAYOUT.timer}], which your reward penalises."
+        in caplog.text
+    )
+    # Only that value's drops count as deaths this go.
+    lab.bus.publish(
+        DiscoveryUpdated((), (), (GameEvent(EventKind.SETBACK, 20, lives.id, "", 3, 2),), ())
+    )
+    assert t.episode.signals.take_setbacks() == 0
+    lab.bus.publish(
+        DiscoveryUpdated((), (), (GameEvent(EventKind.SETBACK, 20, stray.id, "", 9, 8),), ())
+    )
+    assert t.episode.signals.take_setbacks() == 1
+    t.stop()
+    # The reward gone, the next go counts the AI's best guesses again, and says so once.
+    lab.rewards.remove_own(own.id)
+    caplog.clear()
+    t.start(Mode.INDEPENDENT)
+    assert t.step() and t.step() and t.episode is not None
+    best = k.best(VariableKind.LIVES)
+    assert best is not None and t.episode.signals.watched == frozenset({best.id})
+    assert caplog.text.count("Lives lost are counted on") == 1
+    assert "the AI's best life count and health guesses" in caplog.text
+    t.stop()
