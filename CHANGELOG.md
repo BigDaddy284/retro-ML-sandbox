@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-973: the AI works out which thing on the screen is itself: from one save state it plays the same moments holding nothing and then each button, and the thing that moves with the buttons (and not without them) is the player, with how sure it is.
 - T-972: the AI follows the things on the screen from frame to frame, working out how far the screen scrolled so that a coin sliding past reads as still and a walker reads as walking, and cutting a walker out of the ground it stands on by its motion.
 - T-971: the AI finds the things on a screen by itself (no drawing or labelling by a person) and sorts them into kinds by look, "thing 1", "thing 2", a copy facing the other way being the same kind; the first step to it working out on its own which is the player, which are enemies, items and ground (`docs/VISION.md`).
 - T-970: the app can find things a person tagged on the screen (an enemy, ground, a platform, something that hurts, something to pick up, the player) in later frames, facing either way and in front of any background, in about a millisecond a tag; the base for the AI seeing its surroundings (`docs/VISION.md`). Airtest was assessed and not added (ADR-011).

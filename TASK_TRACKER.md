@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-973 | The AI works out which thing on the screen is the player: from one start it plays the same frames holding nothing and then each button, follows every thing, and the thing that moves with a button and not without, for the most buttons, is the player (with a confidence); a hero standing on the ground is cut out by its motion | 8 | Done | 10/10 | see PR |
 | T-972 | The AI follows things between frames: it finds how far the screen scrolled, takes that away, and what still moved is a thing moving in the level (which also cuts a walker out of the ground it stands on); each thing gets a track with its velocity in the level. Background colour now counted on packed pixels (a busy screen 50 ms to 4 ms) | 8 | Done | 15/15 | see PR |
 | T-971 | The AI finds the things on a screen by itself: the commonest colour is the backdrop, other patches are things (parts a pixel apart joined, big patches are scenery), and a catalogue sorts them screen after screen into kinds by look, mirrors included, each with a template for the T-970 finder; the drawing UI is dropped from the plan (Boss: autonomous, no drawing) | 8 | Done | 20/20 | see PR |
 | T-970 | Find what a person tagged on the screen (enemy, ground, hazard, item, player): a masked template matcher for pixel art on NumPy, mirrored, partly covered and repeating tiles handled, about 1 ms a tag; Airtest assessed and not taken on (ADR-011, docs/VISION.md) | 8 | Done | 47/47 | see PR |
@@ -3024,6 +3025,23 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
+### T-973 – The AI works out which thing is the player
+- **Status:** Done
+- **Phase:** 8 (`docs/VISION.md` §5, step 2)
+- **Objective:** `understanding/player.py`: `find_player(run, buttons)` plays from one start holding nothing and then each button (through a `run(held, frames)` callback), follows the things in each run, and returns a `PlayerFinding` (start position, kind when seen whole, buttons that moved it, buttons tried, confidence: one button LOW, two MEDIUM, three or more HIGH), or None when nothing answered.
+- **Scope:** the experiment's logic on pictures. **Out of scope:** running it against the emulator from the training service and remembering the answer with the game's knowledge (the next task), what other kinds do (T-974).
+- **Acceptance criteria:**
+  1. In a scrolling platformer whose camera follows the hero, the hero standing on the ground is found, answering to left, right and jump and not to a button that does nothing (HIGH).
+  2. A walker that walks by itself and a coin that never moves are not taken for the player.
+  3. A game that ignores the buttons gives None; one answering button gives LOW.
+  4. A player seen whole has its catalogue kind.
+  5. On the Toy Racer the car (left, right) is the player, not the track that scrolls when it speeds up.
+  6. No buttons, fewer than two frames and an empty run are a `ConfigurationError`.
+- **Expected changes:** `src/retro_ai_lab/understanding/player.py`, `tests/unit/understanding/test_player.py`, `TASK_TRACKER.md`, `CHANGELOG.md`, `ARCHITECTURE.md`.
+- **Test plan:** `tests/unit/understanding/test_player.py` (10 tests, a made-up scrolling platformer and the Toy Racer); full suite.
+- **Results:** 10/10; full suite 1555 passed, 10 skipped (real emulator); ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** the AI can tell which thing is itself from its own experiment; wiring it to the emulator (save state, held buttons, frames) is next.
 ### T-972 – The AI follows things between frames
 - **Status:** Done
 - **Phase:** 8 (`docs/VISION.md` §5, step 1)
