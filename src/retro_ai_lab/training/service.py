@@ -59,6 +59,7 @@ from retro_ai_lab.services.rewards import RewardService
 from retro_ai_lab.storage.brains import BrainStore
 from retro_ai_lab.training.brain import Brain
 from retro_ai_lab.training.curve import DEFAULT_WINDOW, LearningCurve, describe_survival
+from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.training.episode import (
     DEFAULT_FRAMES_PER_STEP,
     DEFAULT_MAX_STEPS,
@@ -221,6 +222,7 @@ class TrainingService:
         self._rewards = rewards  # whose own rewards say what a death is (T-964)
         self._store = store
         self._history: deque[EpisodeRecord] = deque(maxlen=history)
+        self._deaths = DeathWatch(DEFAULT_WINDOW)  # what the AI saw before dying (T-968)
         self._policies: deque[tuple[int, dict[str, int]]] = deque(maxlen=DEFAULT_WINDOW + 1)
         self._game_id: str | None = None
         self._saves = 0
@@ -1035,6 +1037,7 @@ class TrainingService:
                 on_learned=self._on_learned,
                 lookahead=self._lookahead,
                 watched_setbacks=self._penalised,
+                deaths=self._deaths,
             )
         self._busy = True
         try:
@@ -1233,6 +1236,10 @@ class TrainingService:
         # Every tenth go from the twentieth: is the AI surviving longer? (T-934)
         if self._episodes >= 2 * DEFAULT_WINDOW and self._episodes % DEFAULT_WINDOW == 0:
             log.info("%s", describe_survival(tuple(self._history), DEFAULT_WINDOW))
+            seen = self._deaths.describe(self._discovery.knowledge)  # T-968
+            if seen:
+                log.info("%s", seen)
+        self._deaths.end_go()
         self._note_listening(result)
         if not self._needs_wake:  # a go the game ignored says nothing about play (T-870)
             self._discovery.credit_played(frame=self._observation.frame)
