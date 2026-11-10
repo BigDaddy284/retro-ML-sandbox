@@ -43,7 +43,7 @@ src/retro_ai_lab/
     bizhawk/       adapter, line protocol, hello description, PNG decoding,
                    BizHawkSimulator, retro_ai_lab.lua (EmuHawk)
     mgba/          MgbaAdapter (the BizHawk adapter under mGBA's name), retro_ai_lab.lua (mGBA)
-  observation/     frames, memory snapshots, diffs, input log, tagged sprites on the screen (T-970), things found unaided and sorted into kinds (T-971)
+  observation/     frames, memory snapshots, diffs, input log, tagged sprites on the screen (T-970), things found unaided and sorted into kinds (T-971), followed between frames with the scroll taken away (T-972)
   understanding/   knowledge, variables, events, relations, confidence (a reset needs two values back at their start together, one of them at least MEDIUM: T-838; and at least half of all the values that have moved: T-846)
   rewards/         reward profile, personalities, suggestions, exploitation, goals
   learning/        action space, state encoder, Q-table, DQN (NumPy), skills, greedy player

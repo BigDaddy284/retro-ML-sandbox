@@ -39,9 +39,13 @@ DEFAULT_MOST_KINDS = 256
 
 def background_colour(frame: Frame) -> tuple[int, ...]:
     """The commonest colour of the frame (ties go to the lowest colour value)."""
-    arr = to_array(frame).reshape(-1, frame.channels)
-    colours, counts = np.unique(arr, axis=0, return_counts=True)
-    return tuple(int(v) for v in colours[int(np.argmax(counts))])
+    arr = to_array(frame).reshape(-1, frame.channels).astype(np.int64)
+    packed = arr[:, 0].copy()
+    for ch in range(1, frame.channels):
+        packed = (packed << 8) | arr[:, ch]
+    colours, counts = np.unique(packed, return_counts=True)
+    value = int(colours[int(np.argmax(counts))])
+    return tuple((value >> (8 * (frame.channels - 1 - ch))) & 0xFF for ch in range(frame.channels))
 
 
 @dataclass(frozen=True, slots=True)

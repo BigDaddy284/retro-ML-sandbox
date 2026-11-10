@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-972 | The AI follows things between frames: it finds how far the screen scrolled, takes that away, and what still moved is a thing moving in the level (which also cuts a walker out of the ground it stands on); each thing gets a track with its velocity in the level. Background colour now counted on packed pixels (a busy screen 50 ms to 4 ms) | 8 | Done | 15/15 | see PR |
 | T-971 | The AI finds the things on a screen by itself: the commonest colour is the backdrop, other patches are things (parts a pixel apart joined, big patches are scenery), and a catalogue sorts them screen after screen into kinds by look, mirrors included, each with a template for the T-970 finder; the drawing UI is dropped from the plan (Boss: autonomous, no drawing) | 8 | Done | 20/20 | see PR |
 | T-970 | Find what a person tagged on the screen (enemy, ground, hazard, item, player): a masked template matcher for pixel art on NumPy, mirrored, partly covered and repeating tiles handled, about 1 ms a tag; Airtest assessed and not taken on (ADR-011, docs/VISION.md) | 8 | Done | 47/47 | see PR |
 | T-967 | The user's 23:06 log: "Lives lost are counted on x position at ram[134], Lifes at ram[1882]" and then lives lost per go 0.0 for 465 goes while "Lifes goes down" fired 1.3 times a go. T-964 took every penalised value for a death (a −2 on stepping back included) and counted only the SETBACK events the AI's own life-count guesses raise. A death is now the penalised life count or health value, else the heaviest penalty, and a watched value's DOWN or SETBACK event counts once per update | 8 | Done | 3/3 | see PR #222 |
@@ -3023,6 +3024,22 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
+### T-972 – The AI follows things between frames
+- **Status:** Done
+- **Phase:** 8 (`docs/VISION.md` §5, step 1)
+- **Objective:** `observation/tracking.py`: `estimate_scroll` (the camera's move between two frames), `moving_mask` (what changed once the scroll is taken away), `ObjectTracker` (a `Track` per thing: box, kind, velocity in the level, whether it moves, history).
+- **Scope:** scroll, motion, tracks. **Out of scope:** which track is the player (T-973), what kinds do (T-974).
+- **Acceptance criteria:**
+  1. A horizontal scroll of −8..8 pixels on a textured level, and a vertical one, is found; a plain screen reads as no scroll.
+  2. With the scroll taken away, only a walking thing's pixels have moved; a still level has nothing.
+  3. A walker touching the ground is followed with its level velocity although the camera scrolls; a coin sliding past with the camera stands still in the level; two walkers keep their own tracks and share a kind.
+  4. A one-frame flicker keeps the track; longer than `max_missing` drops it; `reset` forgets tracks and keeps kinds; a frame of another size starts over; bad settings are a `ConfigurationError`.
+  5. A tracker update on a 256x240 frame costs under 100 ms (run now and then, not every frame).
+- **Expected changes:** `src/retro_ai_lab/observation/tracking.py`, `src/retro_ai_lab/observation/objects.py` (faster background colour), `tests/unit/observation/test_tracking.py`, `TASK_TRACKER.md`, `CHANGELOG.md`, `ARCHITECTURE.md`.
+- **Test plan:** `tests/unit/observation/test_tracking.py` (15 tests, a hypothesis property over camera positions and scrolls); observation suite; full suite.
+- **Results:** 15/15; observation suite 218 passed; full suite 1545 passed, 10 skipped (real emulator); ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** tracks with level velocities are what T-973 needs to tell the player (moves with the buttons) from the rest, and T-974 to tell enemies (move on their own) from items and scenery.
 ### T-971 – The AI finds the things on a screen by itself
 - **Status:** Done
 - **Phase:** 8 (Boss, 10 Nov: "i dont want to draw anything, i want the AI to recognise it … This whole project was meant to be autonomous")
