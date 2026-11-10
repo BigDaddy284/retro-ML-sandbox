@@ -1,6 +1,6 @@
 # Seeing the game: tagging enemies, ground and items on the screen
 
-Status: T-970 (the finder) done; T-971 onwards proposed. ADR-011.
+Status: T-970 (the finder) and T-971 (finding things unaided) done; T-972 onwards planned. ADR-011.
 
 ## 1. The question
 
@@ -33,14 +33,25 @@ Short answer: the idea is right and DESIGN.md asks for it (§3.2 "combine memory
 
 Nothing in the app uses it yet: the finder is the base the next tasks build on.
 
-## 4. The plan from here (proposed tasks)
+## 4. No drawing: the AI finds things and works out what they are (T-971)
 
-One task at a time, as CLAUDE.md asks. The aim is Boss's: the AI should see and recognise its surroundings, not only what kills it.
+Boss's direction (10 Nov): nobody should have to draw boxes or label anything; the AI recognises things itself, as the whole project is meant to be autonomous. So the person-tagging UI is dropped from the plan, and everything below is the AI's own work. A person can still look at what it decided, never has to.
 
-1. **T-971 Tags are kept per game.** `storage/sprites.py` beside the knowledge file; a service that holds the game's tags and a finder for them.
-2. **T-972 Show the AI what things are.** In the Game panel: pause, draw a box round something, pick what it is (enemy, ground, platform, something that hurts, something to pick up, you) and give it a name. Everything the AI recognises is outlined on the live screen in its tag's colour, so a child sees what the AI sees.
-3. **T-973 The AI looks at the screen while it plays.** When a game has tags, each training step asks the emulator for its frame too (`step(screenshot=True)`, about 3 ms on the user's PC per the T-960 log), and the finder runs on it.
-4. **T-974 What is around me.** The AI's state gets a small map of the screen around the player (from the `player` tag, or the player's position the memory gives): for each cell of a coarse grid, what is there (enemy, hazard, solid, item, nothing), plus the nearest enemy's and hazard's distance across and up. These go into the state encoder and the feature map as parts of their own, beside the memory values, so the brain can learn "a gap ahead, jump", "an enemy two tiles left", "a platform above".
-5. **T-975 Screen and memory agree.** A memory value that moves on its own (a mover, T-911) and a tagged enemy that moves the same way on the screen are the same thing: the guess is confirmed, named after the tag and trusted more. This is DESIGN §3.2's "combine memory analysis and screen recognition".
-6. **T-976 Things that happen to you.** Events from the screen: touched an enemy, touched something that hurts, picked up an item, landed on solid ground; offered as rewards and used to explain deaths ("an enemy was touching you in 9 of 12 deaths"), which feeds the "Make the AI smarter at the game" work.
-7. **Later: the AI asks.** It notices pictures that keep turning up and move on their own and asks the person "what is this?" (DESIGN §3.4: request help when not confident).
+`retro_ai_lab.observation.objects` (T-971) is the first step:
+
+- `background_colour(frame)`: the commonest colour is the backdrop.
+- `find_objects(frame)`: every patch of other colours is a thing; parts a pixel apart (eyes, feet) are joined; a patch over 64 pixels either way is *scenery* (ground, walls), the level itself.
+- `ObjectCatalogue.observe(frame)`: sorts things screen after screen into kinds by exact look, a mirrored copy being the same kind, named "thing 1", "thing 2" in the order seen, each with a template the T-970 finder can look for.
+
+Known limit, handled by T-972: on one still screen, a sprite touching the ground is part of the ground's patch. Motion between screens separates them.
+
+## 5. The plan from here
+
+One task at a time, as CLAUDE.md asks; each one the AI's own doing.
+
+1. **T-972 Follow things between screens.** Work out how far the screen scrolled, take it away, and what still moved is a thing moving in the level (which also cuts a walker out of the ground it stands on). Each thing gets a track: where it is, which way and how fast it moves.
+2. **T-973 Which one is me.** The AI already experiments with buttons from a save state (T-844); the kind that moves when it presses left or right, and not otherwise, is the player.
+3. **T-974 What each kind does to me.** Set what happens on the screen against what memory says happens (the life count, the score, already found): a kind the player was touching when a life went is something that hurts, and if it moves on its own an enemy; a kind that vanishes when touched as the score goes up is something to pick up; scenery the player stops against or stands on is solid. Each conclusion carries the same confidence levels as the memory guesses (low → confirmed) and grows with repeats.
+4. **T-975 What is around me.** The AI's state gets a small map of what is near the player (enemy, hurts, solid, pick-up, nothing per cell) and the nearest enemy's distance, beside the memory values, so the brain can learn "gap ahead, jump", "enemy two tiles left".
+5. **T-976 Screen and memory agree.** A memory value that moves with a tracked thing on the screen is that thing's position: the guess is confirmed and named ("enemy's x position"), which should cut the RAM guesses a person has to correct.
+6. **T-977 Show what it sees.** Outlines on the Game panel in each kind's colour with the AI's name for it, so a child sees what the AI recognises. Read-only.

@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-971 | The AI finds the things on a screen by itself: the commonest colour is the backdrop, other patches are things (parts a pixel apart joined, big patches are scenery), and a catalogue sorts them screen after screen into kinds by look, mirrors included, each with a template for the T-970 finder; the drawing UI is dropped from the plan (Boss: autonomous, no drawing) | 8 | Done | 20/20 | see PR |
 | T-970 | Find what a person tagged on the screen (enemy, ground, hazard, item, player): a masked template matcher for pixel art on NumPy, mirrored, partly covered and repeating tiles handled, about 1 ms a tag; Airtest assessed and not taken on (ADR-011, docs/VISION.md) | 8 | Done | 47/47 | see PR |
 | T-967 | The user's 23:06 log: "Lives lost are counted on x position at ram[134], Lifes at ram[1882]" and then lives lost per go 0.0 for 465 goes while "Lifes goes down" fired 1.3 times a go. T-964 took every penalised value for a death (a −2 on stepping back included) and counted only the SETBACK events the AI's own life-count guesses raise. A death is now the penalised life count or health value, else the heaviest penalty, and a watched value's DOWN or SETBACK event counts once per update | 8 | Done | 3/3 | see PR #222 |
 | T-966 | The user's 9 Nov log: deaths per go halved (6.3 to 3) while points per go fell from +14 to −30, nearly all of it from one penalty ("x position goes down" −26 to −84 a go): the AI learned to hang back, and nothing in the log said so. The survival line now also gives the points per go of both windows and names the reward that moved most between them | 8 | Done | 2/2 | see PR #221 |
@@ -3022,6 +3023,22 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
+### T-971 – The AI finds the things on a screen by itself
+- **Status:** Done
+- **Phase:** 8 (Boss, 10 Nov: "i dont want to draw anything, i want the AI to recognise it … This whole project was meant to be autonomous")
+- **Objective:** `observation/objects.py`: `background_colour`, `find_objects` (things and scenery on one frame), `ObjectCatalogue` (kinds by look across frames, mirrored copies one kind, a template per kind).
+- **Scope:** finding and grouping. **Out of scope:** motion and scrolling (T-972), which kind is the player (T-973), what kinds do (T-974); see `docs/VISION.md` §5.
+- **Acceptance criteria:**
+  1. Each thing on a plain backdrop is found with the box round its own pixels, wherever it is; nothing on an empty screen.
+  2. Parts one pixel apart are one thing, parts three apart are two; specks under `min_pixels` are ignored; patches over `max_size` are scenery and are not catalogued.
+  3. Copies and mirrored copies are one kind; kinds are named in the order first seen and count sightings and screens; a kind's template is found again by `SpriteFinder`.
+  4. The catalogue stops at `most` kinds and counts what it dropped; bad settings and an unknown kind are a `ConfigurationError`.
+  5. The Toy Racer's car is found unaided; a busy 256x240 screen takes under 50 ms.
+- **Expected changes:** `src/retro_ai_lab/observation/objects.py`, `tests/unit/observation/test_objects.py`, `docs/VISION.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `tests/unit/observation/test_objects.py` (20 tests including a hypothesis property over every position); observation suite; full suite.
+- **Results:** 20/20; observation suite 203 passed; full suite 1530 passed, 10 skipped (real emulator); ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** the AI can now list the things on a screen and recognise the same kind again with nobody pointing. On a single still screen a sprite touching the ground merges into it; T-972 uses motion to separate them.
 ### T-970 – Find what a person tagged on the screen
 - **Status:** Done
 - **Phase:** 8 (Boss asked whether Airtest's image recognition could let the AI recognise enemies and tag them, and its surroundings in general; see `docs/VISION.md`)
