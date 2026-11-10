@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-970: the app can find things a person tagged on the screen (an enemy, ground, a platform, something that hurts, something to pick up, the player) in later frames, facing either way and in front of any background, in about a millisecond a tag; the base for the AI seeing its surroundings (`docs/VISION.md`). Airtest was assessed and not added (ADR-011).
 - T-967: a death is the value your rewards penalise most heavily (a life count or health value you penalise first, however lightly), not every penalised value, and its drops are counted as deaths whether or not the AI takes it for a life count; before, "x position goes down" counted as a death and your "Lifes" drops did not count at all.
 - T-966: the survival line also gives the points per go and names the reward that moved most against the ten goes before, so a survival bought by hanging back shows up as the trade it is.
 - T-965: the check of a start spot that loses a life by itself now runs the same steps holding each of the AI's buttons in turn, so a loss a button avoids (a player who stands still getting hit) is left for the AI to learn around and only a loss that comes whatever is held moves the goes' start; the start moves at most three times from one checkpoint.

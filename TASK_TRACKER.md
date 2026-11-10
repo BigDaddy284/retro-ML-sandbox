@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-970 | Find what a person tagged on the screen (enemy, ground, hazard, item, player): a masked template matcher for pixel art on NumPy, mirrored, partly covered and repeating tiles handled, about 1 ms a tag; Airtest assessed and not taken on (ADR-011, docs/VISION.md) | 8 | Done | 47/47 | see PR |
 | T-967 | The user's 23:06 log: "Lives lost are counted on x position at ram[134], Lifes at ram[1882]" and then lives lost per go 0.0 for 465 goes while "Lifes goes down" fired 1.3 times a go. T-964 took every penalised value for a death (a −2 on stepping back included) and counted only the SETBACK events the AI's own life-count guesses raise. A death is now the penalised life count or health value, else the heaviest penalty, and a watched value's DOWN or SETBACK event counts once per update | 8 | Done | 3/3 | see PR #222 |
 | T-966 | The user's 9 Nov log: deaths per go halved (6.3 to 3) while points per go fell from +14 to −30, nearly all of it from one penalty ("x position goes down" −26 to −84 a go): the AI learned to hang back, and nothing in the log said so. The survival line now also gives the points per go of both windows and names the reward that moved most between them | 8 | Done | 2/2 | see PR #221 |
 | T-965 | The user's 9 Nov log: T-961's check moved the goes' start 14 times in 25 minutes, 60 steps at a time, because a player who holds nothing loses a life every 60 steps in that game, and "lost holding nothing" was taken for "unavoidable". The check now runs the same steps again holding each of the AI's buttons in turn: a button that keeps the life makes the loss the AI's to avoid and the start stays; only a loss that comes whatever is held moves it, and at most three times from one checkpoint | 8 | Done | 3/3 | see PR #220 |
@@ -3021,6 +3022,23 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
+### T-970 – Find what a person tagged on the screen
+- **Status:** Done
+- **Phase:** 8 (Boss asked whether Airtest's image recognition could let the AI recognise enemies and tag them, and its surroundings in general; see `docs/VISION.md`)
+- **Objective:** `observation/sprites.py`: `SpriteTemplate.from_frame` cuts a tagged box out of a frame with its background colour see-through; `SpriteFinder.find` returns every copy on a later frame as `SpriteMatch` (name, tag, box, score, mirrored).
+- **Scope:** the template, the tags, the finder, JSON round trip. **Out of scope:** storing tags per game, the UI to tag, feeding what is seen to the AI (T-971 to T-976 in `docs/VISION.md`).
+- **Acceptance criteria:**
+  1. A sprite tagged against one background is found in front of another, wherever it is put, facing either way (mirrors can be turned off).
+  2. A slightly different palette matches within the tolerance; a partly covered sprite scores below 1 and `min_score` decides.
+  3. One hit per thing: shifted copies and repeating tiles collapse; two enemies overlapping by a quarter and adjacent ground tiles are all kept.
+  4. Bad boxes, names, tags, settings, channels and saved dicts are a `ConfigurationError`; the frame is not changed.
+  5. A Toy Racer obstacle tagged on one frame is followed down the screen.
+  6. Four tags on a 256x240 colour frame with five enemies take under 30 ms (measured 2.5 ms).
+- **Expected changes:** `src/retro_ai_lab/observation/sprites.py`, `src/retro_ai_lab/observation/__init__.py`, `tests/unit/observation/test_sprites.py`, `docs/VISION.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `tests/unit/observation/test_sprites.py`: template masks, explicit background, crop bounds, names, tags, inconsistent fields, dict round trip and broken dicts; finding several copies, none, see-through backgrounds, mirrored, edges, tolerance, partial cover, collapse, overlap, several tags, stable order, too-big template, channel mismatch, settings, frame untouched, a hypothesis property over every position and facing, ground tiles, Toy Racer, cost; full suite.
+- **Results:** 47 tests in `test_sprites.py`, all passing; full suite passed (exit 0, no failures); ruff and mypy clean.
+- **Commit:** see PR. **PR:** see PR.
+- **Completion report:** the finder works on its own; nothing in the app uses it yet. Airtest was installed in a scratch venv and measured: 418 MB over 39 packages with `numpy<2.0` and OpenCV ≤ 4.6 pinned, and its matcher missed a mirrored enemy, so ADR-011 keeps it out.
 ### T-967 – A death is the heaviest penalty on a life-like value, and its drops are counted
 - **Status:** Done
 - **Phase:** 8 (the user's 9 Nov 23:06 log, 465 goes of the T-966 build: the AI plays better, points per go +21 to +25 from −2, retreats 15 a go from 42, score confirmed 2.6 times a go from 0.9, and the T-965 check never fired; but the survival line read "lives lost per go 0.0 (was 0.0)" throughout, under "Lives lost are counted on x position at ram[134], Lifes at ram[1882], which your reward penalises", while "Lifes goes down" fired 1.3 times a go)
