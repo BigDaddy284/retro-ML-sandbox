@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-982 | When the AI looked closer (T-979) the brain's table met each fine situation as a stranger: whatever it had learned about the whole bucket over thousands of goes was left behind and the spot was learned from nothing. A fine situation now starts from the coarse bucket's values, read before the first learn and copied at it | 8 | Done | 2/2 | see PR |
 | T-981 | The user restarts the app for every build, and T-979's closer looks lived only in the running app: the saved brain held fine states its table could not reach again until the deaths named the sight afresh. The sights the AI looks closer at are now saved with the brain and put back on connect, dropped by "Start from scratch" and replaced by a loaded brain's | 8 | Done | 2/2 | see PR #227 |
 | T-980 | The user's 11 Nov log ended with an ERROR: a memory handler ran as the app shut down, `ExperimentHarness.available()` saw the connection still up, called the emulator for its capabilities and got `EmulatorDisconnectedError`. `available()` now answers False when the link drops between the check and the call; the connection service records the disconnect as it did | 8 | Done | 1/1 | see PR #226 |
 | T-979 | The user's 11 Nov log (goes 2975–3295): before three deaths in four the AI saw its own x position in its top bucket (128–255), a sight it has at a fifth of its steps, and no moving thing near; the user says the spot could be an empty floor tile, a fall trap. The brain saw the trap and the ground before it as one state. The death watch now names those sights and the state encoder reads them in steps of 8 instead of the bucket's 128 around the death spot, so the AI can learn where to jump | 8 | Done | 4/4 | see PR #225 |
@@ -3025,6 +3026,19 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
+### T-982 – A fine situation starts from what the coarse one knew
+- **Status:** Done
+- **Phase:** 8 (T-979 reads a sight in fine steps once the deaths name it; from then on the encoder makes fine states the Q-table has never seen, so the stretch before the trap, learned over the user's 3,000 goes, is forgotten at the moment the AI looks closer and the goes there start from zero again)
+- **Objective:** `learning/state.py`: `coarse_bucket(b)` (the coarse bucket a fine one came from; a coarse one is itself), `State.is_fine`, `State.coarse()`. `learning/qlearning.py`: `QTable.values` of an unknown fine state are the coarse twin's values when that is known (nothing is inserted); `QTable.row` copies them at the first learn, so the fine row is its own from then on. The DQN's feature map is untouched (its features already share weight across buckets). Nothing about any game is read.
+- **Scope:** `learning/state.py`, `learning/qlearning.py`. **Out of scope:** the DQN, un-splitting a sight.
+- **Acceptance criteria:**
+  1. `coarse_bucket` maps fine to coarse both signs and leaves coarse alone; `State.coarse()` reads every fine part coarsely and `is_fine` says whether any part is fine.
+  2. An unknown fine state's values and best action are the known coarse twin's without adding a row; the first `row()` copies them, and changes to the copy leave the twin alone; a fine state whose twin is unknown, and a coarse unknown, start from zero.
+- **Expected changes:** the files in Scope, `tests/unit/learning/test_state.py`, `tests/unit/learning/test_qlearning.py`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `test_fine_buckets_split_a_coarse_bucket_into_steps` (extended), `test_a_fine_situation_starts_from_what_the_coarse_one_knew`; learning suite; full suite.
+- **Results:** one test extended, one new; learning suite 31 passed; full suite 1474 passed, 10 skipped (167.40s); ruff and mypy clean.
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** `coarse_bucket`, `State.is_fine`, `State.coarse`, the Q-table's seeded start; looking closer keeps what the AI learned of the stretch.
 ### T-981 – The closer looks are kept with the brain
 - **Status:** Done
 - **Phase:** 8 (T-979's `StateEncoder.look_closer` sights lived in the encoder alone, which every connection makes anew; the user restarts the app for every build, so after each one the brain's fine states would sit unread until a survival window's deaths named the sight again, while the goes learned the spot coarsely again)

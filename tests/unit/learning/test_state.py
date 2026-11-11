@@ -21,6 +21,7 @@ from retro_ai_lab.learning.state import (
     bucket_low,
     bucket_span,
     bucket_word,
+    coarse_bucket,
     distance_id,
     fine_bucket,
     is_fine,
@@ -88,6 +89,12 @@ def test_fine_buckets_split_a_coarse_bucket_into_steps() -> None:
     assert bucket_word(fine_bucket(65535, VariableKind.SCORE)) == "20 (65528..65535)"
     with pytest.raises(ConfigurationError):
         bucket_low(-13)
+    # A fine bucket knows the coarse one it came from, and a state can go coarse (T-982).
+    assert coarse_bucket(fine_bucket(130, pos)) == 12 and coarse_bucket(12) == 12
+    assert coarse_bucket(fine_bucket(-130, pos)) == -13 and coarse_bucket(-13) == -13
+    fine = State((("v1", fine_bucket(130, pos)), ("v2", 3), ("v3", fine_bucket(-130, pos))))
+    assert fine.is_fine and not fine.coarse().is_fine
+    assert fine.coarse() == State((("v1", 12), ("v2", 3), ("v3", -13)))
     with pytest.raises(ConfigurationError):
         bucket_span(fine_bucket(130, pos))
     # The fine bucket's range is the coarse bucket's: every value stays in its bucket.
