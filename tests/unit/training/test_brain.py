@@ -35,6 +35,11 @@ def test_brain_round_trips_everything() -> None:
     assert again.episodes == 2 and again.total_steps == 20
     assert again.agent.to_dict() == agent.to_dict()
     assert again.agent.epsilon == agent.epsilon and again.agent.updates == 10
+    assert again.closer == () and "closer" not in data
+    # The sights read in fine steps travel with the brain (T-981).
+    closer = Brain("toyracer-0", agent, closer=(("v1", 12), ("v2~v1", -12)))
+    assert closer.to_dict()["closer"] == [["v1", 12], ["v2~v1", -12]]
+    assert Brain.from_dict(closer.to_dict(), space=agent.space).closer == closer.closer
     # The restored agent makes the very same next choice.
     s = State((("v1", 1), ("v2", 2)))
     assert again.agent.choose(s) == agent.choose(s)
@@ -55,6 +60,8 @@ def test_brain_refuses_bad_data() -> None:
         Brain.from_dict({"schema": 1, "game_id": "g"})
     with pytest.raises(ConfigurationError, match="different controls"):
         Brain.from_dict(data, space=ActionSpace.from_buttons(BUTTONS[:3]))
+    with pytest.raises(ConfigurationError, match="Bad brain data"):
+        Brain.from_dict({**data, "closer": [["v1", "twelve"]]})
     with pytest.raises(ConfigurationError, match="Bad go record"):
         Brain.from_dict({**data, "goes": [{"number": 1}]})
     with pytest.raises(ConfigurationError, match="Bad go result"):

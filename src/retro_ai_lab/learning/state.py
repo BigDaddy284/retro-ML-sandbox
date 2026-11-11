@@ -263,6 +263,10 @@ class StateEncoder:
             taken.append((vid, b))
         return tuple(taken)
 
+    def forget_closer(self) -> None:
+        """Read every part coarsely again (a brain forgotten or swapped, T-981)."""
+        self._closer.clear()
+
     def _bucket(self, vid: str, value: int, kind: VariableKind) -> int:
         b = bucket(value, kind, self._bins)
         if b in self._closer.get(vid, ()):

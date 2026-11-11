@@ -1942,3 +1942,35 @@ def test_where_it_keeps_dying_the_ai_looks_closer(
     assert enc.closer != () and len(closer) == len(enc.closer)
     assert "looking closer at" in enc.describe()
     t.stop()
+
+
+def test_the_closer_looks_are_kept_with_the_brain(
+    lab: Lab, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T-981: the user restarts the app for every build; the sights the AI looks closer
+    at travel with the saved brain, or its fine states would be dead weight until the
+    deaths named the sight again."""
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.training.service")
+    k = lab.connect()
+    pos = k.at(RAM, LAYOUT.lives)  # any believed value will do for the sight
+    assert pos is not None
+    t = lab.training
+    enc = t.encoder
+    assert enc is not None and enc.closer == ()
+    assert enc.look_closer([(pos.id, 11)]) == ((pos.id, 11),)
+    brain = t.brain()
+    assert brain is not None and brain.closer == ((pos.id, 11),)
+    t.save()
+    lab.connection.disconnect()
+    lab.connect()
+    again = t.encoder
+    assert again is not None and again is not enc and again.closer == ((pos.id, 11),)
+    assert "The AI keeps looking closer at 1 sight where it kept dying." in caplog.text
+    # A brain loaded from a file brings its own; forgetting the game drops them.
+    data = t.brain().to_dict()  # type: ignore[union-attr]
+    data.pop("closer")
+    t.replace_brain(data)
+    assert again.closer == ()
+    again.look_closer([(pos.id, 11)])
+    t.forget()
+    assert again.closer == () and t.brain().closer == ()  # type: ignore[union-attr]
