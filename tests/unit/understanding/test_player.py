@@ -8,6 +8,7 @@ import pytest
 from retro_ai_lab.core import ConfigurationError, Frame
 from retro_ai_lab.emulator.fake import ToyRacer
 from retro_ai_lab.observation.objects import ObjectCatalogue
+from retro_ai_lab.services import ConnectionService
 from retro_ai_lab.understanding.knowledge import Confidence
 from retro_ai_lab.understanding.player import PlayerFinding, find_player
 
@@ -185,3 +186,90 @@ def test_needs_two_frames_or_more() -> None:
 def test_a_run_that_gives_nothing_back_is_an_error() -> None:
     with pytest.raises(ConfigurationError):
         find_player(lambda held, n: [], ["left"])
+
+
+# ------------------------------------------------------------ on the emulator (T-974)
+
+
+def connected(**kw: object) -> ConnectionService:
+    from retro_ai_lab.core.events import EventBus
+    from retro_ai_lab.emulator.registry import default_registry
+
+    bus = EventBus(on_error=lambda exc, event, handler: (_ for _ in ()).throw(exc))
+    connection = ConnectionService(default_registry(), bus)
+    connection.connect("fake", seed=3, **kw)  # type: ignore[arg-type]
+    return connection
+
+
+def off_the_start_line(connection: ConnectionService) -> None:
+    from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
+
+    a = connection.adapter
+    assert isinstance(a, FakeEmulatorAdapter)
+    for _ in range(8):
+        a.game.step(["up"])
+
+
+def test_the_car_is_found_on_the_emulator_and_the_game_is_put_back() -> None:
+    from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
+    from retro_ai_lab.understanding.player import find_player_in_game
+
+    connection = connected()
+    off_the_start_line(connection)
+    a = connection.adapter
+    assert isinstance(a, FakeEmulatorAdapter)
+    before = a.game.snapshot()
+    found = find_player_in_game(
+        connection, ["left", "right", "up"], catalogue=ObjectCatalogue(min_pixels=2)
+    )
+    assert found is not None and {"left", "right"} <= found.buttons
+    assert found.start[1] >= 48 - 5
+    assert a.game.snapshot() == before  # where it was, pad let go
+
+
+def test_no_screenshots_means_no_answer() -> None:
+    from retro_ai_lab.core.types import Capabilities
+    from retro_ai_lab.understanding.player import find_player_in_game
+
+    caps = Capabilities(
+        memory_read=True, input=True, frame_advance=True, save_states=True, speed_control=True
+    )
+    connection = connected(capabilities=caps)
+    assert find_player_in_game(connection, ["left", "right"]) is None
+
+
+def test_the_emulator_run_refuses_unknown_buttons() -> None:
+    from retro_ai_lab.understanding.player import emulator_run
+
+    connection = connected()
+    connection.call(lambda a: a.save_state("x"))
+    run = emulator_run(connection, "x")
+    with pytest.raises(ConfigurationError):
+        run(frozenset({"jump"}), 4)
+    with pytest.raises(ConfigurationError):
+        emulator_run(connection, "x", every=0)
+    assert len(run(frozenset({"left"}), 4)) == 4
+
+
+def test_a_finding_round_trips_and_broken_ones_are_refused() -> None:
+    f = PlayerFinding("thing-2", (30, 45), frozenset({"left", "right"}), 4, Confidence.MEDIUM)
+    assert PlayerFinding.from_dict(f.to_dict()) == f
+    for broken in (
+        {},
+        {**f.to_dict(), "confidence": "SURE"},
+        {**f.to_dict(), "start": [1]},
+        {**f.to_dict(), "kind": 3},
+        {**f.to_dict(), "buttons": "left"},
+        {**f.to_dict(), "tried": "4"},
+    ):
+        with pytest.raises(ConfigurationError):
+            PlayerFinding.from_dict(broken)
+
+
+def test_the_knowledge_keeps_the_player() -> None:
+    from retro_ai_lab.understanding.knowledge import Knowledge
+
+    k = Knowledge("game")
+    assert Knowledge.from_dict(k.to_dict()).player is None
+    k.player = PlayerFinding(None, (30, 45), frozenset({"left"}), 2, Confidence.LOW)
+    assert Knowledge.from_dict(k.to_dict()).player == k.player

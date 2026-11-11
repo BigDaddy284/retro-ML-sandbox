@@ -26,15 +26,24 @@ capturing frames) is the caller's job: :func:`find_player` takes a
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+import logging
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from retro_ai_lab.core import ConfigurationError, Frame
 from retro_ai_lab.observation.objects import ObjectCatalogue
 from retro_ai_lab.observation.tracking import ObjectTracker
 from retro_ai_lab.understanding.knowledge import Confidence
 
-DEFAULT_FRAMES = 16  # frames each run lasts
+if TYPE_CHECKING:  # the services package imports this one; no cycle at run time
+    from retro_ai_lab.services.connection import ConnectionService
+
+log = logging.getLogger(__name__)
+
+DEFAULT_FRAMES = 16  # screens each run looks at
+DEFAULT_EVERY = 2  # emulator frames between two screens of a run
+PLAYER_SLOT = "player"  # where the experiment keeps the spot it plays from
 MOVED = (
     4  # pixels apart, at the frame they differ most, for a run to count as "this button moved it"
 )
@@ -59,6 +68,33 @@ class PlayerFinding:
             f"The thing at {self.start} moves when {names} is held "
             f"({len(self.buttons)} of {self.tried} buttons): it is you."
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "start": list(self.start),
+            "buttons": sorted(self.buttons),
+            "tried": self.tried,
+            "confidence": self.confidence.name,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> PlayerFinding:
+        try:
+            kind = data["kind"]
+            x, y = data["start"]
+            buttons = data["buttons"]
+            tried = data["tried"]
+            confidence = Confidence[data["confidence"]]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ConfigurationError(f"Bad saved player: {exc}") from exc
+        if kind is not None and not isinstance(kind, str):
+            raise ConfigurationError("A saved player's kind must be text or null.")
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in (x, y, tried)):
+            raise ConfigurationError("A saved player's start and tried must be whole numbers.")
+        if not isinstance(buttons, list) or not all(isinstance(b, str) for b in buttons):
+            raise ConfigurationError("A saved player's buttons must be a list of names.")
+        return cls(kind, (x, y), frozenset(buttons), tried, confidence)
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,4 +215,70 @@ def _same(a: tuple[int, int], b: tuple[int, int], within: int) -> bool:
     return abs(a[0] - b[0]) <= within and abs(a[1] - b[1]) <= within
 
 
-__all__ = ["PlayerFinding", "Run", "find_player"]
+def emulator_run(connection: ConnectionService, slot: str, *, every: int = DEFAULT_EVERY) -> Run:
+    """A ``run`` for :func:`find_player` that plays the emulator from save slot ``slot``.
+
+    Each run loads the slot, takes a screenshot, then holds the buttons for
+    ``every`` frames per further screenshot (one bundled step each), and lets
+    go of the pad at the end.
+    """
+    if not isinstance(every, int) or every < 1:
+        raise ConfigurationError("every must be at least 1.")
+    known = {b.name: b for b in connection.call(lambda a: a.buttons())}
+
+    def run(held: frozenset[str], frames: int) -> list[Frame]:
+        unknown = sorted(held - known.keys())
+        if unknown:
+            raise ConfigurationError(f"Unknown buttons for this game: {unknown}.")
+        pressed = tuple(known[n] for n in sorted(held))
+        connection.call(lambda a: a.load_state(slot))
+        out = [connection.call(lambda a: a.capture_frame())]
+        for _ in range(frames - 1):
+            result = connection.call(lambda a: a.step(every, pressed=pressed, screenshot=True))
+            if result.frame is None:
+                raise ConfigurationError("The emulator gave no screenshot back.")
+            out.append(result.frame)
+        connection.call(lambda a: a.set_input(()))
+        return out
+
+    return run
+
+
+def find_player_in_game(
+    connection: ConnectionService,
+    buttons: Iterable[str],
+    *,
+    frames: int = DEFAULT_FRAMES,
+    every: int = DEFAULT_EVERY,
+    catalogue: ObjectCatalogue | None = None,
+) -> PlayerFinding | None:
+    """Run :func:`find_player` on the connected game from where it is now, and put it back.
+
+    Needs screenshots, save states and input; without them the answer is None.
+    """
+    caps = connection.call(lambda a: a.capabilities())
+    if not (caps.screen_capture and caps.save_states and caps.input and caps.frame_advance):
+        log.info("This emulator can't show the AI its screen from a save state.")
+        return None
+    connection.call(lambda a: a.save_state(PLAYER_SLOT))
+    try:
+        return find_player(
+            emulator_run(connection, PLAYER_SLOT, every=every),
+            buttons,
+            frames=frames,
+            catalogue=catalogue,
+        )
+    finally:
+        connection.call(lambda a: a.load_state(PLAYER_SLOT))
+
+
+__all__ = [
+    "DEFAULT_EVERY",
+    "DEFAULT_FRAMES",
+    "PLAYER_SLOT",
+    "PlayerFinding",
+    "Run",
+    "emulator_run",
+    "find_player",
+    "find_player_in_game",
+]

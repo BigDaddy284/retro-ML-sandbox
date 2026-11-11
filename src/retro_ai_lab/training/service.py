@@ -76,7 +76,8 @@ from retro_ai_lab.training.insights import (
     suggest_experiments,
 )
 from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
-from retro_ai_lab.understanding.knowledge import Variable, VariableKind
+from retro_ai_lab.understanding.knowledge import Confidence, Variable, VariableKind
+from retro_ai_lab.understanding.player import find_player_in_game
 from retro_ai_lab.understanding.wakeup import find_wake_button, probe_inputs
 
 CHECKPOINT_SLOT = "training"
@@ -244,6 +245,7 @@ class TrainingService:
         self._wake_button: str | None = None
         self._needs_wake = False
         self._probe_listening = False  # ask the game directly at the next go start (T-848)
+        self._player_checked = False  # looked for itself on the screen since Start (T-974)
         self._last_go: tuple[tuple[str, ...], bool] | None = None
         self._short_resets: list[tuple[str, ...]] = []
         self._early_losses: list[int] = []  # first-loss steps of restored goes (T-961)
@@ -643,6 +645,7 @@ class TrainingService:
         if not self._enabled:  # the link dropped while the checkpoint was being taken
             raise ConfigurationError("The game went away just as training was starting.")
         self._probe_listening = True  # the first go asks whether the game listens (T-848)
+        self._player_checked = False
         self._status = Status.RUNNING
         self._discovery.set_experiments_allowed(False)  # not over the game's link (T-839)
         self._apply_speed()
@@ -1051,6 +1054,10 @@ class TrainingService:
                     woken = self._wake_up_or_wait()
                 if not woken:
                     return None  # training stopped: no go on a game that ignores the AI
+            if self._mode.ai_plays and self._harness is not None and not self._player_checked:
+                self._player_checked = True
+                with self._flat_out():
+                    self._find_player()
             if self._doomed_suspect is not None and self._mode.ai_plays:
                 suspect, self._doomed_suspect = self._doomed_suspect, None
                 with self._flat_out():
@@ -1145,6 +1152,40 @@ class TrainingService:
         self._apply_speed()
         self._announce("not listening")
         return False
+
+    def _find_player(self) -> None:
+        """Which thing on the screen is the AI? Found by pressing buttons (T-974).
+
+        Runs once after Start, from the spot goes start from, in a game that
+        listens; skipped when the game's knowledge already holds a fairly sure
+        answer, and when the emulator can't show the screen from a save state.
+        """
+        knowledge = self._discovery.knowledge
+        if knowledge is None:
+            return
+        if knowledge.player is not None and knowledge.player.confidence >= Confidence.MEDIUM:
+            return
+        harness = self._harness
+        if harness is None or not harness.has_checkpoint or not harness.available():
+            return
+        harness.restore()
+        try:
+            found = find_player_in_game(self._connection, self._playing_buttons())
+        except (ConfigurationError, UnsupportedCapabilityError) as exc:
+            log.info("Could not look for itself on the screen: %s", exc)
+            return
+        if found is None:
+            log.info(
+                "Pressing the buttons moved nothing on the screen; the AI can't see itself yet."
+            )
+            return
+        if found.confidence >= Confidence.MEDIUM:
+            log.info("Found itself on the screen. %s", found.describe())
+        else:  # one button only: kept, and looked for again at the next Start
+            log.info("Not sure yet which thing on the screen is the AI. %s", found.describe())
+        if knowledge.player != found:
+            knowledge.player = found
+            self._discovery.save()
 
     def _wake_up(self) -> bool:
         """The game stopped listening: find the button that gets it going (T-844).
