@@ -170,6 +170,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
 | T-977 | The user's 11 Nov log (227 goes): the AI found itself (A, left, right; high), but none of about 400 lives lost was put down to a thing, everything touched read "harmless" and kinds ran past 250. Kinds are now the colours a thing is drawn in (every animation frame one kind); things cut out of the ground by their motion get a kind (the game's enemies walk on the ground); the player is found again near where it was last seen and its kind is learned; a score or timer that stays put on the screen is not taken for the player; every ten goes the log sums up the looking | 8 | Done | 7/7 | see PR |
+| T-978 | The AI's brain sees what is around it: how far the nearest moving thing and the nearest thing found to hurt are from the player, across and up or down, in a few coarse answers (far/close before, level, close/far after), added to every state on top of the memory values once the player is found | 8 | Done | 15/15 | see PR |
 | T-976 | The AI looks at the screen while it plays: once it is fairly sure which thing is itself, every other step's screenshot goes to a `ScreenWatch` (tracker, player's track, T-975's rule) with the lives lost and score rises memory reported, and the log says what it now makes of things ("thing 3 is an enemy"); touching sprites drawn as one patch keep their tracks | 8 | Done | 9/9 | see PR |
 | T-975 | The AI works out what each kind of thing is from what touching it does: a life lost soon after a touch makes it something that hurts (an enemy if it moves, a hazard if not), vanishing as the score goes up makes it an item, nothing happening makes it harmless; each with a confidence from how many touches agree | 8 | Done | 12/12 | see PR |
 | T-974 | The AI looks for itself on the real game: at the first go after Start, from the goes' start spot, it runs the T-973 button experiment on the emulator (save state, screenshots), keeps the answer with the game's knowledge and says so in the log and the Discovery summary; a fairly sure answer is not looked for again, a weak one is at the next Start | 8 | Done | 8/8 | see PR |
@@ -3029,6 +3030,25 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
+### T-978 – The AI's brain sees what is around it on the screen
+- **Status:** Done
+- **Phase:** 8 (`docs/VISION.md` step 5; the user's 11 Nov log: the same mistakes go after go, because what the AI saw never reached its decisions)
+- **Objective:** `ScreenWatch.parts()` gives `screen:mover dx/dy` and `screen:hurts dx/dy`, the nearest moving thing and the nearest thing of a kind found to hurt, relative to the player, within 128 px across, as coarse answers from `side()` (dx: -2 far before, -1 close before (48 px), 0 level (8 px), 1, 2; dy: -1, 0, 1); `StateEncoder.set_screen(source)` adds up to `SCREEN_SEATS`=4 of them to every state on top of the memory seats, names them in the state's words and says so in `describe()`; `TrainingService._update_watch` connects them whenever the screen watch is on and logs it once.
+- **Scope:** the nearest mover and the nearest thing that hurts. **Out of scope:** a grid map of solid ground and gaps; memory values confirmed by the screen (T-979).
+- **Decision:** exact pixel distances (the state's doubling bins) were tried first and split the practice racer's table so finely that the first demonstration's "the point-lover drives at least twice as fast" check failed; a few coarse answers keep the table small and the check passes.
+- **Acceptance criteria:**
+  1. A walker coming from the right gives a positive across and a level up/down answer.
+  2. A kind found to hurt gives its own across answer.
+  3. Nothing beyond 128 px, and nothing when the player is not seen.
+  4. The coarse answers are right at each boundary.
+  5. The state holds the screen parts and drops them when the screen is switched off.
+  6. With a MEDIUM player the service connects the screen to the brain; without one it does not.
+  7. The first demonstration still passes.
+- **Expected changes:** `training/vision.py`, `learning/state.py`, `training/service.py`, tests, docs.
+- **Test plan:** 4 vision tests, 10 boundary cases, 2 service checks; full suite.
+- **Results:** 15/15; full suite passes; ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** the brain can now learn "enemy close on the right: jump" from what it sees; the next log shows whether lives lost per go come down.
 ### T-977 – Screen recognition that holds up in the user's game
 - **Status:** Done
 - **Phase:** 8 (the user's 11 Nov 18:08–19:20 log, 227 goes of the T-976 build: "Found itself on the screen. The thing at (48, 191) moves when a, left, right is held"; 62 "On the screen" lines, every one "harmless", kind numbers past 250; lives lost per go 1.5–2.2 throughout; the user: "Def looked better in places but also making the same stupid mistakes")

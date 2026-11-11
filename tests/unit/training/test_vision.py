@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from retro_ai_lab.core import Frame
 from retro_ai_lab.observation.sprites import SpriteTag
@@ -154,3 +155,80 @@ def test_the_summary_says_how_the_looking_went() -> None:
     text = watch.describe()
     assert "15 looks" in text and "1 lives lost, 1 of them soon after touching" in text
     assert "1 kinds found to hurt" in text
+
+
+# ------------------------------------------------------------ T-978: the brain sees it
+
+
+def test_the_brain_reads_how_far_the_nearest_moving_thing_is() -> None:
+    watch = ScreenWatch(hero_found())
+    watch.begin_go()
+    assert watch.parts() == ()  # nothing looked at yet
+    for i in range(4):
+        watch.look(screen([(40, 100, HERO), (100 - 4 * i, 102, WALKER)]))
+    parts = dict(watch.parts())
+    assert set(parts) == {"screen:mover dx", "screen:mover dy"}
+    assert parts["screen:mover dx"] > 0  # to the right of the hero
+    assert abs(parts["screen:mover dy"]) <= 1  # level with it
+
+
+def test_the_brain_reads_how_far_the_nearest_thing_that_hurts_is() -> None:
+    watch = ScreenWatch(hero_found())
+    walk_into(watch, WALKER, then="life")
+    walk_into(watch, WALKER, then="life")
+    watch.begin_go()
+    watch.look(screen([(40, 100, HERO), (100, 100, WALKER)]))
+    watch.look(screen([(40, 100, HERO), (100, 100, WALKER)]))
+    parts = dict(watch.parts())
+    assert "screen:hurts dx" in parts and parts["screen:hurts dx"] > 0
+
+
+def test_far_things_and_a_missing_player_give_nothing() -> None:
+    watch = ScreenWatch(hero_found())
+    watch.begin_go()
+    for i in range(3):
+        watch.look(screen([(40, 100, HERO), (240 - i, 100, WALKER)]))  # 200 px away
+    assert all(not k.startswith("screen:mover") for k, _ in watch.parts())
+    watch.begin_go()
+    watch.look(screen([(200, 30, WALKER)]))
+    assert watch.parts() == ()
+
+
+def test_the_state_holds_the_screen_parts_in_seats_of_their_own() -> None:
+    from retro_ai_lab.learning.state import SCREEN_SEATS, StateEncoder
+    from retro_ai_lab.observation.memory import MemorySnapshot
+    from retro_ai_lab.understanding.knowledge import Knowledge
+
+    enc = StateEncoder(Knowledge("g"), most=8)
+    snap = MemorySnapshot(0, {"ram": bytes(16)})
+    assert enc.encode(snap).parts == ()
+    enc.set_screen(lambda: (("screen:mover dx", 3), ("screen:mover dy", 0)))
+    state = enc.encode(snap)
+    assert state.parts == (("screen:mover dx", 3), ("screen:mover dy", 0))
+    assert "nearest moving thing across=3" in state.describe()
+    assert enc.sees_screen
+    enc.set_screen(None)
+    assert enc.encode(snap).parts == () and not enc.sees_screen
+    assert SCREEN_SEATS == 4
+
+
+@pytest.mark.parametrize(
+    ("apart", "near", "want"),
+    [
+        (0, 48, 0),
+        (8, 48, 0),
+        (-8, 48, 0),
+        (9, 48, 1),
+        (48, 48, 1),
+        (49, 48, 2),
+        (-30, 48, -1),
+        (-200, 48, -2),
+        (100, None, 1),
+        (-9, None, -1),
+    ],
+)
+def test_distances_become_a_few_coarse_answers(apart: int, near: int | None, want: int) -> None:
+    """Exact pixels would split the brain's table into thousands of states (T-978)."""
+    from retro_ai_lab.training.vision import side
+
+    assert side(apart, near=near) == want

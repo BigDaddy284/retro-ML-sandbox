@@ -1173,6 +1173,8 @@ class TrainingService:
             or not self._mode.ai_plays
         ):
             runner.set_watch(None)
+            if self._encoder is not None:
+                self._encoder.set_screen(None)
             return
         if self._watch is None or self._watch.player != player:
             self._watch = ScreenWatch(player)
@@ -1181,6 +1183,13 @@ class TrainingService:
                 DEFAULT_LOOK_EVERY,
             )
         runner.set_watch(self._watch)
+        if self._encoder is not None:
+            # The brain reads the nearest moving thing and the nearest thing found to
+            # hurt off the screen, beside the memory values (T-978).
+            told = self._encoder.sees_screen
+            self._encoder.set_screen(self._watch.parts)
+            if not told:
+                log.info("The AI's brain now also sees how far moving things are from it.")
 
     def _tell_roles(self) -> None:
         """Log what the AI now makes of things on the screen, when that changed (T-976)."""

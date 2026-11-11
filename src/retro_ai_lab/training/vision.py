@@ -23,6 +23,21 @@ from retro_ai_lab.understanding.roles import Happening, Role, RoleLearner
 DEFAULT_LOOK_EVERY = 2  # steps between two looks (a look costs a screenshot and ~15 ms)
 SOON_LOOKS = 30  # looks after a touch in which a life lost is put down to it (~4 s)
 FIRST_LOOK_REACH = 16  # pixels from where the player was found, at a go's first look
+PART_REACH = 128  # pixels across within which a thing is in the brain's view (T-978)
+NEAR = 48  # pixels across within which a thing is "close" rather than "coming"
+LEVEL = 8  # pixels within which a thing is level with the player, or on top of it
+
+
+def side(apart: int, *, near: int | None = NEAR) -> int:
+    """A few coarse answers, not exact pixels, so the brain's table stays small:
+    -2 far before, -1 close before, 0 level, 1 close after, 2 far after
+    (without ``near``: only -1, 0 and 1)."""
+    if abs(apart) <= LEVEL:
+        return 0
+    sign = 1 if apart > 0 else -1
+    if near is None or abs(apart) <= near:
+        return sign
+    return 2 * sign
 
 
 class ScreenWatch:
@@ -138,6 +153,36 @@ class ScreenWatch:
     def roles(self) -> tuple[Role, ...]:
         return self._learner.roles()
 
+    def parts(self) -> tuple[tuple[str, int], ...]:
+        """What the brain reads off the last look (T-978): how far the nearest moving
+        thing and the nearest thing found to hurt are from the player, across and up or
+        down, in a few coarse answers (:func:`side`). Nothing when the player was not seen."""
+        tracks = {t.id: t for t in self._tracker.tracks()}
+        me = tracks.get(self._me) if self._me is not None else None
+        if me is None or me.missing > 0:
+            return ()
+        hurts = {r.kind for r in self.roles() if r.tag in (SpriteTag.ENEMY, SpriteTag.HAZARD)}
+        mx, my = me.centre
+        out: list[tuple[str, int]] = []
+
+        def nearest(things: list[Track]) -> Track | None:
+            return min(
+                things,
+                key=lambda t: abs(t.centre[0] - mx) + abs(t.centre[1] - my),
+                default=None,
+            )
+
+        others = [t for t in tracks.values() if t.id != me.id and t.missing == 0]
+        for name, pick in (
+            ("mover", nearest([t for t in others if t.moves])),
+            ("hurts", nearest([t for t in others if t.kind in hurts])),
+        ):
+            if pick is None or abs(pick.centre[0] - mx) > PART_REACH:
+                continue
+            out.append((f"screen:{name} dx", side(pick.centre[0] - mx)))
+            out.append((f"screen:{name} dy", side(pick.centre[1] - my, near=None)))
+        return tuple(out)
+
     def news(self) -> tuple[Role, ...]:
         """Roles that are new or changed since the last call (for the log)."""
         out: list[Role] = []
@@ -149,4 +194,4 @@ class ScreenWatch:
         return tuple(out)
 
 
-__all__ = ["DEFAULT_LOOK_EVERY", "SOON_LOOKS", "ScreenWatch"]
+__all__ = ["DEFAULT_LOOK_EVERY", "SOON_LOOKS", "ScreenWatch", "side"]

@@ -1951,6 +1951,9 @@ def test_a_sure_player_makes_the_ai_look_at_the_screen_while_it_plays(
     assert runner is not None and runner.watch is not None
     assert runner.watch.looks == 3  # every other step
     assert "look at the screen every 2 steps" in caplog.text
+    # T-978: what it sees goes into the brain's state.
+    assert t.encoder is not None and t.encoder.sees_screen
+    assert "brain now also sees how far moving things are" in caplog.text
     t.stop()
 
 
@@ -1963,4 +1966,5 @@ def test_no_sure_player_means_no_looking(lab: Lab, monkeypatch: pytest.MonkeyPat
     t.start(Mode.INDEPENDENT)
     t.step()
     assert t.episode is not None and t.episode.watch is None
+    assert t.encoder is not None and not t.encoder.sees_screen
     t.stop()

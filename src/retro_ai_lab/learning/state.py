@@ -38,6 +38,7 @@ chosen ones are still ordered by address, so a tabular key stays stable.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from retro_ai_lab.core import ConfigurationError
@@ -65,6 +66,14 @@ SEEN_WORDS: dict[VariableKind, tuple[str, str]] = {  # how describe() counts eac
     VariableKind.FLAG: ("switch", "switches"),
 }
 DISTANCE_SEP = "~"  # a distance part's id is "<mover id>~<my position's id>"
+SCREEN_PREFIX = "screen:"  # parts the AI reads off the screen, not memory (T-978)
+SCREEN_SEATS = 4  # seats kept for them when the AI looks at the screen
+SCREEN_WORDS = {
+    "screen:mover dx": "nearest moving thing across",
+    "screen:mover dy": "nearest moving thing up/down",
+    "screen:hurts dx": "nearest thing that hurts across",
+    "screen:hurts dy": "nearest thing that hurts up/down",
+}
 IGNORED_KINDS = frozenset({VariableKind.UNKNOWN, VariableKind.INPUT, VariableKind.COUNTER})
 # The kinds a brain needs first: where things are, how it is doing, then the switches.
 KIND_RANK = (
@@ -138,6 +147,8 @@ class State:
 
 
 def _part_name(vid: str, knowledge: Knowledge | None) -> str:
+    if vid.startswith(SCREEN_PREFIX):
+        return SCREEN_WORDS.get(vid, vid[len(SCREEN_PREFIX) :])
     pair = split_distance(vid)
     if pair is not None:
         mover, mine = (_part_name(x, knowledge) for x in pair)
@@ -164,7 +175,23 @@ class StateEncoder:
         self._most = most
         self._variables: tuple[Variable, ...] = ()
         self._pairs: tuple[tuple[Variable, Variable], ...] = ()
+        self._screen: Callable[[], tuple[tuple[str, int], ...]] | None = None
         self.refresh()
+
+    def set_screen(self, source: Callable[[], tuple[tuple[str, int], ...]] | None) -> None:
+        """Add what the AI reads off the screen to every state (T-978); None stops it.
+
+        ``source`` gives ``(id, bucket)`` parts whose ids start with ``screen:``.
+        At most ``SCREEN_SEATS`` of them are added, on top of the memory seats.
+        """
+        changed = (source is None) != (self._screen is None)
+        self._screen = source
+        if changed:
+            self.refresh()
+
+    @property
+    def sees_screen(self) -> bool:
+        return self._screen is not None
 
     @property
     def knowledge(self) -> Knowledge:
@@ -219,7 +246,10 @@ class StateEncoder:
                     )
                 continue
             words.append(word)
-        return f"{_plural(n, 'value', 'values')}: {', '.join(words)}"
+        seen = f"{_plural(n, 'value', 'values')}: {', '.join(words)}"
+        if self._screen is not None:
+            seen += "; and off the screen, how far the nearest moving thing is"
+        return seen
 
     def refresh(self) -> tuple[Variable, ...]:
         """Re-read the knowledge; call after discoveries change."""
@@ -259,6 +289,8 @@ class StateEncoder:
                 parts.append(
                     (distance_id(mover.id, mine.id), bucket(apart, mover.kind, self._bins))
                 )
+        if self._screen is not None:
+            parts.extend(self._screen()[:SCREEN_SEATS])
         return State(tuple(parts))
 
 
