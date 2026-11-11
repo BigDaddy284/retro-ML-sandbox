@@ -101,6 +101,17 @@ class PlayerFinding:
 class _Outcome:
     path: dict[int, tuple[int, int]]  # frame index -> position in first-screen coordinates
     kind: str | None
+    edges: dict[int, tuple[int, int, int, int]]  # frame index -> left, top, right, bottom
+    screen: dict[int, tuple[int, int]]  # frame index -> top-left on the screen itself
+
+    @property
+    def moved_on_screen(self) -> bool:
+        """It moved on the screen itself. A score, a timer or a life counter stays put
+        on the screen while the camera follows the player, so in the level it seems to
+        move with the buttons; the player moves on the screen in some run (T-977)."""
+        xs = [p[0] for p in self.screen.values()]
+        ys = [p[1] for p in self.screen.values()]
+        return max(xs) - min(xs) >= MOVED or max(ys) - min(ys) >= MOVED
 
     @property
     def start(self) -> tuple[int, int]:
@@ -108,9 +119,20 @@ class _Outcome:
 
     @property
     def moved(self) -> bool:
-        xs = [p[0] for p in self.path.values()]
-        ys = [p[1] for p in self.path.values()]
-        return max(xs) - min(xs) >= MOVED or max(ys) - min(ys) >= MOVED
+        """It went somewhere: both its edges moved, across or up and down (T-977).
+
+        A bar that grows (a score, a timer) or a row of lives that shrinks keeps one
+        edge where it is; on the practice racer the score bar answered to every
+        button once kinds stopped changing with every new length.
+        """
+
+        def spread(i: int) -> int:
+            values = [e[i] for e in self.edges.values()]
+            return max(values) - min(values)
+
+        across = spread(0) >= MOVED and spread(2) >= MOVED
+        updown = spread(1) >= MOVED and spread(3) >= MOVED
+        return across or updown
 
 
 def _outcomes(frames: Sequence[Frame], catalogue: ObjectCatalogue) -> list[_Outcome]:
@@ -124,15 +146,20 @@ def _outcomes(frames: Sequence[Frame], catalogue: ObjectCatalogue) -> list[_Outc
         raise ConfigurationError("A run must give back at least one frame.")
     tracker = ObjectTracker(catalogue)
     paths: dict[int, dict[int, tuple[int, int]]] = {}
+    edges: dict[int, dict[int, tuple[int, int, int, int]]] = {}
+    screen: dict[int, dict[int, tuple[int, int]]] = {}
     kinds: dict[int, str | None] = {}
     for i, frame in enumerate(frames):
         for t in tracker.update(frame):
             if t.missing == 0:
                 _, lx, ly = t.history[-1]
                 paths.setdefault(t.id, {})[i] = (lx, ly)
+                left, top = lx - t.width // 2, ly - t.height // 2
+                edges.setdefault(t.id, {})[i] = (left, top, left + t.width, top + t.height)
+                screen.setdefault(t.id, {})[i] = (t.x, t.y)
                 if t.kind is not None:
                     kinds[t.id] = t.kind
-    return [_Outcome(path, kinds.get(tid)) for tid, path in paths.items()]
+    return [_Outcome(path, kinds.get(tid), edges[tid], screen[tid]) for tid, path in paths.items()]
 
 
 def _apart(a: dict[int, tuple[int, int]], b: dict[int, tuple[int, int]]) -> float | None:
@@ -184,10 +211,16 @@ def find_player(
                 continue
             group = next((g for g in groups if _same(o.start, g.start, SAME_START + MOVED)), None)
             if group is None:
-                groups.append(_Group(o.start, {button}, o.kind))
+                groups.append(_Group(o.start, {button}, o.kind, o.moved_on_screen))
             else:
                 group.buttons.add(button)
                 group.kind = group.kind if group.kind is not None else o.kind
+                group.on_screen = group.on_screen or o.moved_on_screen
+    # A thing that moved on the screen itself beats one that only seemed to move
+    # because the camera did (a score, a timer); a game whose camera always centres
+    # the player has none such, and then the level's view decides (T-977).
+    if any(g.on_screen for g in groups):
+        groups = [g for g in groups if g.on_screen]
     if not groups:
         return None
     # Most buttons first; among equals the lowest on the screen, then the leftmost.
@@ -209,6 +242,7 @@ class _Group:
     start: tuple[int, int]
     buttons: set[str]
     kind: str | None
+    on_screen: bool = False  # moved on the screen itself in some run
 
 
 def _same(a: tuple[int, int], b: tuple[int, int], within: int) -> bool:

@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-977 | The user's 11 Nov log (227 goes): the AI found itself (A, left, right; high), but none of about 400 lives lost was put down to a thing, everything touched read "harmless" and kinds ran past 250. Kinds are now the colours a thing is drawn in (every animation frame one kind); things cut out of the ground by their motion get a kind (the game's enemies walk on the ground); the player is found again near where it was last seen and its kind is learned; a score or timer that stays put on the screen is not taken for the player; every ten goes the log sums up the looking | 8 | Done | 7/7 | see PR |
 | T-976 | The AI looks at the screen while it plays: once it is fairly sure which thing is itself, every other step's screenshot goes to a `ScreenWatch` (tracker, player's track, T-975's rule) with the lives lost and score rises memory reported, and the log says what it now makes of things ("thing 3 is an enemy"); touching sprites drawn as one patch keep their tracks | 8 | Done | 9/9 | see PR |
 | T-975 | The AI works out what each kind of thing is from what touching it does: a life lost soon after a touch makes it something that hurts (an enemy if it moves, a hazard if not), vanishing as the score goes up makes it an item, nothing happening makes it harmless; each with a confidence from how many touches agree | 8 | Done | 12/12 | see PR |
 | T-974 | The AI looks for itself on the real game: at the first go after Start, from the goes' start spot, it runs the T-973 button experiment on the emulator (save state, screenshots), keeps the answer with the game's knowledge and says so in the log and the Discovery summary; a fairly sure answer is not looked for again, a weak one is at the next Start | 8 | Done | 8/8 | see PR |
@@ -3028,6 +3029,22 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
+### T-977 – Screen recognition that holds up in the user's game
+- **Status:** Done
+- **Phase:** 8 (the user's 11 Nov 18:08–19:20 log, 227 goes of the T-976 build: "Found itself on the screen. The thing at (48, 191) moves when a, left, right is held"; 62 "On the screen" lines, every one "harmless", kind numbers past 250; lives lost per go 1.5–2.2 throughout; the user: "Def looked better in places but also making the same stupid mistakes")
+- **Objective:** `ObjectCatalogue` keys kinds by palette (the colours making at least 4% of a thing's pixels) and offers `classify(crop, mask)` and the frame's `background`; `ObjectTracker` gives movers cut out of the scenery a kind from the colours where they moved (backdrop left out), marks them `cut_out`, keeps their trail, and matches them whatever their kind; `find_player` counts a thing as moved only when both its edges moved, and prefers things that moved on the screen itself over a HUD that only seems to move with the camera; `ScreenWatch` learns the player's kind, finds the player again near where it was last seen, and `describe()`s the looking (looks, share with the player followed, kinds, lives lost and how many soon after a touch, kinds found to hurt and to pick up), logged with the survival line every ten goes.
+- **Scope:** recognition only. **Out of scope:** using what is seen in the AI's state (T-978).
+- **Acceptance criteria:**
+  1. A walker's two animation frames are one kind; different colours are different kinds.
+  2. A walker on the ground, cut out by its motion, has a kind, the same as its kind seen whole.
+  3. A score that stays put on the screen is not taken for the player in a scrolling platformer; on the practice racer the car still is (the score bar growing and the lives row shrinking are not moves).
+  4. The player is found again after its track is lost.
+  5. The summary counts looks, lives lost and lives lost soon after a touch, and kinds found to hurt.
+- **Expected changes:** `observation/objects.py`, `observation/tracking.py`, `understanding/player.py`, `understanding/roles.py`, `training/vision.py`, `training/service.py`, tests, docs.
+- **Test plan:** 2 object tests, 1 tracking test, 1 player test, 2 vision tests (7 with the HUD check confirmed failing with the filter off); full suite.
+- **Results:** 7/7; full suite 1590 passed, 10 skipped (real emulator); ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** the causes visible in the log are fixed and tested on made-up frames; the next log's "On the screen so far" line says whether lives lost now follow touches in the user's game.
 ### T-976 – The AI looks at the screen while it plays and learns what things are
 - **Status:** Done
 - **Phase:** 8 (`docs/VISION.md` §5, step 4 fed from play)

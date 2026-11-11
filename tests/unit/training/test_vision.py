@@ -130,3 +130,27 @@ def test_score_rises_are_counted_for_the_watch() -> None:
     bus.publish(update(other))
     assert signals.take_scores() == 1
     assert signals.take_scores() == 0
+
+
+def test_the_player_is_found_again_after_its_track_is_lost() -> None:
+    """T-977: cut out of the ground or half behind something, the player's track can
+    break; the nearest thing to where it was last seen is it again."""
+    watch = ScreenWatch(hero_found())
+    watch.begin_go()
+    watch.look(screen([(40, 100, HERO)]))
+    first = watch.player_track
+    assert first is not None
+    watch.look(screen([]))  # gone for a moment
+    for _ in range(8):  # long enough for the old track to be dropped
+        watch.look(screen([]))
+    watch.look(screen([(48, 100, HERO)]))
+    assert watch.player_track is not None
+
+
+def test_the_summary_says_how_the_looking_went() -> None:
+    watch = ScreenWatch(hero_found())
+    assert "not looked" in watch.describe()
+    walk_into(watch, WALKER, then="life")
+    text = watch.describe()
+    assert "15 looks" in text and "1 lives lost, 1 of them soon after touching" in text
+    assert "1 kinds found to hurt" in text

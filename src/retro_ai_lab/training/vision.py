@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from retro_ai_lab.core import Frame
 from retro_ai_lab.observation.objects import ObjectCatalogue
+from retro_ai_lab.observation.sprites import SpriteTag
 from retro_ai_lab.observation.tracking import ObjectTracker, Track
 from retro_ai_lab.understanding.player import PlayerFinding
 from retro_ai_lab.understanding.roles import Happening, Role, RoleLearner
@@ -36,9 +37,15 @@ class ScreenWatch:
         self._tracker = ObjectTracker(catalogue)
         self._learner = RoleLearner(soon=soon)
         self._me: int | None = None
+        self._my_kind = player.kind  # learned from the player's track when it has one
+        self._last_me: tuple[int, int] | None = None  # where the player was last seen
         self._looks = 0
         self._looks_this_go = 0
         self._told: dict[str, tuple[str, str]] = {}
+        # What the summary every ten goes reports (T-977).
+        self._seen_me = 0
+        self._lives_lost = 0
+        self._lives_after_touch = 0
 
     @property
     def player(self) -> PlayerFinding:
@@ -60,14 +67,24 @@ class ScreenWatch:
         """A go starts from the checkpoint: new tracks, the player looked for afresh."""
         self._tracker.reset()
         self._me = None
+        self._last_me = None
         self._looks_this_go = 0
 
     def look(self, frame: Frame, *, lost: int = 0, scored: int = 0) -> None:
         tracks = self._tracker.update(frame)
         self._me = self._find_me(tracks)
+        me = next((t for t in tracks if t.id == self._me), None)
+        if me is not None and me.missing == 0:
+            self._seen_me += 1
+            self._last_me = me.centre
+            if me.kind is not None and not me.cut_out and not me.merged:
+                self._my_kind = me.kind
         happened: list[Happening] = []
         if lost:
             happened.append(Happening.LIFE_LOST)
+            self._lives_lost += 1
+            if self._learner.waiting:
+                self._lives_after_touch += 1
         if scored:
             happened.append(Happening.SCORE_UP)
         self._learner.observe(self._looks, tracks, self._me, happened)
@@ -79,10 +96,16 @@ class ScreenWatch:
         if self._me is not None and self._me in by_id:
             return self._me
         seen = [t for t in tracks if t.missing == 0]
-        if self._player.kind is not None:
-            mine = [t for t in seen if t.kind == self._player.kind]
+        if self._my_kind is not None:
+            mine = [t for t in seen if t.kind == self._my_kind]
             if mine:
-                return min(mine, key=lambda t: t.id).id
+                return min(mine, key=lambda t: self._distance(t)).id
+        if self._last_me is not None and seen:
+            # Lost (cut out of the ground, half behind something): the nearest thing to
+            # where it was last seen, if near enough, is it again (T-977).
+            near = min(seen, key=lambda t: self._distance(t))
+            if self._distance(near) <= 2 * FIRST_LOOK_REACH:
+                return near.id
         if self._looks_this_go == 0 and seen:
             # The go starts where the player was found: the nearest thing there is it.
             px, py = self._player.start
@@ -90,6 +113,27 @@ class ScreenWatch:
             if abs(near.centre[0] - px) + abs(near.centre[1] - py) <= FIRST_LOOK_REACH:
                 return near.id
         return None
+
+    def _distance(self, t: Track) -> int:
+        if self._last_me is None:
+            return 0
+        return abs(t.centre[0] - self._last_me[0]) + abs(t.centre[1] - self._last_me[1])
+
+    def describe(self) -> str:
+        """What the AI's look at the screen has come to, for the log every ten goes (T-977)."""
+        if self._looks == 0:
+            return "The AI has not looked at the screen yet."
+        share = round(100 * self._seen_me / self._looks)
+        kinds = len(self._tracker.catalogue.kinds())
+        roles = self.roles()
+        hurts = sum(1 for r in roles if r.tag in (SpriteTag.ENEMY, SpriteTag.HAZARD))
+        items = sum(1 for r in roles if r.tag is SpriteTag.ITEM)
+        return (
+            f"On the screen so far: {self._looks} looks, itself followed in {share}% of them; "
+            f"{kinds} kinds of thing; {self._lives_lost} lives lost, "
+            f"{self._lives_after_touch} of them soon after touching something; "
+            f"{hurts} kinds found to hurt, {items} to pick up."
+        )
 
     def roles(self) -> tuple[Role, ...]:
         return self._learner.roles()

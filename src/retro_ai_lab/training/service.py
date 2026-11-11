@@ -1310,6 +1310,8 @@ class TrainingService:
         # Every tenth go from the twentieth: is the AI surviving longer? (T-934)
         if self._episodes >= 2 * DEFAULT_WINDOW and self._episodes % DEFAULT_WINDOW == 0:
             log.info("%s", describe_survival(tuple(self._history), DEFAULT_WINDOW))
+            if self._watch is not None:
+                log.info("%s", self._watch.describe())  # T-977
         self._note_listening(result)
         if not self._needs_wake:  # a go the game ignored says nothing about play (T-870)
             self._discovery.credit_played(frame=self._observation.frame)

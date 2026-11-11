@@ -245,3 +245,18 @@ def test_two_things_that_touch_keep_their_tracks() -> None:
     assert len(ids) == 2
     assert any(t.merged for t in tracker.tracks())
     assert all(t.missing == 0 for t in tracker.tracks())
+
+
+def test_a_walker_on_the_ground_has_a_kind() -> None:
+    """T-977: in the user's game the enemies walk on the ground, were cut out of it by
+    their motion, had no kind and so were never found to hurt."""
+    w = level()
+    tracker = ObjectTracker()
+    for i in range(6):
+        tracker.update(view(w, 100 + 2 * i, [(300 - i, 192, walker())], i))
+    moving = [t for t in tracker.tracks() if t.moves]
+    assert len(moving) == 1
+    assert moving[0].cut_out and moving[0].kind is not None
+    # The same kind every time it is cut out: its colours, the sky left out.
+    walker_kinds = {k.id for k in tracker.catalogue.kinds()}
+    assert moving[0].kind in walker_kinds

@@ -9,10 +9,11 @@ building), kept apart from the things because they are the level, not
 something in it.
 
 An :class:`ObjectCatalogue` sorts the things it sees, screen after screen,
-into *kinds* by their exact look (a copy facing the other way is the same
-kind) and names them in the order first seen: "thing 1", "thing 2". Each
-kind keeps a :class:`~retro_ai_lab.observation.sprites.SpriteTemplate`, so
-the fast finder of T-970 can look for it on later screens.
+into *kinds* by the colours they are drawn in (T-977: every animation frame
+and facing of a sprite is one kind) and names them in the order first seen:
+"thing 1", "thing 2". Each kind keeps a
+:class:`~retro_ai_lab.observation.sprites.SpriteTemplate`, so the fast finder
+of T-970 can look for it on later screens.
 
 What a kind *is* (the player, an enemy, a coin, a platform) is not decided
 here: that comes from what the kind does, followed over time and set
@@ -59,6 +60,7 @@ class ScreenObject:
     pixels: int  # how many of the box's pixels are its own
     scenery: bool  # too big to be a thing: part of the level
     kind: str | None = None  # set by an ObjectCatalogue; None for scenery
+    cut_out: bool = False  # found by its motion against the scenery, not on a still screen
 
     @property
     def centre(self) -> tuple[int, int]:
@@ -187,17 +189,34 @@ class ObjectKind:
     screens: int = 0  # screens it was on
 
 
-def _look(crop: NDArray[np.uint8], mask: NDArray[np.bool_]) -> bytes:
-    shown = np.where(mask[..., None], crop, 0).astype(np.uint8)
+PALETTE_SHARE = 0.04  # a colour is part of a thing's palette from this share of its pixels
+
+
+def _palette(crop: NDArray[np.uint8], mask: NDArray[np.bool_]) -> bytes:
+    """A thing's look as its colours (T-977): the same in every animation frame and facing.
+
+    The user's game showed that an exact look made a new kind of every walking
+    frame and every sprite half behind another (over 250 kinds in an hour);
+    the colours a sprite is drawn in stay the same while it animates.
+    """
+    pixels = crop[mask].astype(np.int64)
+    if pixels.size == 0:
+        return b""
+    packed = pixels[:, 0].copy()
+    for ch in range(1, crop.shape[2]):
+        packed = (packed << 8) | pixels[:, ch]
+    colours, counts = np.unique(packed, return_counts=True)
+    keep = colours[(counts >= 2) & (counts >= PALETTE_SHARE * len(packed))]
+    if keep.size == 0:
+        keep = colours[np.argsort(-counts)[:1]]
     h = hashlib.blake2b(digest_size=16)
-    h.update(np.array(crop.shape, np.int32).tobytes())
-    h.update(shown.tobytes())
-    h.update(mask.tobytes())
+    h.update(np.array([crop.shape[2]], np.int32).tobytes())
+    h.update(np.sort(keep).astype(np.int64).tobytes())
     return h.digest()
 
 
 class ObjectCatalogue:
-    """Sorts the things seen screen after screen into kinds, by look."""
+    """Sorts the things seen screen after screen into kinds, by their colours (T-977)."""
 
     def __init__(
         self,
@@ -215,11 +234,17 @@ class ObjectCatalogue:
         self._kinds: dict[str, ObjectKind] = {}
         self._by_look: dict[bytes, str] = {}
         self._dropped: set[bytes] = set()
+        self._background: tuple[int, ...] | None = None
 
     @property
     def dropped(self) -> int:
         """Looks not catalogued because the catalogue was full."""
         return len(self._dropped)
+
+    @property
+    def background(self) -> tuple[int, ...] | None:
+        """The backdrop colour of the last frame observed."""
+        return self._background
 
     def kinds(self) -> tuple[ObjectKind, ...]:
         return tuple(self._kinds.values())
@@ -233,7 +258,10 @@ class ObjectCatalogue:
     def observe(
         self, frame: Frame, *, background: tuple[int, ...] | None = None
     ) -> tuple[ScreenObject, ...]:
-        """The things on ``frame`` with their kinds; new looks become new kinds."""
+        """The things on ``frame`` with their kinds; new palettes become new kinds."""
+        if background is None:
+            background = background_colour(frame)
+        self._background = background
         arr, fg = _foreground(frame, background)
         out: list[ScreenObject] = []
         on_screen: Counter[str] = Counter()
@@ -243,13 +271,7 @@ class ObjectCatalogue:
                 continue
             crop = arr[o.y : o.y + o.height, o.x : o.x + o.width]
             mask = fg[o.y : o.y + o.height, o.x : o.x + o.width]
-            look = _look(crop, mask)
-            kind_id = self._by_look.get(look)
-            if kind_id is None:
-                mirrored = _look(crop[:, ::-1], mask[:, ::-1])
-                kind_id = self._by_look.get(mirrored)
-                if kind_id is None:
-                    kind_id = self._add(look, mirrored, crop, mask, frame.channels)
+            kind_id = self.classify(crop, mask)
             if kind_id is None:
                 out.append(o)
                 continue
@@ -261,16 +283,20 @@ class ObjectCatalogue:
             k.screens += 1
         return tuple(out)
 
-    def _add(
-        self,
-        look: bytes,
-        mirrored: bytes,
-        crop: NDArray[np.uint8],
-        mask: NDArray[np.bool_],
-        channels: int,
-    ) -> str | None:
+    def classify(self, crop: NDArray[np.uint8], mask: NDArray[np.bool_]) -> str | None:
+        """The kind of the thing drawn by ``crop``'s pixels under ``mask``; a new palette
+        is a new kind (None once the catalogue is full)."""
+        if crop.ndim != 3 or mask.shape != crop.shape[:2] or not mask.any():
+            return None
+        look = _palette(crop, mask)
+        kind_id = self._by_look.get(look)
+        if kind_id is None:
+            kind_id = self._add(look, crop, mask)
+        return kind_id
+
+    def _add(self, look: bytes, crop: NDArray[np.uint8], mask: NDArray[np.bool_]) -> str | None:
         if len(self._kinds) >= self._most:
-            self._dropped.add(min(look, mirrored))
+            self._dropped.add(look)
             return None
         number = len(self._kinds) + 1
         kind_id = f"thing-{number}"
@@ -280,13 +306,12 @@ class ObjectCatalogue:
             tag=SpriteTag.OTHER,
             width=w,
             height=h,
-            channels=channels,
+            channels=crop.shape[2],
             pixels=np.ascontiguousarray(crop).tobytes(),
             mask=mask.astype(np.uint8).tobytes(),
         )
         self._kinds[kind_id] = ObjectKind(kind_id, template.name, template)
         self._by_look[look] = kind_id
-        self._by_look[mirrored] = kind_id
         return kind_id
 
 

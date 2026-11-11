@@ -157,6 +157,11 @@ class RoleLearner:
                         self._pending.append(_Pending(t.kind, t.id, frame))
         self._touching = now
 
+    @property
+    def waiting(self) -> bool:
+        """A touch is waiting to be settled (a life lost now would be put down to it)."""
+        return bool(self._pending)
+
     def _of(self, kind: str) -> KindEvidence:
         ev = self.evidence.get(kind)
         if ev is None:

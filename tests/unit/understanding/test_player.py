@@ -273,3 +273,22 @@ def test_the_knowledge_keeps_the_player() -> None:
     assert Knowledge.from_dict(k.to_dict()).player is None
     k.player = PlayerFinding(None, (30, 45), frozenset({"left"}), 2, Confidence.LOW)
     assert Knowledge.from_dict(k.to_dict()).player == k.player
+
+
+def test_a_score_that_stays_put_on_the_screen_is_not_the_player() -> None:
+    """T-977: a HUD stays on the screen while the camera follows the hero, so in the
+    level it seems to move with the buttons; it never moves on the screen itself."""
+    hud = sprite(WHITE, 24, 8, BLACK)
+
+    def with_hud(held: frozenset[str], frames: int) -> list[Frame]:
+        out = []
+        for f in platformer_run(held, frames):
+            a = np.frombuffer(f.pixels, np.uint8).reshape(240, 256, 3).copy()
+            solid = (hud != np.array(SKY, np.uint8)).any(axis=2)
+            a[10:18, 10:34][solid] = hud[solid]
+            out.append(Frame(256, 240, 3, a.tobytes(), number=f.number))
+        return out
+
+    found = find_player(with_hud, ["left", "right", "a"])
+    assert found is not None
+    assert found.start[1] > 100  # the hero, not the score at the top

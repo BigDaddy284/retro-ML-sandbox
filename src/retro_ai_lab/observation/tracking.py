@@ -138,6 +138,7 @@ class Track:
     seen: int = 1
     history: list[tuple[int, int, int]] = field(default_factory=list)  # (frame, level x, level y)
     merged: bool = False  # this frame it was part of a patch with another thing (touching)
+    cut_out: bool = False  # last seen cut out of the scenery by its motion (T-977)
 
     @property
     def centre(self) -> tuple[int, int]:
@@ -266,23 +267,33 @@ class ObjectTracker:
         boxes += [
             (t.x - sx, t.y - sy, t.width, t.height)
             for t in self._tracks.values()
-            if t.kind is not None
+            if t.kind is not None and not t.cut_out
         ]
         for x, y, w, h in boxes:
             moved[max(0, y - 1) : max(0, y + h + 1), max(0, x - 1) : max(0, x + w + 1)] = False
         if not moved.any():
             return []
         labels, count = _label(_dilate(moved))
+        arr = to_array(frame)
+        bg = self._catalogue.background
         found: list[ScreenObject] = []
         for i in range(1, count + 1):
-            ys, xs = np.nonzero((labels == i) & moved)
+            region = (labels == i) & moved
+            ys, xs = np.nonzero(region)
             if len(ys) < self._min_pixels:
                 continue
             x0, y0 = int(xs.min()), int(ys.min())
             w, h = int(xs.max()) - x0 + 1, int(ys.max()) - y0 + 1
             if w > self._max_size or h > self._max_size:
                 continue  # a big change (a screen flash, a new room) is not a thing
-            found.append(ScreenObject(x0, y0, w, h, len(ys), False, None))
+            # Its kind from the colours now drawn where it moved, the backdrop left out
+            # (its trail shows the sky): a walker on the ground has a kind too (T-977).
+            crop = arr[y0 : y0 + h, x0 : x0 + w]
+            mask = region[y0 : y0 + h, x0 : x0 + w].copy()
+            if bg is not None:
+                mask &= (crop != np.array(bg, np.uint8)).any(axis=2)
+            kind = self._catalogue.classify(crop, mask)
+            found.append(ScreenObject(x0, y0, w, h, len(ys), False, kind, cut_out=True))
         return found
 
     def _match(self, objects: list[ScreenObject], number: int) -> None:
@@ -295,8 +306,13 @@ class ObjectTracker:
             ex = t.centre[0] + t.velocity[0] * (t.missing + 1) - sx
             ey = t.centre[1] + t.velocity[1] * (t.missing + 1) - sy
             for oi, o in enumerate(objects):
-                if t.kind is not None and o.kind is not None and t.kind != o.kind:
-                    continue
+                if (
+                    not (t.cut_out or o.cut_out)
+                    and t.kind is not None
+                    and o.kind is not None
+                    and t.kind != o.kind
+                ):
+                    continue  # a cut-out's colours include a little of what it uncovered
                 d = float(np.hypot(o.centre[0] - ex, o.centre[1] - ey))
                 if d <= self._max_jump:
                     pairs.append((d, ti, oi))
@@ -323,7 +339,8 @@ class ObjectTracker:
                 )
             )
             t.x, t.y, t.width, t.height = o.x, o.y, o.width, o.height
-            t.kind = o.kind if o.kind is not None else t.kind
+            t.kind = o.kind if o.kind is not None and not (o.cut_out and t.kind) else t.kind
+            t.cut_out = o.cut_out
             t.last_frame = number
             t.missing = 0
             t.seen += 1
@@ -365,6 +382,7 @@ class ObjectTracker:
             if oi in used_o:
                 continue
             t = Track(self._next_id, o.kind, o.x, o.y, o.width, o.height, number, number)
+            t.cut_out = o.cut_out
             t.history.append((number, o.centre[0] + cx, o.centre[1] + cy))
             self._tracks[t.id] = t
             self._next_id += 1

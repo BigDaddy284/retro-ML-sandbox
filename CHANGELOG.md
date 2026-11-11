@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-977: the screen recognition holds up in a real game: a sprite's animation frames are one kind (your log had over 250), enemies walking on the ground get a kind (none were ever found to hurt before), the AI keeps hold of itself when its track breaks, a score that stays put on the screen is not taken for the player, and every ten goes the log sums up what the looking found.
 - T-976: once the AI is fairly sure which thing on the screen is itself, it looks at the screen every other step while it plays, sets what it touches against the lives lost and the score, and the log says what it makes of things ("On the screen: thing-3 is an enemy").
 - T-975: the AI can work out what a kind of thing on the screen is from what touching it does to the player: a life lost soon after means it hurts (an enemy if it moves, a hazard if not), vanishing as the score goes up means it is something to pick up, nothing happening means harmless, each with how sure it is.
 - T-974: at the first go after Start the AI looks for itself on your game's screen by pressing each of its buttons from the goes' start spot, remembers what it found with the game, and says so in the log and the Discovery summary; a sure answer is not looked for again.

@@ -225,3 +225,23 @@ def test_catalogue_has_a_limit() -> None:
     cat.observe(scene([(10, 10, walker()), (60, 60, coin()), (120, 120, s3)]))
     assert len(cat.kinds()) == 2
     assert cat.dropped == 1
+
+
+def test_animation_frames_are_one_kind() -> None:
+    """T-977: a walker's two steps are drawn differently in the same colours: one kind.
+    The user's game made a new kind of every frame (over 250 in an hour)."""
+    step = walker()
+    other = walker()
+    other[14:16, 2:7] = SKY
+    other[14:16, 9:14] = BLACK  # the other foot forward
+    cat = ObjectCatalogue()
+    a = cat.observe(scene([(10, 20, step)]))
+    b = cat.observe(scene([(10, 20, other)]))
+    assert a[0].kind == b[0].kind
+    assert len(cat.kinds()) == 1
+
+
+def test_different_colours_are_different_kinds() -> None:
+    cat = ObjectCatalogue()
+    found = cat.observe(scene([(10, 20, walker()), (100, 50, coin())]))
+    assert len({o.kind for o in found}) == 2
