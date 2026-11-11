@@ -109,6 +109,15 @@ def is_fine(b: int) -> bool:
     return abs(b) >= FINE_KEY
 
 
+def coarse_bucket(b: int) -> int:
+    """The coarse bucket a fine one was split from; a coarse bucket is itself."""
+    if not is_fine(b):
+        return b
+    if b < 0:
+        return -1 - ((-1 - b) // FINE_KEY)
+    return b // FINE_KEY
+
+
 def bucket_low(b: int, bins: int = DEFAULT_BINS) -> int:
     """The first (lowest magnitude) value of a coarse bucket of a value ``>= 0``."""
     if b < 0 or is_fine(b):
@@ -171,6 +180,16 @@ class State:
         except ValueError as exc:
             raise ConfigurationError(f"Bad state key {key!r}.") from exc
         return cls(parts)
+
+    @property
+    def is_fine(self) -> bool:
+        """True when any part is read in fine steps (T-979)."""
+        return any(is_fine(b) for _, b in self.parts)
+
+    def coarse(self) -> State:
+        """The same situation with every fine bucket read coarsely again (T-982): what
+        the brain knew of the whole bucket before it looked closer."""
+        return State(tuple((vid, coarse_bucket(b)) for vid, b in self.parts))
 
     def describe(self, knowledge: Knowledge | None = None, *, most: int | None = None) -> str:
         """The situation in words; ``most`` caps the values named ("and N more", T-889)."""
@@ -441,6 +460,7 @@ __all__ = [
     "bucket_low",
     "bucket_span",
     "bucket_word",
+    "coarse_bucket",
     "distance_id",
     "fine_bucket",
     "is_fine",
