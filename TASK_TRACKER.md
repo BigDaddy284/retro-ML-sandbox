@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-975 | The AI works out what each kind of thing is from what touching it does: a life lost soon after a touch makes it something that hurts (an enemy if it moves, a hazard if not), vanishing as the score goes up makes it an item, nothing happening makes it harmless; each with a confidence from how many touches agree | 8 | Done | 12/12 | see PR |
 | T-974 | The AI looks for itself on the real game: at the first go after Start, from the goes' start spot, it runs the T-973 button experiment on the emulator (save state, screenshots), keeps the answer with the game's knowledge and says so in the log and the Discovery summary; a fairly sure answer is not looked for again, a weak one is at the next Start | 8 | Done | 8/8 | see PR |
 | T-973 | The AI works out which thing on the screen is the player: from one start it plays the same frames holding nothing and then each button, follows every thing, and the thing that moves with a button and not without, for the most buttons, is the player (with a confidence); a hero standing on the ground is cut out by its motion | 8 | Done | 10/10 | see PR |
 | T-972 | The AI follows things between frames: it finds how far the screen scrolled, takes that away, and what still moved is a thing moving in the level (which also cuts a walker out of the ground it stands on); each thing gets a track with its velocity in the level. Background colour now counted on packed pixels (a busy screen 50 ms to 4 ms) | 8 | Done | 15/15 | see PR |
@@ -3026,6 +3027,22 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
+### T-975 – What each kind of thing is, from what touching it does
+- **Status:** Done
+- **Phase:** 8 (`docs/VISION.md` §5, step 4)
+- **Objective:** `understanding/roles.py`: `RoleLearner.observe(frame, tracks, player, happenings)` counts per kind the player's touches (boxes within 2 pixels; a long touch once), puts a `LIFE_LOST` within `soon` frames down to the oldest waiting touch (one touch per life), a `SCORE_UP` to a touched thing that has vanished, and lets the rest expire as harmless; notes kinds that move on their own. `roles()` gives `Role(kind, tag, confidence, touches)`: ENEMY or HAZARD when at least half the touches hurt (moving or not), ITEM when at least half were collected, OTHER otherwise; confidence LOW for 1 agreeing touch, MEDIUM 2, HIGH 4.
+- **Scope:** the evidence and the decision. **Out of scope:** feeding it from the training loop (screens during play, the player's track, the memory events): the next task.
+- **Acceptance criteria:**
+  1. A moving kind that costs a life twice is an enemy (MEDIUM); a still one four times a hazard (HIGH).
+  2. A kind that vanishes as the score goes up twice is an item; score with the thing still there is not.
+  3. Touches with nothing after are harmless; one unlucky touch among three harmless ones is not a hazard; a life lost after `soon` frames is not put down to the touch.
+  4. A long touch counts once; one life is put down to one touch.
+  5. Untouched kinds, kindless tracks and no player give no roles; bad settings are refused.
+- **Expected changes:** `src/retro_ai_lab/understanding/roles.py`, `tests/unit/understanding/test_roles.py`, docs.
+- **Test plan:** `tests/unit/understanding/test_roles.py` (12 tests); full suite.
+- **Results:** 12/12; full suite 1575 passed, 10 skipped (real emulator); ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** the decision rule is in place and tested on made-up tracks; it starts learning on a real game once the training loop hands it screens, the player's track and the memory events.
 ### T-974 – The AI looks for itself on the real game
 - **Status:** Done
 - **Phase:** 8 (`docs/VISION.md` §5; Boss: the AI should recognise things itself)
