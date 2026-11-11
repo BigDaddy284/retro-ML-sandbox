@@ -41,7 +41,7 @@ from retro_ai_lab.learning.promotion import convert, promote
 from retro_ai_lab.learning.qlearning import QLearningAgent, Settings
 from retro_ai_lab.learning.replay import Transition
 from retro_ai_lab.learning.skills import SkillsLearner
-from retro_ai_lab.learning.state import State, StateEncoder
+from retro_ai_lab.learning.state import FINE_STEP, State, StateEncoder, bucket_span, part_name
 from retro_ai_lab.observation.memory import MemoryCapture
 from retro_ai_lab.rewards.exploitation import ExploitWarning
 from retro_ai_lab.rewards.goals import Goal
@@ -1236,9 +1236,23 @@ class TrainingService:
         # Every tenth go from the twentieth: is the AI surviving longer? (T-934)
         if self._episodes >= 2 * DEFAULT_WINDOW and self._episodes % DEFAULT_WINDOW == 0:
             log.info("%s", describe_survival(tuple(self._history), DEFAULT_WINDOW))
-            seen = self._deaths.describe(self._discovery.knowledge)  # T-968
+            knowledge = self._discovery.knowledge
+            seen = self._deaths.describe(knowledge)  # T-968
             if seen:
                 log.info("%s", seen)
+            if self._encoder is not None:
+                # A sight before most deaths is read in fine steps from now on (T-979):
+                # the user's AI died at one stretch of ground that shared its bucket
+                # with the safe ground before it.
+                for vid, b in self._encoder.look_closer(self._deaths.standouts()):
+                    log.info(
+                        "Where it keeps dying the AI now looks closer: %s around %d, "
+                        "in steps of %d instead of %d.",
+                        part_name(vid, knowledge),
+                        b,
+                        FINE_STEP,
+                        bucket_span(b, self._encoder.bins),
+                    )
         self._deaths.end_go()
         self._note_listening(result)
         if not self._needs_wake:  # a go the game ignored says nothing about play (T-870)

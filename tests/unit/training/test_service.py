@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from dataclasses import dataclass, replace
 from itertools import pairwise
 from pathlib import Path
@@ -20,7 +21,7 @@ from retro_ai_lab.core.worklog import CallStats, app_work
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
 from retro_ai_lab.emulator.registry import default_registry
-from retro_ai_lab.learning import Settings
+from retro_ai_lab.learning import Settings, bucket
 from retro_ai_lab.services import (
     ConnectionService,
     DiscoveryService,
@@ -34,6 +35,7 @@ from retro_ai_lab.storage import BrainStore, GoalStore, RewardStore
 from retro_ai_lab.training import (
     DEFAULT_MAX_STEPS,
     DEFAULT_UNSTICK_AFTER,
+    LOOKAHEAD_STEPS,
     Brain,
     EpisodeFinished,
     Mode,
@@ -1798,8 +1800,6 @@ def test_goes_without_a_checkpoint_do_not_count_as_a_doomed_start(
 
 def test_the_service_hands_the_runner_its_lookahead(lab: Lab, tmp_path: Path) -> None:
     """T-963: the app's goes learn each step from the return over the next eight."""
-    from retro_ai_lab.training import LOOKAHEAD_STEPS
-
     assert LOOKAHEAD_STEPS == 8
     with pytest.raises(ConfigurationError):
         TrainingService(lab.connection, lab.observation, lab.discovery, lab.bus, lookahead=0)
@@ -1893,3 +1893,52 @@ def test_what_the_ai_saw_before_its_deaths_is_logged_with_the_survival_line(
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Before the")]
     assert len(lines) == 1  # once, with the survival line
     assert " deaths in the last 10 goes" in lines[0]  # the three, plus the car's own crashes
+
+
+def test_where_it_keeps_dying_the_ai_looks_closer(
+    lab: Lab, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T-979: the user's AI died at one stretch of ground that shared its 128-wide bucket
+    with the safe ground before it (a fall trap, the user said); after a survival window
+    whose deaths came in one sight the brain reads that value in steps of 8 there."""
+    k = lab.connect()
+    lives = k.at(RAM, LAYOUT.lives)
+    assert lives is not None
+    t = lab.training
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.training.service")
+    t.start(Mode.INDEPENDENT)
+    _run_goes(lab, 10)
+    enc = t.encoder
+    assert enc is not None and enc.closer == ()
+    # Over goes 11 to 20, a loss at every step where the car has been in the 64..127
+    # stretch of the track (bucket 11) for the whole lookahead: the sight before most
+    # of the window's deaths, beside the car's own crashes anywhere.
+    track: deque[int] = deque(maxlen=LOOKAHEAD_STEPS + 1)
+    deaths = 0
+    while t.episodes < 20:
+        latest = lab.observation.latest
+        assert latest is not None
+        track.append(latest.regions[RAM][LAYOUT.position])
+        if (
+            t.episode is not None
+            and len(track) > LOOKAHEAD_STEPS
+            and bucket(track[0], VariableKind.POSITION) == 11
+            and bucket(track[-1], VariableKind.POSITION) == 11
+        ):
+            deaths += 1
+            lab.bus.publish(
+                DiscoveryUpdated(
+                    (), (), (GameEvent(EventKind.SETBACK, 20, lives.id, "", 3, 2),), ()
+                )
+            )
+        assert t.step()
+    assert deaths >= 20
+    closer = [
+        r.getMessage()
+        for r in caplog.records
+        if r.getMessage().startswith("Where it keeps dying the AI now looks closer: ")
+    ]
+    assert len(closer) >= 1 and all(" in steps of 8 instead of " in line for line in closer)
+    assert enc.closer != () and len(closer) == len(enc.closer)
+    assert "looking closer at" in enc.describe()
+    t.stop()

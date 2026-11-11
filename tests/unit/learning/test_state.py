@@ -13,9 +13,17 @@ from retro_ai_lab.learning import State, StateEncoder, bucket
 from retro_ai_lab.learning.features import DEFAULT_WIDTH
 from retro_ai_lab.learning.state import (
     DEFAULT_MOST,
+    FINE_KEY,
+    FINE_STEP,
     KIND_RANK,
+    MOST_CLOSER,
     MOST_DISTANCES,
+    bucket_low,
+    bucket_span,
+    bucket_word,
     distance_id,
+    fine_bucket,
+    is_fine,
     split_distance,
 )
 from retro_ai_lab.observation import MemorySnapshot
@@ -58,6 +66,72 @@ def test_bucket_is_monotonic_and_small(value: int, bins: int) -> None:
     assert bucket(value + 1, VariableKind.SCORE, bins) >= b
     if value < bins:
         assert b == value
+
+
+def test_fine_buckets_split_a_coarse_bucket_into_steps() -> None:
+    """T-979: the user's AI died at one stretch of ground in its 128-wide top bucket."""
+    assert FINE_STEP == 8 and FINE_KEY == 1 << 32
+    pos = VariableKind.POSITION
+    fine = [fine_bucket(v, pos) for v in range(128, 256)]
+    assert len(set(fine)) == 16 and fine[0] == 12 * FINE_KEY and fine[-1] == 12 * FINE_KEY + 15
+    assert fine == sorted(fine) and all(is_fine(b) for b in fine)
+    assert fine_bucket(-130, pos) == -1 - fine_bucket(130, pos) and is_fine(fine_bucket(-130, pos))
+    assert not is_fine(bucket(255, pos)) and not is_fine(bucket(-255, pos))
+    assert bucket_word(fine_bucket(130, pos)) == "12 (128..135)"
+    assert bucket_word(fine_bucket(255, pos)) == "12 (248..255)"
+    assert bucket_word(fine_bucket(-130, pos)) == "-13 (-135..-128)"
+    assert bucket_word(12) == "12" and bucket_word(-13) == "-13"
+    assert bucket_span(12) == 128 and bucket_span(-13) == 128 and bucket_span(8) == 8
+    assert bucket_span(7) == 1 and bucket_span(-8) == 1 and bucket_span(9) == 16
+    assert bucket_span(5, bins=4) == 8  # bins 4: bucket 5 holds 8..15
+    assert bucket_low(12) == 128 and bucket_low(7) == 7 and bucket_low(5, bins=4) == 8
+    assert bucket_word(fine_bucket(65535, VariableKind.SCORE)) == "20 (65528..65535)"
+    with pytest.raises(ConfigurationError):
+        bucket_low(-13)
+    with pytest.raises(ConfigurationError):
+        bucket_span(fine_bucket(130, pos))
+    # The fine bucket's range is the coarse bucket's: every value stays in its bucket.
+    for v in range(0, 65536, 7):
+        assert fine_bucket(v, pos) // FINE_KEY == bucket(v, pos)
+
+
+def test_the_encoder_looks_closer_where_told() -> None:
+    k, me, it, score = moving_world()
+    enc = StateEncoder(k)
+    apart = distance_id(it.id, me.id)
+    pos = VariableKind.POSITION
+
+    def parts(me_at: int, it_at: int) -> dict[str, int]:
+        return dict(enc.encode(snap(bytes([0, me_at, it_at, 9]))).parts)
+
+    before = parts(130, 20)
+    assert before[me.id] == 12 and before[apart] == bucket(-110, pos) == -12
+    assert enc.closer == () and "looking closer" not in enc.describe()
+    # The death watch names my position in bucket 12 and the distance in its bucket;
+    # a fine sight, an exact one and bucket 8 (already 8 wide) are left alone.
+    taken = enc.look_closer(
+        [(me.id, 12), (me.id, fine_bucket(130, pos)), (score.id, 3), (score.id, 8), (apart, -12)]
+    )
+    assert taken == ((me.id, 12), (apart, -12))
+    assert enc.closer == ((me.id, 12), (apart, -12))
+    assert enc.describe().endswith("; looking closer at 2 sights where it keeps dying")
+    after = parts(130, 20)
+    assert after[me.id] == fine_bucket(130, pos) and after[apart] == fine_bucket(-110, pos)
+    assert after[score.id] == before[score.id]
+    assert parts(135, 20)[me.id] == after[me.id] and parts(136, 20)[me.id] != after[me.id]
+    assert parts(100, 20)[me.id] == 11  # outside the bucket: coarse as before
+    assert parts(130, 135)[apart] == 5  # the distance outside its bucket too
+    assert enc.look_closer([(me.id, 12)]) == ()  # already looked at
+    enc.refresh()  # a refresh keeps the closer looks
+    assert parts(130, 20)[me.id] == fine_bucket(130, pos)
+    # At most MOST_CLOSER sights.
+    assert MOST_CLOSER == 8
+    more = enc.look_closer([(score.id, b) for b in (9, 10, 11, 12, 13, 14, 15)])
+    assert len(more) == 6 and (score.id, 15) not in more
+    assert len(enc.closer) == MOST_CLOSER
+    s = enc.encode(snap(bytes([0, 130, 20, 9])))
+    assert f"{me.id}=12 (128..135)" in s.describe()
+    assert State.from_key(s.key) == s
 
 
 # ------------------------------------------------------------ states

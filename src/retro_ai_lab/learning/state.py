@@ -38,6 +38,7 @@ chosen ones are still ordered by address, so a tabular key stays stable.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from retro_ai_lab.core import ConfigurationError
@@ -65,6 +66,9 @@ SEEN_WORDS: dict[VariableKind, tuple[str, str]] = {  # how describe() counts eac
     VariableKind.FLAG: ("switch", "switches"),
 }
 DISTANCE_SEP = "~"  # a distance part's id is "<mover id>~<my position's id>"
+FINE_STEP = 8  # values per step where the AI looks closer (T-979)
+FINE_KEY = 1 << 32  # a fine bucket is coarse * FINE_KEY + (value - the bucket's low) // FINE_STEP
+MOST_CLOSER = 8  # sights the encoder looks closer at, at most
 IGNORED_KINDS = frozenset({VariableKind.UNKNOWN, VariableKind.INPUT, VariableKind.COUNTER})
 # The kinds a brain needs first: where things are, how it is doing, then the switches.
 KIND_RANK = (
@@ -87,6 +91,52 @@ def bucket(value: int, kind: VariableKind, bins: int = DEFAULT_BINS) -> int:
     if value < bins:
         return value
     return bins + (value // bins).bit_length() - 1
+
+
+def fine_bucket(value: int, kind: VariableKind, bins: int = DEFAULT_BINS) -> int:
+    """A coarse bucket split into steps of ``FINE_STEP`` (T-979): the user's AI died at
+    one stretch of ground that shared its 128-wide bucket with the safe ground before it.
+    ``coarse * FINE_KEY + (value - low) // FINE_STEP`` with ``low`` the bucket's first
+    value, negatives mirrored as :func:`bucket` does."""
+    if value < 0:
+        return -1 - fine_bucket(-value, kind, bins)
+    coarse = bucket(value, kind, bins)
+    return coarse * FINE_KEY + (value - bucket_low(coarse, bins)) // FINE_STEP
+
+
+def is_fine(b: int) -> bool:
+    """True for a bucket :func:`fine_bucket` made."""
+    return abs(b) >= FINE_KEY
+
+
+def bucket_low(b: int, bins: int = DEFAULT_BINS) -> int:
+    """The first (lowest magnitude) value of a coarse bucket of a value ``>= 0``."""
+    if b < 0 or is_fine(b):
+        raise ConfigurationError("bucket_low takes a coarse bucket of a value >= 0.")
+    return b if b < bins else bins << (b - bins)
+
+
+def bucket_span(b: int, bins: int = DEFAULT_BINS) -> int:
+    """How many values a coarse bucket holds (1 below ``bins``, then doubling)."""
+    if is_fine(b):
+        raise ConfigurationError("bucket_span takes a coarse bucket.")
+    coarse = -1 - b if b < 0 else b
+    return 1 if coarse < bins else bins << (coarse - bins)
+
+
+def bucket_word(b: int) -> str:
+    """A bucket in words: the number, or "12 (128..135)" for a fine one (T-979)."""
+    if not is_fine(b):
+        return str(b)
+    flip = b < 0
+    if flip:
+        b = -1 - b
+    coarse, sub = divmod(b, FINE_KEY)
+    low = bucket_low(coarse) + sub * FINE_STEP
+    high = low + FINE_STEP - 1
+    if flip:
+        return f"-{coarse + 1} (-{high}..-{low})"
+    return f"{coarse} ({low}..{high})"
 
 
 def distance_id(mover: str, mine: str) -> str:
@@ -130,7 +180,7 @@ class State:
             raise ConfigurationError("most must be at least 1 (or None).")
         words = []
         for vid, b in self.parts:
-            words.append(f"{part_name(vid, knowledge)}={b}")
+            words.append(f"{part_name(vid, knowledge)}={bucket_word(b)}")
         if most is not None and len(words) > most:
             left = len(words) - most
             return ", ".join(words[:most]) + f" and {left} more"
@@ -165,6 +215,7 @@ class StateEncoder:
         self._most = most
         self._variables: tuple[Variable, ...] = ()
         self._pairs: tuple[tuple[Variable, Variable], ...] = ()
+        self._closer: dict[str, set[int]] = {}  # part id -> coarse buckets read finely
         self.refresh()
 
     @property
@@ -190,6 +241,33 @@ class StateEncoder:
     def pairs(self) -> tuple[tuple[Variable, Variable], ...]:
         """``(mover, mine)`` pairs whose distance the state holds (T-912)."""
         return self._pairs
+
+    @property
+    def closer(self) -> tuple[tuple[str, int], ...]:
+        """The (part id, coarse bucket) sights read in fine steps (T-979)."""
+        return tuple(sorted((vid, b) for vid, bs in self._closer.items() for b in bs))
+
+    def look_closer(self, sights: Iterable[tuple[str, int]]) -> tuple[tuple[str, int], ...]:
+        """From now on read each part in fine steps where its value falls in the given
+        coarse bucket (T-979). Exact buckets (within ``bins``), fine ones and sights past
+        ``MOST_CLOSER`` are left alone. Returns the sights newly taken."""
+        taken: list[tuple[str, int]] = []
+        for vid, b in sights:
+            if is_fine(b) or bucket_span(b, self._bins) <= FINE_STEP:
+                continue
+            if b in self._closer.get(vid, ()):
+                continue
+            if sum(len(bs) for bs in self._closer.values()) >= MOST_CLOSER:
+                break
+            self._closer.setdefault(vid, set()).add(b)
+            taken.append((vid, b))
+        return tuple(taken)
+
+    def _bucket(self, vid: str, value: int, kind: VariableKind) -> int:
+        b = bucket(value, kind, self._bins)
+        if b in self._closer.get(vid, ()):
+            return fine_bucket(value, kind, self._bins)
+        return b
 
     def describe(self) -> str:
         """What the brain sees, in words, for the log (T-913)."""
@@ -220,7 +298,11 @@ class StateEncoder:
                     )
                 continue
             words.append(word)
-        return f"{_plural(n, 'value', 'values')}: {', '.join(words)}"
+        seen = f"{_plural(n, 'value', 'values')}: {', '.join(words)}"
+        if self._closer:
+            c = sum(len(bs) for bs in self._closer.values())
+            seen += f"; looking closer at {_plural(c, 'sight', 'sights')} where it keeps dying"
+        return seen
 
     def refresh(self) -> tuple[Variable, ...]:
         """Re-read the knowledge; call after discoveries change."""
@@ -246,7 +328,7 @@ class StateEncoder:
             except ConfigurationError:
                 continue  # the snapshot does not cover this variable
             values[v.id] = value
-            parts.append((v.id, bucket(value, v.kind, self._bins)))
+            parts.append((v.id, self._bucket(v.id, value, v.kind)))
         for pair in self._pairs:
             for v in pair:  # a mover or own position without a seat is still read (T-923)
                 if v.id not in values:
@@ -257,9 +339,8 @@ class StateEncoder:
         for mover, mine in self._pairs:
             if mover.id in values and mine.id in values:
                 apart = values[mover.id] - values[mine.id]
-                parts.append(
-                    (distance_id(mover.id, mine.id), bucket(apart, mover.kind, self._bins))
-                )
+                did = distance_id(mover.id, mine.id)
+                parts.append((did, self._bucket(did, apart, mover.kind)))
         return State(tuple(parts))
 
 
@@ -343,14 +424,22 @@ __all__ = [
     "DEFAULT_BINS",
     "DEFAULT_MOST",
     "DISTANCE_SEP",
+    "FINE_KEY",
+    "FINE_STEP",
     "IGNORED_KINDS",
     "KIND_RANK",
+    "MOST_CLOSER",
     "MOST_DISTANCES",
     "SEEN_WORDS",
     "State",
     "StateEncoder",
     "bucket",
+    "bucket_low",
+    "bucket_span",
+    "bucket_word",
     "distance_id",
+    "fine_bucket",
+    "is_fine",
     "part_name",
     "split_distance",
 ]

@@ -330,6 +330,13 @@ the statistics do. Guesses you confirmed, named or rejected are never rethought.
 found, and the Research window's memory table lets you name a value for
 it.
 
+When the last ten goes' deaths mostly came with one sight (the AI's own
+position in one of its wide buckets, say, and nothing moving near: a pit
+or a fall trap), the AI looks closer there from then on, reading that
+value in steps of 8 inside that bucket instead of one 128-wide lump, so
+the trap and the ground before it become different situations and it can
+learn the button for the spot. The log says where it now looks closer.
+
 Every few minutes the log also prints a census of memory values, the
 sixteen that change most, the sixteen smoothest and the sixteen rare ones
 with the widest range, with the numbers behind the AI's word for each, so a
