@@ -129,9 +129,11 @@ class RoleLearner:
         for p in self._pending:
             if p.track not in by_id or by_id[p.track].missing > 0:
                 p.gone = True
-        # What memory said settles the touches still waiting, oldest first.
+        # What memory said settles the touches still waiting. A life lost goes to the
+        # latest touch: a game freezes the player when it is hit, and the life
+        # counter drops a few seconds later, after nothing else was touched.
         if Happening.LIFE_LOST in happened and self._pending:
-            p = self._pending.pop(0)
+            p = self._pending.pop()
             self._of(p.kind).hurt += 1
             self._pending.clear()  # a life lost is put down to one touch only
         elif Happening.SCORE_UP in happened:

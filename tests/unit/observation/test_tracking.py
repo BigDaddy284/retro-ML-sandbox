@@ -233,3 +233,15 @@ def test_following_costs_little_enough_to_run_now_and_then() -> None:
         tracker.update(f)
     per = (time.perf_counter() - start) / 5
     assert per < 0.1, f"{per * 1000:.0f} ms"
+
+
+def test_two_things_that_touch_keep_their_tracks() -> None:
+    """Touching sprites are drawn as one patch; both tracks stay, marked as merged (T-976)."""
+    w = level()
+    tracker = ObjectTracker()
+    for i in range(6):  # the coin waits, the walker walks into it
+        tracker.update(view(w, 0, [(60 + 4 * i, 60, walker()), (90, 62, coin())], i))
+    ids = {t.id for t in tracker.tracks()}
+    assert len(ids) == 2
+    assert any(t.merged for t in tracker.tracks())
+    assert all(t.missing == 0 for t in tracker.tracks())

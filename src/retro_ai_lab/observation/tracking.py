@@ -137,6 +137,7 @@ class Track:
     missing: int = 0  # frames since last seen
     seen: int = 1
     history: list[tuple[int, int, int]] = field(default_factory=list)  # (frame, level x, level y)
+    merged: bool = False  # this frame it was part of a patch with another thing (touching)
 
     @property
     def centre(self) -> tuple[int, int]:
@@ -150,6 +151,18 @@ class Track:
         xs = [h[1] for h in self.history]
         ys = [h[2] for h in self.history]
         return max(xs) - min(xs) > 1 or max(ys) - min(ys) > 1
+
+
+def _inside(t: Track, o: ScreenObject, sx: int, sy: int, slack: int = 3) -> bool:
+    """Where ``t`` should be now (moved, slid by the scroll) lies within the patch ``o``."""
+    x = t.x + t.velocity[0] - sx
+    y = t.y + t.velocity[1] - sy
+    return (
+        x >= o.x - slack
+        and y >= o.y - slack
+        and x + t.width <= o.x + o.width + slack
+        and y + t.height <= o.y + o.height + slack
+    )
 
 
 class ObjectTracker:
@@ -314,8 +327,32 @@ class ObjectTracker:
             t.last_frame = number
             t.missing = 0
             t.seen += 1
+            t.merged = False
             t.history.append((number, *new_level))
             del t.history[:-HISTORY]
+        # Two things that touch are drawn as one patch, which looks like neither of them:
+        # the things it covers stay seen, where their motion takes them, touching each
+        # other, instead of a new thing being made of the pair (T-976).
+        for oi, o in enumerate(objects):
+            if oi in used_o:
+                continue
+            covered = [
+                ti for ti, t in enumerate(tracks) if ti not in used_t and _inside(t, o, sx, sy)
+            ]
+            if len(covered) >= 2:
+                used_o.add(oi)
+                for ti in covered:
+                    used_t.add(ti)
+                    t = tracks[ti]
+                    t.x = round(t.x + t.velocity[0] - sx)
+                    t.y = round(t.y + t.velocity[1] - sy)
+                    t.last_frame = number
+                    t.missing = 0
+                    t.seen += 1
+                    t.merged = True
+                    lx, ly = t.centre[0] + cx, t.centre[1] + cy
+                    t.history.append((number, lx, ly))
+                    del t.history[:-HISTORY]
         for ti, t in enumerate(tracks):
             if ti not in used_t:
                 t.missing += 1

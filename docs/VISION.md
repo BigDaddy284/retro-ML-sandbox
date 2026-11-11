@@ -1,6 +1,6 @@
 # Seeing the game: tagging enemies, ground and items on the screen
 
-Status: T-970 to T-975 done (find, follow, find itself on the real game, the rule for what kinds are); feeding T-975 from play and T-976 onwards planned. ADR-011.
+Status: T-970 to T-976 done (find, follow, find itself on the real game, learn what things are while playing); T-977 onwards planned. ADR-011.
 
 ## 1. The question
 
@@ -52,7 +52,7 @@ One task at a time, as CLAUDE.md asks; each one the AI's own doing.
 1. **T-972 (done) Follow things between screens.** Work out how far the screen scrolled, take it away, and what still moved is a thing moving in the level (which also cuts a walker out of the ground it stands on). Each thing gets a track: where it is, which way and how fast it moves.
 2. **T-973 (done) Which one is me.** The AI already experiments with buttons from a save state (T-844); the kind that moves when it presses left or right, and not otherwise, is the player.
 3. **T-974 (done) It looks for itself on the real game** at the first go after Start and remembers the answer.
-4. **T-975 (rule done; wiring to play next) What each kind does to me.** Set what happens on the screen against what memory says happens (the life count, the score, already found): a kind the player was touching when a life went is something that hurts, and if it moves on its own an enemy; a kind that vanishes when touched as the score goes up is something to pick up; scenery the player stops against or stands on is solid. Each conclusion carries the same confidence levels as the memory guesses (low → confirmed) and grows with repeats.
-5. **T-976 What is around me.** The AI's state gets a small map of what is near the player (enemy, hurts, solid, pick-up, nothing per cell) and the nearest enemy's distance, beside the memory values, so the brain can learn "gap ahead, jump", "enemy two tiles left".
-6. **T-977 Screen and memory agree.** A memory value that moves with a tracked thing on the screen is that thing's position: the guess is confirmed and named ("enemy's x position"), which should cut the RAM guesses a person has to correct.
-7. **T-978 Show what it sees.** Outlines on the Game panel in each kind's colour with the AI's name for it, so a child sees what the AI recognises. Read-only.
+4. **T-975 and T-976 (done) What each kind does to me,** learned while the AI plays. Set what happens on the screen against what memory says happens (the life count, the score, already found): a kind the player was touching when a life went is something that hurts, and if it moves on its own an enemy; a kind that vanishes when touched as the score goes up is something to pick up; scenery the player stops against or stands on is solid. Each conclusion carries the same confidence levels as the memory guesses (low → confirmed) and grows with repeats.
+5. **T-977 What is around me.** The AI's state gets a small map of what is near the player (enemy, hurts, solid, pick-up, nothing per cell) and the nearest enemy's distance, beside the memory values, so the brain can learn "gap ahead, jump", "enemy two tiles left".
+6. **T-978 Screen and memory agree.** A memory value that moves with a tracked thing on the screen is that thing's position: the guess is confirmed and named ("enemy's x position"), which should cut the RAM guesses a person has to correct.
+7. **T-979 Show what it sees.** Outlines on the Game panel in each kind's colour with the AI's name for it, so a child sees what the AI recognises. Read-only.

@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-976 | The AI looks at the screen while it plays: once it is fairly sure which thing is itself, every other step's screenshot goes to a `ScreenWatch` (tracker, player's track, T-975's rule) with the lives lost and score rises memory reported, and the log says what it now makes of things ("thing 3 is an enemy"); touching sprites drawn as one patch keep their tracks | 8 | Done | 9/9 | see PR |
 | T-975 | The AI works out what each kind of thing is from what touching it does: a life lost soon after a touch makes it something that hurts (an enemy if it moves, a hazard if not), vanishing as the score goes up makes it an item, nothing happening makes it harmless; each with a confidence from how many touches agree | 8 | Done | 12/12 | see PR |
 | T-974 | The AI looks for itself on the real game: at the first go after Start, from the goes' start spot, it runs the T-973 button experiment on the emulator (save state, screenshots), keeps the answer with the game's knowledge and says so in the log and the Discovery summary; a fairly sure answer is not looked for again, a weak one is at the next Start | 8 | Done | 8/8 | see PR |
 | T-973 | The AI works out which thing on the screen is the player: from one start it plays the same frames holding nothing and then each button, follows every thing, and the thing that moves with a button and not without, for the most buttons, is the player (with a confidence); a hero standing on the ground is cut out by its motion | 8 | Done | 10/10 | see PR |
@@ -3027,6 +3028,23 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
 
+### T-976 – The AI looks at the screen while it plays and learns what things are
+- **Status:** Done
+- **Phase:** 8 (`docs/VISION.md` §5, step 4 fed from play)
+- **Objective:** `training/vision.py` `ScreenWatch` (tracker, the player's track by kind or at a go's first look by where it was found, a `RoleLearner` fed lives lost and score rises; `news()` for the log); `EpisodeRunner(watch=, look_every=2)` asks the step for a screenshot every other step and hands it with that step's lives lost and score rises to the watch; `EpisodeSignals.watch_scores`/`take_scores` (the best score guess's UP events and any SCORE_GAIN); `TrainingService._update_watch` (only with screenshots, an AI mode and a MEDIUM or better player; announced once) and `_tell_roles` after each go ("On the screen: thing-3 is an enemy (medium, 2 touches)."); the tracker keeps both tracks when two touching sprites are drawn as one patch (`Track.merged`); `RoleLearner` puts a life lost down to the latest touch.
+- **Scope:** feeding and logging. **Out of scope:** keeping kinds and roles with the game across sessions; the map of what is around the player in the AI's state (next).
+- **Acceptance criteria:**
+  1. The hero is picked out at a go's first look near where it was found, and not when nothing is near.
+  2. A thing touched before a life is lost, twice, hurts (MEDIUM); one that vanishes as the score rises, twice, is an item.
+  3. `news()` tells each change once.
+  4. Two touching sprites keep their two tracks.
+  5. Score rises are counted once per update, only for the score's value.
+  6. With a MEDIUM player the runner looks every other step and the log says so; without one it does not look.
+- **Expected changes:** `training/vision.py`, `training/episode.py`, `training/service.py`, `observation/tracking.py`, `understanding/roles.py`, tests, docs.
+- **Test plan:** `tests/unit/training/test_vision.py` (6), one tracking test, two service tests; full suite.
+- **Results:** 9/9; full suite 1584 passed, 10 skipped (real emulator); ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** on a game where the AI has found itself, it now learns what things are while it plays and says so in the log. Cost: a screenshot and about 15 ms of looking every other step. Known limits: kinds and roles last as long as the app runs; a player cut out of the ground (no kind) is followed from the go's first look only while its track holds.
 ### T-975 – What each kind of thing is, from what touching it does
 - **Status:** Done
 - **Phase:** 8 (`docs/VISION.md` §5, step 4)

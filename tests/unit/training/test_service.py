@@ -1927,3 +1927,40 @@ def test_a_weak_answer_is_looked_for_once_per_start(
     t.step()
     t.stop()
     assert calls == [1, 1]
+
+
+# ------------------------------------------------ T-976: it looks at the screen while it plays
+
+
+def test_a_sure_player_makes_the_ai_look_at_the_screen_while_it_plays(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import retro_ai_lab.training.service as module
+    from retro_ai_lab.understanding.knowledge import Confidence
+    from retro_ai_lab.understanding.player import PlayerFinding
+
+    k = lab.connect()
+    k.player = PlayerFinding(None, (31, 45), frozenset({"left", "right"}), 2, Confidence.MEDIUM)
+    monkeypatch.setattr(module, "find_player_in_game", lambda *a, **kw: None)
+    caplog.set_level(logging.INFO)
+    t = lab.training
+    t.start(Mode.INDEPENDENT)
+    for _ in range(6):
+        t.step()
+    runner = t.episode
+    assert runner is not None and runner.watch is not None
+    assert runner.watch.looks == 3  # every other step
+    assert "look at the screen every 2 steps" in caplog.text
+    t.stop()
+
+
+def test_no_sure_player_means_no_looking(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    import retro_ai_lab.training.service as module
+
+    lab.connect()
+    monkeypatch.setattr(module, "find_player_in_game", lambda *a, **kw: None)
+    t = lab.training
+    t.start(Mode.INDEPENDENT)
+    t.step()
+    assert t.episode is not None and t.episode.watch is None
+    t.stop()
