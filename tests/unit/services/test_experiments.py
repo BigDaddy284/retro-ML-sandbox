@@ -145,6 +145,20 @@ def test_no_screen_capture_still_works(connection: ConnectionService) -> None:
     assert not trial.diff.is_empty
 
 
+def test_a_link_that_drops_at_the_check_is_not_available(connection: ConnectionService) -> None:
+    """T-980: the user's log ended with EmulatorDisconnectedError raised out of
+    available(), from a memory handler that ran as the app shut down."""
+    connection.connect("fake")
+    h = ExperimentHarness(connection)
+    assert h.available()
+    adapter = connection.adapter
+    assert adapter is not None
+    adapter.drop_link()  # the emulator is gone, the service does not know yet
+    assert connection.is_connected
+    assert not h.available()
+    assert not connection.is_connected  # the connection service noticed as it called
+
+
 def test_link_loss_mid_trial_forgets_checkpoint(connection: ConnectionService) -> None:
     connection.connect("fake", drop_after_ops=12)
     h = ExperimentHarness(connection)
