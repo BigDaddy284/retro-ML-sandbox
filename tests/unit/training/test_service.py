@@ -1968,3 +1968,29 @@ def test_no_sure_player_means_no_looking(lab: Lab, monkeypatch: pytest.MonkeyPat
     assert t.episode is not None and t.episode.watch is None
     assert t.encoder is not None and not t.encoder.sees_screen
     t.stop()
+
+
+def test_what_the_ai_saw_before_its_deaths_is_logged_with_the_survival_line(
+    lab: Lab, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T-968: every tenth go, with the survival line, what the AI saw before the window's
+    deaths; the user's deaths stayed at 1.2 a go while everything else improved."""
+    k = lab.connect()
+    lives = k.at(RAM, LAYOUT.lives)
+    assert lives is not None
+    t = lab.training
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.training.service")
+    t.start(Mode.INDEPENDENT)
+    _run_goes(lab, 19)
+    while t.episodes < 20:  # three losses during go 20
+        if t.episode is not None and t.episode.steps in (5, 15, 25):
+            lab.bus.publish(
+                DiscoveryUpdated(
+                    (), (), (GameEvent(EventKind.SETBACK, 20, lives.id, "", 3, 2),), ()
+                )
+            )
+        assert t.step()
+    t.stop()
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Before the")]
+    assert len(lines) == 1  # once, with the survival line
+    assert " deaths in the last 10 goes" in lines[0]  # the three, plus the car's own crashes

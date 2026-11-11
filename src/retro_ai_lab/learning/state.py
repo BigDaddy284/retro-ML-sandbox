@@ -139,19 +139,21 @@ class State:
             raise ConfigurationError("most must be at least 1 (or None).")
         words = []
         for vid, b in self.parts:
-            words.append(f"{_part_name(vid, knowledge)}={b}")
+            words.append(f"{part_name(vid, knowledge)}={b}")
         if most is not None and len(words) > most:
             left = len(words) - most
             return ", ".join(words[:most]) + f" and {left} more"
         return ", ".join(words)
 
 
-def _part_name(vid: str, knowledge: Knowledge | None) -> str:
+def part_name(vid: str, knowledge: Knowledge | None) -> str:
+    """A state part in words: a variable's display name, "<mover> from <mine>", or
+    what the AI reads off the screen (T-978)."""
     if vid.startswith(SCREEN_PREFIX):
         return SCREEN_WORDS.get(vid, vid[len(SCREEN_PREFIX) :])
     pair = split_distance(vid)
     if pair is not None:
-        mover, mine = (_part_name(x, knowledge) for x in pair)
+        mover, mine = (part_name(x, knowledge) for x in pair)
         return f"{mover} from {mine}"
     return knowledge.get(vid).display_name if knowledge and vid in knowledge else vid
 
@@ -382,5 +384,6 @@ __all__ = [
     "StateEncoder",
     "bucket",
     "distance_id",
+    "part_name",
     "split_distance",
 ]
