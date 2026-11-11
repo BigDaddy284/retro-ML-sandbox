@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-981: the sights the AI looks closer at (T-979) are saved with its brain and come back when the game connects again, so a restart does not send it back to coarse steps at the spot where it kept dying.
 - T-980: the ERROR at the end of the user's log (a memory handler asking a just-vanished emulator for its capabilities as the app shut down) is gone: the experiment harness answers "not available" when the link drops during the check.
 - T-979: when the sight before most of the last ten goes' deaths is a memory value in one coarse bucket (the AI's own position in the 128-wide top bucket, which the user read as a fall trap), the brain from then on reads that value in steps of 8 inside that bucket, so the trap and the ground before it are different states and a button can be learned for the spot; the log says where it now looks closer.
 - T-968: with the survival line, when the last ten goes had three deaths or more, the log says what the AI saw a moment before them and seldom at other steps, or that nothing stood out and it may not see what kills it.
