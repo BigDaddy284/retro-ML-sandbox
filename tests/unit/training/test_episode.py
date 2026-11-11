@@ -623,3 +623,42 @@ def test_a_drop_of_the_value_you_penalise_counts_as_a_death(lab: Lab) -> None:
     assert r.signals.take_setbacks() == 0
     lab.bus.publish(DiscoveryUpdated((), (), (setback,), ()))
     assert r.signals.take_setbacks() == 1
+
+
+def test_the_runner_hands_the_death_watch_the_sight_a_lookahead_before_the_loss(
+    lab: Lab,
+) -> None:
+    """T-968: a death is reported with the state from LOOKAHEAD steps earlier, when the
+    loss was still avoidable, and every step's state is tallied."""
+    from retro_ai_lab.training.deaths import DeathWatch
+
+    lab.connection.connect("fake", seed=3)
+    k = teach(lab)
+    fuel = k.propose(RAM, LAYOUT.timer, kind=VariableKind.COUNTER, evidence=SURE)
+
+    class Spy(DeathWatch):
+        def __init__(self) -> None:
+            super().__init__()
+            self.stepped: list[State] = []
+            self.died: list[State] = []
+
+        def step(self, state: State) -> None:
+            self.stepped.append(state)
+
+        def death(self, before: State) -> None:
+            self.died.append(before)
+
+    spy = Spy()
+    r = runner(lab, frames_per_step=4, max_steps=12, lookahead=3, deaths=spy)
+    r.begin()
+    r.signals.watch_setbacks(frozenset({fuel.id}))  # the car's own crashes stay out of it
+    r.signals.take_setbacks()
+    for _ in range(5):
+        assert r.step()
+    lab.bus.publish(
+        DiscoveryUpdated((), (), (GameEvent(EventKind.DOWN, 20, fuel.id, "", 9, 8),), ())
+    )
+    assert r.step()  # the sixth step settles the loss
+    assert len(spy.stepped) == 6
+    assert spy.died == [spy.stepped[3]]  # the state three steps before the one that lost
+    r.finish()

@@ -29,6 +29,7 @@ from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.goals import ObjectiveCompleted, ObjectiveSetback
 from retro_ai_lab.services.observer import ButtonsHeld, ObservationService
 from retro_ai_lab.services.rewards import GoStarted, RewardEarned
+from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.understanding.events import EventKind
 from retro_ai_lab.understanding.knowledge import Knowledge, VariableKind
 
@@ -299,6 +300,7 @@ class EpisodeRunner:
         on_learned: Callable[[Transition], None] | None = None,
         lookahead: int = LOOKAHEAD_STEPS,
         watched_setbacks: Callable[[], frozenset[str]] | None = None,
+        deaths: DeathWatch | None = None,
     ) -> None:
         if frames_per_step < 1:
             raise ConfigurationError("frames_per_step must be at least 1.")
@@ -324,6 +326,7 @@ class EpisodeRunner:
         self._lookahead = lookahead
         self._pending: deque[tuple[State, int, float]] = deque()  # steps not yet learned
         self._watched_setbacks = watched_setbacks  # the values a person penalises (T-964)
+        self._deaths = deaths  # what the AI saw before it died (T-968)
         self._watched_last: frozenset[str] | None = None
         self._restored = False
         self._unsticks = 0
@@ -557,6 +560,12 @@ class EpisodeRunner:
             self._setbacks += lost
             if self._first_setback_step is None:
                 self._first_setback_step = self._steps + 1  # this step, 1-based (T-934)
+            if self._deaths is not None:  # the sight a lookahead before the loss (T-968)
+                before = self._pending[0][0] if self._pending else state
+                for _ in range(lost):
+                    self._deaths.death(before)
+        if self._deaths is not None:
+            self._deaths.step(state)
         self._last_state = state
         self._last_reward = reward
         # Putting the game back to the checkpoint looks like a restart to the engine, and

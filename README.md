@@ -143,7 +143,11 @@ below zero; a life count or health value you penalise comes first, however
 lightly, so "x position goes down" at -2 is a step back and not a death),
 else of the AI's best life count and best health (yours first, if you
 confirmed one), not of every guess of those kinds; the log names what is
-counted whenever that changes. Every go starts by putting the
+counted whenever that changes. Beside it, when the ten goes had three deaths
+or more, a line says what the AI saw a moment before them and seldom
+otherwise ("Before the 12 deaths in the last 10 goes the AI saw Position at
+ram[520] from x position=1 in 9 of them (15% of all steps)"), or that nothing
+stood out and it may not see what kills it. Every go starts by putting the
 game back to its checkpoint, and that jump is the AI's doing, not the game's:
 the change statistics behind the "went up N times and down N" warnings skip
 it, so a life count that only ever drops in play is not told it bounces.
