@@ -82,6 +82,10 @@ class Report:
     ground_steps: int = 0  # steps of new ground counted over the run
     ground_goes: int = 0  # goes in which the watch looked at the screen
     ground_right: int = 0  # ... and its furthest to the right was the game's, to a step
+    # ... of which goes that began before the game's camera had moved since the AI
+    # started: until it does the watch can only go by where the player stands on the
+    # screen, and the game's own figure is how far the player itself went (T-998).
+    ground_before: int = 0
     # Deaths, by the game's account, and what the watch made of them.
     falls: int = 0
     walkers: int = 0
@@ -254,12 +258,15 @@ def run(
 def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
     training.start(Mode.INDEPENDENT)
     looks = 0
+    scrolled = False  # the game's camera has moved between two looks since the AI started
     while training.episodes < report.goes:
         go = training.episodes
         furthest, lost, level = 0, 0, game.state.level
         before = game.state
         camera: int | None = None  # where the game's camera was at the go's last look
         began: int | None = None  # where the game's camera was at the go's first look
+        stood = 0  # where the player was at the go's first look
+        fresh = not scrolled  # the go began before the camera had ever moved
         got, counted, steps = 0, 0, 0  # furthest at a look: the game's, the watch's; its steps
         while training.episodes == go:
             training.step()
@@ -278,10 +285,15 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
                 report.right += _on_the_player(training, game)
                 if camera is not None:
                     _count_camera(report, now.scroll - camera, watch.tracker.scroll)
+                first_move = camera is not None and now.scroll != camera
                 camera = now.scroll
                 if began is None:
-                    began = now.scroll
-                got = max(got, now.scroll - began)
+                    began, stood = now.scroll, now.x
+                # The camera's travel, once the camera has been seen to move. Up to the
+                # look at which it first does, how far the player itself has gone:
+                # nothing else has moved, and that is what the watch can count.
+                got = max(got, now.scroll - began if scrolled else now.x - stood)
+                scrolled = scrolled or first_move
                 counted = max(counted, watch.ground.reach[0])
                 steps = max(steps, watch.ground.steps)
                 if watch.around is not None:
@@ -292,6 +304,7 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
         report.lost.append(lost)
         if began is not None and training.watch is not None:
             report.ground_goes += 1
+            report.ground_before += fresh
             report.ground_steps += steps
             step = training.watch.ground.unit or toy_hopper.PLAYER_H
             report.ground_right += abs(counted - got) <= step

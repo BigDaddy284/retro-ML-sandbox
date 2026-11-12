@@ -361,3 +361,24 @@ def test_the_network_learner_explores_in_runs() -> None:
         chain(learner, 400)
         assert learner.greedy(A) == RIGHT and learner.greedy(B) == RIGHT
         assert learner.value(B, RIGHT) > learner.value(A, RIGHT) > 0
+
+
+def test_the_network_learner_tries_moves_one_button_from_its_own() -> None:
+    """T-998: half of what it tries is one button away from what it would have done."""
+    space = ActionSpace.from_buttons(("up", "down", "left", "right", "a", "b"))
+    always = dict(epsilon=1.0, epsilon_min=1.0, epsilon_decay=1.0, rebound=0.0, explore_run=1)
+    agent = DQNLearner(space, Settings(**always), seed=5, config=QUICK)
+    held = 0
+    for x in range(12):
+        state = State((("x", x),))
+        own = agent.greedy(state)  # what the network, as it stands, would do here
+        near = set(space.near(own))
+        if not near:  # it would hold nothing: there is nothing to keep doing
+            continue
+        held += 1
+        picks = [agent.choose(state) for _ in range(3000)]
+        expected = 0.5 + 0.5 * len(near) / len(space)
+        assert abs(sum(p in near for p in picks) / len(picks) - expected) < 0.04
+        assert set(picks) == set(range(len(space)))
+        assert agent.greedy(state) == own  # choosing teaches it nothing
+    assert held >= 3

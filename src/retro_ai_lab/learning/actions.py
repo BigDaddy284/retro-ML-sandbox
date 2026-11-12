@@ -22,6 +22,7 @@ OPPOSITES: frozenset[frozenset[str]] = frozenset(
 )
 DEFAULT_EXCLUDE: tuple[str, ...] = ("start", "select")
 NOTHING = "do nothing"
+NEAR_SHARE = 0.5  # of the moves it tries, how many are one button from its own (T-998)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +57,7 @@ class ActionSpace:
             raise ConfigurationError("An action space needs at least one action.")
         self._actions = tuple(items)
         self._by_buttons = {a.buttons: a for a in items}
+        self._near: dict[int, tuple[int, ...]] = {}  # the moves one button away, as asked
 
     @classmethod
     def from_buttons(
@@ -119,6 +121,39 @@ class ActionSpace:
 
     def sample(self, rng: Random) -> int:
         return rng.randrange(len(self._actions))
+
+    def near(self, index: int) -> tuple[int, ...]:
+        """The moves one button away from this one that keep a button it holds.
+
+        One button more, or one of two let go. Letting go of everything is
+        stopping, not a small change, and from holding nothing every button is
+        one away, so neither counts: controls with no combinations have no
+        near moves at all.
+        """
+        buttons = self[index].buttons
+        found = self._near.get(index)
+        if found is None:
+            found = self._near[index] = tuple(
+                a.index
+                for a in self._actions
+                if len(a.buttons ^ buttons) == 1 and a.buttons & buttons
+            )
+        return found
+
+    def sample_near(self, rng: Random, index: int) -> int:
+        """A move to try around ``index``, the move that would otherwise be made (T-998).
+
+        ``NEAR_SHARE`` of the time one of the moves one button away from it, each
+        as likely as the next; otherwise any move at all, so nothing is out of
+        reach and a brain that knows nothing yet still tries everything. Getting
+        over a gap is "what I was doing, plus one button", held: a pick from
+        every combination hardly ever keeps the run-up. Where no move is near
+        it is the plain pick, with the same single draw.
+        """
+        near = self.near(index)
+        if near and rng.random() < NEAR_SHARE:
+            return rng.choice(near)
+        return self.sample(rng)
 
     # ------------------------------------------------------------ persistence
 

@@ -89,3 +89,65 @@ def test_matches_picks_the_exact_or_largest_contained_action() -> None:
     assert space.matches(["start"]).label == NOTHING
     assert space.matches(["up", "start"]).label == "up"
     assert space.matches([]).label == NOTHING
+
+
+# ---------------------------------------------------------------- T-998
+
+PAD = ("up", "down", "left", "right", "a", "b", "start")
+
+
+def test_near_is_one_button_away() -> None:
+    space = ActionSpace.from_buttons(PAD)
+
+    def near(*buttons: str) -> set[frozenset[str]]:
+        return {space.buttons_for(i) for i in space.near(space.index_of(buttons))}
+
+    # From holding right: keep holding it and add one of the buttons that go with it.
+    # Letting go of it is stopping, not a small change.
+    assert near("right") == {frozenset({"a", "right"}), frozenset({"b", "right"})}
+    # From nothing there is nothing to keep doing.
+    assert near() == set()
+    # From right and A: let go of either.
+    assert near("a", "right") == {frozenset({"a"}), frozenset({"right"})}
+    assert near("a") == {frozenset({"a", d}) for d in ("up", "down", "left", "right")}
+    # Each way round, never the move itself, one button apart and one still held.
+    for i in range(len(space)):
+        assert i not in space.near(i)
+        for j in space.near(i):
+            assert i in space.near(j)
+            assert len(space.buttons_for(i) ^ space.buttons_for(j)) == 1
+            assert space.buttons_for(i) & space.buttons_for(j)
+    # Asked twice it is the same answer; a move that is not there is refused.
+    assert space.near(3) is space.near(3)
+    with pytest.raises(ConfigurationError):
+        space.near(len(space))
+    # Moves with nothing one button away from them have none, and nor have controls
+    # where buttons are never held together.
+    apart = ActionSpace([frozenset({"left", "a"}), frozenset({"right", "b"})])
+    assert apart.near(0) == () and apart.near(1) == ()
+    singles = ActionSpace.from_buttons(PAD, combos=False)
+    assert all(singles.near(i) == () for i in range(len(singles)))
+
+
+def test_sample_near_is_half_near_and_half_anything() -> None:
+    space = ActionSpace.from_buttons(PAD)
+    right = space.index_of(["right"])
+    near = set(space.near(right))
+    rng = Random(4)
+    picks = [space.sample_near(rng, right) for _ in range(6000)]
+    share = sum(p in near for p in picks) / len(picks)
+    # Half are near outright, and 2 of the 15 moves are near in the other half: 57%.
+    assert 0.54 <= share <= 0.60
+    assert set(picks) == set(range(len(space)))  # every move is still reached
+    # Each near move is as likely as the next.
+    counts = [picks.count(i) for i in near]
+    assert max(counts) - min(counts) < 0.15 * max(counts)
+    # Nothing near: the plain pick, draw for draw.
+    singles = ActionSpace.from_buttons(PAD, combos=False)
+    one, other = Random(9), Random(9)
+    assert [singles.sample_near(one, i % 7) for i in range(200)] == [
+        singles.sample(other) for _ in range(200)
+    ]
+    assert one.random() == other.random()
+    with pytest.raises(ConfigurationError):
+        space.sample_near(rng, -1)
