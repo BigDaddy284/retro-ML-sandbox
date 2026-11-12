@@ -1,4 +1,7 @@
-"""``FakeEmulatorAdapter``: the full adapter contract over :class:`ToyRacer`.
+"""``FakeEmulatorAdapter``: the full adapter contract over a toy game.
+
+It runs :class:`ToyRacer` unless asked for ``game="hopper"`` (T-985), the practice
+platform game.
 
 Besides being the test double for every upper layer, it is what the app's
 demo mode will run, so it must behave like a real emulator would:
@@ -13,7 +16,9 @@ demo mode will run, so it must behave like a real emulator would:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import Any
 
 from retro_ai_lab.core import (
     Button,
@@ -26,7 +31,30 @@ from retro_ai_lab.core import (
     MemoryRegion,
 )
 from retro_ai_lab.emulator.base import EmulatorAdapter
-from retro_ai_lab.emulator.fake.toy_racer import BUTTONS, RAM_REGION, ToyRacer
+from retro_ai_lab.emulator.fake import toy_hopper, toy_racer
+from retro_ai_lab.emulator.fake.toy_hopper import ToyHopper
+from retro_ai_lab.emulator.fake.toy_racer import ToyRacer
+
+
+@dataclass(frozen=True)
+class _Cartridge:
+    """One game the practice console can run, and what it tells the app about itself."""
+
+    title: str
+    hash_prefix: str
+    make: Callable[[int], ToyRacer | ToyHopper]
+    buttons: tuple[Button, ...]
+    region: MemoryRegion
+
+
+_CARTRIDGES: dict[str, _Cartridge] = {
+    "racer": _Cartridge("Toy Racer", "toyracer", ToyRacer, toy_racer.BUTTONS, toy_racer.RAM_REGION),
+    "hopper": _Cartridge(
+        "Toy Hopper", "toyhopper", ToyHopper, toy_hopper.BUTTONS, toy_hopper.RAM_REGION
+    ),
+}
+GAMES: tuple[str, ...] = tuple(_CARTRIDGES)
+DEFAULT_GAME = "racer"
 
 
 class FakeEmulatorAdapter(EmulatorAdapter):
@@ -37,13 +65,20 @@ class FakeEmulatorAdapter(EmulatorAdapter):
         self,
         *,
         seed: int = 0,
+        game: str = DEFAULT_GAME,
         capabilities: Capabilities | None = None,
         fail_connect: Exception | None = None,
         connect_delay_s: float = 0.0,
         drop_after_ops: int | None = None,
     ) -> None:
         super().__init__()
-        self._game = ToyRacer(seed)
+        if not isinstance(game, str) or game not in _CARTRIDGES:
+            raise ConfigurationError(
+                f"The practice console has no game called {game!r} (choices: {', '.join(GAMES)})."
+            )
+        self._cartridge = _CARTRIDGES[game]
+        self._game = self._cartridge.make(seed)
+        self.display_name = f"Practice console ({self._cartridge.title})"
         self._caps = capabilities if capabilities is not None else Capabilities.all()
         self._fail_connect = fail_connect
         if connect_delay_s < 0:
@@ -60,8 +95,8 @@ class FakeEmulatorAdapter(EmulatorAdapter):
     # ------------------------------------------------------------ test aids
 
     @property
-    def game(self) -> ToyRacer:
-        """The underlying game, for tests that need ground truth."""
+    def game(self) -> Any:
+        """The underlying game (a ToyRacer or a ToyHopper), for tests that need ground truth."""
         return self._game
 
     @property
@@ -101,13 +136,16 @@ class FakeEmulatorAdapter(EmulatorAdapter):
         return self._caps
 
     def _do_game_info(self) -> GameInfo:
-        return GameInfo("TOY", "Toy Racer", rom_hash=f"toyracer-{self._game.seed}")
+        cartridge = self._cartridge
+        return GameInfo(
+            "TOY", cartridge.title, rom_hash=f"{cartridge.hash_prefix}-{self._game.seed}"
+        )
 
     def _do_buttons(self) -> Sequence[Button]:
-        return BUTTONS
+        return self._cartridge.buttons
 
     def _do_memory_regions(self) -> Sequence[MemoryRegion]:
-        return (RAM_REGION,)
+        return (self._cartridge.region,)
 
     def _do_read_memory(self, region: str, offset: int, length: int) -> bytes:
         self._tick()
@@ -156,4 +194,4 @@ class FakeEmulatorAdapter(EmulatorAdapter):
         self._ops += 1
 
 
-__all__ = ["FakeEmulatorAdapter"]
+__all__ = ["DEFAULT_GAME", "GAMES", "FakeEmulatorAdapter"]
