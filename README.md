@@ -376,8 +376,16 @@ game saved before the AI could do this is looked at once more at the next
 Start. Every other step of a go it then looks at the screen, follows the
 other things on it, and sets what it touched against the lives it lost and
 the points it gained, to learn which kinds of thing hurt and which are worth
-picking up; the brain is told how far the nearest moving thing and the
-nearest thing that hurts are. It hears of every life lost, also those lost
+picking up. At every look the brain is told what is around it, read off the
+picture next to where it sees itself: how much floor there is to its right
+and to its left before a drop, how far the way is clear at its own height on
+each side, and whether it stands on something, has something below it or has
+nothing under it at all; then how far the nearest moving thing and the
+nearest thing that hurts are. So it can see a gap coming instead of having
+to remember where in the level the gaps are. (It cannot yet tell a bush or a
+far hill from a wall, and a game with a strip along the bottom of the screen
+hides its gaps from this reading.) Twelve of the brain's 32 seats are kept
+for what it reads off the picture. It hears of every life lost, also those lost
 between two looks. A life lost after it went out of sight coming down, with
 nothing under it but the backdrop, is a fall, and is not blamed on whatever
 it touched or stood on before; coming down through the floor is not a fall

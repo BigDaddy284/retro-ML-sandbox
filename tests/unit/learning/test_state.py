@@ -486,3 +486,70 @@ def test_distances_are_measured_from_the_position_the_stick_moves() -> None:
     only = k2.propose(RAM, 0, kind=pos, evidence=[Evidence("monotonic", "Climbs.", 6.0)])
     thing = k2.propose(RAM, 3, kind=pos, evidence=[Evidence(MOVER, "Moves.", 1.5)])
     assert StateEncoder(k2).pairs == ((thing, only),)  # nothing linked yet: as before
+
+
+# ------------------------------------------------------------ T-989: seats for the screen
+
+
+def test_screen_seats_come_out_of_the_most() -> None:
+    """The screen parts used to be added on top of a state that could already fill the
+    brain's feature map, where a newcomer is dropped when every seat's holder is
+    present: on a game with many believed values the brain never got them."""
+    from retro_ai_lab.learning.features import FeatureMap
+    from retro_ai_lab.learning.state import SCREEN_SEATS
+    from retro_ai_lab.understanding.knowledge import MOVER
+
+    k = Knowledge("g")
+    # More believed values than the map has seats (a kind is heard 16 strong at most).
+    for i in range(20):
+        k.propose(RAM, i, kind=VariableKind.POSITION, evidence=[Evidence("monotonic", "", 6.0)])
+        k.propose(RAM, 20 + i, kind=VariableKind.FLAG, evidence=SURE)
+    for i, kind in enumerate((VariableKind.LIVES, VariableKind.SCORE, VariableKind.SPEED)):
+        k.propose(RAM, 40 + i, kind=kind, evidence=SURE)
+    enc = StateEncoder(k)
+    assert len(enc.variables) == DEFAULT_MOST == DEFAULT_WIDTH
+    seen = tuple((f"screen:part {i}", i % 5) for i in range(SCREEN_SEATS + 3))
+    enc.set_screen(lambda: seen)
+    assert len(enc.variables) == DEFAULT_MOST - SCREEN_SEATS
+    state = enc.encode(snap(bytes(64)))
+    assert len(state.parts) == DEFAULT_WIDTH  # the whole state fits the map
+    assert state.parts[-SCREEN_SEATS:] == seen[:SCREEN_SEATS]  # no more than their seats
+    features = FeatureMap()
+    features.vector(state)
+    assert features.dropped == 0 and all(vid in features.ids for vid, _ in seen[:SCREEN_SEATS])
+    # With moving things believed too, the distances keep their seats as well.
+    for i in range(3):
+        k.propose(RAM, 52 + i, kind=VariableKind.POSITION, evidence=[Evidence(MOVER, "", 2.0)])
+    enc.refresh()
+    assert len(enc.variables) == DEFAULT_MOST - SCREEN_SEATS - MOST_DISTANCES
+    assert len(enc.encode(snap(bytes(64))).parts) <= DEFAULT_WIDTH
+    # The seats go back to memory when the AI stops looking.
+    enc.set_screen(None)
+    assert len(enc.variables) == DEFAULT_MOST - MOST_DISTANCES
+    # A small most never goes below one seat; no cap stays no cap.
+    small = StateEncoder(k, most=4)
+    small.set_screen(lambda: seen)
+    assert len(small.variables) == 1
+    every = StateEncoder(k, most=None)
+    before = len(every.variables)
+    every.set_screen(lambda: seen)
+    assert len(every.variables) == before
+
+
+def test_the_screen_parts_have_words() -> None:
+    from retro_ai_lab.observation.surroundings import Surroundings
+
+    k = Knowledge("g")
+    enc = StateEncoder(k)
+    enc.set_screen(Surroundings(2, 6, 0, 6, 3).parts)
+    state = enc.encode(snap(bytes(8)))
+    assert state.describe(k) == (
+        "floor to its right=2, floor to its left=6, clear way to its right=0, "
+        "clear way to its left=6, what is under it=3"
+    )
+    k.propose(RAM, 0, kind=VariableKind.LIVES, evidence=SURE)
+    enc.refresh()
+    assert enc.describe() == (
+        "1 value: 1 life count; and off the screen, the floor and the way either side of "
+        "it, what is under it and how far the nearest moving thing is"
+    )

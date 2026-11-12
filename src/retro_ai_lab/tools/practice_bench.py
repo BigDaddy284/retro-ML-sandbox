@@ -26,6 +26,7 @@ from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter, ToyHopper, toy_hopper
 from retro_ai_lab.emulator.registry import default_registry
 from retro_ai_lab.learning import algorithm_choices, describe_algorithm
+from retro_ai_lab.observation import surroundings
 from retro_ai_lab.services import (
     ConnectionService,
     DiscoveryService,
@@ -48,6 +49,7 @@ WINDOW = 10  # goes in the first and last stretches the report compares
 FOLLOWED_TARGET = 95
 EXPLAINED_TARGET = 80
 MOST_KINDS = 30
+FLOOR_TARGET = 95  # the floor either side read as the game's level has it (T-989)
 
 
 @dataclass
@@ -63,6 +65,8 @@ class Report:
     followed: int = 0  # looks in which the watch had what it calls itself in sight
     right: int = 0  # ... and that thing really was the player
     kinds: int = 0
+    around: int = 0  # looks in which it read what is around it (T-989)
+    floor_right: int = 0  # ... and the floor either side was as the game's level has it
     hurts: int = 0
     items: int = 0
     # Deaths, by the game's account, and what the watch made of them.
@@ -96,7 +100,10 @@ class Report:
                 f"Eyes: {self.looks:,} looks; followed what it takes for itself in "
                 f"{_share(self.followed, self.looks)}% of them (target {FOLLOWED_TARGET}%), and "
                 f"that really was the player in {_share(self.right, self.looks)}%; "
-                f"{self.kinds} kinds of thing (target under {MOST_KINDS})."
+                f"{self.kinds} kinds of thing (target under {MOST_KINDS}); the floor to its "
+                f"right and left read as the level has it in "
+                f"{_share(self.floor_right, self.around)}% of the {self.around:,} looks in which "
+                f"it read what is around it (target {FLOOR_TARGET}%)."
             )
         else:
             out.append(
@@ -233,6 +240,10 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
             if watch is not None and watch.looks != looks:
                 looks = watch.looks
                 report.right += _on_the_player(training, game)
+                if watch.around is not None:
+                    report.around += 1
+                    floor = (watch.around.floor_right, watch.around.floor_left)
+                    report.floor_right += floor == _floor_either_side(game)
         report.furthest.append(furthest)
         report.lost.append(lost)
         report.finished.append(max(0, game.state.level - level))
@@ -259,6 +270,29 @@ def _on_the_player(training: TrainingService, game: ToyHopper) -> bool:
     y = st.y + toy_hopper.PLAYER_H // 2
     mx, my = left + width // 2, top + height // 2
     return abs(mx - x) <= ON_PLAYER and abs(my - y) <= ON_PLAYER
+
+
+def _floor_either_side(game: ToyHopper) -> tuple[int, int]:
+    """The steps of floor to the player's right and left before a gap, by the game's
+    own level, counted as the reading counts them: from one pixel past its edge and
+    outline, 8 pixels a step, as far as 48 pixels or the edge of the screen."""
+    st = game.state
+    holes = {col for first, wide in game.gaps for col in range(first, first + wide)}
+    reach = surroundings.MOST * surroundings.STEP
+    x = st.x - st.scroll
+
+    def steps(first: int, way: int) -> int:
+        for d in range(reach):
+            column = first + way * d
+            if not 0 <= column < toy_hopper.SCREEN_WIDTH:
+                break
+            if (column + st.scroll) // toy_hopper.TILE in holes:
+                return d // surroundings.STEP
+        return surroundings.MOST
+
+    right = steps(x + toy_hopper.PLAYER_W + surroundings.MARGIN, 1)
+    left = steps(x - surroundings.MARGIN - 1, -1)
+    return right, left
 
 
 def _read_memory(training: TrainingService, discovery: DiscoveryService, report: Report) -> None:
@@ -343,6 +377,7 @@ __all__ = [
     "DEFAULT_PLAY_FRAMES",
     "DEFAULT_STEPS",
     "EXPLAINED_TARGET",
+    "FLOOR_TARGET",
     "FOLLOWED_TARGET",
     "MOST_KINDS",
     "ON_PLAYER",
