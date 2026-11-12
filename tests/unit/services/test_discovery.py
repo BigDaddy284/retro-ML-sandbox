@@ -16,6 +16,7 @@ from retro_ai_lab.core.worklog import CallStats, app_work
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter
 from retro_ai_lab.emulator.fake.toy_racer import BUTTONS, LAYOUT
 from retro_ai_lab.emulator.registry import default_registry
+from retro_ai_lab.observation import MemorySnapshot
 from retro_ai_lab.services import (
     ConnectionService,
     DiscoveryProgress,
@@ -23,7 +24,14 @@ from retro_ai_lab.services import (
     DiscoveryUpdated,
     ObservationService,
 )
-from retro_ai_lab.services.discovery import BOUNCES, BUSY, MOVES_ALONE, PLAYED, game_id_for
+from retro_ai_lab.services.discovery import (
+    BOUNCES,
+    BUSY,
+    CLOCK_TOP,
+    MOVES_ALONE,
+    PLAYED,
+    game_id_for,
+)
 from retro_ai_lab.storage import KnowledgeStore
 from retro_ai_lab.understanding import (
     Confidence,
@@ -1389,3 +1397,60 @@ def test_a_zero_interval_saves_every_change_as_before(
         play(connection, observation, 1)
     d.wait_for_save()
     assert not d.pending_save and store.load("toyracer-2").to_dict() == k.to_dict()
+
+
+def test_the_top_of_a_clock_is_doubted_then_dropped(
+    discovery: DiscoveryService,
+    connection: ConnectionService,
+    observation: ObservationService,
+    bus: EventBus,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """T-996: on the practice game the upper byte of the level's clock was "progress",
+    10 points every 256 frames for standing still."""
+    connection.connect("fake", seed=5)
+    k = discovery.knowledge
+    assert k is not None
+    tracker = observation.tracker
+    tracker.reset()
+    clock = place = slow = 0
+    for i in range(1400):
+        if i % 450 == 0:
+            clock = place = slow = 0  # a new go
+        elif i % 10 != 9:  # it stops now and then (a pause while dying)
+            clock += 4
+            slow += 2
+        place += (0, 3, 6, 9, 6, 3, 9, 0)[i % 8]
+        pairs = (clock, place, clock, slow)
+        row = bytes(b for n in pairs for b in (n & 255, (n >> 8) & 255))
+        tracker.observe(MemorySnapshot(i, {"ram": row}))
+    top = k.propose("ram", 1, kind=VariableKind.PROGRESS, name="Clock top")
+    page = k.propose("ram", 3, kind=VariableKind.PROGRESS, name="Page")
+    sworn = k.propose("ram", 5, kind=VariableKind.PROGRESS, name="Sworn")
+    k.confirm(sworn.id)
+    lives = k.propose("ram", 7, kind=VariableKind.LIVES, name="Lives")
+    seen: list[DiscoveryUpdated] = []
+    bus.subscribe(DiscoveryUpdated, seen.append)
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
+    # A probe that did not see the clock move by itself says nothing about its top.
+    assert discovery.doubt_self_moving({("ram", 2)}) == ()
+    lows = {("ram", 0), ("ram", 2), ("ram", 4), ("ram", 6)}
+    changed = discovery.doubt_self_moving(lows, frame=5)
+    assert [v.id for v in changed] == [top.id] and not k.get(top.id).rejected
+    last = k.get(top.id).evidence[-1]
+    assert last.kind == CLOCK_TOP and last.frame == 5
+    assert "the top of a clock" in last.detail and "not something the player earns" in last.detail
+    assert len(seen) == 1 and seen[0].changed == changed
+    assert (
+        "1 guesses count the roll-overs of a clock: 1 doubted (Clock top), 0 dropped" in caplog.text
+    )
+    assert "while nobody pressed anything" not in caplog.text  # that line is for the others
+    changed = discovery.doubt_self_moving(lows)
+    assert [v.id for v in changed] == [top.id] and k.get(top.id).rejected
+    assert "0 doubted (none), 1 dropped (Clock top)" in caplog.text
+    assert discovery.doubt_self_moving(lows) == () and len(seen) == 2
+    # The page of a position, a person's word and a life count are left as they were.
+    for other in (page, sworn, lives):
+        now = k.get(other.id)
+        assert not now.rejected and not any(e.kind == CLOCK_TOP for e in now.evidence)
+    assert k.get(sworn.id).confirmed

@@ -196,7 +196,11 @@ what it found ("Start gets the game going."). To practise one part of a game,
 play to it yourself and press "Pin this spot" first. Each time it checks
 whether the game listens, it also notes which values change while nobody
 presses anything and ignore the controller (timers, enemies, a demo) and, after
-two such checks, drops any "score" or "progress" guess among them. The Discovery
+two such checks, drops any "score" or "progress" guess among them. The same
+goes for the value just above a clock that counts how many times the clock has
+gone round (the minutes over the seconds): it changes too rarely to be caught
+in the act, so the AI goes by the clock under it, and no longer takes time
+passing for progress. The Discovery
 panel still lists a dropped guess, and you can put it back.
 
 Two boxes in the Learning panel set the go timers: "Each go lasts" (40

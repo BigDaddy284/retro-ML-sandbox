@@ -67,6 +67,7 @@ from retro_ai_lab.understanding.player import PlayerFinding
 from retro_ai_lab.understanding.relationships import RelationshipFinder
 from retro_ai_lab.understanding.variables import (
     RARE_RATE,
+    clock_top,
     find_candidates,
     flag_doubt,
     lives_doubt,
@@ -88,6 +89,12 @@ MOVES_ALONE = "moves-alone"  # evidence kind: changed while nobody pressed anyth
 # The kinds a player earns by playing; one that moves by itself is not one. Lives and
 # health are left out: standing still is a fine way to lose them.
 DOUBTED_KINDS = frozenset({VariableKind.SCORE, VariableKind.PROGRESS})
+# The byte above one that moves by itself, when it counts that byte's roll-overs and
+# that byte ticks at one pace, is the top of a clock (T-996). It is caught moving once
+# in 64 probes, so it is judged by the byte below it. A flag is one too until it shows
+# a third value, and then "progress".
+CLOCK_TOP = "clock-top"
+CLOCK_KINDS = frozenset({VariableKind.SCORE, VariableKind.PROGRESS, VariableKind.FLAG})
 BOUNCES = "bounces"  # evidence kind: a "lives" byte going up nearly as often as down (T-864)
 BUSY = "busy"  # evidence kind: a "lives" byte changing more than once in ten steps (T-865)
 NOT_LIVES = frozenset({BOUNCES, BUSY})
@@ -379,58 +386,82 @@ class DiscoveryService:
 
         A score or progress guess covering one of them is doubted the first time
         and rejected by the AI the second time; confirmed and already rejected
-        guesses are left alone. Returns the variables changed.
+        guesses are left alone. So is a score, progress or flag guess on the byte
+        above one of them when that byte is the top of a clock (T-996,
+        :func:`clock_top`): it counts the roll-overs of something that ticks by
+        itself. Returns the variables changed.
         """
         moved = frozenset(locations)
         if not moved:
             return ()
         with self._lock:
             k = self._require()
-            doubted: list[Variable] = []
-            dropped: list[Variable] = []
+            tops = self._clock_tops(moved)
+            alone: tuple[list[Variable], list[Variable]] = ([], [])  # doubted, dropped
+            clocks: tuple[list[Variable], list[Variable]] = ([], [])
             for v in k:
-                if v.confirmed or v.rejected or v.kind not in DOUBTED_KINDS:
+                if v.confirmed or v.rejected:
                     continue
-                if not any((v.region, o) in moved for o in range(v.offset, v.offset + v.width)):
-                    continue
-                if any(e.kind == MOVES_ALONE for e in v.evidence):
-                    k.support(
-                        v.id,
-                        Evidence(
-                            MOVES_ALONE,
-                            "Changed again while nobody pressed anything; not something "
-                            "the player earns.",
-                            0.0,
-                            frame,
-                        ),
+                span = [(v.region, o) for o in range(v.offset, v.offset + v.width)]
+                if v.kind in DOUBTED_KINDS and any(byte in moved for byte in span):
+                    kind, lists = MOVES_ALONE, alone
+                    first = (
+                        "Changed while nobody pressed anything. Once is a doubt; "
+                        "twice and the AI drops it."
                     )
-                    dropped.append(k.reject(v.id, by=AI))
+                    again = (
+                        "Changed again while nobody pressed anything; not something "
+                        "the player earns."
+                    )
+                elif v.kind in CLOCK_KINDS and (v.region, v.offset) in tops:
+                    kind, lists = CLOCK_TOP, clocks
+                    first = (
+                        "Counts the roll-overs of the value below it, which ticks by itself "
+                        "at one pace: the top of a clock, not something the player earns. "
+                        "Once is a doubt; twice and the AI drops it."
+                    )
+                    again = (
+                        "Still the top of a clock that ticks by itself; not something "
+                        "the player earns."
+                    )
                 else:
-                    doubted.append(
-                        k.support(
-                            v.id,
-                            Evidence(
-                                MOVES_ALONE,
-                                "Changed while nobody pressed anything. Once is a doubt; "
-                                "twice and the AI drops it.",
-                                0.0,
-                                frame,
-                            ),
-                        )
+                    continue
+                if any(e.kind == kind for e in v.evidence):
+                    k.support(v.id, Evidence(kind, again, 0.0, frame))
+                    lists[1].append(k.reject(v.id, by=AI))
+                else:
+                    lists[0].append(k.support(v.id, Evidence(kind, first, 0.0, frame)))
+            changed = (*alone[0], *alone[1], *clocks[0], *clocks[1])
+            for (doubted, dropped), what in (
+                (alone, "changed while nobody pressed anything"),
+                (clocks, "count the roll-overs of a clock"),
+            ):
+                if doubted or dropped:
+                    log.info(
+                        "%d guesses %s: %d doubted (%s), %d dropped (%s).",
+                        len(doubted) + len(dropped),
+                        what,
+                        len(doubted),
+                        _names(doubted),
+                        len(dropped),
+                        _names(dropped),
                     )
-            changed = (*doubted, *dropped)
             if changed:
-                log.info(
-                    "%d guesses changed while nobody pressed anything: %d doubted (%s), "
-                    "%d dropped (%s).",
-                    len(changed),
-                    len(doubted),
-                    _names(doubted),
-                    len(dropped),
-                    _names(dropped),
-                )
                 self._announce(DiscoveryUpdated((), changed, (), ()))
             return changed
+
+    def _clock_tops(self, moved: frozenset[tuple[str, int]]) -> set[tuple[str, int]]:
+        """The bytes just above ``moved`` ones that are the tops of clocks (T-996)."""
+        tracker = self._observation.tracker
+        tops: set[tuple[str, int]] = set()
+        for region, offset in moved:
+            try:
+                low, high = tracker.stats(region, offset), tracker.stats(region, offset + 1)
+            except ConfigurationError:
+                continue  # the last byte of a region, or one never observed
+            if clock_top(low, high):
+                tops.add((region, offset + 1))
+        return tops
 
     @property
     def questions(self) -> tuple[Question, ...]:
