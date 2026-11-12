@@ -39,11 +39,12 @@ class EmulatorAdapter(ABC):
     """Base class for all emulator adapters.
 
     ``name`` is the stable identifier shown by the adapter registry (T-006);
-    ``display_name`` is what children see.
+    ``display_name`` is what children see: the class's is what the list of
+    emulators shows, and an adapter may say more once it knows what it runs (T-985).
     """
 
     name: ClassVar[str] = ""
-    display_name: ClassVar[str] = ""
+    display_name: str = ""
 
     def __init__(self) -> None:
         self._connected = False

@@ -26,6 +26,13 @@ class TestFakeAdapterContract(AdapterContract):
         return FakeEmulatorAdapter(seed=3, capabilities=capabilities)
 
 
+class TestFakeHopperContract(AdapterContract):
+    """T-985: the contract every adapter is held to, with Toy Hopper in the console."""
+
+    def make_adapter(self, capabilities: Capabilities | None = None) -> EmulatorAdapter:
+        return FakeEmulatorAdapter(seed=3, capabilities=capabilities, game="hopper")
+
+
 @pytest.fixture
 def fake() -> FakeEmulatorAdapter:
     a = FakeEmulatorAdapter(seed=3)
@@ -183,3 +190,83 @@ def test_a_watched_step_answers_what_the_toy_pad_holds(fake: FakeEmulatorAdapter
     result = fake.step(2, watch=True)
     assert result.pressed == frozenset({"up", "a"})
     assert fake.step(1).pressed is None
+
+
+# ------------------------------------------------------------ T-985: Toy Hopper
+
+
+def test_the_practice_console_runs_toy_hopper() -> None:
+    from retro_ai_lab.emulator.fake import ToyHopper, toy_hopper
+    from retro_ai_lab.emulator.fake.adapter import DEFAULT_GAME, GAMES
+
+    assert GAMES == ("racer", "hopper") and DEFAULT_GAME == "racer"
+    racer = FakeEmulatorAdapter(seed=4, game="racer")  # asked for by name: what it always was
+    racer.connect()
+    assert racer.game_info() == GameInfo("TOY", "Toy Racer", rom_hash="toyracer-4")
+    assert tuple(racer.buttons()) == BUTTONS and isinstance(racer.game, ToyRacer)
+    assert racer.display_name == FakeEmulatorAdapter.display_name == "Practice console (Toy Racer)"
+    assert racer.memory_regions()[0].size == RAM_SIZE
+
+    hopper = FakeEmulatorAdapter(seed=4, game="hopper")
+    assert isinstance(hopper, EmulatorAdapter) and isinstance(hopper.game, ToyHopper)
+    assert hopper.display_name == "Practice console (Toy Hopper)"
+    hopper.connect()
+    assert hopper.game_info() == GameInfo("TOY", "Toy Hopper", rom_hash="toyhopper-4")
+    assert tuple(hopper.buttons()) == toy_hopper.BUTTONS
+    (region,) = hopper.memory_regions()
+    assert (region.name, region.size) == ("ram", toy_hopper.RAM_SIZE)
+    assert hopper.capabilities() == Capabilities.all()
+    # Held buttons drive the hopper exactly as the game played directly.
+    direct = ToyHopper(4)
+    by_name = {b.name: b for b in hopper.buttons()}
+    for held, frames in ((["right"], 30), (["right", "a"], 20), ([], 10), (["left"], 8)):
+        hopper.set_input([by_name[name] for name in held])
+        hopper.advance_frames(frames)
+        for _ in range(frames):
+            direct.step(held)
+        assert hopper.read_memory("ram", 0, toy_hopper.RAM_SIZE) == direct.ram
+    assert hopper.read_memory("ram", toy_hopper.LAYOUT.lives, 1) == bytes([toy_hopper.START_LIVES])
+    frame = hopper.capture_frame()
+    assert (frame.width, frame.height, frame.channels) == (256, 240, 3)
+    assert frame == direct.render() and frame.number == direct.state.frame == 68
+    # A save state brings the exact game back.
+    hopper.save_state("spot")
+    saved = hopper.read_memory("ram", 0, toy_hopper.RAM_SIZE)
+    hopper.set_input([by_name["right"]])
+    hopper.advance_frames(40)
+    assert hopper.read_memory("ram", 0, toy_hopper.RAM_SIZE) != saved
+    hopper.load_state("spot")
+    assert hopper.read_memory("ram", 0, toy_hopper.RAM_SIZE) == saved
+
+
+@pytest.mark.parametrize("game", ["pong", "", None, 3, "Hopper"])
+def test_an_unknown_practice_game_is_refused(game: Any) -> None:
+    with pytest.raises(ConfigurationError, match=r"no game called .*choices: racer, hopper"):
+        FakeEmulatorAdapter(game=game)
+
+
+def test_the_services_connect_to_toy_hopper() -> None:
+    from retro_ai_lab.core.events import EventBus
+    from retro_ai_lab.emulator.fake import toy_hopper
+    from retro_ai_lab.emulator.registry import default_registry
+    from retro_ai_lab.services import ConnectionService, ObservationService
+
+    bus = EventBus()
+    connection = ConnectionService(default_registry(), bus)
+    observation = ObservationService(connection, bus)
+    session = connection.connect("fake", game="hopper", seed=2)
+    assert session.display_name == "Practice console (Toy Hopper)"
+    assert session.game_info == GameInfo("TOY", "Toy Hopper", rom_hash="toyhopper-2")
+    assert [b.name for b in session.buttons] == list(toy_hopper.BUTTON_NAMES)
+    adapter = connection.adapter
+    assert isinstance(adapter, FakeEmulatorAdapter)
+    adapter.set_input([b for b in adapter.buttons() if b.name == "right"])
+    for _ in range(12):
+        adapter.advance_frames(1)
+        observation.advance(1)
+    latest = observation.ring[-1]
+    assert latest.get("ram") == adapter.game.ram and adapter.game.state.x > toy_hopper.START_X
+    connection.disconnect()
+    with pytest.raises(ConfigurationError, match="no game called"):
+        connection.connect("fake", game="pong")
+    assert connection.connect("fake").game_info.title == "Toy Racer"  # the default stands
