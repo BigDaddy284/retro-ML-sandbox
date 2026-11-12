@@ -314,7 +314,8 @@ the saved brain for this game: 109 goes and 49,050 steps learned so far").
 
 ## What the AI sees
 
-The AI does not look at the picture. Its eyes are the values it believes in:
+The AI's first eyes are the values it believes in (it also looks at the
+picture; see the end of this section):
 each go, it reads its best guesses (a position, the lives, the score, a
 checkpoint, a few switches) and learns which button helps from how they
 change. Its brain has room for 32 of them at a time, and they are handed
@@ -363,6 +364,21 @@ clock. Each button experiment logs what the buttons moved, and the line
 after every go names the position the distances are measured from. A
 button that stops or replaces the whole game when held (a pause button, a
 menu) is noted as such and linked to nothing.
+
+It looks at the picture too. After Start it holds each button in turn from
+the same spot and watches what moves: the thing that answers is itself
+("Found itself on the screen" in the log). From the screens on which it saw
+itself move it also learns what it looks like, the few colours it is drawn in
+that nothing else on the screen shares, and from then on it picks itself out
+of every screen by those colours alone ("It knows what it looks like"), so it
+does not lose itself when it jumps, stands still or the screen scrolls. A
+game saved before the AI could do this is looked at once more at the next
+Start. Every other step of a go it then looks at the screen, follows the
+other things on it, and sets what it touched against the lives it lost and
+the points it gained, to learn which kinds of thing hurt and which are worth
+picking up; the brain is told how far the nearest moving thing and the
+nearest thing that hurts are. Every ten goes the log says how the looking is
+going ("On the screen so far").
 
 ## Arranging the panels
 

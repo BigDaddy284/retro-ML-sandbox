@@ -1236,12 +1236,17 @@ class TrainingService:
 
         Runs once after Start, from the spot goes start from, in a game that
         listens; skipped when the game's knowledge already holds a fairly sure
-        answer, and when the emulator can't show the screen from a save state.
+        answer that says what the player looks like, and when the emulator can't
+        show the screen from a save state. A sure answer saved before the AI
+        learnt its own colours (T-987) is looked for once more, and kept if the
+        second look is no better.
         """
         knowledge = self._discovery.knowledge
         if knowledge is None:
             return
-        if knowledge.player is not None and knowledge.player.confidence >= Confidence.MEDIUM:
+        known = knowledge.player
+        sure = known is not None and known.confidence >= Confidence.MEDIUM
+        if sure and known is not None and known.colours is not None:
             return
         harness = self._harness
         if harness is None or not harness.has_checkpoint or not harness.available():
@@ -1253,14 +1258,27 @@ class TrainingService:
             log.info("Could not look for itself on the screen: %s", exc)
             return
         if found is None:
-            log.info(
-                "Pressing the buttons moved nothing on the screen; the AI can't see itself yet."
-            )
+            if not sure:
+                log.info(
+                    "Pressing the buttons moved nothing on the screen; the AI can't see itself yet."
+                )
             return
+        if sure and (found.confidence < Confidence.MEDIUM or found.colours is None):
+            return  # what it had is at least as good: kept
         if found.confidence >= Confidence.MEDIUM:
             log.info("Found itself on the screen. %s", found.describe())
         else:  # one button only: kept, and looked for again at the next Start
             log.info("Not sure yet which thing on the screen is the AI. %s", found.describe())
+        if found.colours is not None:
+            log.info(
+                "It knows what it looks like (%s) and will pick itself out of every screen.",
+                found.colours.describe(),
+            )
+        else:
+            log.info(
+                "It has no colours of its own to know itself by; it will follow itself "
+                "from screen to screen instead."
+            )
         if knowledge.player != found:
             knowledge.player = found
             self._discovery.save()
