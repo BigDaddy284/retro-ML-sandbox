@@ -355,6 +355,9 @@ class EpisodeRunner:
         self._watch = watch  # looks at the screen every few steps (T-976)
         self._look_every = look_every
         self._seen: Frame | None = None  # the screenshot of the step being settled
+        # Lives lost and score rises on steps without a look, kept for the next look (T-988).
+        self._unseen_lost = 0
+        self._unseen_scored = 0
         self._restored = False
         self._unsticks = 0
         self._same_state = 0
@@ -508,6 +511,8 @@ class EpisodeRunner:
         score = self._encoder.knowledge.best(VariableKind.SCORE)
         self._signals.watch_scores(frozenset({score.id}) if score is not None else frozenset())
         self._seen = None
+        self._unseen_lost = 0
+        self._unseen_scored = 0
         if self._watch is not None:
             self._watch.begin_go()
         # Observe before listening: putting the game back to the checkpoint looks like
@@ -609,10 +614,16 @@ class EpisodeRunner:
                     self._deaths.death(before)
         if self._deaths is not None:
             self._deaths.step(state)
-        if self._seen is not None and self._watch is not None:
-            with app_work.timed("step: look"):
-                self._watch.look(self._seen, lost=lost, scored=scored)
-            self._seen = None
+        if self._watch is not None:
+            # The watch looks every few steps but lives go on any step: what happened
+            # since its last look is told with the next one (T-988; it used to be dropped).
+            self._unseen_lost += lost
+            self._unseen_scored += scored
+            if self._seen is not None:
+                with app_work.timed("step: look"):
+                    self._watch.look(self._seen, lost=self._unseen_lost, scored=self._unseen_scored)
+                self._unseen_lost = self._unseen_scored = 0
+        self._seen = None
         self._last_state = state
         self._last_reward = reward
         # Putting the game back to the checkpoint looks like a restart to the engine, and
@@ -727,6 +738,10 @@ class EpisodeRunner:
                 self._observation.record_input([], "ai")
             except EmulatorError:
                 pass  # the connection service reports link loss
+        if self._watch is not None and self._unseen_lost:
+            # A life that went on the go's last step, after the last look (T-988).
+            self._watch.told(lost=self._unseen_lost)
+        self._unseen_lost = self._unseen_scored = 0
         if self._pending:  # the go ended without a reset: the last steps bootstrap on (T-963)
             assert self._state is not None
             self._flush(self._state, done=False)

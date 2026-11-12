@@ -176,3 +176,36 @@ def test_touches_are_measured_from_the_box_when_one_is_given() -> None:
     both = RoleLearner()
     both.observe(0, [me(0), spike], ME, me=(186, 100, 16, 16))
     assert both.evidence["thing-3"].touches == 1
+
+
+# ------------------------------------------------------------------ T-988: a fall instead
+
+
+def test_a_life_lost_can_be_told_directly_and_touches_let_go() -> None:
+    """T-988: at the end of a go there is no new frame to show with a life lost; and
+    when a fall explains a life, the touches still waiting were harmless."""
+    lr = RoleLearner(soon=3)
+    spike = track(7, "thing-3", 200)
+    lr.life_lost()  # nothing waiting: nothing blamed
+    assert lr.roles() == ()
+    lr.observe(0, [me(190), spike], ME)
+    assert lr.waiting
+    lr.life_lost()
+    assert lr.evidence["thing-3"].hurt == 1 and not lr.waiting
+    lr.life_lost()  # once only
+    assert lr.evidence["thing-3"].hurt == 1
+    # Two touches waiting: the latest takes the blame, the other is cleared with it.
+    lr.observe(1, [me(100), spike], ME)
+    lr.observe(2, [me(190), spike, track(8, "thing-9", 200)], ME)
+    lr.life_lost()
+    assert lr.evidence["thing-9"].hurt == 1 and lr.evidence["thing-3"].hurt == 1
+    assert not lr.waiting
+    # Let go: the touch stays counted, as a harmless one.
+    lr.observe(3, [me(100), spike], ME)
+    lr.observe(4, [me(190), spike], ME)
+    assert lr.waiting
+    lr.let_go()
+    assert not lr.waiting
+    lr.observe(5, [me(190), spike], ME, [Happening.LIFE_LOST])
+    ev = lr.evidence["thing-3"]
+    assert (ev.touches, ev.hurt, ev.harmless) == (3, 1, 2)

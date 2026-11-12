@@ -662,3 +662,83 @@ def test_the_runner_hands_the_death_watch_the_sight_a_lookahead_before_the_loss(
     assert len(spy.stepped) == 6
     assert spy.died == [spy.stepped[3]]  # the state three steps before the one that lost
     r.finish()
+
+
+# ------------------------------------------------------------ T-988: every life reaches the eyes
+
+
+class _SpyWatch:
+    """Stands in for the ScreenWatch: notes what each look and each telling was given."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int, int]] = []
+
+    def begin_go(self) -> None:
+        self.calls.append(("go", 0, 0))
+
+    def look(self, frame: object, *, lost: int = 0, scored: int = 0) -> None:
+        assert frame is not None
+        self.calls.append(("look", lost, scored))
+
+    def told(self, *, lost: int = 0) -> None:
+        self.calls.append(("told", lost, 0))
+
+
+def _watched_runner(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, lost_at: dict[int, int], scored_at: dict[int, int]
+) -> tuple[EpisodeRunner, _SpyWatch]:
+    """A runner whose signals report lives lost and score rises on the given steps
+    (1-based), looking at the screen every other step."""
+    lab.connection.connect("fake", seed=3)
+    teach(lab)
+    spy = _SpyWatch()
+    r = runner(lab, frames_per_step=4, max_steps=6, watch=spy)
+    step = {"n": 0}
+
+    def setbacks() -> int:
+        step["n"] += 1
+        return lost_at.get(step["n"], 0)
+
+    monkeypatch.setattr(r.signals, "take_setbacks", setbacks)
+    monkeypatch.setattr(r.signals, "take_scores", lambda: scored_at.get(step["n"], 0))
+    return r, spy
+
+
+def test_a_life_lost_between_looks_reaches_the_next_look(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-988: the watch looks every other step, and what happened on the step between
+    was dropped: on the practice game not one life lost ever reached it."""
+    r, spy = _watched_runner(lab, monkeypatch, {2: 1, 3: 1, 4: 2}, {2: 1, 5: 3})
+    r.begin()
+    for _ in range(5):
+        assert r.step()
+    # Looks on steps 1, 3 and 5 (the runner looks when its step count is even, from 0).
+    assert spy.calls == [
+        ("go", 0, 0),
+        ("look", 0, 0),  # step 1
+        ("look", 2, 1),  # step 3: its own life lost and step 2's, and step 2's point
+        ("look", 2, 3),  # step 5: step 4's two lives, its own three points
+    ]
+    r.finish()
+    assert spy.calls[-1] == ("look", 2, 3)  # nothing was left to tell
+
+
+def test_a_life_lost_at_the_end_of_a_go_is_told_without_a_screen(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    r, spy = _watched_runner(lab, monkeypatch, {6: 1}, {6: 4})
+    r.begin()
+    while r.step():
+        pass
+    assert [c[0] for c in spy.calls] == ["go", "look", "look", "look"]
+    r.finish()
+    # The go's last step (6) had no look: the life is told; a point needs a screen and
+    # is let go.
+    assert spy.calls[-1] == ("told", 1, 0)
+    # Nothing is carried into the next go.
+    r.begin()
+    assert r.step()
+    assert spy.calls[-2:] == [("go", 0, 0), ("look", 0, 0)]
+    r.finish()
+    assert spy.calls[-1] == ("look", 0, 0)

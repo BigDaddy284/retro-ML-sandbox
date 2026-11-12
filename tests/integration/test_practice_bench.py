@@ -29,6 +29,7 @@ def test_the_bench_counts_agree_with_the_game(report: Report) -> None:
     # Every death is a fall or a walker; the watch can blame no more deaths than it saw.
     assert report.deaths == report.falls + report.walkers
     assert 0 <= report.blamed <= report.deaths + 1  # a dying pause can straddle the run's end
+    assert 0 <= report.fell <= report.deaths + 1
     assert sum(report.lost) <= report.deaths
     assert report.kinds >= 1 and report.hurts >= 0 and report.items >= 0
     # Memory: it names a value in the game's RAM as its own position.
@@ -52,6 +53,8 @@ def test_the_report_reads_in_words(report: Report) -> None:
     assert "(target 95%)" in lines[1] and "(target under 30)" in lines[1]
     assert lines[2].startswith(f"Deaths: {report.deaths} ({report.falls} falls, ")
     assert "target 80%" in lines[2]
+    assert f"the eyes put {report.fell} down to a fall and {report.blamed} to touching" in lines[2]
+    assert ("% explained" in lines[2]) == bool(report.deaths)
     assert lines[3].startswith(f"Memory: measures distances from {report.own_position} (")
     assert "lives found" in lines[3]
     assert lines[4].startswith("Brain: furthest reached ") and "of 2,496 to the flag" in lines[4]
@@ -98,3 +101,16 @@ def test_the_eyes_are_on_the_player(report: Report) -> None:
     # With the player out of the tracker's picture, it no longer makes kinds of its own
     # (itself half behind something, itself and what it touches as one patch).
     assert report.kinds <= 6
+
+
+@pytest.mark.slow
+def test_deaths_are_explained() -> None:
+    """T-988: every life lost reaches the eyes (on this game none used to: the dying
+    pause is a whole number of looks long), and a fall is known for a fall."""
+    report = run(12, seed=3, algorithm="q_table", max_steps=200, play_frames=2000)
+    assert report.deaths >= 3 and report.walkers == 0  # level 3's first deaths are falls
+    # Each fall the game counted, the eyes counted; none was put down to the pillar
+    # the player stood on before it fell. (The last death's pause can outlast the run.)
+    assert report.falls - 1 <= report.fell <= report.falls
+    assert report.blamed == 0 and report.hurts == 0
+    assert "% explained" in report.lines()[2]

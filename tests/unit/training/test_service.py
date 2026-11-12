@@ -1715,7 +1715,7 @@ def test_a_loss_a_held_button_avoids_leaves_the_start_where_it_is(
     lab.connect()
     lab.play(["up"], 3)  # speed 3 with an obstacle ahead: holding nothing crashes at step 6
     game = lab.adapter().game
-    lives, position = game.state.lives, game.state.position
+    lives, position, frame = game.state.lives, game.state.position, game.state.frame
     t = lab.training
     caplog.set_level(logging.INFO)
     t.start(Mode.INDEPENDENT)
@@ -1727,9 +1727,13 @@ def test_a_loss_a_held_button_avoids_leaves_the_start_where_it_is(
         "holding Down: the life the last 3 goes lost at step 6 is the AI's to avoid." in caplog.text
     )
     assert "loses a life by itself" not in caplog.text
-    # Go 4 started where the others did: no life down, one step of speed 3 driven.
+    # Go 4 started where the others did: no life down, and the game's own clock (put
+    # back with the start) one step on. How far that step drove is the AI's choice of
+    # button: since T-988 its eyes hear of the lives lost here and it has learnt
+    # something, so it brakes (3 on) where it used to steer (12 on at speed 3).
     assert game.state.lives == lives
-    assert game.state.position == position + 3 * t.frames_per_step
+    assert game.state.frame == frame + t.frames_per_step
+    assert position < game.state.position <= position + 4 * t.frames_per_step
     _run_goes(lab, 6)  # three more goes losing it at step 6: cleared, not checked again
     assert t.step() and game.state.lives == lives
     assert caplog.text.count("the AI's to avoid") == 1

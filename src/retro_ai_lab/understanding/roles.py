@@ -157,9 +157,7 @@ class RoleLearner:
         # latest touch: a game freezes the player when it is hit, and the life
         # counter drops a few seconds later, after nothing else was touched.
         if Happening.LIFE_LOST in happened and self._pending:
-            p = self._pending.pop()
-            self._of(p.kind).hurt += 1
-            self._pending.clear()  # a life lost is put down to one touch only
+            self.life_lost()
         elif Happening.SCORE_UP in happened:
             for p in [p for p in self._pending if p.gone]:
                 self._of(p.kind).collected += 1
@@ -184,6 +182,20 @@ class RoleLearner:
     def waiting(self) -> bool:
         """A touch is waiting to be settled (a life lost now would be put down to it)."""
         return bool(self._pending)
+
+    def life_lost(self) -> None:
+        """A life went: it is put down to the latest touch still waiting, and to that
+        one only (:meth:`observe` does this for a life lost it is told of; a caller
+        with no new frame to show, at the end of a go, calls it directly)."""
+        if self._pending:
+            p = self._pending.pop()
+            self._of(p.kind).hurt += 1
+            self._pending.clear()
+
+    def let_go(self) -> None:
+        """Something else explains what happened (a fall): the touches still waiting
+        were harmless (T-988)."""
+        self._pending.clear()
 
     def _of(self, kind: str) -> KindEvidence:
         ev = self.evidence.get(kind)
