@@ -90,12 +90,12 @@ def read(
     thing: NDArray[np.bool_] = (to_array(frame) != np.array(backdrop, np.uint8)).any(axis=2)
     feet = max(0, y + h)
     # A column with anything in it from the player's feet down holds floor.
-    floor = thing[feet:].any(axis=0)
+    floor = _any(thing[feet:], 0)
     # Its own height, less the bottom quarter: a floor a little higher is no wall.
     top, bottom = max(0, y), max(0, y + h - h // 4)
-    way = thing[top:bottom].any(axis=0) if bottom > top else np.zeros(frame.width, np.bool_)
+    way = _any(thing[top:bottom], 0)  # no rows in sight: nothing in the way
     left, right = x - margin, x + w + margin  # the first columns read on either side
-    below = thing[feet:, max(0, x) : max(0, x + w)].any(axis=1)
+    below = _any(thing[feet:, max(0, x) : max(0, x + w)], 1)
     return Surroundings(
         floor_right=_steps(~floor[max(0, right) :]),
         floor_left=_steps(~floor[: max(0, left)][::-1]),
@@ -103,6 +103,11 @@ def read(
         clear_left=_steps(way[: max(0, left)][::-1]),
         under=_under(below, h),
     )
+
+
+def _any(mask: NDArray[np.bool_], axis: int) -> NDArray[np.bool_]:
+    """``mask.any(axis)`` as an array (older numpy types it as possibly one value)."""
+    return np.asarray(mask.any(axis=axis), dtype=np.bool_)
 
 
 def _steps(found: NDArray[np.bool_]) -> int:
