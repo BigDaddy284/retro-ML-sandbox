@@ -61,7 +61,13 @@ emulator, follow [docs/BIZHAWK.md](docs/BIZHAWK.md) or
 
 If the app does not appear or closes on its own, every run writes a log at
 `%LOCALAPPDATA%\RetroAILab\logs\retro-ai-lab.log` (paste `%LOCALAPPDATA%\RetroAILab\logs`
-into Explorer's address bar); send that file with your report. While a game is
+into Explorer's address bar); send that file with your report. The log names
+each stage of the start before it begins, so its last line is the stage that
+did not finish. If the window is not up after 10 seconds, or the app dies
+inside one of its libraries, exactly where is written to a small file next to
+the log (`start-1234.txt`), and the next time the app starts it copies that
+into the log; so if it would not open, start it once more before sending the
+log, or send the whole folder. While a game is
 connected the log also records, every few seconds, how long the emulator took to
 answer each kind of request, which is the first thing to look at if the game
 runs slowly in the app.

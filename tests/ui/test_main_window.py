@@ -326,6 +326,23 @@ def test_real_entry_point_launches_headless_and_exits_zero(tmp_path: Path) -> No
     text = (tmp_path / "logs" / "retro-ai-lab.log").read_text(encoding="utf-8")
     for line in ("starting", "Qt application created", "Main window shown", "Event loop finished"):
         assert line in text
+    # T-995: each stage is named before it begins, so a start that stops says where.
+    stages = (
+        "starting",
+        "Loading Qt",
+        "Loading the app's own code",
+        "Starting the app",
+        "Creating the Qt application",
+        "Qt application created",
+        "Building the main window",
+        "Main window shown",
+        "Event loop finished",
+    )
+    places = [text.index(stage) for stage in stages]
+    assert places == sorted(places)
+    # It started in time and nothing crashed: no trace is left behind, or spoken of.
+    assert list((tmp_path / "logs").glob("start-*.txt")) == []
+    assert "left a trace" not in text
 
 
 # ------------------------------------------------- T-881: one title per panel
