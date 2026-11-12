@@ -929,8 +929,10 @@ def test_auto_starts_with_a_table_and_promotes_when_the_game_grows(
     assert isinstance(again, DQNLearner) and again.episodes == 2 and t.episodes == 2
     assert [c.reason for c in changes if c.reason == "promoted"] == ["promoted"]
     # A fixed choice never promotes.
+    # Seeded (T-984): unseeded, a go of held random moves (T-983) now and then met only two
+    # situations, and the claim needs it to know the three that would promote an AUTO brain.
     fixed = TrainingService(
-        lab.connection, lab.observation, lab.discovery, lab.bus, max_steps=50, promote_at=3
+        lab.connection, lab.observation, lab.discovery, lab.bus, max_steps=50, promote_at=3, seed=1
     )
     fixed.set_algorithm(Q_TABLE)
     lab.connection.disconnect()
