@@ -169,8 +169,14 @@ def test_the_camera_is_followed(report: Report) -> None:
 def test_new_ground_is_paid_as_the_game_has_it(report: Report) -> None:
     """T-993: the ground the AI is paid for is counted off the screen: on a game that
     scrolls, the camera's travel. Go by go, the furthest it counted to the right is
-    how far the game's own camera went, to within a step of the player's size."""
+    how far the game's own camera went, to within a step of the player's size.
+
+    T-998: in a go that begins before the camera has moved at all since the AI started,
+    the watch has only the player's place on the screen to go by, and the game's own
+    figure up to the camera's first move is how far the player itself went. The first
+    go is always one, and here the second too: the AI stays near the start in both."""
     assert report.ground_goes == report.goes
+    assert 1 <= report.ground_before < report.ground_goes
     assert report.ground_right >= 0.9 * report.ground_goes
     assert report.ground_steps >= 1
     # A level on which it runs further and dies more: the count holds through the
@@ -180,5 +186,6 @@ def test_new_ground_is_paid_as_the_game_has_it(report: Report) -> None:
     # for jumping or for falling into a gap.
     gaps = run(12, seed=3, algorithm="q_table", max_steps=200, play_frames=2000)
     assert gaps.ground_goes == 12 and gaps.ground_right >= 11
+    assert gaps.ground_before == 1  # it runs: the camera moves in the first go
     owed = sum(max(0, far - 80) // 16 for far in gaps.furthest)
     assert owed - 12 <= gaps.ground_steps <= owed + 12 + 3  # the first go's 3 on the screen

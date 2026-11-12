@@ -314,6 +314,11 @@ log says when that happens. A random move is not a one-step twitch: the AI holds
 it for a run of 1 to "Exploring run" steps (8, about half a second), so it
 finds out what holding a button does, such as a long jump; runs start less
 often, so the share of random steps is still what the other settings say.
+And half the moves it tries are close to what it was about to do: the same
+buttons with one more held, or with one of two let go (walking right becomes
+walking right and jumping). The other half are any move at all, as before. A
+jump over a gap is "what I was doing, plus one button", and a random pick from
+every move almost never keeps the run-up.
 
 To find a value yourself, like a cheat finder, use the Research window's
 "Search values" tab. Type the number you see on the screen (12, a score of

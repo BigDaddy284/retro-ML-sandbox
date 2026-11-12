@@ -331,3 +331,44 @@ def test_the_table_learner_explores_in_runs() -> None:
         data["run"] = bad
         with pytest.raises(ConfigurationError):
             QLearningAgent.from_dict(data, space=SPACE)
+
+
+# ---------------------------------------------------------------- T-998
+
+PAD_SPACE = ActionSpace.from_buttons(("up", "down", "left", "right", "a", "b"))
+ALWAYS = dict(epsilon=1.0, epsilon_min=1.0, epsilon_decay=1.0, rebound=0.0, explore_run=1)
+
+
+def test_the_table_learner_tries_moves_one_button_from_its_own() -> None:
+    """A jump over a gap is "what I was doing, plus one button": on the practice game
+    that got across the first gap five times as often as a pick from every move."""
+    right = PAD_SPACE.index_of(["right"])
+    agent = QLearningAgent(PAD_SPACE, Settings(**ALWAYS), seed=3)
+    agent.table.row(A)[right] = 1.0  # what it would do here: hold right
+    near = set(PAD_SPACE.near(right))
+    assert {PAD_SPACE.buttons_for(i) for i in near} == {
+        frozenset({"a", "right"}),
+        frozenset({"b", "right"}),
+    }
+    picks = [agent.choose(A) for _ in range(3000)]
+    share = sum(p in near for p in picks) / len(picks)
+    assert 0.52 <= share <= 0.62  # chance alone would make it 2 in 15
+    assert set(picks) == set(range(len(PAD_SPACE)))  # and nothing is out of reach
+    # Somewhere else it would do something else, and tries around that.
+    jump = PAD_SPACE.index_of(["a", "right"])
+    agent.table.row(B)[jump] = 1.0
+    around = set(PAD_SPACE.near(jump))
+    picks = [agent.choose(B) for _ in range(3000)]
+    assert {PAD_SPACE.buttons_for(i) for i in around} == {frozenset({"a"}), frozenset({"right"})}
+    assert 0.52 <= sum(p in around for p in picks) / len(picks) <= 0.62
+    # With nothing held there is nothing to keep doing: any move, as before.
+    still, elsewhere = PAD_SPACE.index_of([]), State((("pos", 2),))
+    agent.table.row(elsewhere)[still] = 1.0
+    picks = [agent.choose(elsewhere) for _ in range(3000)]
+    counts = [picks.count(i) for i in range(len(PAD_SPACE))]
+    assert min(counts) > 140 and max(counts) < 260  # 200 each, give or take
+    # Not exploring, it does what looks best, as ever.
+    calm = dict(ALWAYS, epsilon=0.0, epsilon_min=0.0)
+    sure = QLearningAgent(PAD_SPACE, Settings(**calm), seed=3)
+    sure.table.row(A)[right] = 1.0
+    assert {sure.choose(A) for _ in range(50)} == {right}

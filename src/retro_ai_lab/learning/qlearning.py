@@ -268,7 +268,10 @@ class QLearningAgent:
         return self._last_decision
 
     def choose(self, state: State) -> int:
-        tried = self._runs.next(self._rng, self._epsilon, self._space.sample)  # T-983
+        own = self._table.best(state)  # what it would do; a try is made around it (T-998)
+        tried = self._runs.next(  # T-983
+            self._rng, self._epsilon, lambda rng: self._space.sample_near(rng, own)
+        )
         if tried is not None:
             action = tried
             explored = True
