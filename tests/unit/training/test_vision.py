@@ -167,7 +167,9 @@ def test_the_brain_reads_how_far_the_nearest_moving_thing_is() -> None:
     for i in range(4):
         watch.look(screen([(40, 100, HERO), (100 - 4 * i, 102, WALKER)]))
     parts = dict(watch.parts())
-    assert set(parts) == {"screen:mover dx", "screen:mover dy"}
+    # What is around it comes first (T-989), then the nearest moving thing.
+    assert list(parts)[:5] == [k for k, _ in watch.around.parts()]
+    assert list(parts)[5:] == ["screen:mover dx", "screen:mover dy"]
     assert parts["screen:mover dx"] > 0  # to the right of the hero
     assert abs(parts["screen:mover dy"]) <= 1  # level with it
 
@@ -209,7 +211,7 @@ def test_the_state_holds_the_screen_parts_in_seats_of_their_own() -> None:
     assert enc.sees_screen
     enc.set_screen(None)
     assert enc.encode(snap).parts == () and not enc.sees_screen
-    assert SCREEN_SEATS == 4
+    assert SCREEN_SEATS == 12  # T-989: five for what is around it, four for things, room
 
 
 @pytest.mark.parametrize(
@@ -550,3 +552,71 @@ def test_the_summary_names_the_falls() -> None:
         "2 lives lost, 1 of them soon after touching something and 1 after falling off the "
         "bottom of the screen; 1 kinds found to hurt" in watch.describe()
     )
+
+
+# ------------------------------------------------------------ T-989: what is around it
+
+
+def gap_ahead(hero_x: int, gap_x: int, wide: int, *, y: int = 192) -> Frame:
+    """Plain ground from y=208 with a gap in it, and the hero."""
+    a = np.zeros((240, 256, 3), np.uint8)
+    a[:] = SKY
+    a[208:] = BROWN
+    a[208] = BLACK
+    a[208:, gap_x : gap_x + wide] = SKY
+    solid = (np.array(SKY, np.uint8) != HERO).any(axis=2)
+    a[y : y + 16, hero_x : hero_x + 12][solid] = HERO[solid]
+    return Frame(256, 240, 3, a.tobytes())
+
+
+def test_the_brain_is_given_what_is_around_it() -> None:
+    from retro_ai_lab.observation.surroundings import (
+        MOST,
+        NOTHING_BELOW,
+        ON_SOMETHING,
+        Surroundings,
+    )
+
+    watch = ScreenWatch(hero_with_colours())
+    watch.begin_go()
+    assert watch.around is None and watch.parts() == ()
+    # Walking up to a gap 20 pixels a look: its box is (x+1, 193, 10, 15), so the first
+    # column read to its right is x+12, and the gap starts at 150.
+    for x, floor in ((40, MOST), (80, MOST), (100, 4), (120, 2), (136, 0)):
+        watch.look(gap_ahead(x, 150, 48))
+        assert watch.around == Surroundings(floor, MOST, MOST, MOST, ON_SOMETHING), x
+        assert watch.parts() == watch.around.parts()  # nothing moves: these are all it reads
+    # In the air over the gap.
+    watch.look(gap_ahead(160, 150, 48, y=150))
+    assert watch.around is not None
+    assert (watch.around.under, watch.around.floor_right, watch.around.floor_left) == (
+        NOTHING_BELOW,
+        0,
+        0,
+    )
+    # With hills behind the ground (decoration it cannot tell from a wall, a recorded
+    # limit): the hill 10 pixels behind it and the one 45 ahead read as in the way.
+    watch.begin_go()
+    watch.look(level(0, [(40, 192, HERO)]))
+    assert watch.around == Surroundings(MOST, MOST, 5, 1, ON_SOMETHING)
+    # A watch that follows a track (no colours to go by) reads the same from its box.
+    blind = ScreenWatch(hero_found())
+    blind.begin_go()
+    blind.look(screen([(40, 100, HERO)]))
+    assert blind.around == Surroundings(0, 0, MOST, MOST, NOTHING_BELOW)
+    assert blind.parts() == blind.around.parts()
+
+
+def test_nothing_is_given_when_it_does_not_see_itself() -> None:
+    watch = ScreenWatch(hero_with_colours())
+    watch.begin_go()
+    watch.look(gap_ahead(40, 150, 48))
+    assert watch.around is not None and len(watch.parts()) == 5
+    # Gone from the screen: no reading, and none left over from the look before.
+    watch.look(level(0, []))
+    assert watch.me is None and watch.around is None and watch.parts() == ()
+    # Back in sight, then a new go: nothing is carried over from the last one.
+    watch.look(gap_ahead(40, 150, 48))
+    assert watch.around is not None
+    watch.begin_go()
+    assert watch.around is None and watch.parts() == ()

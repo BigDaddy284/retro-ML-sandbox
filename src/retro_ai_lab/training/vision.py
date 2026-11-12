@@ -15,17 +15,19 @@ Since T-987 the player is known by its looks when the finding has its colours
 it out of the screen afresh, so a jump, a locked camera or standing on the
 ground no longer lose it, and "me" is a box (:attr:`ScreenWatch.me`) rather
 than a track. A finding without colours is followed as a track, as before.
+
+Since T-989 every look in which it sees itself also reads what is around it
+(:mod:`retro_ai_lab.observation.surroundings`): the floor either side, the way
+at its own height and what is under it. The brain is given those first.
 """
 
 from __future__ import annotations
 
-import numpy as np
-
 from retro_ai_lab.core import Frame
 from retro_ai_lab.observation.objects import ObjectCatalogue
-from retro_ai_lab.observation.screen import to_array
 from retro_ai_lab.observation.signature import Box
 from retro_ai_lab.observation.sprites import SpriteTag
+from retro_ai_lab.observation.surroundings import NOTHING_BELOW, Surroundings, read
 from retro_ai_lab.observation.tracking import ObjectTracker, Track
 from retro_ai_lab.understanding.player import PlayerFinding
 from retro_ai_lab.understanding.roles import Happening, Role, RoleLearner, within
@@ -85,6 +87,7 @@ class ScreenWatch:
         self._nothing_under = False  # at its last sighting, only backdrop below it
         self._fell_at: int | None = None  # the look at which it went out of sight, falling
         self._was_seen = False  # it was in sight at the look before
+        self._around: Surroundings | None = None  # what was around it at the last look (T-989)
 
     @property
     def player(self) -> PlayerFinding:
@@ -128,9 +131,16 @@ class ScreenWatch:
         it did not."""
         return self._box
 
+    @property
+    def around(self) -> Surroundings | None:
+        """What was around it at the last look: the floor either side, the way at its
+        own height, what is under it (T-989). None when it did not see itself."""
+        return self._around
+
     def begin_go(self) -> None:
         """A go starts from the checkpoint: new tracks, the player looked for afresh."""
         self._tracker.reset()
+        self._around = None
         self._me = None
         self._box = None
         self._last_me = None
@@ -169,12 +179,18 @@ class ScreenWatch:
         happened: list[Happening] = []
         if lost and not self._a_fall(lost):
             happened.append(Happening.LIFE_LOST)
+        self._around = None
         if self._box is not None:
             x, y, w, h = self._box
             self._seen_me += 1
             self._last_me = (x + w // 2, y + h // 2)
             self._before, self._last_box = self._last_box if self._was_seen else None, self._box
-            self._nothing_under = self._sign is not None and self._open_below(frame, self._box)
+            self._around = read(frame, self._box, self._tracker.catalogue.background)
+            self._nothing_under = (
+                self._sign is not None
+                and self._around is not None
+                and self._around.under == NOTHING_BELOW
+            )
             self._fell_at = None  # in sight again: it did not fall out of the screen
         self._was_seen = self._box is not None
         if scored:
@@ -190,16 +206,6 @@ class ScreenWatch:
         a fall or to the touch that was waiting, with no new screen to go by (T-988)."""
         if lost and not self._a_fall(lost):
             self._learner.life_lost()
-
-    def _open_below(self, frame: Frame, box: Box) -> bool:
-        """Nothing under ``box`` to stand on: from its bottom to the bottom of the
-        screen there is only backdrop."""
-        backdrop = self._tracker.catalogue.background
-        if backdrop is None or len(backdrop) != frame.channels:
-            return False
-        x, y, w, h = box
-        strip = to_array(frame)[max(0, y + h) :, max(0, x) : max(0, x + w)]
-        return bool((strip == np.array(backdrop, np.uint8)).all())
 
     def _falling(self) -> bool:
         """At its last sighting it was coming down with nothing under it (and now it is
@@ -277,9 +283,11 @@ class ScreenWatch:
         return self._learner.roles()
 
     def parts(self) -> tuple[tuple[str, int], ...]:
-        """What the brain reads off the last look (T-978): how far the nearest moving
-        thing and the nearest thing found to hurt are from the player, across and up or
-        down, in a few coarse answers (:func:`side`). Nothing when the player was not seen."""
+        """What the brain reads off the last look. First what is around the player
+        (T-989): the floor either side, the way at its own height, what is under it.
+        Then (T-978) how far the nearest moving thing and the nearest thing found to
+        hurt are from it, across and up or down, in a few coarse answers (:func:`side`).
+        Nothing when the player was not seen."""
         if self._box is None:
             return ()
         tracks = {t.id: t for t in self._tracker.tracks()}
@@ -291,7 +299,7 @@ class ScreenWatch:
             if self._sign is None
             else {t.id for t in tracks.values() if within(t, self._box)}
         )
-        out: list[tuple[str, int]] = []
+        out: list[tuple[str, int]] = list(self._around.parts()) if self._around else []
 
         def nearest(things: list[Track]) -> Track | None:
             return min(

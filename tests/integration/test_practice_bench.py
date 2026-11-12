@@ -51,6 +51,10 @@ def test_the_report_reads_in_words(report: Report) -> None:
         f"Eyes: {report.looks:,} looks; followed what it takes for itself in "
     )
     assert "(target 95%)" in lines[1] and "(target under 30)" in lines[1]
+    assert (
+        f"read as the level has it in {round(100 * report.floor_right / report.around)}% of "
+        f"the {report.around:,} looks in which it read what is around it (target 95%)."
+    ) in lines[1]
     assert lines[2].startswith(f"Deaths: {report.deaths} ({report.falls} falls, ")
     assert "target 80%" in lines[2]
     assert f"the eyes put {report.fell} down to a fall and {report.blamed} to touching" in lines[2]
@@ -88,6 +92,7 @@ def test_the_command_line(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(ConfigurationError, match="No way of learning called"):
         run(1, algorithm="magic")
     assert practice_bench.FOLLOWED_TARGET == 95 and practice_bench.EXPLAINED_TARGET == 80
+    assert practice_bench.FLOOR_TARGET == 95
 
 
 @pytest.mark.slow
@@ -114,3 +119,16 @@ def test_deaths_are_explained() -> None:
     assert report.falls - 1 <= report.fell <= report.falls
     assert report.blamed == 0 and report.hurts == 0
     assert "% explained" in report.lines()[2]
+
+
+@pytest.mark.slow
+def test_the_floor_is_read_right(report: Report) -> None:
+    """T-989: what the AI reads of the floor to its right and left, at every look in
+    which it sees itself, is what the game's own level has there."""
+    assert report.around >= 0.85 * report.looks
+    assert report.around <= report.followed  # read only where it sees itself
+    assert report.floor_right >= 0.95 * report.around
+    # A longer run on a level whose first deaths are falls: it is at the gaps a lot.
+    gaps = run(12, seed=3, algorithm="q_table", max_steps=200, play_frames=2000)
+    assert gaps.falls >= 3 and gaps.around >= 500
+    assert gaps.floor_right >= 0.95 * gaps.around

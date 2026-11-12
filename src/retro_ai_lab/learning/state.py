@@ -67,8 +67,13 @@ SEEN_WORDS: dict[VariableKind, tuple[str, str]] = {  # how describe() counts eac
 }
 DISTANCE_SEP = "~"  # a distance part's id is "<mover id>~<my position's id>"
 SCREEN_PREFIX = "screen:"  # parts the AI reads off the screen, not memory (T-978)
-SCREEN_SEATS = 4  # seats kept for them when the AI looks at the screen
+SCREEN_SEATS = 12  # seats kept for them, out of the most, when the AI looks (T-989)
 SCREEN_WORDS = {
+    "screen:floor right": "floor to its right",
+    "screen:floor left": "floor to its left",
+    "screen:clear right": "clear way to its right",
+    "screen:clear left": "clear way to its left",
+    "screen:under": "what is under it",
     "screen:mover dx": "nearest moving thing across",
     "screen:mover dy": "nearest moving thing up/down",
     "screen:hurts dx": "nearest thing that hurts across",
@@ -253,7 +258,10 @@ class StateEncoder:
         """Add what the AI reads off the screen to every state (T-978); None stops it.
 
         ``source`` gives ``(id, bucket)`` parts whose ids start with ``screen:``.
-        At most ``SCREEN_SEATS`` of them are added, on top of the memory seats.
+        At most ``SCREEN_SEATS`` of them are added, and while a source is set that
+        many seats are kept for them out of the most (T-989), so the whole state
+        still fits the brain's feature map: on a game with many believed values the
+        screen parts used to be the newcomers a full map dropped.
         """
         changed = (source is None) != (self._screen is None)
         self._screen = source
@@ -353,7 +361,10 @@ class StateEncoder:
             c = sum(len(bs) for bs in self._closer.values())
             seen += f"; looking closer at {_plural(c, 'sight', 'sights')} where it keeps dying"
         if self._screen is not None:
-            seen += "; and off the screen, how far the nearest moving thing is"
+            seen += (
+                "; and off the screen, the floor and the way either side of it, what is "
+                "under it and how far the nearest moving thing is"
+            )
         return seen
 
     def refresh(self) -> tuple[Variable, ...]:
@@ -362,6 +373,8 @@ class StateEncoder:
             v for v in self._knowledge.believed(self._at_least) if v.kind not in IGNORED_KINDS
         ]
         most = self._most
+        if most is not None and self._screen is not None:
+            most = max(1, most - SCREEN_SEATS)
         if most is not None and any(is_mover(v) for v in believed):
             most = max(1, most - MOST_DISTANCES)
         self._variables = tuple(sorted(_choose(believed, most), key=lambda v: (v.region, v.offset)))
