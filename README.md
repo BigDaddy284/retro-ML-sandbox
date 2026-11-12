@@ -377,8 +377,14 @@ Start. Every other step of a go it then looks at the screen, follows the
 other things on it, and sets what it touched against the lives it lost and
 the points it gained, to learn which kinds of thing hurt and which are worth
 picking up; the brain is told how far the nearest moving thing and the
-nearest thing that hurts are. Every ten goes the log says how the looking is
-going ("On the screen so far").
+nearest thing that hurts are. It hears of every life lost, also those lost
+between two looks. A life lost after it went out of sight coming down, with
+nothing under it but the backdrop, is a fall, and is not blamed on whatever
+it touched or stood on before; coming down through the floor is not a fall
+(many games throw a player that was hit off the bottom of the screen), and
+then the thing it touched keeps the blame. Every ten goes the log says how
+the looking is going ("On the screen so far"), with the lives lost after a
+touch and after a fall.
 
 ## Arranging the panels
 

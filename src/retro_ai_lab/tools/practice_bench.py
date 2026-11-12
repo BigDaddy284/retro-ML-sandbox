@@ -69,6 +69,7 @@ class Report:
     falls: int = 0
     walkers: int = 0
     blamed: int = 0  # lives the watch put down to touching something
+    fell: int = 0  # lives the watch put down to falling off the bottom of the screen (T-988)
     # Memory.
     own_position: str = "nothing"  # where the encoder measures distances from
     own_position_right: bool = False
@@ -101,11 +102,16 @@ class Report:
             out.append(
                 "Eyes: the AI never looked at the screen (it did not find itself in memory)."
             )
-        explained = f"{_share(self.blamed, self.deaths)}%" if self.deaths else "none to explain"
+        explained = (
+            f"{_share(self.fell + self.blamed, self.deaths)}% explained"
+            if self.deaths
+            else "none to explain"
+        )
         out.append(
             f"Deaths: {self.deaths} ({self.falls} falls, {self.walkers} walkers); the eyes put "
-            f"{self.blamed} down to touching something ({explained}, target {EXPLAINED_TARGET}% "
-            f"and for the right reason); {self.hurts} kinds found to hurt, {self.items} to pick up."
+            f"{self.fell} down to a fall and {self.blamed} to touching something ({explained}, "
+            f"target {EXPLAINED_TARGET}% and for the right reason); {self.hurts} kinds found to "
+            f"hurt, {self.items} to pick up."
         )
         out.append(
             f"Memory: measures distances from {self.own_position} "
@@ -235,6 +241,7 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
         return
     report.looks, report.followed = watch.looks, watch.seen_me
     report.blamed = watch.lives_after_touch
+    report.fell = watch.lives_after_fall
     report.kinds = len(watch.tracker.catalogue.kinds())
     tags = [role.tag.name for role in watch.roles()]
     report.hurts = sum(tag in ("ENEMY", "HAZARD") for tag in tags)

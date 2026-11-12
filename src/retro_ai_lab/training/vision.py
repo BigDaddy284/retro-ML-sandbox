@@ -19,8 +19,11 @@ than a track. A finding without colours is followed as a track, as before.
 
 from __future__ import annotations
 
+import numpy as np
+
 from retro_ai_lab.core import Frame
 from retro_ai_lab.observation.objects import ObjectCatalogue
+from retro_ai_lab.observation.screen import to_array
 from retro_ai_lab.observation.signature import Box
 from retro_ai_lab.observation.sprites import SpriteTag
 from retro_ai_lab.observation.tracking import ObjectTracker, Track
@@ -74,6 +77,14 @@ class ScreenWatch:
         self._seen_me = 0
         self._lives_lost = 0
         self._lives_after_touch = 0
+        self._lives_after_fall = 0
+        # Falling out of the bottom of the screen (T-988).
+        self._soon = soon
+        self._before: Box | None = None  # the sighting before the last, if a look apart
+        self._last_box: Box | None = None  # the last sighting, kept while out of sight
+        self._nothing_under = False  # at its last sighting, only backdrop below it
+        self._fell_at: int | None = None  # the look at which it went out of sight, falling
+        self._was_seen = False  # it was in sight at the look before
 
     @property
     def player(self) -> PlayerFinding:
@@ -98,6 +109,11 @@ class ScreenWatch:
         return self._lives_after_touch
 
     @property
+    def lives_after_fall(self) -> int:
+        """Lives lost after it went out of sight falling, with nothing under it."""
+        return self._lives_after_fall
+
+    @property
     def tracker(self) -> ObjectTracker:
         return self._tracker
 
@@ -119,6 +135,11 @@ class ScreenWatch:
         self._box = None
         self._last_me = None
         self._looks_this_go = 0
+        self._before = None
+        self._last_box = None
+        self._fell_at = None
+        self._nothing_under = False
+        self._was_seen = False
 
     def look(self, frame: Frame, *, lost: int = 0, scored: int = 0) -> None:
         if self._sign is not None:
@@ -143,16 +164,19 @@ class ScreenWatch:
                     self._my_kind = me.kind
             else:
                 self._box = None
+        if self._box is None and self._sign is not None and self._was_seen and self._falling():
+            self._fell_at = self._looks
+        happened: list[Happening] = []
+        if lost and not self._a_fall(lost):
+            happened.append(Happening.LIFE_LOST)
         if self._box is not None:
             x, y, w, h = self._box
             self._seen_me += 1
             self._last_me = (x + w // 2, y + h // 2)
-        happened: list[Happening] = []
-        if lost:
-            happened.append(Happening.LIFE_LOST)
-            self._lives_lost += 1
-            if self._learner.waiting:
-                self._lives_after_touch += 1
+            self._before, self._last_box = self._last_box if self._was_seen else None, self._box
+            self._nothing_under = self._sign is not None and self._open_below(frame, self._box)
+            self._fell_at = None  # in sight again: it did not fall out of the screen
+        self._was_seen = self._box is not None
         if scored:
             happened.append(Happening.SCORE_UP)
         self._learner.observe(
@@ -160,6 +184,45 @@ class ScreenWatch:
         )
         self._looks += 1
         self._looks_this_go += 1
+
+    def told(self, *, lost: int = 0) -> None:
+        """Lives lost that no look will come for (the go ended): counted and put down to
+        a fall or to the touch that was waiting, with no new screen to go by (T-988)."""
+        if lost and not self._a_fall(lost):
+            self._learner.life_lost()
+
+    def _open_below(self, frame: Frame, box: Box) -> bool:
+        """Nothing under ``box`` to stand on: from its bottom to the bottom of the
+        screen there is only backdrop."""
+        backdrop = self._tracker.catalogue.background
+        if backdrop is None or len(backdrop) != frame.channels:
+            return False
+        x, y, w, h = box
+        strip = to_array(frame)[max(0, y + h) :, max(0, x) : max(0, x + w)]
+        return bool((strip == np.array(backdrop, np.uint8)).all())
+
+    def _falling(self) -> bool:
+        """At its last sighting it was coming down with nothing under it (and now it is
+        gone). Coming down *through* the floor is no fall: many games throw a player
+        that was hit off the bottom of the screen, and then the hit is the cause."""
+        if self._before is None or self._last_box is None:
+            return False
+        return self._last_box[1] > self._before[1] and self._nothing_under
+
+    def _a_fall(self, lost: int) -> bool:
+        """Count ``lost`` lives, and say whether they went by a fall: within the last
+        ``soon`` looks it went out of sight falling, and has not been seen since. A
+        fall lets the touches still waiting go unblamed."""
+        self._lives_lost += lost
+        fell = self._fell_at is not None and self._looks - self._fell_at <= self._soon
+        self._fell_at = None
+        if fell:
+            self._lives_after_fall += lost
+            self._learner.let_go()
+            return True
+        if self._learner.waiting:
+            self._lives_after_touch += lost
+        return False
 
     def _find_me(self, tracks: tuple[Track, ...]) -> int | None:
         by_id = {t.id: t for t in tracks}
@@ -198,10 +261,15 @@ class ScreenWatch:
         roles = self.roles()
         hurts = sum(1 for r in roles if r.tag in (SpriteTag.ENEMY, SpriteTag.HAZARD))
         items = sum(1 for r in roles if r.tag is SpriteTag.ITEM)
+        fell = (
+            f" and {self._lives_after_fall} after falling off the bottom of the screen"
+            if self._lives_after_fall
+            else ""
+        )
         return (
             f"On the screen so far: {self._looks} looks, itself followed in {share}% of them; "
             f"{kinds} kinds of thing; {self._lives_lost} lives lost, "
-            f"{self._lives_after_touch} of them soon after touching something; "
+            f"{self._lives_after_touch} of them soon after touching something{fell}; "
             f"{hurts} kinds found to hurt, {items} to pick up."
         )
 

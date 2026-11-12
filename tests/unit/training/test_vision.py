@@ -357,3 +357,196 @@ def test_the_findings_kind_name_is_not_taken_for_the_watchs_own() -> None:
     shared.look(screen(things))
     shared.look(screen(things))
     assert shared.me is not None and abs(shared.me[0] - 41) <= 1
+
+
+# ------------------------------------------------------------ T-988: a fall
+
+
+def fall(watch: ScreenWatch, *, extra: list[tuple[int, int, np.ndarray]] | None = None) -> None:
+    """The hero drops out of the bottom of the screen: seen coming down at y=150 and
+    y=190 with nothing but sky under it, then gone."""
+    things = extra or []
+    watch.look(screen([(60, 150, HERO), *things]))
+    watch.look(screen([(60, 190, HERO), *things]))
+    watch.look(screen(things))
+
+
+def test_heading_off_the_bottom_then_a_life_lost_is_a_fall() -> None:
+    watch = ScreenWatch(hero_with_colours((46, 108)))
+    watch.begin_go()
+    watch.look(screen([(40, 100, HERO)]))
+    fall(watch)
+    for _ in range(4):  # the dying pause: nothing to see
+        watch.look(screen([]))
+    watch.look(screen([(40, 100, HERO)]), lost=1)  # back at the start, a life short
+    assert (watch.lives_lost, watch.lives_after_fall, watch.lives_after_touch) == (1, 1, 0)
+    assert watch.roles() == ()  # nothing was touched, nothing is blamed
+    # Counted once: the next life, lost standing where it is, is no fall.
+    watch.look(screen([(40, 100, HERO)]), lost=1)
+    assert (watch.lives_lost, watch.lives_after_fall, watch.lives_after_touch) == (2, 1, 0)
+    assert "2 lives lost, 0 of them soon after touching something and 1 after falling off" in (
+        watch.describe()
+    )
+    # A new go forgets a fall that no life followed.
+    fall(watch)
+    watch.begin_go()
+    watch.look(screen([(40, 100, HERO)]), lost=1)
+    assert watch.lives_after_fall == 1
+
+
+def test_landing_near_the_bottom_or_vanishing_otherwise_is_no_fall() -> None:
+    def lost_after(looks: list[list[tuple[int, int, np.ndarray]]], **kw: int) -> ScreenWatch:
+        watch = ScreenWatch(hero_with_colours((46, 108)), **kw)
+        watch.begin_go()
+        for things in looks:
+            watch.look(screen(things))
+        watch.look(screen([(40, 100, HERO)]), lost=1)
+        assert watch.lives_lost == 1
+        return watch
+
+    hero = lambda y, x=60: [(x, y, HERO)]  # noqa: E731
+    # The same drop as a fall, to be sure the scene is one.
+    assert lost_after([hero(150), hero(190), []]).lives_after_fall == 1
+    # Coming down just as fast, then seen standing where it landed before it goes.
+    assert lost_after([hero(150), hero(190), hero(190), []]).lives_after_fall == 0
+    # Seen again after it went out of sight coming down (behind something, a flicker):
+    # it did not fall out of the screen.
+    assert lost_after([hero(150), hero(190), [], hero(190)]).lives_after_fall == 0
+    # Standing still, then gone (a door, a flash).
+    assert lost_after([hero(190), hero(190), []]).lives_after_fall == 0
+    # Going up, then gone.
+    assert lost_after([hero(220), hero(190), []]).lives_after_fall == 0
+    # Coming down only a little, high up the screen, then gone: with nothing under it
+    # that is a fall all the same (a fall starts slowly).
+    assert lost_after([hero(50), hero(59), []]).lives_after_fall == 1
+    # Seen once only before it went: no telling which way it was going.
+    assert lost_after([hero(190), []]).lives_after_fall == 0
+    # Out of sight between the two sightings: they are not one movement.
+    assert lost_after([hero(150), [], hero(190), []]).lives_after_fall == 0
+    # A fall, but the life went long after: something else took it.
+    late = lost_after([hero(150), hero(190), [], [], [], [], [], []], soon=4)
+    assert late.lives_after_fall == 0
+    assert lost_after([hero(150), hero(190), [], [], [], []], soon=4).lives_after_fall == 1
+    # A watch that follows a track (no colours) knows no falls, as before.
+    blind = ScreenWatch(hero_found())
+    blind.begin_go()
+    blind.look(screen([(40, 100, HERO)]))
+    for things in ([(40, 150, HERO)], [(40, 190, HERO)], []):
+        blind.look(screen(things))
+    blind.look(screen([(40, 100, HERO)]), lost=1)
+    assert (blind.lives_lost, blind.lives_after_fall) == (1, 0)
+    assert "falling" not in blind.describe()
+
+
+def over_ground(things: list[tuple[int, int, np.ndarray]]) -> Frame:
+    """The plain test screen with a floor across the bottom (y=224 down)."""
+    floor = np.zeros((16, 256, 3), np.uint8)
+    floor[:] = BROWN
+    return screen([(0, 224, floor), *things])
+
+
+def test_coming_down_through_the_floor_is_no_fall() -> None:
+    """Many games throw a player that was hit off the bottom of the screen, through
+    the ground. That is not a fall: there was something under it."""
+    watch = ScreenWatch(hero_with_colours((46, 108)))
+    watch.begin_go()
+    watch.look(over_ground([(40, 100, HERO)]))
+    watch.look(over_ground([(60, 150, HERO)]))
+    watch.look(over_ground([(60, 190, HERO)]))  # coming down, the floor under it
+    watch.look(over_ground([]))
+    watch.look(over_ground([(40, 100, HERO)]), lost=1)
+    assert (watch.lives_lost, watch.lives_after_fall, watch.lives_after_touch) == (1, 0, 0)
+    # The same over a gap in the floor: a fall.
+    gap = np.zeros((16, 40, 3), np.uint8)
+    gap[:] = SKY
+
+    def holed(things: list[tuple[int, int, np.ndarray]]) -> Frame:
+        a = np.frombuffer(over_ground(things).pixels, np.uint8).reshape(240, 256, 3).copy()
+        a[224:, 50:90] = SKY
+        return Frame(256, 240, 3, a.tobytes())
+
+    watch.begin_go()
+    watch.look(holed([(40, 100, HERO)]))
+    watch.look(holed([(60, 150, HERO)]))
+    watch.look(holed([(60, 190, HERO)]))
+    watch.look(holed([]))
+    watch.look(holed([(40, 100, HERO)]), lost=1)
+    assert (watch.lives_lost, watch.lives_after_fall, watch.lives_after_touch) == (2, 1, 0)
+    # Half over the edge of the gap there is still floor under it: no fall.
+    watch.begin_go()
+    watch.look(holed([(40, 100, HERO)]))
+    watch.look(holed([(45, 150, HERO)]))
+    watch.look(holed([(45, 190, HERO)]))
+    watch.look(holed([]))
+    watch.look(holed([(40, 100, HERO)]), lost=1)
+    assert (watch.lives_lost, watch.lives_after_fall) == (3, 1)
+
+
+def test_a_fall_is_not_blamed_on_what_was_touched_before_it() -> None:
+    """On the practice game the AI stood on a narrow pillar, fell into the gap beside
+    it, and the pillar was "found to hurt"."""
+    walker = [(120, 100, WALKER)]
+
+    def touch_then(watch: ScreenWatch, *, floor: bool) -> None:
+        """Touches the walker, then goes down out of the screen beside it; a life goes."""
+        draw = over_ground if floor else screen
+        watch.begin_go()
+        watch.look(draw([(40, 100, HERO), *walker]))
+        watch.look(draw([(109, 100, HERO), *walker]))  # touching
+        watch.look(draw([(109, 150, HERO), *walker]))
+        watch.look(draw([(109, 200, HERO), *walker]))
+        watch.look(draw(walker))
+        watch.look(draw([(40, 100, HERO), *walker]), lost=1)
+
+    # Nothing under it: the fall explains the life, and the walker is not blamed.
+    fell = ScreenWatch(hero_with_colours((46, 108)))
+    touch_then(fell, floor=False)
+    assert (fell.lives_after_touch, fell.lives_after_fall) == (0, 1)
+    assert [r.tag for r in fell.roles()] == [SpriteTag.OTHER]  # touched, and harmless
+    # The touch that was waiting was let go: the next life lost is not put down to it.
+    fell.look(screen([(40, 100, HERO), *walker]), lost=1)
+    assert (fell.lives_lost, fell.lives_after_touch, fell.lives_after_fall) == (2, 0, 1)
+    # Thrown off the screen through the floor after the touch: the touch did it.
+    hit = ScreenWatch(hero_with_colours((46, 108)))
+    touch_then(hit, floor=True)
+    assert (hit.lives_after_touch, hit.lives_after_fall) == (1, 0)
+    assert len(hit.roles()) == 1 and hit.roles()[0].tag is not SpriteTag.OTHER
+
+
+def test_told_without_a_screen() -> None:
+    """The go ended before the next look: a life lost is still counted and explained."""
+    watch = ScreenWatch(hero_with_colours((46, 108)))
+    watch.begin_go()
+    watch.look(screen([(40, 100, HERO)]))
+    fall(watch)
+    watch.told(lost=1)
+    assert (watch.looks, watch.lives_lost, watch.lives_after_fall) == (4, 1, 1)
+    watch.told(lost=0)
+    watch.told()
+    assert watch.lives_lost == 1
+    # With a touch waiting, the touch is blamed.
+    watch.begin_go()
+    watch.look(screen([(40, 100, HERO), (120, 100, WALKER)]))
+    watch.look(screen([(109, 100, HERO), (120, 100, WALKER)]))
+    watch.told(lost=1)
+    assert (watch.lives_lost, watch.lives_after_touch, watch.lives_after_fall) == (2, 1, 1)
+    assert len(watch.roles()) == 1 and watch.roles()[0].tag is not SpriteTag.OTHER
+    # No touch, no fall: counted, and nobody's fault.
+    watch.begin_go()
+    watch.look(screen([(40, 100, HERO)]))
+    watch.told(lost=2)
+    assert (watch.lives_lost, watch.lives_after_touch, watch.lives_after_fall) == (4, 1, 1)
+
+
+def test_the_summary_names_the_falls() -> None:
+    watch = ScreenWatch(hero_with_colours((46, 108)))
+    walk_into(watch, WALKER, then="life")
+    assert "1 lives lost, 1 of them soon after touching something; 1 kinds" in watch.describe()
+    watch.begin_go()
+    watch.look(screen([(40, 100, HERO)]))
+    fall(watch)
+    watch.look(screen([(40, 100, HERO)]), lost=1)
+    assert (
+        "2 lives lost, 1 of them soon after touching something and 1 after falling off the "
+        "bottom of the screen; 1 kinds found to hurt" in watch.describe()
+    )
