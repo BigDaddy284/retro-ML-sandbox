@@ -45,7 +45,7 @@ def test_the_bench_is_repeatable(report: Report) -> None:
 @pytest.mark.slow
 def test_the_report_reads_in_words(report: Report) -> None:
     lines = report.lines()
-    assert len(lines) == 6
+    assert len(lines) == 7
     assert lines[0] == "Practice bench: Toy Hopper level 0, 5 goes of up to 80 steps, Simple table."
     assert lines[1].startswith(
         f"Eyes: {report.looks:,} looks; followed what it takes for itself in "
@@ -62,29 +62,35 @@ def test_the_report_reads_in_words(report: Report) -> None:
         "(target 90%)" in lines[2] and f"it stood still {report.camera_still:,} times" in lines[2]
     )
     assert lines[2].endswith(f"{report.camera_cuts} cuts to another place not counted.")
-    assert lines[3].startswith(f"Deaths: {report.deaths} ({report.falls} falls, ")
-    assert "target 80%" in lines[3]
-    assert f"the eyes put {report.fell} down to a fall and {report.blamed} to touching" in lines[3]
-    assert ("% explained" in lines[3]) == bool(report.deaths)
-    assert lines[4].startswith(f"Memory: measures distances from {report.own_position} (")
-    assert "lives found" in lines[4]
-    assert lines[5].startswith("Brain: furthest reached ") and "of 2,496 to the flag" in lines[5]
+    assert lines[3].startswith(
+        f"Ground: {report.ground_steps:,} steps of new ground counted for pay; the furthest it "
+        "counted to the right was as far as the game's own camera went, to within a step, in "
+    )
+    assert lines[3].endswith(f"% of the {report.ground_goes} goes (target 90%).")
+    assert lines[4].startswith(f"Deaths: {report.deaths} ({report.falls} falls, ")
+    assert "target 80%" in lines[4]
+    assert f"the eyes put {report.fell} down to a fall and {report.blamed} to touching" in lines[4]
+    assert ("% explained" in lines[4]) == bool(report.deaths)
+    assert lines[5].startswith(f"Memory: measures distances from {report.own_position} (")
+    assert "lives found" in lines[5]
+    assert lines[6].startswith("Brain: furthest reached ") and "of 2,496 to the flag" in lines[6]
     # A run in which the AI never looked says so instead of dividing by nothing.
     blind = Report(seed=1, goes=2, max_steps=10, algorithm="dqn", furthest=[40, 50], lost=[0, 1])
     blind.finished = [0, 0]
     words = blind.lines()
     assert words[1].startswith("Eyes: the AI never looked at the screen")
     assert words[2] == "Camera: not followed (the AI never looked at the screen twice in a go)."
-    assert "none to explain" in words[3] and "Neural network" in words[0]
+    assert words[3] == "Ground: none counted (the AI never looked at the screen)."
+    assert "none to explain" in words[4] and "Neural network" in words[0]
     assert (
-        "furthest reached 45 (best 50)" in words[5] and "lives lost a go 0.50 then 0.50" in words[5]
+        "furthest reached 45 (best 50)" in words[6] and "lives lost a go 0.50 then 0.50" in words[6]
     )
 
 
 def test_the_command_line(capsys: pytest.CaptureFixture[str]) -> None:
     code = main(["--goes", "1", "--steps", "20", "--play-frames", "600", "--algorithm", "q_table"])
     out = capsys.readouterr().out.splitlines()
-    assert code == 0 and len(out) == 6
+    assert code == 0 and len(out) == 7
     assert out[0] == "Practice bench: Toy Hopper level 0, 1 goes of up to 20 steps, Simple table."
     for bad in (
         ["--goes", "0"],
@@ -101,6 +107,7 @@ def test_the_command_line(capsys: pytest.CaptureFixture[str]) -> None:
         run(1, algorithm="magic")
     assert practice_bench.FOLLOWED_TARGET == 95 and practice_bench.EXPLAINED_TARGET == 80
     assert practice_bench.FLOOR_TARGET == 95 and practice_bench.CAMERA_TARGET == 90
+    assert practice_bench.GROUND_TARGET == 90
 
 
 @pytest.mark.slow
@@ -126,7 +133,7 @@ def test_deaths_are_explained() -> None:
     # the player stood on before it fell. (The last death's pause can outlast the run.)
     assert report.falls - 1 <= report.fell <= report.falls
     assert report.blamed == 0 and report.hurts == 0
-    assert "% explained" in report.lines()[3]
+    assert "% explained" in report.lines()[4]
 
 
 @pytest.mark.slow
@@ -156,3 +163,22 @@ def test_the_camera_is_followed(report: Report) -> None:
     assert gaps.camera_moved >= 100
     assert gaps.camera_moved_right >= 0.9 * gaps.camera_moved
     assert gaps.camera_still_right >= 0.99 * gaps.camera_still
+
+
+@pytest.mark.slow
+def test_new_ground_is_paid_as_the_game_has_it(report: Report) -> None:
+    """T-993: the ground the AI is paid for is counted off the screen: on a game that
+    scrolls, the camera's travel. Go by go, the furthest it counted to the right is
+    how far the game's own camera went, to within a step of the player's size."""
+    assert report.ground_goes == report.goes
+    assert report.ground_right >= 0.9 * report.ground_goes
+    assert report.ground_steps >= 1
+    # A level on which it runs further and dies more: the count holds through the
+    # falls, and a life lost does not get the same ground paid twice. A step is 16
+    # pixels, and the camera starts to follow 80 pixels into the level, so a go's
+    # steps are those of its furthest less five, give or take one; nothing is paid
+    # for jumping or for falling into a gap.
+    gaps = run(12, seed=3, algorithm="q_table", max_steps=200, play_frames=2000)
+    assert gaps.ground_goes == 12 and gaps.ground_right >= 11
+    owed = sum(max(0, far - 80) // 16 for far in gaps.furthest)
+    assert owed - 12 <= gaps.ground_steps <= owed + 12 + 3  # the first go's 3 on the screen

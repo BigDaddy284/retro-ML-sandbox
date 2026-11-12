@@ -21,6 +21,7 @@ from retro_ai_lab.services.goals import (
 )
 from retro_ai_lab.services.observer import (
     ButtonsHeld,
+    GroundCovered,
     InputRecorded,
     MemoryObserved,
     ObservationService,
@@ -52,6 +53,7 @@ __all__ = [
     "GoStarted",
     "GoalChanged",
     "GoalService",
+    "GroundCovered",
     "InputRecorded",
     "MemoryObserved",
     "ObjectiveCompleted",

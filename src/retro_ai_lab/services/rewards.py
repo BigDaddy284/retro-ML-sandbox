@@ -17,6 +17,7 @@ from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.rewards.buttons import ensure_button_rows
 from retro_ai_lab.rewards.exploitation import ExploitDetector, ExploitWarning
+from retro_ai_lab.rewards.ground import GROUND_ID, ensure_ground_row
 from retro_ai_lab.rewards.model import Behaviour, RewardProfile
 from retro_ai_lab.rewards.own import is_own, own_behaviour, own_id
 from retro_ai_lab.rewards.personalities import Personality, apply_personality
@@ -33,7 +34,7 @@ from retro_ai_lab.services.connection import (
     EmulatorDisconnected,
 )
 from retro_ai_lab.services.discovery import DiscoveryService, DiscoveryUpdated, game_id_for
-from retro_ai_lab.services.observer import ButtonsHeld
+from retro_ai_lab.services.observer import ButtonsHeld, GroundCovered
 from retro_ai_lab.storage.rewards import RewardStore
 from retro_ai_lab.understanding.events import EventKind, GameEvent
 from retro_ai_lab.understanding.knowledge import VariableKind, plain_names
@@ -110,6 +111,7 @@ class RewardService:
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
         bus.subscribe(ButtonsHeld, self._on_buttons_held)
+        bus.subscribe(GroundCovered, self._on_ground_covered)
         bus.subscribe(GoStarted, self._on_go_started)
         bus.subscribe(DiscoveryUpdated, self._on_discovery)
 
@@ -430,6 +432,21 @@ class RewardService:
                 again = GameEvent(EventKind.REPEAT, event.frame, name, f"{name} held again")
                 if profile.reward_for(again) != 0.0:
                     self._score(again)
+
+    def _on_ground_covered(self, event: GroundCovered) -> None:
+        """Pay each step of new ground the AI's look at the screen found (T-993). The
+        row is added the first time there is ground to pay for, unless a person removed
+        it; from then on it is theirs to change like any other."""
+        profile = self._profile
+        if not self._enabled or profile is None or event.steps < 1:
+            return
+        if ensure_ground_row(profile):
+            self._announce(RewardProfileChanged((GROUND_ID,), (), (), "suggestions"))
+        step = GameEvent(EventKind.NEW_GROUND, event.frame, None, "a step of new ground")
+        if profile.reward_for(step) == 0.0:
+            return
+        for _ in range(event.steps):
+            self._score(step)
 
     def _watch_for_exploits(self, now: int) -> None:
         if self._detector is None:

@@ -19,11 +19,22 @@ than a track. A finding without colours is followed as a track, as before.
 Since T-989 every look in which it sees itself also reads what is around it
 (:mod:`retro_ai_lab.observation.surroundings`): the floor either side, the way
 at its own height and what is under it. The brain is given those first.
+
+Since T-993 the watch also measures the new ground the go covers
+(:mod:`retro_ai_lab.observation.ground`): the camera's travel on a game that
+scrolls, where it stands on a screen that does not, in steps of its own
+size. A cut to another place, or a life lost with a jump of the screen, puts
+it back where the go began. The
+runner asks :meth:`ScreenWatch.take_new_ground` after every look and the
+reward service pays it.
 """
 
 from __future__ import annotations
 
+from collections import deque
+
 from retro_ai_lab.core import Frame
+from retro_ai_lab.observation.ground import Ground
 from retro_ai_lab.observation.objects import ObjectCatalogue
 from retro_ai_lab.observation.signature import Box
 from retro_ai_lab.observation.sprites import SpriteTag
@@ -40,6 +51,12 @@ NEAR = 48  # pixels across within which a thing is "close" rather than "coming"
 LEVEL = 8  # pixels within which a thing is level with the player, or on top of it
 HIDE_MARGIN = 1  # pixels round the player's own colours left out with it (its outline)
 LOOK_SHIFT = 32  # pixels the camera may move between two looks, either way (T-992)
+CUT = 0.25  # share of the screen no camera move explains: a cut to another place (T-993)
+JOLT = 0.02  # ... and the share that, with a life lost about then, is a respawn
+BACK_LOOKS = 4  # looks between the life lost and the jolt for the two to be one event
+FOLLOWED_OVER = 200  # looks with the camera moving that its measure is judged over
+LOST_LEAST = 20  # ... of which this many unmeasured, and more than the share below,
+LOST_SHARE = 0.2  # mean the camera cannot be followed here: no ground is counted
 
 
 def side(apart: int, *, near: int | None = NEAR) -> int:
@@ -89,6 +106,16 @@ class ScreenWatch:
         self._fell_at: int | None = None  # the look at which it went out of sight, falling
         self._was_seen = False  # it was in sight at the look before
         self._around: Surroundings | None = None  # what was around it at the last look (T-989)
+        # The new ground the go covers (T-993).
+        self._ground = Ground()
+        self._new_ground = 0  # steps found since the last take
+        self._jolt_at: int | None = None  # the last jolt that found it somewhere else
+        self._prior_box: Box | None = None  # its last sighting before this look
+        self._lost_at: int | None = None  # the last look that heard of a life lost
+        self._was_jolt = False  # the look before was a jolt too
+        # Looks in which the camera moved: True where the move was measured, False
+        # where it was not (a jolt). Kept from go to go: it is about the game.
+        self._measured: deque[bool] = deque(maxlen=FOLLOWED_OVER)
 
     @property
     def player(self) -> PlayerFinding:
@@ -138,9 +165,36 @@ class ScreenWatch:
         own height, what is under it (T-989). None when it did not see itself."""
         return self._around
 
+    @property
+    def ground(self) -> Ground:
+        """The new ground this go has covered so far (T-993)."""
+        return self._ground
+
+    @property
+    def follows_camera(self) -> bool:
+        """Whether the camera's moves can be measured well enough on this game to
+        count new ground by (T-993). Not when, of the last looks in which it moved, a
+        fifth or more (and 20 at least) could not be measured: a screen too small or a
+        scroll too fast leaves too little of the picture to compare, and counting only
+        the moves that can be measured would pay for going slowly."""
+        unmeasured = len(self._measured) - sum(self._measured)
+        return not (unmeasured >= LOST_LEAST and unmeasured > LOST_SHARE * len(self._measured))
+
+    def take_new_ground(self) -> int:
+        """The steps of new ground found since the last call (T-993); they are given
+        once."""
+        new, self._new_ground = self._new_ground, 0
+        return new
+
     def begin_go(self) -> None:
         """A go starts from the checkpoint: new tracks, the player looked for afresh."""
         self._tracker.reset()
+        self._ground.begin()
+        self._new_ground = 0
+        self._jolt_at = None
+        self._prior_box = None
+        self._lost_at = None
+        self._was_jolt = False
         self._around = None
         self._me = None
         self._box = None
@@ -153,6 +207,7 @@ class ScreenWatch:
         self._was_seen = False
 
     def look(self, frame: Frame, *, lost: int = 0, scored: int = 0) -> None:
+        self._prior_box = self._last_box
         if self._sign is not None:
             # By its colours: nearest where it was last seen, or at the start of a go
             # where the player was found (the go starts from that spot).
@@ -194,6 +249,7 @@ class ScreenWatch:
             )
             self._fell_at = None  # in sight again: it did not fall out of the screen
         self._was_seen = self._box is not None
+        self._cover_ground(lost)
         if scored:
             happened.append(Happening.SCORE_UP)
         self._learner.observe(
@@ -201,6 +257,58 @@ class ScreenWatch:
         )
         self._looks += 1
         self._looks_this_go += 1
+
+    def _cover_ground(self, lost: int) -> None:
+        """Count the new ground of this look (T-993).
+
+        A jolt is a look in which the screen changed and no camera move explains it.
+        A quarter of the screen or more is a cut to another place. Being put back
+        after dying can change far less of a plain level: that is a jolt that comes
+        after a look that could be measured, finds the player somewhere else on the
+        screen than it was last seen (further than its own size), and has a life lost
+        within a few looks of it. Either way it is taken to be back where the go
+        began, so ground it walks again pays nothing. A life lost without all that (a
+        hit that costs health, a crash that leaves it where it was) changes nothing.
+
+        Every other jolt is a move that could not be measured, and nothing is counted
+        for it. Where those are common the count would pay for moving slowly enough to
+        be measured, so nothing is counted at all while :attr:`follows_camera` is
+        False.
+        """
+        moved, share = self._tracker.scroll, self._tracker.unexplained
+        jolt = moved == (0, 0) and share >= JOLT
+        if jolt and not self._was_jolt and self._elsewhere():
+            self._jolt_at = self._looks
+        if lost:
+            self._lost_at = self._looks
+        respawn = (
+            self._jolt_at is not None
+            and self._lost_at is not None
+            and abs(self._jolt_at - self._lost_at) <= BACK_LOOKS
+        )
+        if respawn or (jolt and share >= CUT):
+            self._ground.back()
+            if respawn:
+                self._jolt_at = self._lost_at = None
+        elif jolt:
+            self._measured.append(False)
+        elif moved != (0, 0):
+            self._measured.append(True)
+        self._was_jolt = jolt
+        if self._box is None:
+            new = self._ground.look(moved)
+        else:
+            x, y, w, h = self._box
+            new = self._ground.look(moved, (x + w // 2, y + h // 2), max(w, h))
+        if self.follows_camera:
+            self._new_ground += new  # otherwise counted and not paid, now or later
+
+    def _elsewhere(self) -> bool:
+        """It is seen further than its own size from where it was last seen."""
+        if self._box is None or self._prior_box is None:
+            return False
+        (x, y, w, h), (px, py, _, _) = self._box, self._prior_box
+        return max(abs(x - px), abs(y - py)) > max(w, h)
 
     def told(self, *, lost: int = 0) -> None:
         """Lives lost that no look will come for (the go ended): counted and put down to
@@ -273,11 +381,20 @@ class ScreenWatch:
             if self._lives_after_fall
             else ""
         )
+        lost = (
+            ""
+            if self.follows_camera
+            else (
+                f" It cannot follow the camera here ({len(self._measured) - sum(self._measured)} "
+                f"of the last {len(self._measured)} moves could not be measured), so new "
+                "ground is not counted."
+            )
+        )
         return (
             f"On the screen so far: {self._looks} looks, itself followed in {share}% of them; "
             f"{kinds} kinds of thing; {self._lives_lost} lives lost, "
             f"{self._lives_after_touch} of them soon after touching something{fell}; "
-            f"{hurts} kinds found to hurt, {items} to pick up."
+            f"{hurts} kinds found to hurt, {items} to pick up.{lost}"
         )
 
     def roles(self) -> tuple[Role, ...]:
