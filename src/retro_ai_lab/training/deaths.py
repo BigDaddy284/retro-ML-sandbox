@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections import Counter, deque
 
 from retro_ai_lab.core import ConfigurationError
-from retro_ai_lab.learning.state import State, part_name
+from retro_ai_lab.learning.state import State, bucket_word, part_name
 from retro_ai_lab.understanding.knowledge import Knowledge
 
 DEATHS_AT_LEAST = 3  # fewer deaths in a window say nothing
@@ -61,12 +61,12 @@ class DeathWatch:
         """Deaths seen over the goes in the window."""
         return sum(len(d) for d in self._deaths)
 
-    def describe(self, knowledge: Knowledge | None = None) -> str:
-        """The sights that stood out before the window's deaths, or that none did;
-        "" with fewer than ``DEATHS_AT_LEAST`` deaths."""
+    def _lifted(self) -> list[tuple[float, int, float, Sight]]:
+        """(lift, deaths with it, share of steps, sight) for the sights that stand out,
+        by lift; empty with fewer than ``DEATHS_AT_LEAST`` deaths."""
         deaths = [parts for go in self._deaths for parts in go]
         if len(deaths) < DEATHS_AT_LEAST:
-            return ""
+            return []
         steps_seen: Counter[Sight] = Counter()
         for c in self._steps:
             steps_seen.update(c)
@@ -81,18 +81,39 @@ class DeathWatch:
             if share >= STANDS_OUT_SHARE and share - usual >= STANDS_OUT_LIFT:
                 lifted.append((share - usual, n, usual, sight))
         lifted.sort(key=lambda x: (-x[0], -x[1], x[3]))
+        return lifted
+
+    def standouts(self) -> tuple[Sight, ...]:
+        """The sights :meth:`describe` names, in its order (T-979); none when it names none."""
+        return tuple(sight for _, _, _, sight in self._lifted()[:MOST_SIGHTS])
+
+    def describe(self, knowledge: Knowledge | None = None) -> str:
+        """The sights that stood out before the window's deaths, or that none did;
+        "" with fewer than ``DEATHS_AT_LEAST`` deaths."""
+        deaths = sum(len(go) for go in self._deaths)
+        if deaths < DEATHS_AT_LEAST:
+            return ""
+        lifted = self._lifted()
         goes = len(self._deaths)
-        head = f"Before the {len(deaths)} deaths in the last {goes} goes"
+        head = f"Before the {deaths} deaths in the last {goes} goes"
         if not lifted:
             return (
                 f"{head} nothing the AI sees stood out: the same sights as any other "
                 "step. It may not see what kills it."
             )
         words = [
-            f"{part_name(sight[0], knowledge)}={sight[1]} in {n} of them ({usual:.0%} of all steps)"
+            f"{part_name(sight[0], knowledge)}={bucket_word(sight[1])} in {n} of them "
+            f"({usual:.0%} of all steps)"
             for _, n, usual, sight in lifted[:MOST_SIGHTS]
         ]
         return f"{head} the AI saw {' and '.join(words)}."
 
 
-__all__ = ["DEATHS_AT_LEAST", "MOST_SIGHTS", "STANDS_OUT_LIFT", "STANDS_OUT_SHARE", "DeathWatch"]
+__all__ = [
+    "DEATHS_AT_LEAST",
+    "MOST_SIGHTS",
+    "STANDS_OUT_LIFT",
+    "STANDS_OUT_SHARE",
+    "DeathWatch",
+    "Sight",
+]

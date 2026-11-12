@@ -41,7 +41,7 @@ from retro_ai_lab.learning.promotion import convert, promote
 from retro_ai_lab.learning.qlearning import QLearningAgent, Settings
 from retro_ai_lab.learning.replay import Transition
 from retro_ai_lab.learning.skills import SkillsLearner
-from retro_ai_lab.learning.state import State, StateEncoder
+from retro_ai_lab.learning.state import FINE_STEP, State, StateEncoder, bucket_span, part_name
 from retro_ai_lab.observation.memory import MemoryCapture
 from retro_ai_lab.rewards.exploitation import ExploitWarning
 from retro_ai_lab.rewards.goals import Goal
@@ -231,6 +231,7 @@ class TrainingService:
         self._fresh_start = ""
         self._agent: Learner | None = None
         self._encoder: StateEncoder | None = None
+        self._closer_kept: tuple[tuple[str, int], ...] = ()  # a saved brain's (T-981)
         self._harness: ExperimentHarness | None = None
         self._runner: EpisodeRunner | None = None
         self._status = Status.IDLE
@@ -428,6 +429,7 @@ class TrainingService:
             self._demonstrations,
             self._max_steps if self._max_steps != self._default_max_steps else None,
             self._unstick_after if self._unstick_after != self._default_unstick_after else None,
+            self._encoder.closer if self._encoder is not None else self._closer_kept,
         )
 
     def curve(self, window: int = DEFAULT_WINDOW) -> LearningCurve:
@@ -728,6 +730,23 @@ class TrainingService:
             self._max_steps = brain.go_length
         if brain.give_up_after is not None:
             self._unstick_after = brain.give_up_after
+        self._closer_kept = brain.closer  # applied once the encoder exists (T-981)
+        if self._encoder is not None:
+            self._keep_closer()
+
+    def _keep_closer(self) -> None:
+        """The saved brain's closer looks are the encoder's again (T-981): the fine
+        states in its table would be dead weight until the deaths named the sight afresh."""
+        if self._encoder is None:
+            return
+        self._encoder.forget_closer()
+        kept = self._encoder.look_closer(self._closer_kept)
+        if kept:
+            log.info(
+                "The AI keeps looking closer at %d sight%s where it kept dying.",
+                len(kept),
+                "" if len(kept) == 1 else "s",
+            )
 
     @_locked
     def forget(self) -> None:
@@ -744,6 +763,9 @@ class TrainingService:
         self._total_steps = 0
         self._runner = None
         self._fresh_start = ""
+        self._closer_kept = ()
+        if self._encoder is not None:
+            self._encoder.forget_closer()
         if self._store is not None:
             self._store.delete(self._game_id)
         log.info("The AI forgot this game at your request: its brain and the saved copy are gone.")
@@ -898,6 +920,7 @@ class TrainingService:
         self._unstick_after = self._default_unstick_after
         self._fresh_start = ""
         self._last_change = ""
+        self._closer_kept = ()
         if self._store is not None and self._store.exists(self._game_id):
             try:
                 brain = Brain.from_dict(self._store.load(self._game_id), space=space)
@@ -918,6 +941,8 @@ class TrainingService:
         else:
             log.info("No saved brain for this game yet: the AI starts with a new one.")
         self._encoder = StateEncoder(knowledge)
+        if self._closer_kept:
+            self._keep_closer()
         self._harness = (
             ExperimentHarness(
                 self._connection, slot=CHECKPOINT_SLOT, on_restore=self._observation.expect_jump
@@ -1322,9 +1347,23 @@ class TrainingService:
         # Every tenth go from the twentieth: is the AI surviving longer? (T-934)
         if self._episodes >= 2 * DEFAULT_WINDOW and self._episodes % DEFAULT_WINDOW == 0:
             log.info("%s", describe_survival(tuple(self._history), DEFAULT_WINDOW))
-            seen = self._deaths.describe(self._discovery.knowledge)  # T-968
+            knowledge = self._discovery.knowledge
+            seen = self._deaths.describe(knowledge)  # T-968
             if seen:
                 log.info("%s", seen)
+            if self._encoder is not None:
+                # A sight before most deaths is read in fine steps from now on (T-979):
+                # the user's AI died at one stretch of ground that shared its bucket
+                # with the safe ground before it.
+                for vid, b in self._encoder.look_closer(self._deaths.standouts()):
+                    log.info(
+                        "Where it keeps dying the AI now looks closer: %s around %d, "
+                        "in steps of %d instead of %d.",
+                        part_name(vid, knowledge),
+                        b,
+                        FINE_STEP,
+                        bucket_span(b, self._encoder.bins),
+                    )
             if self._watch is not None:
                 log.info("%s", self._watch.describe())  # T-977
         self._deaths.end_go()

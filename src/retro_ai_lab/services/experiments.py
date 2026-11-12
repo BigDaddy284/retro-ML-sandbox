@@ -19,6 +19,7 @@ from retro_ai_lab.core import (
     Button,
     ConfigurationError,
     EmulatorDisconnectedError,
+    EmulatorError,
     Frame,
     UnsupportedCapabilityError,
 )
@@ -115,10 +116,18 @@ class ExperimentHarness:
         return self._trials
 
     def available(self) -> bool:
-        """True if the connected emulator supports everything a trial needs."""
+        """True if the connected emulator supports everything a trial needs.
+
+        A link that drops between the check and the call makes it False (T-980):
+        the user's log ended with that error from a memory handler that ran as the
+        app shut down. The connection service records the disconnect itself.
+        """
         if not self._connection.is_connected:
             return False
-        caps = self._connection.call(lambda a: a.capabilities())
+        try:
+            caps = self._connection.call(lambda a: a.capabilities())
+        except EmulatorError:
+            return False
         return all(caps.supports(name) for name in REQUIRED)
 
     def _require(self) -> None:

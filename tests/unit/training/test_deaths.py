@@ -54,3 +54,25 @@ def test_nothing_standing_out_says_the_ai_may_not_see_what_kills_it() -> None:
     )
     with pytest.raises(ConfigurationError):
         DeathWatch(window=0)
+
+
+def test_the_death_watch_names_its_standouts() -> None:
+    """T-979: the sights the line names are handed to the encoder to look closer at."""
+    w = DeathWatch(window=2)
+    assert w.standouts() == ()
+    for i in range(100):
+        w.step(state(near=1 if i < 15 else 5, speed=0 if i < 40 else 2, score=3))
+    w.death(state(near=1, speed=0, score=3))
+    w.death(state(near=1, speed=2, score=3))
+    assert w.standouts() == ()  # too few deaths, as the line says nothing
+    w.death(state(near=1, speed=0, score=3))
+    w.death(state(near=5, speed=0, score=3))
+    assert w.standouts() == (("near", 1), ("speed", 0))  # the line's order: by lift
+    assert "near=1 in 3 of them" in w.describe()
+    w.end_go()
+    for i in range(50):
+        w.step(state(near=i % 2, speed=1))
+    w.end_go()  # the first go's deaths are out of the window
+    for near in (1, 0, 1):
+        w.death(state(near=near, speed=1))
+    assert "nothing the AI sees stood out" in w.describe() and w.standouts() == ()

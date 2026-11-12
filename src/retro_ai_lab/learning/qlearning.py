@@ -141,10 +141,24 @@ class QTable:
         return tuple(self._rows)
 
     def row(self, state: State) -> list[float]:
-        return self._rows.setdefault(state.key, [0.0] * self._actions)
+        row = self._rows.get(state.key)
+        if row is None:
+            row = self._rows[state.key] = list(self._start(state))
+        return row
 
     def values(self, state: State) -> tuple[float, ...]:
-        return tuple(self._rows.get(state.key, [0.0] * self._actions))
+        row = self._rows.get(state.key)
+        return tuple(row) if row is not None else self._start(state)
+
+    def _start(self, state: State) -> tuple[float, ...]:
+        """What an unknown situation starts from: nothing, or, for one the AI looks
+        closer at (T-982), what it knew of the whole coarse bucket, so looking closer
+        splits that knowledge instead of throwing it away."""
+        if state.is_fine:
+            twin = self._rows.get(state.coarse().key)
+            if twin is not None:
+                return tuple(twin)
+        return (0.0,) * self._actions
 
     def value(self, state: State, action: int) -> float:
         return self.values(state)[action]

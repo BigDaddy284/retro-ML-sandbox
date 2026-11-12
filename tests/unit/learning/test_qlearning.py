@@ -238,3 +238,23 @@ def test_a_q_update_bootstraps_over_the_steps_it_spans() -> None:
     for bad in (0, -2, 1.5, True):
         with pytest.raises(ConfigurationError):
             agent.learn(A, LEFT, 0.0, B, steps=bad)  # type: ignore[arg-type]
+
+
+def test_a_fine_situation_starts_from_what_the_coarse_one_knew() -> None:
+    """T-982: looking closer (T-979) splits a bucket's knowledge instead of throwing it
+    away; the AI had learned the stretch before the trap over thousands of goes."""
+    from retro_ai_lab.learning.state import fine_bucket
+    from retro_ai_lab.understanding import VariableKind
+
+    t = QTable(2)
+    coarse = State((("v1", 12), ("v2", 3)))
+    t.row(coarse)[1] = 4.0
+    fine = State((("v1", fine_bucket(130, VariableKind.POSITION)), ("v2", 3)))
+    assert t.values(fine) == (0.0, 4.0) and t.best(fine) == 1 and len(t) == 1  # read only
+    row = t.row(fine)  # the first learn copies it
+    assert row == [0.0, 4.0] and len(t) == 2
+    row[0] = 9.0
+    assert t.values(coarse) == (0.0, 4.0)  # a copy, not a share
+    other = State((("v1", fine_bucket(70, VariableKind.POSITION)), ("v2", 3)))
+    assert t.values(other) == (0.0, 0.0)  # bucket 11 was never learned
+    assert t.values(State((("v1", 12), ("v2", 5)))) == (0.0, 0.0)  # a coarse unknown: nothing
