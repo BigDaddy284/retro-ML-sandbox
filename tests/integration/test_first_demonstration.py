@@ -5,6 +5,15 @@ the user interface drives, with nothing taught by hand: the sandbox connects to 
 game it has never seen, works out what matters, lets the rewards be configured,
 trains, explains itself, and then shows that different rewards make it play
 differently.
+
+Steps 1 to 9 are walked once for each of a few learner seeds, and step 10's claims
+are about all of them together (T-992). They used to be about one seeded run: thirty
+goes of a learner that explores at random are mostly luck, and the "twice as fast"
+claim needed its seed moved twice, and held on between none and four of six seeds
+depending on what the AI's eyes told its brain that week. Summed over three seeds the
+claims below held for every three of the six seeds measured (1 to 5 and 7): the
+point-lover scores 1.7 to 2.7 times as much per step and drives faster, and the
+careful one's crashes per step fall to between 0.47 and 0.69 of what they were.
 """
 
 from __future__ import annotations
@@ -27,11 +36,12 @@ from retro_ai_lab.understanding import EventKind, VariableKind
 BY_NAME = {b.name: b for b in BUTTONS}
 EXPLORE_FRAMES = 2500  # and a brake: the AI's checkpoint must not be a dying moment (T-961)
 GOES = 30
+SEEDS = (1, 2, 3)  # the learner's; the game is the same one each time
 MAX_STEPS = 150
 WINDOW = 10
 
 
-def lab(tmp_path: Path, name: str) -> AppContext:
+def lab(tmp_path: Path, name: str, seed: int) -> AppContext:
     ctx = AppContext(data_dir=tmp_path / name)
     ctx.training = TrainingService(
         ctx.connection,
@@ -39,17 +49,7 @@ def lab(tmp_path: Path, name: str) -> AppContext:
         ctx.discovery,
         ctx.bus,
         max_steps=MAX_STEPS,
-        # Seed 5 since T-988 (7 before T-983, 3 until T-988). Step 10's "twice as fast"
-        # is a claim about one seeded run, and it moves whenever what the AI learns from
-        # changes: over seeds 1 to 5 and 7 it held on four with a new move every step, on
-        # one (3) once the AI explored in runs, and holds on three (2, 4 and 5; this one
-        # by 2.8) now that its eyes hear of every life lost, which made a kind of thing
-        # "hurt" on the racer for the first time. The other three claims of step 10 (more
-        # points per step, the careful one crashing less as it learns, the rewards'
-        # signs) hold on all six seeds each time. The assertions are as they were; a
-        # statement of the speed claim that does not hang on the seed is owed (tracker,
-        # T-988).
-        seed=5,
+        seed=seed,
         settings=Settings(epsilon=1.0, epsilon_min=0.05, epsilon_decay=0.9),
         store=ctx.brain_store,
     )
@@ -126,9 +126,17 @@ def train(ctx: AppContext, goes: int) -> Played:
     return played
 
 
-@pytest.mark.slow
-def test_first_working_demonstration(tmp_path: Path) -> None:
-    ctx = lab(tmp_path, "demo")
+@dataclass
+class Shown:
+    """What one walk through steps 1 to 9 showed, for step 10."""
+
+    lover: tuple[float, float, float, float]  # reward, steps, score, speed (last goes)
+    careful: tuple[float, float, float, float]
+    careful_played: Played
+
+
+def walk(tmp_path: Path, seed: int) -> Shown:
+    ctx = lab(tmp_path, "demo", seed)
 
     # 1. Connect to an emulator.
     session = ctx.connection.connect("fake", seed=5)
@@ -221,25 +229,6 @@ def test_first_working_demonstration(tmp_path: Path) -> None:
     careful_played = train(ctx, GOES)
     careful = careful_played.recent()
 
-    # 10. Changing the rewards changed how it plays: the point-lover drives fast and
-    #     scores more per step; the careful one crawls (its total can creep past the
-    #     lover's, which is why the score is compared per step) and, with crashing
-    #     at -50, crashes less and less as it learns. (Go length is not compared: a
-    #     crawler's goes end as "stuck", so steps measure the give-up rule, not
-    #     caution; T-875.)
-    lover_reward, lover_steps, lover_score, lover_speed = score_lover
-    careful_reward, careful_steps, careful_score, careful_speed = careful
-    assert lover_speed >= 2 * careful_speed, (score_lover, careful)
-    assert lover_score / lover_steps > careful_score / careful_steps, (score_lover, careful)
-    #     "Less" is at least a quarter fewer per step: a seeded run's exact ratio moves
-    #     with every change to what the AI is paid, the direction is the claim (T-878).
-    early, late = slice(0, WINDOW), slice(-WINDOW, None)
-    assert careful_played.crashes_per_step(late) < 0.75 * careful_played.crashes_per_step(early), (
-        careful_played.crashes,
-        careful_played.steps,
-    )
-    assert lover_reward > 0 > careful_reward, (score_lover, careful)
-
     # Everything the child did was saved and comes back after a reconnect.
     ctx.connection.disconnect()
     ctx.connection.connect("fake", seed=5)
@@ -248,3 +237,34 @@ def test_first_working_demonstration(tmp_path: Path) -> None:
     assert profile is not None and profile.get(setback.id).value == -50
     goal = ctx.goals.goal
     assert goal is not None and objective.id in goal
+    ctx.connection.disconnect()
+    return Shown(score_lover, careful, careful_played)
+
+
+@pytest.mark.slow
+def test_first_working_demonstration(tmp_path: Path) -> None:
+    shown = [walk(tmp_path / f"seed{seed}", seed) for seed in SEEDS]
+
+    # 10. Changing the rewards changed how it plays. The point-lover's rewards add up
+    #     above zero and the careful one's below, on every seed.
+    for one in shown:
+        assert one.lover[0] > 0 > one.careful[0], (one.lover, one.careful)
+    #     The point-lover scores more per step (the careful one's total can creep past
+    #     the lover's, which is why the score is compared per step; go length is not
+    #     compared: a crawler's goes end as "stuck", so steps measure the give-up rule,
+    #     not caution; T-875), and drives faster.
+    lover_score = sum(one.lover[2] for one in shown) / sum(one.lover[1] for one in shown)
+    careful_score = sum(one.careful[2] for one in shown) / sum(one.careful[1] for one in shown)
+    assert lover_score > careful_score, [(one.lover, one.careful) for one in shown]
+    assert sum(one.lover[3] for one in shown) > sum(one.careful[3] for one in shown)
+    #     And the careful one, with crashing at -50, crashes less and less as it learns:
+    #     at least a quarter fewer per step in its last goes than in its first.
+    early, late = slice(0, WINDOW), slice(-WINDOW, None)
+
+    def crashes_per_step(goes: slice) -> float:
+        played = [one.careful_played for one in shown]
+        return sum(sum(p.crashes[goes]) for p in played) / sum(sum(p.steps[goes]) for p in played)
+
+    assert crashes_per_step(late) < 0.75 * crashes_per_step(early), [
+        (one.careful_played.crashes, one.careful_played.steps) for one in shown
+    ]

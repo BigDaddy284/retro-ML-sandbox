@@ -620,3 +620,24 @@ def test_nothing_is_given_when_it_does_not_see_itself() -> None:
     assert watch.around is not None
     watch.begin_go()
     assert watch.around is None and watch.parts() == ()
+
+
+# ------------------------------------------------------------ T-992: the camera at its pace
+
+
+def test_the_watch_follows_a_fast_camera() -> None:
+    """The AI looks every 8 frames; in that time a camera moves well past the 8 pixels
+    the tracker allowed for one frame. The player, held still on the screen by the
+    camera, has no say in how far it moved."""
+    watch = ScreenWatch(hero_with_colours())
+    watch.begin_go()
+    camera = 0
+    for step in (0, 16, 16, 24, 31, 0, -20, -16, 3):
+        camera += step
+        watch.look(level(camera + 100, [(80, 192, HERO)]))
+        assert watch.tracker.scroll == (step, 0), step
+        assert watch.me == (81, 193, 10, 15)
+    assert watch.tracker.camera == (54, 0)
+    # A new go starts the camera's count again.
+    watch.begin_go()
+    assert watch.tracker.camera == (0, 0)

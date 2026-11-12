@@ -747,6 +747,7 @@ def test_free_run_leaves_the_real_controller_alone_between_watched_steps() -> No
         adapter.connect(timeout_s=5.0)
         adapter.set_free_run(True)
         wait_until(lambda: not host.paused)
+        before = host.game.state.position
         host.real_pad = ("up",)
         watched = adapter.step(1, watch=True)
         assert watched.pressed == frozenset({"up"})
@@ -754,7 +755,11 @@ def test_free_run_leaves_the_real_controller_alone_between_watched_steps() -> No
         start = host.frames
         wait_until(lambda: host.frames > start + 5)
         assert host.calls.count("joypad_set") == sets  # the pad was left to the person
-        assert host.game.state.speed > 0  # and their Up reached the game
+        # And their Up reached the game: the car, which stood still, has driven on. (Its
+        # speed at this instant says less: the game runs on its own here, and on a slow
+        # machine it has run far enough by now to hit something and stand still again,
+        # as it did once in a full run of the suite, T-992.)
+        assert host.game.state.position > before
         # A step that holds the pad takes it back on every turn after it.
         adapter.step(1, pressed={Button("a", "A")})
         sets = host.calls.count("joypad_set")

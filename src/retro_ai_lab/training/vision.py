@@ -39,6 +39,7 @@ PART_REACH = 128  # pixels across within which a thing is in the brain's view (T
 NEAR = 48  # pixels across within which a thing is "close" rather than "coming"
 LEVEL = 8  # pixels within which a thing is level with the player, or on top of it
 HIDE_MARGIN = 1  # pixels round the player's own colours left out with it (its outline)
+LOOK_SHIFT = 32  # pixels the camera may move between two looks, either way (T-992)
 
 
 def side(apart: int, *, near: int | None = NEAR) -> int:
@@ -62,7 +63,7 @@ class ScreenWatch:
         soon: int = SOON_LOOKS,
     ) -> None:
         self._player = player
-        self._tracker = ObjectTracker(catalogue)
+        self._tracker = ObjectTracker(catalogue, max_shift=LOOK_SHIFT)
         self._learner = RoleLearner(soon=soon)
         self._sign = player.colours  # what the player looks like, when the finding says (T-987)
         self._me: int | None = None  # the player's track, when it has no colours to go by

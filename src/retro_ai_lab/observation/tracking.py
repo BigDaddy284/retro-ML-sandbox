@@ -17,11 +17,16 @@ it stays on screen: where it is, its kind when the catalogue knows it, and
 its velocity *in the level* (screen movement plus scroll), so a coin that
 slides past as the camera moves reads as standing still and a walker reads
 as walking.
+
+Since T-992 the tracker's camera is measured at the pace the AI looks, and
+only by what can tell: see :meth:`ObjectTracker.update`.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import TypeVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -38,6 +43,15 @@ from retro_ai_lab.observation.objects import (
 from retro_ai_lab.observation.screen import to_array
 
 DEFAULT_MAX_SHIFT = 8  # pixels a frame the camera may move either way
+# Every shift is tried while that costs no more than 8 pixels of reach either way on a
+# 256 by 240 screen did; past that, coarse then fine (T-992).
+EXHAUSTIVE = 17 * 17 * 256 * 240
+COARSE = 4  # the coarse search looks at every fourth pixel and tries every fourth shift
+KEEP = 3  # coarse answers looked at closely
+GLASS_AFTER = 2  # camera moves a row stood still through before it counts as glass
+GLASS_MOST = 4  # ... and the most that are counted, so a row can be unlearnt again
+SCREEN_SHARE = 4  # the camera's reach is at most a quarter of the screen either way
+EXPLAINS = 0.5  # a move must leave at most this share of what differed still differing
 DEFAULT_MAX_JUMP = 24  # farthest a thing may be from where it was expected to be
 DEFAULT_MAX_MISSING = 5  # frames a track survives without being seen
 HISTORY = 30  # positions kept per track
@@ -61,14 +75,113 @@ def _check_pair(before: Frame, after: Frame) -> None:
         raise ConfigurationError("Both frames must have the same size and channels.")
 
 
-def _overlap(
-    a: NDArray[np.int32], b: NDArray[np.int32], dx: int, dy: int
-) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
+_Pixels = TypeVar("_Pixels", NDArray[np.int32], NDArray[np.bool_])
+
+
+def _overlap(a: _Pixels, b: _Pixels, dx: int, dy: int) -> tuple[_Pixels, _Pixels]:
     """The parts of ``a`` (after) and ``b`` (before) showing one spot: a[y,x] ~ b[y+dy,x+dx]."""
     h, w = a.shape
     ay0, ay1 = max(0, -dy), min(h, h - dy)
     ax0, ax1 = max(0, -dx), min(w, w - dx)
     return a[ay0:ay1, ax0:ax1], b[ay0 + dy : ay1 + dy, ax0 + dx : ax1 + dx]
+
+
+def _mismatch(
+    a: NDArray[np.int32],
+    b: NDArray[np.int32],
+    va: NDArray[np.bool_] | None,
+    vb: NDArray[np.bool_] | None,
+    dx: int,
+    dy: int,
+) -> float | None:
+    """The share of pixels that differ with ``a`` laid over ``b`` moved by the shift,
+    among those both masks let vote; None when none do."""
+    aa, bb = _overlap(a, b, dx, dy)
+    if aa.size == 0:
+        return None
+    differ = aa != bb
+    if va is None and vb is None:
+        return float(np.count_nonzero(differ)) / aa.size
+    ok = np.ones(aa.shape, np.bool_)
+    if va is not None:
+        ok &= _overlap(va, va, dx, dy)[0]
+    if vb is not None:
+        ok &= _overlap(vb, vb, dx, dy)[1]
+    votes = int(np.count_nonzero(ok))
+    if votes == 0:
+        return None
+    return float(np.count_nonzero(differ & ok)) / votes
+
+
+_Key = tuple[float, int, int, int]
+
+
+def _rank(
+    a: NDArray[np.int32],
+    b: NDArray[np.int32],
+    va: NDArray[np.bool_] | None,
+    vb: NDArray[np.bool_] | None,
+    shifts: Iterable[tuple[int, int]],
+) -> list[_Key]:
+    """The shifts, best first: least mismatch, then the smallest move."""
+    keys: list[_Key] = []
+    for dx, dy in shifts:
+        mismatch = _mismatch(a, b, va, vb, dx, dy)
+        if mismatch is not None:
+            keys.append((round(mismatch, 6), abs(dx) + abs(dy), dy, dx))
+    keys.sort()
+    return keys
+
+
+def _search(
+    a: NDArray[np.int32],
+    b: NDArray[np.int32],
+    va: NDArray[np.bool_] | None,
+    vb: NDArray[np.bool_] | None,
+    max_dx: int,
+    max_dy: int,
+) -> tuple[int, int]:
+    """:func:`estimate_scroll` on packed screens and masks of the pixels that vote."""
+    if (2 * max_dx + 1) * (2 * max_dy + 1) * a.size <= EXHAUSTIVE:
+        shifts = {
+            (dx, dy) for dy in range(-max_dy, max_dy + 1) for dx in range(-max_dx, max_dx + 1)
+        }
+    else:
+        # Every fourth pixel, every fourth shift, over the whole reach; then every
+        # shift round the best few. A reach of 32 costs less than 8 does in full.
+        c = COARSE
+        kx, ky = -(-max_dx // c), -(-max_dy // c)
+        coarse = _rank(
+            a[::c, ::c],
+            b[::c, ::c],
+            None if va is None else va[::c, ::c],
+            None if vb is None else vb[::c, ::c],
+            ((x, y) for y in range(-ky, ky + 1) for x in range(-kx, kx + 1)),
+        )
+        shifts = {(0, 0)}
+        for key in coarse[:KEEP]:
+            y, x = key[2], key[3]
+            for dy in range(c * y - c + 1, c * y + c):
+                for dx in range(c * x - c + 1, c * x + c):
+                    if abs(dx) <= max_dx and abs(dy) <= max_dy:
+                        shifts.add((dx, dy))
+    ranked = _rank(a, b, va, vb, shifts)
+    if not ranked:
+        return (0, 0)
+    return ranked[0][3], ranked[0][2]
+
+
+def _votes(mask: object, frame: Frame, what: str) -> NDArray[np.bool_] | None:
+    """A leave-out mask turned into the pixels that vote; None when nothing is left out."""
+    if mask is None:
+        return None
+    if (
+        not isinstance(mask, np.ndarray)
+        or mask.dtype != np.bool_
+        or mask.shape != (frame.height, frame.width)
+    ):
+        raise ConfigurationError(f"{what} must be a mask of true and false, one for each pixel.")
+    return ~mask
 
 
 def estimate_scroll(
@@ -77,29 +190,26 @@ def estimate_scroll(
     *,
     max_dx: int = DEFAULT_MAX_SHIFT,
     max_dy: int = DEFAULT_MAX_SHIFT,
+    leave_out_before: NDArray[np.bool_] | None = None,
+    leave_out_after: NDArray[np.bool_] | None = None,
 ) -> tuple[int, int]:
     """How far the camera moved: ``(dx, dy)`` with ``after[y, x] == before[y+dy, x+dx]``.
 
-    Positive ``dx`` is the camera moving right (the level sliding left).
+    Positive ``dx`` is the camera moving right (the level sliding left). Pixels true
+    in a ``leave_out`` mask (one for each screen, height by width) have no say: what
+    is known not to move with the scenery, such as the player the camera holds still
+    (T-992). Every shift is tried while that is cheap (``EXHAUSTIVE``: a small reach, or
+    a small screen); past that the search is coarse, then fine round the best few, and
+    can miss what only features thinner than ``COARSE`` pixels tell.
     """
     _check_pair(before, after)
     if not isinstance(max_dx, int) or not isinstance(max_dy, int) or max_dx < 0 or max_dy < 0:
         raise ConfigurationError("The largest shift must be a whole number, 0 or more.")
     max_dx = min(max_dx, before.width - 1)
     max_dy = min(max_dy, before.height - 1)
-    a, b = _packed(after), _packed(before)
-    best: tuple[float, int, int, int] | None = None
-    for dy in range(-max_dy, max_dy + 1):
-        for dx in range(-max_dx, max_dx + 1):
-            aa, bb = _overlap(a, b, dx, dy)
-            if aa.size == 0:
-                continue
-            mismatch = float(np.count_nonzero(aa != bb)) / aa.size
-            key = (round(mismatch, 6), abs(dx) + abs(dy), dy, dx)
-            if best is None or key < best:
-                best = key
-    assert best is not None
-    return best[3], best[2]
+    vb = _votes(leave_out_before, before, "leave_out_before")
+    va = _votes(leave_out_after, after, "leave_out_after")
+    return _search(_packed(after), _packed(before), va, vb, max_dx, max_dy)
 
 
 def moving_mask(before: Frame, after: Frame, scroll: tuple[int, int]) -> NDArray[np.bool_]:
@@ -138,6 +248,7 @@ class Track:
     seen: int = 1
     history: list[tuple[int, int, int]] = field(default_factory=list)  # (frame, level x, level y)
     merged: bool = False  # this frame it was part of a patch with another thing (touching)
+    glass: bool = False  # drawn on the glass (a life counter): it stays put on the screen
     cut_out: bool = False  # last seen cut out of the scenery by its motion (T-977)
 
     @property
@@ -202,6 +313,11 @@ class ObjectTracker:
         self._camera = (0, 0)  # where the camera is in the level, summed scrolls
         self._scroll = (0, 0)
         self._hidden: tuple[int, int, int, int] | None = None  # the box left out last frame
+        # Camera moves each row stood still through although the move would have changed
+        # it (T-992). Kept over a reset, like the kinds: the strip of lives and score is
+        # in the same place every go.
+        self._stuck: NDArray[np.int16] | None = None
+        self._searches = 0
 
     @property
     def catalogue(self) -> ObjectCatalogue:
@@ -216,6 +332,20 @@ class ObjectTracker:
     def camera(self) -> tuple[int, int]:
         """The camera's position in the level, counted from the first frame."""
         return self._camera
+
+    @property
+    def glass(self) -> tuple[int, ...]:
+        """The rows found to be painted on the glass: they stand still while the camera
+        moves (the lives, the score), so they have no say in how far it moved."""
+        if self._stuck is None:
+            return ()
+        return tuple(int(y) for y in np.flatnonzero(self._stuck >= GLASS_AFTER))
+
+    @property
+    def searches(self) -> int:
+        """Looks in which the camera's move had to be searched for (a still screen and a
+        change no bigger than one small thing need no search)."""
+        return self._searches
 
     def tracks(self) -> tuple[Track, ...]:
         """The things on screen now (seen this frame or missing only briefly)."""
@@ -233,9 +363,17 @@ class ObjectTracker:
         self, frame: Frame, *, hide: tuple[int, int, int, int] | None = None
     ) -> tuple[Track, ...]:
         """Follow the things on ``frame``. ``hide`` is a box (x, y, width, height) to
-        leave out of the picture: nothing in it is a thing, and neither is the change
-        it leaves behind when it moves (T-987: the player, which the caller knows by
-        its looks and follows itself)."""
+                leave out of the picture: nothing in it is a thing, and neither is the change
+                it leaves behind when it moves (T-987: the player, which the caller knows by
+                its looks and follows itself).
+
+                The camera's move since the last frame (T-992) is voted on by the pixels that
+        can tell: not the hidden box, here or where it was (the camera holds the player
+        still on the screen), and not the rows found to be glass. And one small thing
+        changing is no camera move: when all that changed fits in half a thing's
+        largest size, the camera stood still. (Things known to move are not left out:
+        a wrong scroll makes the scenery's own edges look like movers, and leaving
+        those out would keep the scroll wrong.)"""
         if not isinstance(frame, Frame):
             raise ConfigurationError("update() needs a Frame.")
         if hide is not None and (
@@ -252,12 +390,11 @@ class ObjectTracker:
             frame.channels,
         ):
             self.reset()
+            self._stuck = None
             prev = None
         objects = [o for o in self._catalogue.observe(frame, hide=hide) if not o.scenery]
         if prev is not None:
-            self._scroll = estimate_scroll(
-                prev, frame, max_dx=self._max_shift, max_dy=self._max_shift
-            )
+            self._scroll = self._camera_move(prev, frame, hide)
             self._camera = (self._camera[0] + self._scroll[0], self._camera[1] + self._scroll[1])
             objects.extend(self._movers_in_scenery(prev, frame, objects, hide))
         else:
@@ -269,6 +406,104 @@ class ObjectTracker:
 
     # ------------------------------------------------------------ internals
 
+    def _camera_move(
+        self, prev: Frame, frame: Frame, hide: tuple[int, int, int, int] | None
+    ) -> tuple[int, int]:
+        a, b = _packed(frame), _packed(prev)
+        if self._stuck is None:
+            self._stuck = np.zeros(frame.height, np.int16)
+        out_a = np.zeros(a.shape, np.bool_)  # what has no say, on the new screen ...
+        out_b = np.zeros(a.shape, np.bool_)  # ... and on the old one
+
+        for mask, box in ((out_a, hide), (out_b, self._hidden)):
+            if box is not None:
+                x, y, w, h = box
+                mask[max(0, y) : max(0, y + h), max(0, x) : max(0, x + w)] = True
+        changed = (a != b) & ~(out_a | out_b)  # with no shift, what either screen leaves out
+        glass = self._stuck >= GLASS_AFTER
+        telling = changed & ~glass[:, None]
+        if not telling.any():
+            return (0, 0)
+        ys, xs = np.nonzero(telling)
+        # Small, and far, are measured against the screen: on a small screen a thing
+        # is smaller and a move past a quarter of it leaves too little to compare.
+        thin = min(self._max_size // 2, frame.width // (2 * SCREEN_SHARE))
+        tall = min(self._max_size // 2, frame.height // (2 * SCREEN_SHARE))
+        if int(np.max(xs) - np.min(xs)) < thin and int(np.max(ys) - np.min(ys)) < tall:
+            return (0, 0)  # one small thing changed: that is no camera move
+        self._searches += 1
+        va, vb = ~(out_a | glass[:, None]), ~(out_b | glass[:, None])
+        scroll = _search(
+            a,
+            b,
+            va,
+            vb,
+            min(self._max_shift, frame.width // SCREEN_SHARE),
+            min(self._max_shift, frame.height // SCREEN_SHARE),
+        )
+        if scroll == (0, 0):
+            return scroll
+        # The best of a bad lot is no measure: after a cut to another place, or a move
+        # past the reach, some shift still fits best. A real move explains most of
+        # what differed.
+        still, moved = _mismatch(a, b, va, vb, 0, 0), _mismatch(a, b, va, vb, *scroll)
+        if still is None or moved is None or moved > EXPLAINS * still:
+            return (0, 0)
+        self._learn_glass(a, b, changed, out_a, out_b, scroll)
+        return scroll
+
+    def _learn_glass(
+        self,
+        a: NDArray[np.int32],
+        b: NDArray[np.int32],
+        changed: NDArray[np.bool_],
+        out_a: NDArray[np.bool_],
+        out_b: NDArray[np.bool_],
+        scroll: tuple[int, int],
+    ) -> None:
+        """The camera moved. A row stood still if it holds something (it is not one
+        colour from end to end), nothing in it changed, and the move would have changed
+        it both ways: what the move would bring into the row is not there, and what the
+        row held has not gone where the move would take it. (One way is not enough: a
+        line running down the screen "should" be where the strip above it is, yet did
+        not stand still. Where one of the two lies off the screen, the other decides.)
+        Once more and the row is glass. A row that changed and is wholly as the move
+        says moved with the scenery: it is not glass. Any other row loses one count,
+        so a row counted by mistake is let go again by the moves that follow."""
+        assert self._stuck is not None
+        dx, dy = scroll
+        height = a.shape[0]
+        aa, bb = _overlap(a, b, dx, dy)
+        ok = _overlap(~out_a, ~out_a, dx, dy)[0] & _overlap(~out_b, ~out_b, dx, dy)[1]
+        differ = np.asarray(((aa != bb) & ok).any(axis=1), np.bool_)
+        rows = len(differ)
+        top, source = max(0, -dy), max(0, dy)
+        # What the move brings to a row is not there / what it held is not where the
+        # move takes it; and whether the screen shows enough to say.
+        not_come, not_gone = np.zeros(height, np.bool_), np.zeros(height, np.bool_)
+        come_seen, gone_seen = np.zeros(height, np.bool_), np.zeros(height, np.bool_)
+        not_come[top : top + rows], come_seen[top : top + rows] = differ, True
+        not_gone[source : source + rows], gone_seen[source : source + rows] = differ, True
+        row_changed = np.asarray(changed.any(axis=1), np.bool_)
+        holds = np.asarray((a != a[:, :1]).any(axis=1), np.bool_)
+        stood = (
+            ~row_changed
+            & holds
+            & (not_come | ~come_seen)
+            & (not_gone | ~gone_seen)
+            & (come_seen | gone_seen)
+        )
+        self._stuck[stood] = np.minimum(self._stuck[stood] + 1, GLASS_MOST)
+        self._stuck[~stood] = np.maximum(self._stuck[~stood] - 1, 0)
+        self._stuck[row_changed & come_seen & ~not_come] = 0
+
+    def _on_glass(self, y: int, height: int) -> bool:
+        """Every row of a thing this tall at ``y`` is glass."""
+        if self._stuck is None:
+            return False
+        rows = self._stuck[max(0, y) : max(0, y + height)]
+        return bool(rows.size) and bool((rows >= GLASS_AFTER).all())
+
     def _movers_in_scenery(
         self,
         prev: Frame,
@@ -278,6 +513,8 @@ class ObjectTracker:
     ) -> list[ScreenObject]:
         """Moving patches not already covered by a thing: a walker on the ground."""
         moved = moving_mask(prev, frame, self._scroll)
+        if self._stuck is not None:
+            moved[self._stuck >= GLASS_AFTER] = False  # what is on the glass moves with nothing
         sx, sy = self._scroll
         # What is already a thing needs no second look, and neither does the spot a
         # thing of a known kind has just left (its trail is a change too). A mover cut
@@ -328,9 +565,10 @@ class ObjectTracker:
         pairs: list[tuple[float, int, int]] = []
         tracks = list(self._tracks.values())
         for ti, t in enumerate(tracks):
-            # Where it should be on screen now: moved by its velocity, slid by the scroll.
-            ex = t.centre[0] + t.velocity[0] * (t.missing + 1) - sx
-            ey = t.centre[1] + t.velocity[1] * (t.missing + 1) - sy
+            # Where it should be on screen now: moved by its velocity, slid by the scroll
+            # (what is on the glass does not slide).
+            ex = t.centre[0] + t.velocity[0] * (t.missing + 1) - (0 if t.glass else sx)
+            ey = t.centre[1] + t.velocity[1] * (t.missing + 1) - (0 if t.glass else sy)
             for oi, o in enumerate(objects):
                 if (
                     not (t.cut_out or o.cut_out)
@@ -351,8 +589,22 @@ class ObjectTracker:
             used_t.add(ti)
             used_o.add(oi)
             t, o = tracks[ti], objects[oi]
-            old_level = (t.centre[0] + (cx - sx), t.centre[1] + (cy - sy))
-            new_level = (o.centre[0] + cx, o.centre[1] + cy)
+            glass = self._on_glass(o.y, o.height)
+            flipped = glass != t.glass
+            if flipped:
+                # Found to be on the glass (or no longer): where it has been was counted
+                # the other way, so its past says nothing about whether or how it moves.
+                t.glass = glass
+                t.history.clear()
+                t.velocity = (0.0, 0.0)
+            if glass:  # the level it stands still in is the screen
+                new_level = o.centre
+                old_level = new_level if flipped else t.centre
+            else:
+                new_level = (o.centre[0] + cx, o.centre[1] + cy)
+                old_level = (
+                    new_level if flipped else (t.centre[0] + (cx - sx), t.centre[1] + (cy - sy))
+                )
             steps = t.missing + 1
             vx = (new_level[0] - old_level[0]) / steps
             vy = (new_level[1] - old_level[1]) / steps
@@ -400,8 +652,9 @@ class ObjectTracker:
             if ti not in used_t:
                 t.missing += 1
                 # Out of sight it keeps sliding with the camera.
-                t.x -= sx
-                t.y -= sy
+                if not t.glass:
+                    t.x -= sx
+                    t.y -= sy
                 if t.missing > self._max_missing:
                     del self._tracks[t.id]
         for oi, o in enumerate(objects):
@@ -409,7 +662,11 @@ class ObjectTracker:
                 continue
             t = Track(self._next_id, o.kind, o.x, o.y, o.width, o.height, number, number)
             t.cut_out = o.cut_out
-            t.history.append((number, o.centre[0] + cx, o.centre[1] + cy))
+            t.glass = self._on_glass(o.y, o.height)
+            if t.glass:
+                t.history.append((number, *o.centre))
+            else:
+                t.history.append((number, o.centre[0] + cx, o.centre[1] + cy))
             self._tracks[t.id] = t
             self._next_id += 1
 

@@ -385,7 +385,14 @@ nearest thing that hurts are. So it can see a gap coming instead of having
 to remember where in the level the gaps are. (It cannot yet tell a bush or a
 far hill from a wall, and a game with a strip along the bottom of the screen
 hides its gaps from this reading.) Twelve of the brain's 32 seats are kept
-for what it reads off the picture. It hears of every life lost, also those lost
+for what it reads off the picture. Between two looks it also measures how far
+the camera moved, which is what tells a thing that walks from one the screen
+merely slides past. It measures that by the scenery alone: the AI itself,
+which the camera holds still on the screen, has no say, and neither have the
+rows it has found to be painted on the glass (a strip of lives and score
+stands still while everything else slides, so after two camera moves it is
+left out); and one small thing changing on a still screen is not taken for
+the camera moving. It hears of every life lost, also those lost
 between two looks. A life lost after it went out of sight coming down, with
 nothing under it but the backdrop, is a fall, and is not blamed on whatever
 it touched or stood on before; coming down through the floor is not a fall

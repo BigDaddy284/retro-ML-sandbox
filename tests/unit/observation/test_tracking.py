@@ -318,3 +318,320 @@ def test_a_hidden_box_is_checked() -> None:
         with pytest.raises(ConfigurationError):
             tracker.update(frame, hide=bad)  # type: ignore[arg-type]
     assert tracker.update(frame, hide=(-5, -5, 3, 3)) == tracker.tracks()  # off the screen
+
+
+# ------------------------------------------------------------ T-992: the camera's move
+
+
+def tall_view(world: np.ndarray, camera: int, top: int) -> Frame:
+    """The screen at ``camera`` with the level slid ``top`` rows up (more sky above the
+    level, more ground below it, so there is always something to show)."""
+    sky = np.zeros((40, world.shape[1], 3), np.uint8)
+    sky[:] = SKY
+    sky[10:18, 50::83] = WHITE  # a few specks of cloud
+    big = np.vstack([sky, world, world[208:240], world[208:216]])
+    a = big[40 + top : 280 + top, camera : camera + 256]
+    return Frame(256, 240, 3, np.ascontiguousarray(a).tobytes())
+
+
+@pytest.mark.parametrize(
+    "shift",
+    [
+        (16, 0),
+        (-23, 0),
+        (32, 0),
+        (-32, 0),
+        (0, 17),
+        (0, -9),
+        (13, 5),
+        (-20, -11),
+        (31, 31),
+        (9, 0),
+        (3, 0),
+        (-1, 1),
+        (0, 0),
+    ],
+)
+def test_a_wide_scroll_is_found_coarse_then_fine(shift: tuple[int, int]) -> None:
+    w = level()
+    dx, dy = shift
+    before, after = tall_view(w, 300, 0), tall_view(w, 300 + dx, dy)
+    assert estimate_scroll(before, after, max_dx=32, max_dy=32) == shift
+    # The reach is a limit: a move past it is not found (and nothing is made up
+    # beyond it).
+    found = estimate_scroll(before, after, max_dx=12, max_dy=12)
+    assert abs(found[0]) <= 12 and abs(found[1]) <= 12
+    if max(abs(dx), abs(dy)) <= 12:
+        assert found == shift
+
+
+def test_a_wide_search_costs_no_more_than_the_narrow_one() -> None:
+    w = level()
+    a, b = view(w, 100, [], 0), view(w, 116, [], 1)
+    estimate_scroll(a, b, max_dx=32, max_dy=32)
+
+    def cost(reach: int) -> float:
+        start = time.perf_counter()
+        for _ in range(5):
+            estimate_scroll(a, b, max_dx=reach, max_dy=reach)
+        return (time.perf_counter() - start) / 5
+
+    wide, narrow = cost(32), cost(8)
+    assert wide < 0.25, f"{wide * 1000:.0f} ms"
+    assert wide < 1.5 * narrow, f"{wide * 1000:.0f} ms against {narrow * 1000:.0f} ms"
+
+
+def plain(width: int = 1024, gaps: tuple[tuple[int, int], ...] = ()) -> np.ndarray:
+    """Sky over plain ground from y=200, grass on top, nothing to tell a shift by but
+    the gaps (first x, width)."""
+    a = np.zeros((240, width, 3), np.uint8)
+    a[:] = SKY
+    a[200:] = BROWN
+    a[200:204] = GREEN
+    for x, wide in gaps:
+        a[200:, x : x + wide] = SKY
+    return a
+
+
+def strip(frame: Frame, squares: int) -> Frame:
+    """The same screen with a strip along the top: ``squares`` black squares that stay
+    where they are on the screen (lives, a score)."""
+    a = np.frombuffer(frame.pixels, np.uint8).reshape(240, 256, 3).copy()
+    for i in range(squares):
+        a[8:16, 8 + 12 * i : 16 + 12 * i] = BLACK
+    return Frame(256, 240, 3, a.tobytes(), number=frame.number)
+
+
+def test_pixels_left_out_do_not_vote() -> None:
+    # One gap slides by 2 pixels under a strip of twelve squares that stays put: the
+    # strip's edges outweigh the gap's, and the screen reads as still.
+    w = plain(gaps=((400, 48),))
+    before, after = strip(view(w, 300, [], 0), 12), strip(view(w, 302, [], 1), 12)
+    assert estimate_scroll(before, after) == (0, 0)
+    # With the strip's rows left out of both screens, the gap tells.
+    out = np.zeros((240, 256), np.bool_)
+    out[8:16] = True
+    assert estimate_scroll(before, after, leave_out_before=out, leave_out_after=out) == (2, 0)
+    assert estimate_scroll(
+        before, after, max_dx=32, max_dy=32, leave_out_before=out, leave_out_after=out
+    ) == (2, 0)
+    # Everything left out: nothing can tell, and that reads as no move.
+    everything = np.ones((240, 256), np.bool_)
+    assert estimate_scroll(before, after, leave_out_after=everything) == (0, 0)
+    assert estimate_scroll(before, after, max_dx=32, leave_out_before=everything) == (0, 0)
+
+
+def test_bad_masks_are_refused() -> None:
+    f = Frame(8, 6, 1, bytes(48))
+    for bad in (
+        np.zeros((8, 6), np.bool_),  # width by height
+        np.zeros((6, 8), np.uint8),
+        np.zeros((6, 8, 1), np.bool_),
+        [[False] * 8] * 6,
+        "mask",
+    ):
+        with pytest.raises(ConfigurationError):
+            estimate_scroll(f, f, leave_out_before=bad)  # type: ignore[arg-type]
+        with pytest.raises(ConfigurationError):
+            estimate_scroll(f, f, leave_out_after=bad)  # type: ignore[arg-type]
+    assert estimate_scroll(f, f, leave_out_before=np.zeros((6, 8), np.bool_)) == (0, 0)
+
+
+def big_hero() -> np.ndarray:
+    s = np.zeros((24, 16, 3), np.uint8)
+    s[:] = (228, 0, 88)
+    s[0:6, 3:13] = (252, 188, 176)
+    return s
+
+
+def test_the_hidden_player_does_not_hold_the_camera_still() -> None:
+    """The camera holds the player at one spot on the screen while the level slides
+    by, so the player's own pixels say "nothing moved"."""
+    w = plain(gaps=((470, 400),))  # one edge of a wide gap in sight
+    seen = ObjectTracker(max_shift=32)
+    hidden = ObjectTracker(max_shift=32)
+    for i in range(6):
+        camera = 300 + 2 * i
+        frame = view(w, camera, [(camera + 80, 176, big_hero())], i)
+        seen.update(frame)
+        hidden.update(frame, hide=(79, 175, 18, 26))
+        if i:
+            assert seen.scroll == (0, 0)  # the player outvotes the one edge
+            assert hidden.scroll == (2, 0)
+    assert hidden.camera == (10, 0) and seen.camera == (0, 0)
+
+
+def test_the_tracker_follows_a_camera_faster_than_eight_pixels_a_look() -> None:
+    w = level()
+    tracker = ObjectTracker(max_shift=32)
+    camera = 100
+    for i, step in enumerate((0, 16, 16, 20, 31, -27, -16, 9, 0, 3)):
+        camera += step
+        tracker.update(view(w, camera, [], i))
+        assert tracker.scroll == (step, 0), i
+    assert tracker.camera == (52, 0)
+    # With the reach meant for a single frame, the same camera is lost (what was wrong).
+    slow = ObjectTracker()
+    slow.update(view(w, 100, [], 0))
+    slow.update(view(w, 120, [], 1))
+    assert slow.scroll != (20, 0)
+
+
+def test_a_lone_mover_is_not_a_camera_move() -> None:
+    """A walker pacing on plain ground, nothing else in sight: every pixel that changed
+    fits "the camera moved the other way". One small thing is not the camera."""
+    w = plain()
+    tracker = ObjectTracker(max_shift=32)
+    for i in range(8):
+        tracker.update(view(w, 300, [(420 + 4 * i, 184, walker())], i))
+        assert tracker.scroll == (0, 0) and tracker.camera == (0, 0)
+    assert tracker.searches == 0
+    moving = [t for t in tracker.tracks() if t.missing == 0 and t.moves]
+    assert len(moving) == 1 and abs(moving[0].velocity[0] - 4) < 1
+    # A thing that pops up or goes (a coin taken) is no camera move either.
+    tracker.update(view(w, 300, [(420 + 28, 184, walker()), (350, 120, coin())], 8))
+    assert tracker.scroll == (0, 0) and tracker.searches == 0
+
+
+def test_a_still_screen_costs_no_search() -> None:
+    w = level()
+    tracker = ObjectTracker(max_shift=32)
+    frame = view(w, 200, [], 0)
+    for _ in range(5):
+        tracker.update(frame)
+    assert tracker.searches == 0 and tracker.scroll == (0, 0)
+    tracker.update(view(w, 205, [], 1))
+    assert tracker.searches == 1 and tracker.scroll == (5, 0)
+
+
+def taught(squares: int = 12) -> tuple[ObjectTracker, np.ndarray]:
+    """A tracker that has watched hilly ground slide by under a strip of squares, and
+    the level: hills up to x=600, then plain ground with one gap at 800."""
+    w = plain(gaps=((800, 48),))
+    for x0 in range(0, 600, 97):
+        w[150:200, x0 : x0 + 30] = GREEN
+        w[150, x0 : x0 + 30] = BLACK
+    tracker = ObjectTracker(max_shift=32)
+    for i in range(4):
+        tracker.update(strip(view(w, 100 + 16 * i, [], i), squares))
+        assert tracker.scroll == ((16, 0) if i else (0, 0))
+    return tracker, w
+
+
+def test_a_strip_that_stands_still_is_learnt_as_glass() -> None:
+    tracker, w = taught()
+    # The strip's rows stood still through two camera moves that would have changed
+    # them: they are glass. Nothing else is.
+    assert tracker.glass == tuple(range(8, 16))
+    # Over plain ground with one gap, a pixel a look: the strip would outvote the gap
+    # (see test_pixels_left_out_do_not_vote); it no longer has a say.
+    tracker.reset()
+    assert tracker.glass == tuple(range(8, 16))  # kept over a go, like the kinds
+    fresh = ObjectTracker(max_shift=32)
+    for i in range(5):
+        frame = strip(view(w, 620 + i, [], i), 12)
+        tracker.update(frame)
+        fresh.update(frame)
+        if i:
+            assert tracker.scroll == (1, 0)
+            assert fresh.scroll == (0, 0)
+    assert tracker.camera == (4, 0)
+
+
+def test_what_is_on_the_glass_does_not_move() -> None:
+    """With the scroll right, a square that stays put on the screen would read as moving
+    through the level at the camera's speed. It is on the glass: it moves with nothing,
+    and is not cut out of the scenery as a mover."""
+    tracker, w = taught(squares=3)
+    for i in range(4, 10):
+        tracker.update(strip(view(w, 100 + 16 * i, [], i), 3))
+        assert tracker.scroll == (16, 0)
+    on_glass = [t for t in tracker.tracks() if t.glass]
+    assert len(on_glass) == 3 and all(t.missing == 0 for t in on_glass)
+    assert [t.x for t in sorted(on_glass, key=lambda t: t.x)] == [8, 20, 32]
+    assert not any(t.moves for t in tracker.tracks())
+    assert all(abs(t.velocity[0]) < 0.01 for t in on_glass)
+    # A thing in the level is not on the glass, wherever the camera goes.
+    tracker.update(strip(view(w, 260, [(400, 100, coin())], 10), 3))
+    tracker.update(strip(view(w, 276, [(400, 100, coin())], 11), 3))
+    coins = [t for t in tracker.tracks() if 100 <= t.y < 108 and t.missing == 0]
+    assert len(coins) == 1 and not coins[0].glass and not coins[0].moves
+
+
+def test_glass_is_unlearnt_when_the_row_moves_with_the_scenery() -> None:
+    tracker, w = taught()
+    assert tracker.glass == tuple(range(8, 16))
+    # The strip is gone and a cloud in the level slides through its rows: rows that
+    # change just as the camera's move says are scenery, not glass.
+    w[8:16, 300:340] = WHITE
+    for i in range(3):
+        tracker.update(view(w, 180 + 16 * i, [], i))
+    assert tracker.scroll == (16, 0)
+    assert tracker.glass == ()
+    # A frame of another size starts everything over, glass too.
+    tracker2, _ = taught()
+    tracker2.update(Frame(64, 48, 3, bytes(64 * 48 * 3)))
+    assert tracker2.glass == ()
+
+
+def test_the_best_of_a_bad_lot_is_no_move() -> None:
+    """After a cut to another place some shift still fits best. It explains next to
+    nothing of what changed, so it is no measure: the camera's count stays where it
+    was and nothing is learnt from it."""
+    tracker, w = taught()
+    camera = tracker.camera
+    other = np.zeros((240, 1024, 3), np.uint8)  # somewhere else altogether: indoors
+    other[60:180:40, 30::70] = WHITE
+    other[200:] = (60, 60, 60)
+    tracker.update(strip(view(other, 500, [], 9), 12))
+    assert tracker.scroll == (0, 0) and tracker.camera == camera
+    assert tracker.glass == tuple(range(8, 16))
+    # A move past the reach is the same: not guessed at.
+    far = ObjectTracker(max_shift=12)
+    far.update(view(w, 100, [], 0))
+    far.update(view(w, 150, [], 1))
+    assert far.scroll == (0, 0)
+
+
+def small_track(position: int, things: tuple[tuple[int, int], ...] = ((70, 0), (90, 2))) -> Frame:
+    """A small grey screen (64 by 48) looking down a track with three lanes: lines down
+    the screen, blocks across a lane (how far along, which lane) coming down it as
+    ``position`` grows, and a strip of two squares on top."""
+    a = np.full((48, 64, 1), 16, np.uint8)
+    a[1:3, 1:3] = 200
+    a[1:3, 5:7] = 200
+    a[8:, 21] = 64
+    a[8:, 42] = 64
+    for along, lane in things:
+        row = 44 - (along - position)
+        if 8 <= row < 47:
+            a[row : row + 2, lane * 21 + 2 : lane * 21 + 19] = 160
+    return Frame(64, 48, 1, a.tobytes(), number=position)
+
+
+def test_small_and_far_are_measured_against_the_screen() -> None:
+    # Two blocks come down the track 5 rows a look: a move, though each block is far
+    # smaller than half a thing's largest size on a big screen.
+    tracker = ObjectTracker(max_shift=32)
+    for i in range(5):
+        tracker.update(small_track(40 + 5 * i))
+        assert tracker.scroll == ((0, -5) if i else (0, 0))
+    # A quarter of this screen is 12 rows: 20 rows a look is past the reach, and is not
+    # guessed at.
+    fast = ObjectTracker(max_shift=32)
+    fast.update(small_track(40))
+    fast.update(small_track(60))
+    assert fast.scroll == (0, 0)
+
+
+def test_only_a_row_that_stood_still_both_ways_is_glass() -> None:
+    """A move up or down the screen "would have changed" more rows than the strip that
+    stood still: the empty rows the strip would have slid into, and the top of the lane
+    lines, where the strip's rows would have come from. Neither stood still."""
+    tracker = ObjectTracker(max_shift=32)
+    for i in range(8):
+        tracker.update(small_track(40 + 5 * i))
+    assert tracker.glass == (1, 2)  # the strip, and nothing else
+    # A block coming down through the top of the track is a thing in the level.
+    tops = [t for t in tracker.tracks() if t.missing == 0 and t.y >= 8]
+    assert tops and not any(t.glass for t in tops)
