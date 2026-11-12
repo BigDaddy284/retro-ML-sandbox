@@ -244,15 +244,13 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
 def _on_the_player(training: TrainingService, game: ToyHopper) -> bool:
     """Whether what the watch follows as itself is, just now, on the real player."""
     watch = training.watch
-    if watch is None or watch.player_track is None:
+    if watch is None or watch.me is None:
         return False
-    me = next((t for t in watch.tracker.tracks() if t.id == watch.player_track), None)
-    if me is None or me.missing:
-        return False
+    left, top, width, height = watch.me
     st = game.state
     x = st.x - st.scroll + toy_hopper.PLAYER_W // 2
     y = st.y + toy_hopper.PLAYER_H // 2
-    mx, my = me.centre
+    mx, my = left + width // 2, top + height // 2
     return abs(mx - x) <= ON_PLAYER and abs(my - y) <= ON_PLAYER
 
 

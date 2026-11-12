@@ -245,3 +245,25 @@ def test_different_colours_are_different_kinds() -> None:
     cat = ObjectCatalogue()
     found = cat.observe(scene([(10, 20, walker()), (100, 50, coin())]))
     assert len({o.kind for o in found}) == 2
+
+
+# ------------------------------------------------------------ T-987: a box left out
+
+
+def test_a_hidden_box_is_left_out_of_the_picture() -> None:
+    """T-987: what the caller knows by other means (the player, by its colours) is left
+    out, so that it is not one patch with whatever it touches."""
+    together = [(60, 60, walker()), (73, 62, coin())]  # touching: one patch
+    cat = ObjectCatalogue()
+    alone = cat.observe(scene([(150, 62, coin())]))
+    assert len(alone) == 1 and alone[0].kind == "thing-1"
+    patch = cat.observe(scene(together))
+    assert len(patch) == 1 and patch[0].kind == "thing-2"  # a look of its own
+    # The walker's box hidden: the coin is seen as the coin it is, and no kind is added.
+    seen = cat.observe(scene(together), hide=(60, 60, 14, 16))
+    assert boxes(seen) == [(74, 63, 4, 6)] and seen[0].kind == "thing-1"
+    assert len(cat.kinds()) == 2
+    # Hidden to the edge of the screen and beyond it; and hiding everything.
+    assert cat.observe(scene([(0, 0, walker())]), hide=(-8, -8, 30, 30)) == ()
+    assert cat.observe(scene(together), hide=(0, 0, 256, 240)) == ()
+    assert len(cat.observe(scene(together), hide=(200, 200, 500, 500))) == 1

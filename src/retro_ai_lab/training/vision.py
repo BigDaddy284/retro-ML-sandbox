@@ -9,16 +9,23 @@ service asks :meth:`ScreenWatch.roles` and logs what changed.
 
 The kinds ("thing 3") live as long as the app runs; keeping them with the
 game across sessions is a later task.
+
+Since T-987 the player is known by its looks when the finding has its colours
+(:class:`~retro_ai_lab.observation.signature.ColourSignature`): each look picks
+it out of the screen afresh, so a jump, a locked camera or standing on the
+ground no longer lose it, and "me" is a box (:attr:`ScreenWatch.me`) rather
+than a track. A finding without colours is followed as a track, as before.
 """
 
 from __future__ import annotations
 
 from retro_ai_lab.core import Frame
 from retro_ai_lab.observation.objects import ObjectCatalogue
+from retro_ai_lab.observation.signature import Box
 from retro_ai_lab.observation.sprites import SpriteTag
 from retro_ai_lab.observation.tracking import ObjectTracker, Track
 from retro_ai_lab.understanding.player import PlayerFinding
-from retro_ai_lab.understanding.roles import Happening, Role, RoleLearner
+from retro_ai_lab.understanding.roles import Happening, Role, RoleLearner, within
 
 DEFAULT_LOOK_EVERY = 2  # steps between two looks (a look costs a screenshot and ~15 ms)
 SOON_LOOKS = 30  # looks after a touch in which a life lost is put down to it (~4 s)
@@ -26,6 +33,7 @@ FIRST_LOOK_REACH = 16  # pixels from where the player was found, at a go's first
 PART_REACH = 128  # pixels across within which a thing is in the brain's view (T-978)
 NEAR = 48  # pixels across within which a thing is "close" rather than "coming"
 LEVEL = 8  # pixels within which a thing is level with the player, or on top of it
+HIDE_MARGIN = 1  # pixels round the player's own colours left out with it (its outline)
 
 
 def side(apart: int, *, near: int | None = NEAR) -> int:
@@ -51,8 +59,13 @@ class ScreenWatch:
         self._player = player
         self._tracker = ObjectTracker(catalogue)
         self._learner = RoleLearner(soon=soon)
-        self._me: int | None = None
-        self._my_kind = player.kind  # learned from the player's track when it has one
+        self._sign = player.colours  # what the player looks like, when the finding says (T-987)
+        self._me: int | None = None  # the player's track, when it has no colours to go by
+        self._box: Box | None = None  # where the player was seen at the last look
+        # Learned from the player's track when it has one. The finding's kind is a name
+        # from the catalogue of whoever found it; it means something here only when
+        # the caller handed over that same catalogue.
+        self._my_kind = player.kind if catalogue is not None else None
         self._last_me: tuple[int, int] | None = None  # where the player was last seen
         self._looks = 0
         self._looks_this_go = 0
@@ -90,24 +103,50 @@ class ScreenWatch:
 
     @property
     def player_track(self) -> int | None:
+        """The track followed as the player (None when it is known by its colours)."""
         return self._me
+
+    @property
+    def me(self) -> Box | None:
+        """Where the AI saw itself at the last look (x, y, width, height); None when
+        it did not."""
+        return self._box
 
     def begin_go(self) -> None:
         """A go starts from the checkpoint: new tracks, the player looked for afresh."""
         self._tracker.reset()
         self._me = None
+        self._box = None
         self._last_me = None
         self._looks_this_go = 0
 
     def look(self, frame: Frame, *, lost: int = 0, scored: int = 0) -> None:
-        tracks = self._tracker.update(frame)
-        self._me = self._find_me(tracks)
-        me = next((t for t in tracks if t.id == self._me), None)
-        if me is not None and me.missing == 0:
+        if self._sign is not None:
+            # By its colours: nearest where it was last seen, or at the start of a go
+            # where the player was found (the go starts from that spot).
+            near = self._last_me if self._last_me is not None else self._player.start
+            self._box = self._sign.find(frame, near=near)
+            # The tracker follows everything else: with the player left out of its
+            # picture, nothing the player stands on or touches is one patch with it.
+            hide = None
+            if self._box is not None:
+                x, y, w, h = self._box
+                hide = (x - HIDE_MARGIN, y - HIDE_MARGIN, w + 2 * HIDE_MARGIN, h + 2 * HIDE_MARGIN)
+            tracks = self._tracker.update(frame, hide=hide)
+        else:
+            tracks = self._tracker.update(frame)
+            self._me = self._find_me(tracks)
+            me = next((t for t in tracks if t.id == self._me), None)
+            if me is not None and me.missing == 0:
+                self._box = (me.x, me.y, me.width, me.height)
+                if me.kind is not None and not me.cut_out and not me.merged:
+                    self._my_kind = me.kind
+            else:
+                self._box = None
+        if self._box is not None:
+            x, y, w, h = self._box
             self._seen_me += 1
-            self._last_me = me.centre
-            if me.kind is not None and not me.cut_out and not me.merged:
-                self._my_kind = me.kind
+            self._last_me = (x + w // 2, y + h // 2)
         happened: list[Happening] = []
         if lost:
             happened.append(Happening.LIFE_LOST)
@@ -116,7 +155,9 @@ class ScreenWatch:
                 self._lives_after_touch += 1
         if scored:
             happened.append(Happening.SCORE_UP)
-        self._learner.observe(self._looks, tracks, self._me, happened)
+        self._learner.observe(
+            self._looks, tracks, self._me, happened, me=self._box if self._sign else None
+        )
         self._looks += 1
         self._looks_this_go += 1
 
@@ -171,12 +212,17 @@ class ScreenWatch:
         """What the brain reads off the last look (T-978): how far the nearest moving
         thing and the nearest thing found to hurt are from the player, across and up or
         down, in a few coarse answers (:func:`side`). Nothing when the player was not seen."""
-        tracks = {t.id: t for t in self._tracker.tracks()}
-        me = tracks.get(self._me) if self._me is not None else None
-        if me is None or me.missing > 0:
+        if self._box is None:
             return ()
+        tracks = {t.id: t for t in self._tracker.tracks()}
         hurts = {r.kind for r in self.roles() if r.tag in (SpriteTag.ENEMY, SpriteTag.HAZARD)}
-        mx, my = me.centre
+        x, y, w, h = self._box
+        mx, my = x + w // 2, y + h // 2
+        mine = (
+            {self._me}
+            if self._sign is None
+            else {t.id for t in tracks.values() if within(t, self._box)}
+        )
         out: list[tuple[str, int]] = []
 
         def nearest(things: list[Track]) -> Track | None:
@@ -186,7 +232,7 @@ class ScreenWatch:
                 default=None,
             )
 
-        others = [t for t in tracks.values() if t.id != me.id and t.missing == 0]
+        others = [t for t in tracks.values() if t.id not in mine and t.missing == 0]
         for name, pick in (
             ("mover", nearest([t for t in others if t.moves])),
             ("hurts", nearest([t for t in others if t.kind in hurts])),

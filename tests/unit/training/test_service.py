@@ -762,7 +762,14 @@ def test_the_log_says_whether_the_saved_brain_was_picked_up(
         (r.levelname, r.getMessage())
         for r in caplog.records
         if not r.getMessage().startswith(
-            ("Go ", "The brain after", "Found itself", "Not sure yet which thing")
+            (
+                "Go ",
+                "The brain after",
+                "Found itself",
+                "Not sure yet which thing",
+                "It knows what it looks like",  # T-987: said with either of the two above
+                "It has no colours of its own",
+            )
         )
     ]
     assert messages == [
@@ -1920,11 +1927,20 @@ def test_the_first_go_finds_the_ai_on_the_screen(
 
 def test_a_sure_answer_is_not_looked_for_again(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
     import retro_ai_lab.training.service as module
+    from retro_ai_lab.observation.signature import ColourSignature
     from retro_ai_lab.understanding.knowledge import Confidence
     from retro_ai_lab.understanding.player import PlayerFinding
 
     k = lab.connect()
-    k.player = PlayerFinding(None, (30, 45), frozenset({"left", "right"}), 2, Confidence.MEDIUM)
+    # Sure, and it knows what it looks like (T-987): nothing left to find out.
+    k.player = PlayerFinding(
+        None,
+        (30, 45),
+        frozenset({"left", "right"}),
+        2,
+        Confidence.MEDIUM,
+        ColourSignature(((0xE40058, 20),), 5, 4),
+    )
     calls: list[int] = []
     monkeypatch.setattr(module, "find_player_in_game", lambda *a, **kw: calls.append(1))
     t = lab.training
@@ -1932,6 +1948,59 @@ def test_a_sure_answer_is_not_looked_for_again(lab: Lab, monkeypatch: pytest.Mon
     assert t.step()
     assert calls == []
     t.stop()
+
+
+def test_start_looks_again_when_the_saved_player_has_no_colours(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T-987: a finding saved before the AI learnt its colours is looked for once more;
+    a better answer replaces it, a worse one (or none) leaves it as it was."""
+    import retro_ai_lab.training.service as module
+    from retro_ai_lab.observation.signature import ColourSignature
+    from retro_ai_lab.understanding.knowledge import Confidence
+    from retro_ai_lab.understanding.player import PlayerFinding
+
+    k = lab.connect()
+    old = PlayerFinding(None, (30, 45), frozenset({"left", "right"}), 2, Confidence.MEDIUM)
+    k.player = old
+    sign = ColourSignature(((0xE40058, 20),), 5, 4)
+    answers: list[PlayerFinding | None] = [
+        None,  # nothing moved this time
+        PlayerFinding(None, (9, 9), frozenset({"up"}), 2, Confidence.LOW, sign),  # weaker
+        PlayerFinding(None, (31, 45), frozenset({"left", "right"}), 2, Confidence.MEDIUM),
+        PlayerFinding(None, (31, 45), frozenset({"left", "right"}), 2, Confidence.MEDIUM, sign),
+    ]
+    calls: list[int] = []
+
+    def answer(*_a: object, **_kw: object) -> PlayerFinding | None:
+        calls.append(1)
+        return answers[len(calls) - 1]
+
+    monkeypatch.setattr(module, "find_player_in_game", answer)
+    caplog.set_level(logging.INFO)
+    t = lab.training
+    for n in (1, 2, 3):
+        t.start(Mode.INDEPENDENT)
+        assert t.step()
+        t.stop()
+        assert len(calls) == n and k.player == old  # asked, and the old answer kept
+    assert "moved nothing on the screen" not in caplog.text  # it still knows itself
+    assert "Found itself" not in caplog.text
+    t.start(Mode.INDEPENDENT)
+    assert t.step()
+    assert len(calls) == 4 and k.player == answers[3]
+    assert "Found itself on the screen" in caplog.text
+    assert "It knows what it looks like (1 colour of its own, 5 by 4 pixels)" in caplog.text
+    # The watch was made anew with the finding that has colours.
+    assert t.watch is not None and t.watch.player == answers[3]
+    t.stop()
+    # Saved with the game, and not asked a fifth time.
+    assert lab.discovery.knowledge is not None
+    assert lab.discovery.knowledge.player == answers[3]
+    t.start(Mode.INDEPENDENT)
+    assert t.step()
+    t.stop()
+    assert len(calls) == 4
 
 
 def test_a_weak_answer_is_looked_for_once_per_start(

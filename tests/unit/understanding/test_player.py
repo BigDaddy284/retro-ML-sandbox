@@ -292,3 +292,81 @@ def test_a_score_that_stays_put_on_the_screen_is_not_the_player() -> None:
     found = find_player(with_hud, ["left", "right", "a"])
     assert found is not None
     assert found.start[1] > 100  # the hero, not the score at the top
+
+
+# ------------------------------------------------------------------ T-987: its colours
+
+
+def pack(colour: tuple[int, int, int]) -> int:
+    return (colour[0] << 16) | (colour[1] << 8) | colour[2]
+
+
+def test_the_finding_carries_the_players_colours() -> None:
+    """T-987: the screens on which the player was seen moving say what it looks like."""
+    found = find_player(platformer_run, ["left", "right", "a", "b"])
+    assert found is not None and found.colours is not None
+    # The hero's red (10 by 15, less its one white mark); the mark is a single pixel
+    # and white is the walker's and the coin's mark too.
+    assert found.colours.colours == ((pack(RED), 149),)
+    assert (found.colours.width, found.colours.height) == (10, 15)
+    # With those colours it is picked out of any screen of the game, standing still.
+    game = Platformer()
+    for _ in range(20):  # (at 40 steps the walker has walked over him)
+        game.step(frozenset({"right"}))
+    box = found.colours.find(game.render())
+    assert box == (game.hero[0] - game.camera + 1, game.hero[1] + 1, 10, 15)
+
+
+def test_the_finding_carries_the_colours_on_toy_hopper() -> None:
+    from retro_ai_lab.emulator.fake import ToyHopper, toy_hopper
+
+    def run(held: frozenset[str], frames: int) -> list[Frame]:
+        game = ToyHopper(0)  # the same start every run
+        out = [game.render()]
+        for _ in range(frames - 1):
+            game.step(held)
+            game.step(held)
+            out.append(game.render())
+        return out
+
+    found = find_player(run, ["left", "right", "a", "b"])
+    assert found is not None and found.colours is not None
+    # The slivers of its edges that walking changes grow to the whole 12 by 16 player.
+    assert {c for c, _ in found.colours.colours} == {
+        pack(toy_hopper.PLAYER),
+        pack(toy_hopper.PLAYER_HEAD),
+    }
+    assert (found.colours.width, found.colours.height) == (
+        toy_hopper.PLAYER_W,
+        toy_hopper.PLAYER_H,
+    )
+    assert found.colours.pixels == toy_hopper.PLAYER_W * toy_hopper.PLAYER_H
+
+
+def test_a_finding_saved_before_colours_loads_without() -> None:
+    f = PlayerFinding("thing-2", (30, 45), frozenset({"left", "right"}), 4, Confidence.MEDIUM)
+    assert f.colours is None and f.to_dict()["colours"] is None
+    old = {k: v for k, v in f.to_dict().items() if k != "colours"}
+    assert PlayerFinding.from_dict(old) == f
+
+
+def test_a_finding_with_colours_is_saved_and_read_back() -> None:
+    from retro_ai_lab.observation.signature import ColourSignature
+    from retro_ai_lab.understanding.knowledge import Knowledge
+
+    sign = ColourSignature(((pack(RED), 149), (pack(WHITE), 3)), 10, 15)
+    f = PlayerFinding(None, (30, 45), frozenset({"left", "right"}), 4, Confidence.MEDIUM, sign)
+    assert f.to_dict()["colours"] == sign.to_dict()
+    assert PlayerFinding.from_dict(f.to_dict()) == f
+    k = Knowledge("game")
+    k.player = f
+    assert Knowledge.from_dict(k.to_dict()).player == f
+    # It differs from the same finding without colours (so the watch is renewed).
+    assert f != PlayerFinding(None, (30, 45), frozenset({"left", "right"}), 4, Confidence.MEDIUM)
+    for broken in (
+        {**f.to_dict(), "colours": "red"},
+        {**f.to_dict(), "colours": {"colours": [], "width": 1, "height": 1, "channels": 3}},
+        {**f.to_dict(), "colours": {"width": 1}},
+    ):
+        with pytest.raises(ConfigurationError):
+            PlayerFinding.from_dict(broken)

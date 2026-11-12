@@ -141,3 +141,38 @@ def test_no_player_means_no_touches() -> None:
 def test_settings_are_checked() -> None:
     with pytest.raises(ConfigurationError):
         RoleLearner(soon=0)
+
+
+# ------------------------------------------------------------------ T-987: a box for "me"
+
+
+def test_touches_are_measured_from_the_box_when_one_is_given() -> None:
+    """T-987: the player known by its looks is a box, not a track. Touches are measured
+    from the box, and the tracks lying in it are the player and not a thing it touched."""
+    lr = RoleLearner()
+    spike = track(7, "thing-3", 200)
+    f = 0
+    for _ in range(2):
+        # Its own track (a moving patch of its colours) sits in the box all along.
+        lr.observe(f, [track(3, "thing-1", 150, moving=True), spike], None, me=(150, 100, 16, 16))
+        lr.observe(
+            f + 1, [track(3, "thing-1", 186, moving=True), spike], None, me=(186, 100, 16, 16)
+        )
+        lr.observe(f + 2, [track(3, "thing-1", 186), spike], None, [Happening.LIFE_LOST], me=None)
+        f += 40
+    assert [r.kind for r in lr.roles()] == ["thing-3"]  # its own kind was never "touched"
+    assert role_of(lr, "thing-3") == (SpriteTag.HAZARD, Confidence.MEDIUM)
+    assert "thing-1" not in lr.evidence  # nor counted as a thing that moves by itself
+    # No box and no track: nothing is touched, whatever is on the screen.
+    quiet = RoleLearner()
+    quiet.observe(0, [track(3, "thing-1", 186), spike], None)
+    quiet.observe(1, [track(3, "thing-1", 186), spike], None, me=None)
+    assert quiet.roles() == () and not quiet.waiting
+    # A track only partly in the box (its middle outside) is something else.
+    near = RoleLearner()
+    near.observe(0, [track(4, "thing-5", 162)], None, me=(150, 100, 16, 16))
+    assert near.evidence["thing-5"].touches == 1 and near.waiting
+    # A box given beside a track id wins: the id's track is not looked up.
+    both = RoleLearner()
+    both.observe(0, [me(0), spike], ME, me=(186, 100, 16, 16))
+    assert both.evidence["thing-3"].touches == 1

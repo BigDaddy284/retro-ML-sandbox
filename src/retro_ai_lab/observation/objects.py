@@ -256,13 +256,25 @@ class ObjectCatalogue:
             raise ConfigurationError(f"No kind {kind_id!r} has been seen.") from exc
 
     def observe(
-        self, frame: Frame, *, background: tuple[int, ...] | None = None
+        self,
+        frame: Frame,
+        *,
+        background: tuple[int, ...] | None = None,
+        hide: tuple[int, int, int, int] | None = None,
     ) -> tuple[ScreenObject, ...]:
-        """The things on ``frame`` with their kinds; new palettes become new kinds."""
+        """The things on ``frame`` with their kinds; new palettes become new kinds.
+
+        ``hide`` is a box (x, y, width, height) to leave out of the picture: what is
+        drawn there counts as backdrop (T-987: the player, known by its own looks, so
+        that it is not one patch with whatever it stands on or touches).
+        """
         if background is None:
             background = background_colour(frame)
         self._background = background
         arr, fg = _foreground(frame, background)
+        if hide is not None:
+            x, y, w, h = hide
+            fg[max(0, y) : max(0, y + h), max(0, x) : max(0, x + w)] = False
         out: list[ScreenObject] = []
         on_screen: Counter[str] = Counter()
         for o in _objects(fg, self._min_pixels, self._max_size):

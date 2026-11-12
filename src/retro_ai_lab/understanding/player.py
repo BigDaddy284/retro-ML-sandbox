@@ -19,6 +19,11 @@ to two or more (left and right, up and down, jump). A player standing on
 the ground is part of the ground's patch on a still screen, so it is cut
 out by its motion and may be first seen a frame late, without a kind.
 
+The finding also says what the player looks like (T-987): the colours it is
+drawn in, learnt from the screens on which it was seen moving
+(:class:`~retro_ai_lab.observation.signature.ColourSignature`), so that it
+can be picked out of any later screen without having to be followed there.
+
 Running the experiment against an emulator (save states, holding buttons,
 capturing frames) is the caller's job: :func:`find_player` takes a
 ``run(buttons, frames)`` function, so it is tested on pictures alone.
@@ -28,11 +33,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from retro_ai_lab.core import ConfigurationError, Frame
 from retro_ai_lab.observation.objects import ObjectCatalogue
+from retro_ai_lab.observation.signature import Box, ColourSignature, Sample
 from retro_ai_lab.observation.tracking import ObjectTracker
 from retro_ai_lab.understanding.knowledge import Confidence
 
@@ -61,6 +67,7 @@ class PlayerFinding:
     buttons: frozenset[str]  # the buttons that moved it
     tried: int  # buttons tried
     confidence: Confidence
+    colours: ColourSignature | None = None  # what it looks like, to find it on any screen (T-987)
 
     def describe(self) -> str:
         names = ", ".join(sorted(self.buttons))
@@ -76,6 +83,7 @@ class PlayerFinding:
             "buttons": sorted(self.buttons),
             "tried": self.tried,
             "confidence": self.confidence.name,
+            "colours": self.colours.to_dict() if self.colours is not None else None,
         }
 
     @classmethod
@@ -94,7 +102,12 @@ class PlayerFinding:
             raise ConfigurationError("A saved player's start and tried must be whole numbers.")
         if not isinstance(buttons, list) or not all(isinstance(b, str) for b in buttons):
             raise ConfigurationError("A saved player's buttons must be a list of names.")
-        return cls(kind, (x, y), frozenset(buttons), tried, confidence)
+        # A finding saved before T-987 has no colours; the AI looks again at the next Start.
+        saved = data.get("colours")
+        if saved is not None and not isinstance(saved, Mapping):
+            raise ConfigurationError("A saved player's colours must be a mapping or null.")
+        colours = ColourSignature.from_dict(saved) if saved is not None else None
+        return cls(kind, (x, y), frozenset(buttons), tried, confidence, colours)
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +116,11 @@ class _Outcome:
     kind: str | None
     edges: dict[int, tuple[int, int, int, int]]  # frame index -> left, top, right, bottom
     screen: dict[int, tuple[int, int]]  # frame index -> top-left on the screen itself
+
+    def box(self, i: int) -> Box:
+        """Where it was on the screen itself at frame ``i``: x, y, width, height."""
+        left, top, right, bottom = self.edges[i]
+        return (*self.screen[i], right - left, bottom - top)
 
     @property
     def moved_on_screen(self) -> bool:
@@ -206,16 +224,20 @@ def find_player(
     # Candidates: things that moved with a button held and did not do the same without.
     groups: list[_Group] = []
     for button in chosen:
-        for o in _outcomes(run(frozenset({button}), frames), catalogue):
+        screens = run(frozenset({button}), frames)
+        for o in _outcomes(screens, catalogue):
             if not o.moved or _does_the_same(o, base):
                 continue
             group = next((g for g in groups if _same(o.start, g.start, SAME_START + MOVED)), None)
             if group is None:
-                groups.append(_Group(o.start, {button}, o.kind, o.moved_on_screen))
+                group = _Group(o.start, {button}, o.kind, o.moved_on_screen)
+                groups.append(group)
             else:
                 group.buttons.add(button)
                 group.kind = group.kind if group.kind is not None else o.kind
                 group.on_screen = group.on_screen or o.moved_on_screen
+            # Where it was seen moving, screen by screen: what its colours are learnt from.
+            group.seen.extend((screens[i], o.box(i)) for i in sorted(o.path))
     # A thing that moved on the screen itself beats one that only seemed to move
     # because the camera did (a score, a timer); a game whose camera always centres
     # the player has none such, and then the level's view decides (T-977).
@@ -232,7 +254,14 @@ def find_player(
         confidence = Confidence.MEDIUM
     else:
         confidence = Confidence.LOW
-    return PlayerFinding(best.kind, best.start, frozenset(best.buttons), len(chosen), confidence)
+    return PlayerFinding(
+        best.kind,
+        best.start,
+        frozenset(best.buttons),
+        len(chosen),
+        confidence,
+        ColourSignature.learn(best.seen),
+    )
 
 
 @dataclass(slots=True)
@@ -243,6 +272,7 @@ class _Group:
     buttons: set[str]
     kind: str | None
     on_screen: bool = False  # moved on the screen itself in some run
+    seen: list[Sample] = field(default_factory=list)  # screens and the box it moved in
 
 
 def _same(a: tuple[int, int], b: tuple[int, int], within: int) -> bool:

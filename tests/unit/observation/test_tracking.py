@@ -260,3 +260,61 @@ def test_a_walker_on_the_ground_has_a_kind() -> None:
     # The same kind every time it is cut out: its colours, the sky left out.
     walker_kinds = {k.id for k in tracker.catalogue.kinds()}
     assert moving[0].kind in walker_kinds
+
+
+# ------------------------------------------------------------ T-987: a box left out
+
+
+def hero() -> np.ndarray:
+    s = np.zeros((16, 12, 3), np.uint8)
+    s[:] = (228, 0, 88)
+    s[0:4, 2:10] = (252, 188, 176)
+    return s
+
+
+def test_what_is_hidden_is_no_thing_and_leaves_no_trail() -> None:
+    """T-987: the player is known by its colours and followed by the caller; hidden from
+    the tracker it makes no track, standing or walking, and neither does the change it
+    leaves behind where it was."""
+    w = level()
+    tracker = ObjectTracker()
+    for i in range(8):  # the hero walks right, the camera after it; a walker walks ahead
+        x, camera = 300 + 6 * i, 100 + 4 * i
+        frame = view(w, camera, [(x, 192, hero()), (330 + 5 * i, 192, walker())], i)
+        tracks = tracker.update(frame, hide=(x - camera - 1, 191, 14, 18))
+        seen = [t for t in tracks if t.missing == 0 and t.moves]
+        if i >= 2:
+            # Only the walker moves, as far as the tracker can tell.
+            assert len(seen) == 1 and seen[0].kind is not None
+            assert abs(seen[0].centre[0] - (330 + 5 * i - camera + 8)) <= 6
+    # The same walk with nothing hidden: the hero is a moving thing as well.
+    plain = ObjectTracker()
+    for i in range(8):
+        x, camera = 300 + 6 * i, 100 + 4 * i
+        plain.update(view(w, camera, [(x, 192, hero()), (330 + 5 * i, 192, walker())], i))
+    assert len([t for t in plain.tracks() if t.missing == 0 and t.moves]) >= 2
+
+
+def test_a_thing_touching_what_is_hidden_keeps_its_own_kind() -> None:
+    w = level()
+    tracker = ObjectTracker()
+    kinds: set[str | None] = set()
+    for i in range(8):  # in the air: the hero comes up against a walker that waits
+        x = min(60 + 6 * i, 88)
+        tracks = tracker.update(
+            view(w, 0, [(x, 60, hero()), (100, 60, walker())], i), hide=(x - 1, 59, 14, 18)
+        )
+        things = [t for t in tracks if t.missing == 0 and t.y < 100]
+        assert len(things) == 1 and not things[0].merged
+        kinds.add(things[0].kind)
+    assert len(kinds) == 1 and None not in kinds  # one walker, one kind, touching or not
+    assert len(tracker.catalogue.kinds()) == 1
+
+
+def test_a_hidden_box_is_checked() -> None:
+    tracker = ObjectTracker()
+    frame = view(level(), 0, [], 0)
+    for bad in ((1, 2, 3), (1, 2, 0, 4), (1, 2, 3, 4.5), (True, 2, 3, 4), "box"):
+        with pytest.raises(ConfigurationError):
+            tracker.update(frame, hide=bad)  # type: ignore[arg-type]
+    assert tracker.update(frame, hide=(-5, -5, 3, 3)) == tracker.tracks()  # off the screen

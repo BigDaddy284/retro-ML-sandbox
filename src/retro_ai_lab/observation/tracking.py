@@ -201,6 +201,7 @@ class ObjectTracker:
         self._next_id = 1
         self._camera = (0, 0)  # where the camera is in the level, summed scrolls
         self._scroll = (0, 0)
+        self._hidden: tuple[int, int, int, int] | None = None  # the box left out last frame
 
     @property
     def catalogue(self) -> ObjectCatalogue:
@@ -226,10 +227,24 @@ class ObjectTracker:
         self._tracks.clear()
         self._camera = (0, 0)
         self._scroll = (0, 0)
+        self._hidden = None
 
-    def update(self, frame: Frame) -> tuple[Track, ...]:
+    def update(
+        self, frame: Frame, *, hide: tuple[int, int, int, int] | None = None
+    ) -> tuple[Track, ...]:
+        """Follow the things on ``frame``. ``hide`` is a box (x, y, width, height) to
+        leave out of the picture: nothing in it is a thing, and neither is the change
+        it leaves behind when it moves (T-987: the player, which the caller knows by
+        its looks and follows itself)."""
         if not isinstance(frame, Frame):
             raise ConfigurationError("update() needs a Frame.")
+        if hide is not None and (
+            len(hide) != 4
+            or not all(isinstance(v, int) and not isinstance(v, bool) for v in hide)
+            or hide[2] < 1
+            or hide[3] < 1
+        ):
+            raise ConfigurationError("hide must be a box: x, y, width, height.")
         prev = self._previous
         if prev is not None and (prev.width, prev.height, prev.channels) != (
             frame.width,
@@ -238,23 +253,28 @@ class ObjectTracker:
         ):
             self.reset()
             prev = None
-        objects = [o for o in self._catalogue.observe(frame) if not o.scenery]
+        objects = [o for o in self._catalogue.observe(frame, hide=hide) if not o.scenery]
         if prev is not None:
             self._scroll = estimate_scroll(
                 prev, frame, max_dx=self._max_shift, max_dy=self._max_shift
             )
             self._camera = (self._camera[0] + self._scroll[0], self._camera[1] + self._scroll[1])
-            objects.extend(self._movers_in_scenery(prev, frame, objects))
+            objects.extend(self._movers_in_scenery(prev, frame, objects, hide))
         else:
             self._scroll = (0, 0)
         self._match(objects, frame.number)
         self._previous = frame
+        self._hidden = hide
         return self.tracks()
 
     # ------------------------------------------------------------ internals
 
     def _movers_in_scenery(
-        self, prev: Frame, frame: Frame, things: list[ScreenObject]
+        self,
+        prev: Frame,
+        frame: Frame,
+        things: list[ScreenObject],
+        hide: tuple[int, int, int, int] | None = None,
     ) -> list[ScreenObject]:
         """Moving patches not already covered by a thing: a walker on the ground."""
         moved = moving_mask(prev, frame, self._scroll)
@@ -269,6 +289,12 @@ class ObjectTracker:
             for t in self._tracks.values()
             if t.kind is not None and not t.cut_out
         ]
+        # What the caller hides is no thing, here or where it was a frame ago.
+        if hide is not None:
+            boxes.append(hide)
+        if self._hidden is not None:
+            hx, hy, hw, hh = self._hidden
+            boxes.append((hx - sx, hy - sy, hw, hh))
         for x, y, w, h in boxes:
             moved[max(0, y - 1) : max(0, y + h + 1), max(0, x - 1) : max(0, x + w + 1)] = False
         if not moved.any():

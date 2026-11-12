@@ -85,3 +85,16 @@ def test_the_command_line(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(ConfigurationError, match="No way of learning called"):
         run(1, algorithm="magic")
     assert practice_bench.FOLLOWED_TARGET == 95 and practice_bench.EXPLAINED_TARGET == 80
+
+
+@pytest.mark.slow
+def test_the_eyes_are_on_the_player(report: Report) -> None:
+    """T-987: the AI knows itself by its colours. In all but the looks in which the
+    player is dying or has fallen off the screen, what it takes for itself is the
+    player (the baseline before: followed in 39% of looks, rightly in 19%)."""
+    assert report.looks >= 100
+    assert report.followed == report.right  # never anything else taken for itself
+    assert report.right >= 0.85 * report.looks
+    # With the player out of the tracker's picture, it no longer makes kinds of its own
+    # (itself half behind something, itself and what it touches as one patch).
+    assert report.kinds <= 6

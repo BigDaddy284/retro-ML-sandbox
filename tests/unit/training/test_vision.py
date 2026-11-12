@@ -232,3 +232,128 @@ def test_distances_become_a_few_coarse_answers(apart: int, near: int | None, wan
     from retro_ai_lab.training.vision import side
 
     assert side(apart, near=near) == want
+
+
+# ------------------------------------------------------------ T-987: it knows itself by its colours
+
+BROWN = (200, 76, 12)
+BLACK = (0, 0, 0)
+RED_ONLY = (RED[0] << 16) | (RED[1] << 8) | RED[2]
+
+
+def hero_with_colours(start: tuple[int, int] = (46, 200)) -> PlayerFinding:
+    from retro_ai_lab.observation.signature import ColourSignature
+
+    # The hero sprite: red 10 by 15, less its one white mark.
+    sign = ColourSignature(((RED_ONLY, 149),), 10, 15)
+    return PlayerFinding(None, start, frozenset({"left", "right"}), 2, Confidence.MEDIUM, sign)
+
+
+def level(camera: int, things: list[tuple[int, int, np.ndarray]]) -> Frame:
+    """Brick ground from y=208 and hills behind, seen from ``camera``; the things are
+    given where they are on the screen."""
+    a = np.zeros((240, 1024, 3), np.uint8)
+    a[:] = SKY
+    for x0 in range(0, 1024, 97):
+        a[150:208, x0 : x0 + 30] = (0, 168, 0)
+    for x0 in range(0, 1024, 16):
+        a[208:240, x0 : x0 + 16] = BROWN
+        a[208, x0 : x0 + 16] = BLACK
+        a[208:240, x0] = BLACK
+    a = a[:, camera : camera + 256].copy()
+    for x, y, spr in things:
+        h, w = spr.shape[:2]
+        solid = (spr != np.array(SKY, np.uint8)).any(axis=2)
+        a[y : y + h, x : x + w][solid] = spr[solid]
+    return Frame(256, 240, 3, a.tobytes())
+
+
+def a_go(watch: ScreenWatch) -> list[tuple[int, int]]:
+    """Standing still on the ground, a jump of 36 pixels a look, then walking with the
+    camera locked on it (it stays put on the screen while the level slides by 16
+    pixels a look). Returns where the hero's box really was at each look."""
+    watch.begin_go()
+    spots: list[tuple[int, int]] = []
+    for _ in range(4):  # standing still: nothing on the screen changes
+        spots.append((40, 192))
+    for dy in (36, 60, 36, 0):  # up and down again, far between two looks
+        spots.append((52, 192 - dy))
+    for _ in range(6):  # camera locked
+        spots.append((52, 192))
+    camera = 0
+    for i, (x, y) in enumerate(spots):
+        if i >= 8:
+            camera += 16
+        watch.look(level(camera, [(x, y, HERO)]))
+        spots[i] = (x, y)
+        yield_me = watch.me
+        if yield_me is not None:
+            assert yield_me == (x + 1, y + 1, 10, 15)
+    return spots
+
+
+def test_with_colours_it_has_itself_through_a_jump_and_standing_still() -> None:
+    watch = ScreenWatch(hero_with_colours())
+    spots = a_go(watch)
+    # In every look, exactly where it was (a_go checks the box each time it has one).
+    assert watch.looks == len(spots) == 14 and watch.seen_me == 14
+    assert watch.player_track is None  # no track is taken for it
+    assert watch.me == (53, 193, 10, 15)
+    # Out of sight (a death) it says so, and has itself again when it is back: at a
+    # new go, the other end of the screen from where it was found.
+    watch.look(level(96, []))
+    assert watch.me is None and watch.parts() == () and watch.seen_me == 14
+    watch.begin_go()
+    watch.look(level(0, [(200, 100, HERO)]))
+    assert watch.me == (201, 101, 10, 15) and watch.seen_me == 15
+    assert "itself followed in 94% of them" in watch.describe()
+    # The same go with no colours to go by: standing on the ground it is one patch with
+    # it, and it is lost for most of the go (what T-987 is for).
+    blind = ScreenWatch(PlayerFinding(None, (46, 200), frozenset({"a"}), 2, Confidence.MEDIUM))
+    blind.begin_go()
+    for i in range(14):
+        x, y = (40, 192) if i < 4 else (52, 192 - (36, 60, 36, 0)[i - 4] if i < 8 else 192)
+        blind.look(level(max(0, 16 * (i - 7)), [(x, y, HERO)]))
+    assert blind.seen_me < 7
+
+
+def test_with_colours_a_touch_counts_and_its_own_track_does_not() -> None:
+    watch = ScreenWatch(hero_with_colours((46, 108)))
+    walk_into(watch, WALKER, then="life")
+    walk_into(watch, WALKER, then="life")
+    assert watch.seen_me == watch.looks == 30
+    roles = watch.roles()
+    # One kind was touched, the walker's, and it hurts; the hero's own patch is not a
+    # thing it touched.
+    assert len(roles) == 1 and roles[0].tag in (SpriteTag.ENEMY, SpriteTag.HAZARD)
+    assert roles[0].confidence is Confidence.MEDIUM and roles[0].touches == 2
+    assert watch.lives_lost == 2 and watch.lives_after_touch == 2
+    # The brain's view is measured from the box.
+    watch.begin_go()
+    for i in range(3):
+        watch.look(screen([(40, 100, HERO), (100 - 4 * i, 100, WALKER)]))
+    parts = dict(watch.parts())
+    assert parts["screen:mover dx"] > 0 and parts["screen:hurts dx"] > 0
+
+
+def test_the_findings_kind_name_is_not_taken_for_the_watchs_own() -> None:
+    """The finding's kind is a name from the finder's catalogue; in the watch's own
+    catalogue the same name is whatever it happened to see first."""
+    from retro_ai_lab.observation.objects import ObjectCatalogue
+
+    things = [(150, 30, COIN), (40, 100, HERO)]  # the coin is met first: "thing-1"
+    found = PlayerFinding("thing-1", (46, 108), frozenset({"left", "right"}), 2, Confidence.MEDIUM)
+    watch = ScreenWatch(found)
+    watch.begin_go()
+    watch.look(screen(things))
+    assert watch.me is not None and abs(watch.me[0] - 41) <= 1  # the hero, where it was found
+    # With the finder's own catalogue handed over, the name means what it says: the
+    # coin's kind is followed even though the finding's start is nowhere near it.
+    catalogue = ObjectCatalogue()
+    kinds = {o.x: o.kind for o in catalogue.observe(screen(things)) if not o.scenery}
+    far = PlayerFinding(kinds[41], (250, 230), frozenset({"left", "right"}), 2, Confidence.MEDIUM)
+    shared = ScreenWatch(far, catalogue=catalogue)
+    shared.begin_go()
+    shared.look(screen(things))
+    shared.look(screen(things))
+    assert shared.me is not None and abs(shared.me[0] - 41) <= 1

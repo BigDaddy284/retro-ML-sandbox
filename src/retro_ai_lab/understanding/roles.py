@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from retro_ai_lab.core import ConfigurationError
+from retro_ai_lab.observation.signature import Box
 from retro_ai_lab.observation.sprites import SpriteTag
 from retro_ai_lab.observation.tracking import Track
 from retro_ai_lab.understanding.knowledge import Confidence
@@ -81,13 +82,21 @@ class _Pending:
     gone: bool = False
 
 
-def _touching(a: Track, b: Track, gap: int = TOUCH_GAP) -> bool:
+def _touching(a: Box, b: Track, gap: int = TOUCH_GAP) -> bool:
+    ax, ay, aw, ah = a
     return (
-        a.x - gap < b.x + b.width
-        and b.x - gap < a.x + a.width
-        and a.y - gap < b.y + b.height
-        and b.y - gap < a.y + a.height
+        ax - gap < b.x + b.width
+        and b.x - gap < ax + aw
+        and ay - gap < b.y + b.height
+        and b.y - gap < ay + ah
     )
+
+
+def within(t: Track, box: Box, gap: int = TOUCH_GAP) -> bool:
+    """The middle of ``t`` lies in ``box``: it is the thing the box was put round."""
+    x, y, w, h = box
+    cx, cy = t.centre
+    return x - gap <= cx < x + w + gap and y - gap <= cy < y + h + gap
 
 
 def _confidence(n: int) -> Confidence:
@@ -117,13 +126,28 @@ class RoleLearner:
         tracks: Iterable[Track],
         player: int | None,
         happenings: Iterable[Happening] = (),
+        *,
+        me: Box | None = None,
     ) -> None:
-        """One frame: the tracks on screen, the player's track id, what memory said happened."""
+        """One frame: the tracks on screen, the player's track id, what memory said happened.
+
+        ``me`` is the box the player was seen in when it is known by its looks rather
+        than as a track (T-987): touches are measured from the box, and the tracks
+        whose middle lies in it are the player, not something it touched. A caller
+        that gives boxes gives None when the player is out of sight.
+        """
         tracks = list(tracks)
         by_id = {t.id: t for t in tracks}
         happened = frozenset(happenings)
+        if me is not None:
+            mine = {t.id for t in tracks if t.missing == 0 and within(t, me)}
+        else:
+            mine = {player} if player is not None else set()
+            seen = by_id.get(player) if player is not None else None
+            if seen is not None and seen.missing == 0:
+                me = (seen.x, seen.y, seen.width, seen.height)
         for t in tracks:
-            if t.kind is not None and t.moves and t.id != player:
+            if t.kind is not None and t.moves and t.id not in mine:
                 self._of(t.kind).moves = True
         # Things touched earlier that are gone now (picked up, or defeated).
         for p in self._pending:
@@ -144,11 +168,10 @@ class RoleLearner:
         # Touches that waited too long were harmless.
         self._pending = [p for p in self._pending if frame - p.frame <= self.soon]
         # New touches this frame (a touch lasting several frames counts once).
-        me = by_id.get(player) if player is not None else None
         now: set[int] = set()
-        if me is not None and me.missing == 0:
+        if me is not None:
             for t in tracks:
-                if t.id == player or t.kind is None or t.missing > 0:
+                if t.id in mine or t.kind is None or t.missing > 0:
                     continue
                 if _touching(me, t):
                     now.add(t.id)
@@ -185,4 +208,4 @@ class RoleLearner:
         return tuple(out)
 
 
-__all__ = ["Happening", "KindEvidence", "Role", "RoleLearner"]
+__all__ = ["Happening", "KindEvidence", "Role", "RoleLearner", "within"]
