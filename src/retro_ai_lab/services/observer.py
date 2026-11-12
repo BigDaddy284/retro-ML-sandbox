@@ -29,6 +29,9 @@ from retro_ai_lab.services.connection import (
 class MemoryObserved:
     snapshot: MemorySnapshot
     diff: SnapshotDiff | None  # None for the first snapshot after connect
+    # The app had just put the game back to an earlier moment of the go (T-1004): how
+    # the values moved since the last snapshot is its doing, not the game's.
+    went_back: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +83,7 @@ class ObservationService:
         self._bus = bus
         self._ring = SnapshotRing(ring_capacity)
         self._tracker = ChangeTracker()
+        self._went_back = False  # the next snapshot follows a jump back in a go (T-1004)
         self._screen = ScreenTracker()
         self._inputs = InputLog()
         self._frames_seen = 0
@@ -159,10 +163,17 @@ class ObservationService:
         self._frame += frames
         return self.observe(snapshot=snapshot)
 
-    def expect_jump(self) -> None:
+    def expect_jump(self, *, back: bool = False) -> None:
         """The game was just put back to a saved state: the next snapshot's jump is
-        not a change the game made (T-935)."""
+        not a change the game made (T-935).
+
+        ``back`` says it was put back to an earlier moment of the go being played
+        (T-1004): the next snapshot is then marked ``went_back``, and the
+        understanding engine raises no event for it. A checkpoint or practise-spot
+        restore is not marked: the restart it shows is still seen, as before.
+        """
         self._tracker.expect_jump()
+        self._went_back = back and self._tracker.jump_expected
 
     def observe(self, *, snapshot: Sequence[bytes] | None = None) -> MemoryObserved | None:
         """Take a snapshot now. Returns None if observation is off or failed."""
@@ -183,7 +194,8 @@ class ObservationService:
         self._ring.append(captured)
         with app_work.timed("observe: track"):
             diff = self._tracker.observe(captured)
-        event = MemoryObserved(captured, diff)
+        event = MemoryObserved(captured, diff, self._went_back)
+        self._went_back = False
         self._bus.publish(event)
         return event
 
@@ -213,6 +225,7 @@ class ObservationService:
     def _on_connected(self, event: EmulatorConnected) -> None:
         self._ring.clear()
         self._tracker.reset()
+        self._went_back = False
         self._screen.reset()
         self._inputs.clear()
         self._frames_seen = 0

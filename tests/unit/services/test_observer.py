@@ -258,3 +258,39 @@ def test_prefetched_bytes_with_the_wrong_shape_are_rejected(
     with pytest.raises(ConfigurationError, match="planned"):
         observer.advance(1, snapshot=[b"", b""])
     assert observer.latest is None and observer.errors == 0
+
+
+def test_a_jump_back_marks_only_the_next_snapshot(
+    observer: ObservationService, connection: ConnectionService, events: list[MemoryObserved]
+) -> None:
+    """T-1004: the app put the game back to an earlier moment of the go, and says so."""
+    connection.connect("fake")
+    observer.expect_jump(back=True)  # before the first snapshot there is nothing to mark
+    observer.observe()
+    observer.advance(4)
+    assert [e.went_back for e in events] == [False, False]
+    connection.call(lambda a: a.save_state("t1004"))
+    observer.advance(4)
+    counted = observer.tracker.transitions
+    # A plain restore (a checkpoint, a practise spot) marks nothing.
+    observer.expect_jump()
+    connection.call(lambda a: a.load_state("t1004"))
+    observer.observe()
+    assert events[-1].went_back is False
+    observer.advance(4)
+    # A jump back marks the next snapshot, is skipped by the byte statistics like any
+    # restore, and marks no snapshot after it.
+    observer.expect_jump(back=True)
+    assert observer.tracker.jump_expected
+    connection.call(lambda a: a.load_state("t1004"))
+    marked = observer.observe()
+    assert marked is not None and marked.went_back is True and events[-1] is marked
+    # One step was played since the count was taken; neither jump is counted.
+    assert observer.tracker.transitions == counted + 1
+    observer.advance(4)
+    assert events[-1].went_back is False
+    # A plain restore asked for after a jump back takes the mark off again.
+    observer.expect_jump(back=True)
+    observer.expect_jump()
+    observer.observe()
+    assert events[-1].went_back is False

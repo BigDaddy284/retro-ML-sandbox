@@ -385,3 +385,54 @@ def test_only_the_best_few_of_a_kind_are_watched() -> None:
     k.support("v40", Evidence("t", "", 2.0))  # the last one earns a seat
     d.observe(snap(1, *([0] * 40)))
     assert "v40" in d.watching and "v16" not in d.watching and len(d.watching) == 16
+
+
+# ---------------------------------------------------------- T-1004: a jump back
+
+
+def test_rebase_takes_the_values_without_judging_the_move() -> None:
+    """The app put the game back to an earlier moment: nothing the game did."""
+    k = knowledge_for({0: VariableKind.PROGRESS, 1: VariableKind.LIVES, 2: VariableKind.SCORE})
+    d = EventDetector(k)
+    assert d.observe(snap(0, 5, 3, 100)) == ()
+    d.observe(snap(1, 6, 3, 110))  # the score's usual gain is ten
+    (lost,) = d.observe(snap(2, 6, 2, 110))
+    assert lost.kind is EventKind.SETBACK
+    seen, moved = d.observed, d.moved
+    # Back to before the life went: progress down, a life more, the score lower.
+    assert d.rebase(snap(3, 5, 3, 100)) is None
+    assert d.observed == seen and d.moved == moved
+    assert d.observe(snap(4, 5, 3, 100)) == ()
+    # What happens next is judged from the values it was put back to.
+    again = d.observe(snap(5, 6, 2, 110))
+    assert sorted((e.kind.value, e.before, e.after) for e in again) == [
+        ("progress", 5, 6),
+        ("setback", 3, 2),
+    ]
+    # The score's usual gain was kept: ten more is nothing, forty more is a jump.
+    assert d.observe(snap(6, 6, 2, 120)) == ()
+    assert [e.kind for e in d.observe(snap(7, 6, 2, 160))] == [EventKind.SCORE_GAIN]
+
+
+def test_rebase_keeps_first_values_and_starts_watching_new_ones() -> None:
+    k = knowledge_for({0: VariableKind.PROGRESS, 1: VariableKind.LIVES, 2: VariableKind.SCORE})
+    d = EventDetector(k)
+    d.observe(snap(0, 0, 3, 0))
+    d.observe(snap(1, 4, 2, 50))
+    # Put back to the very start: every value is at its first value again, and that is
+    # not the game starting over.
+    d.rebase(snap(2, 0, 3, 0))
+    assert d.observe(snap(3, 0, 3, 0)) == ()
+    # A real restart later is still measured against the same first values.
+    d.observe(snap(4, 4, 2, 50))
+    kinds = {e.kind for e in d.observe(snap(5, 0, 3, 0))}
+    assert EventKind.RESET in kinds
+    # A detector that had seen nothing yet starts watching at the jump.
+    fresh = EventDetector(k)
+    fresh.rebase(snap(0, 5, 3, 100))
+    assert fresh.watching == ("v1", "v2", "v3") and fresh.observed == 0
+    assert fresh.observe(snap(1, 5, 3, 100)) == ()
+    (lost,) = fresh.observe(snap(2, 5, 2, 100))
+    assert (lost.kind, lost.before, lost.after) == (EventKind.SETBACK, 3, 2)
+    with pytest.raises(ConfigurationError):
+        fresh.rebase("nope")  # type: ignore[arg-type]

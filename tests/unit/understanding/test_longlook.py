@@ -210,3 +210,53 @@ def test_a_mover_is_neither_a_driver_nor_a_stepper() -> None:
     look = look_at(k, frames(200))
     assert mover.id not in look._drivers and mover.id not in look._steppers
     assert var(k, POSITION).id in look._drivers and var(k, CHECKPOINT).id in look._steppers
+
+
+# ---------------------------------------------------------- T-1004: a jump back
+
+
+def test_rebase_counts_nothing_across_a_jump() -> None:
+    """The app put the game back to an earlier moment: no step, no place, no starting over."""
+    k = knowledge()
+    rows = frames(36)  # most of the first round: position 35, checkpoint 3
+    look, plain = LongLook(k), LongLook(k)
+    for i, row in enumerate(rows):
+        look.observe(MemorySnapshot(i, {RAM: row}))
+        plain.observe(MemorySnapshot(i, {RAM: row}))
+
+    def counted(ll: LongLook) -> dict[str, tuple[int, int, int, int]]:
+        return {
+            i: (s.ups, s.downs, s.seen, sum(len(at) for at in s.places.values()))
+            for i, s in ll._steppers.items()
+        }
+
+    before = counted(look)
+    rounds = {i: dict(s.rounds) for i, s in look._steppers.items()}
+    seen = look.observed
+    # Back to frame 4 of the same round: the position drops by most of its range and
+    # the checkpoint by three, as at a lap's end.
+    look.rebase(MemorySnapshot(36, {RAM: rows[4]}))
+    assert counted(look) == before and look.observed == seen
+    assert {i: dict(s.rounds) for i, s in look._steppers.items()} == rounds
+    assert {i: s.last for i, s in look._steppers.items()} == {
+        i: s.last for i, s in _after(k, rows[:5]).items()
+    }
+    # The one fed the same jump as a snapshot counted it as the game's own doing.
+    plain.observe(MemorySnapshot(36, {RAM: rows[4]}))
+    assert counted(plain) != before
+    # The next real step is counted from where it was put back to.
+    for i, row in enumerate(rows[5:12], start=37):
+        look.observe(MemorySnapshot(i, {RAM: row}))
+    checkpoint = k.at(RAM, CHECKPOINT)
+    assert checkpoint is not None
+    ups, downs, _, _ = counted(look)[checkpoint.id]
+    assert (ups, downs) == (before[checkpoint.id][0] + 1, before[checkpoint.id][1])
+    with pytest.raises(ConfigurationError):
+        look.rebase("nope")  # type: ignore[arg-type]
+
+
+def _after(k: Knowledge, rows: list[bytes]):  # type: ignore[no-untyped-def]
+    ll = LongLook(k)
+    for i, row in enumerate(rows):
+        ll.observe(MemorySnapshot(i, {RAM: row}))
+    return ll._steppers

@@ -181,6 +181,31 @@ class EventDetector:
                     self._moved -= 1
         return self._tracked_list
 
+    def rebase(self, snapshot: MemorySnapshot) -> None:
+        """Take the values as they are in ``snapshot`` without judging how they moved.
+
+        For a snapshot that follows the app putting the game back to an earlier
+        moment of a go (T-1004): the life that came back, the progress that went
+        down and the values that are at their first value again are the app's doing,
+        not the game's. No event is raised and nothing is counted; each value's first
+        value, its usual gain and whether it ever moved are kept, so what the game
+        does next is judged from here as it would have been from there.
+        """
+        if not isinstance(snapshot, MemorySnapshot):
+            raise ConfigurationError("EventDetector.rebase needs a MemorySnapshot.")
+        for var in self._tracked(snapshot.region_names):
+            try:
+                value = var.decode(snapshot)
+            except ConfigurationError:
+                continue  # snapshot does not cover this variable
+            watch = self._watches.get(var.id)
+            if watch is None or watch.variable != var:
+                if watch is not None and watch.moved:
+                    self._moved -= 1
+                self._watches[var.id] = _Watch(var, value, value)
+            else:
+                watch.last = value
+
     def observe(self, snapshot: MemorySnapshot) -> tuple[GameEvent, ...]:
         if not isinstance(snapshot, MemorySnapshot):
             raise ConfigurationError("EventDetector.observe needs a MemorySnapshot.")
