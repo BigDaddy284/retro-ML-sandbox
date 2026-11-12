@@ -26,6 +26,8 @@ That under-pays a new room and never pays the same ground twice.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from retro_ai_lab.core import ConfigurationError
 
 MOST_A_LOOK = 4  # steps paid for one look at most: a misread jump is not a fortune
@@ -43,6 +45,17 @@ def _pair(value: object, what: str) -> tuple[int, int]:
     ):
         raise ConfigurationError(f"{what} is (across, down) in whole pixels.")
     return value
+
+
+@dataclass(frozen=True, slots=True)
+class Kept:
+    """Where a :class:`Ground` was at one moment (T-1000), to be put back there when
+    the game is: the camera's travel, where on the screen the player was first seen,
+    and where it stood from there."""
+
+    camera: tuple[int, int]
+    first: tuple[int, int] | None
+    offset: tuple[int, int]
 
 
 class Ground:
@@ -101,6 +114,26 @@ class Ground:
         self._first = None
         self._offset = (0, 0)
 
+    def keep(self) -> Kept:
+        """Where it is now, to be put back to (T-1000)."""
+        return Kept(self._camera, self._first, self._offset)
+
+    def put_back(self, kept: Kept) -> None:
+        """The game was put back to the moment ``kept`` was taken: that is the place
+        again. What was reached stays reached and what was counted stays counted, so
+        ground walked again pays nothing and the first step past the furthest does."""
+        if not isinstance(kept, Kept):
+            raise ConfigurationError("Only a place this kept can be put back.")
+        self._camera, self._first, self._offset = kept.camera, kept.first, kept.offset
+
+    def copy(self) -> Ground:
+        """Another count in the same state, for a try that must not change this one."""
+        other = Ground(most=self._most)
+        other._unit, other._scrolls = self._unit, self._scrolls
+        other._camera, other._first, other._offset = self._camera, self._first, self._offset
+        other._reach, other._paid = list(self._reach), list(self._paid)
+        return other
+
     def look(
         self,
         moved: tuple[int, int],
@@ -137,4 +170,14 @@ class Ground:
         return min(new, self._most)
 
 
-__all__ = ["DOWN", "LARGEST", "LEFT", "MOST_A_LOOK", "RIGHT", "SMALLEST", "UP", "Ground"]
+__all__ = [
+    "DOWN",
+    "LARGEST",
+    "LEFT",
+    "MOST_A_LOOK",
+    "RIGHT",
+    "SMALLEST",
+    "UP",
+    "Ground",
+    "Kept",
+]

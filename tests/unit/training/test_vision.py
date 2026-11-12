@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from retro_ai_lab.core import Frame
+from retro_ai_lab.core import ConfigurationError, Frame
 from retro_ai_lab.observation.sprites import SpriteTag
 from retro_ai_lab.training.vision import ScreenWatch
 from retro_ai_lab.understanding.knowledge import Confidence
@@ -864,3 +864,96 @@ def test_new_ground_is_taken_once_and_a_go_starts_from_nothing() -> None:
     for i in range(5):
         watch.look(level(100 + 16 * i, HELD))
     assert watch.take_new_ground() == 4
+
+
+# ---------------------------------------------------------------- T-1000
+
+
+def test_put_back_to_a_marked_moment() -> None:
+    """The game is put back to a save from a moment before: the watch goes with it."""
+    watch = ScreenWatch(hero_with_colours((86, 200)))
+    watch.begin_go()
+    for i in range(3):
+        watch.look(level(100 + 16 * i, HELD))
+    mark = watch.mark()
+    assert watch.ground.place == (32, 0) and watch.take_new_ground() == 2
+    for i in range(3, 7):
+        watch.look(level(100 + 16 * i, HELD))
+    assert watch.ground.place == (96, 0) and watch.take_new_ground() == 4
+    looks, lost = watch.looks, watch.lives_lost
+    # A life goes (told with no look to come), and the game is put back 64 pixels.
+    watch.told(lost=1)
+    watch.back_to(mark)
+    watch.look(level(132, HELD))
+    assert watch.tracker.scroll == (0, 0) and watch.tracker.unexplained == 0.0
+    assert watch.ground.place == (32, 0) and watch.ground.reach == (96, 0, 0, 0)
+    assert watch.me is not None and watch.follows_camera
+    assert watch.looks == looks + 1 and watch.lives_lost == lost + 1
+    # The same ground again pays nothing; past its furthest it pays as ever.
+    for i in range(3, 7):
+        watch.look(level(100 + 16 * i, HELD))
+    assert watch.take_new_ground() == 0 and watch.ground.place == (96, 0)
+    watch.look(level(100 + 16 * 7, HELD))
+    watch.look(level(100 + 16 * 8, HELD))
+    assert watch.take_new_ground() == 2 and watch.ground.place == (128, 0)
+    # Without being told, the same jump back is a move it cannot measure: nothing is
+    # counted for it and the place is wrong from then on.
+    lost_track = ScreenWatch(hero_with_colours((86, 200)))
+    lost_track.begin_go()
+    for i in range(7):
+        lost_track.look(level(100 + 16 * i, HELD))
+    lost_track.look(level(132, HELD))
+    assert lost_track.ground.place != (32, 0)
+
+
+def test_a_trial_counts_without_changing_the_watch() -> None:
+    watch = ScreenWatch(hero_with_colours((86, 200)))
+    watch.begin_go()
+    for i in range(3):
+        watch.look(level(100 + 16 * i, HELD))
+    mark = watch.mark()
+    for i in range(3, 7):
+        watch.look(level(100 + 16 * i, HELD))
+    assert watch.take_new_ground() == 6
+    before = (watch.looks, watch.seen_me, watch.ground.place, watch.ground.reach)
+    before += (watch.ground.steps, watch.tracker.scroll, watch.me)
+    # A try from the marked moment that gets no further than the go did: nothing new.
+    short = watch.trial(mark)
+    assert short.ground.place == (32, 0) and short.ground.reach == (96, 0, 0, 0)
+    for i in range(2, 7):
+        short.look(level(100 + 16 * i, HELD))
+    assert short.take_new_ground() == 0 and short.ground.place == (96, 0)
+    # One that gets 48 pixels past the go's furthest: three steps of 15.
+    far = watch.trial(mark)
+    for i in range(2, 10):
+        far.look(level(100 + 16 * i, HELD))
+    assert far.ground.place == (144, 0) and far.take_new_ground() == 144 // 15 - 96 // 15 == 3
+    assert far.player == watch.player and far.ground.unit == watch.ground.unit
+    # Neither changed the watch they were lent from.
+    after = (watch.looks, watch.seen_me, watch.ground.place, watch.ground.reach)
+    after += (watch.ground.steps, watch.tracker.scroll, watch.me)
+    assert after == before and watch.take_new_ground() == 0
+    # And the go's watch carries on from where it was.
+    watch.look(level(100 + 16 * 7, HELD))
+    assert watch.ground.place == (112, 0) and watch.take_new_ground() == 1
+
+
+def test_marks_before_it_is_seen_and_nonsense() -> None:
+    watch = ScreenWatch(hero_with_colours((86, 200)))
+    watch.begin_go()
+    mark = watch.mark()  # nothing looked at yet
+    for i in range(4):
+        watch.look(level(100 + 16 * i, HELD))
+    assert watch.take_new_ground() == 3
+    watch.back_to(mark)
+    assert watch.me is None and watch.ground.place == (0, 0)
+    assert watch.ground.reach == (48, 0, 0, 0)
+    for i in range(5):
+        watch.look(level(100 + 16 * i, HELD))
+    assert watch.ground.place == (64, 0) and watch.take_new_ground() == 1
+    assert watch.trial(mark).ground.place == (0, 0)
+    for bad in (None, (0, 0), watch.ground.keep()):
+        with pytest.raises(ConfigurationError):
+            watch.back_to(bad)  # type: ignore[arg-type]
+        with pytest.raises(ConfigurationError):
+            watch.trial(bad)  # type: ignore[arg-type]
