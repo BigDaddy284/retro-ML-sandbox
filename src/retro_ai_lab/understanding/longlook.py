@@ -163,6 +163,36 @@ class LongLook:
             self._believed_lists[kinds] = found
         return found
 
+    def rebase(self, snapshot: MemorySnapshot) -> None:
+        """Take the values as they are in ``snapshot`` without counting how they moved.
+
+        For a snapshot that follows the app putting the game back to an earlier
+        moment of a go (T-1004): no step up or down, no place a value stepped at and
+        no starting over is counted across the jump.
+        """
+        if not isinstance(snapshot, MemorySnapshot):
+            raise ConfigurationError("LongLook.rebase needs a MemorySnapshot.")
+        for var in self._believed(DRIVER_KINDS, snapshot.region_names):
+            try:
+                value = var.decode(snapshot)
+            except ConfigurationError:
+                continue
+            driver = self._drivers.get(var.id)
+            if driver is None:
+                self._drivers[var.id] = _Driver(value, value, value)
+            else:
+                driver.last = value
+        for var in self._believed(STEPPER_KINDS, snapshot.region_names):
+            try:
+                value = var.decode(snapshot)
+            except ConfigurationError:
+                continue
+            stepper = self._steppers.get(var.id)
+            if stepper is None:
+                self._steppers[var.id] = _Stepper(value, {value})
+            else:
+                stepper.last = value
+
     def observe(self, snapshot: MemorySnapshot) -> None:
         if not isinstance(snapshot, MemorySnapshot):
             raise ConfigurationError("LongLook.observe needs a MemorySnapshot.")

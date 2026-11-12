@@ -1282,6 +1282,17 @@ class DiscoveryService:
         if not self._enabled or self._knowledge is None:
             return
         assert self._detector is not None and self._finder is not None
+        if event.went_back:
+            # The app put the game back to an earlier moment of the go (T-1004). The
+            # life that came back and the progress that went down are its doing: no
+            # event, nothing paired or matched across the jump, nothing counted.
+            with app_work.timed("discovery: events"):
+                self._detector.rebase(event.snapshot)
+            if self._look is not None:
+                self._look.rebase(event.snapshot)
+            self._finder.forget_recent()
+            self._aftermath.begin()
+            return
         # Each stage is timed for the "App work" log line (T-947).
         with app_work.timed("discovery: events"):
             events = self._detector.observe(event.snapshot)

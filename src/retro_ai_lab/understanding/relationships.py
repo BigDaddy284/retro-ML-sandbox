@@ -85,6 +85,14 @@ class RelationshipFinder:
     def seen(self) -> int:
         return sum(self._counts.values())
 
+    def forget_recent(self) -> None:
+        """Nothing that happens from here on followed what happened before.
+
+        For the app putting the game back to an earlier moment of a go (T-1004).
+        Everything counted so far is kept.
+        """
+        self._recent.clear()
+
     def reset(self) -> None:
         self._recent.clear()
         self._counts.clear()

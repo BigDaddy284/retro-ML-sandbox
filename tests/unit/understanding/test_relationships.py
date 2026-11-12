@@ -319,3 +319,25 @@ def test_toy_racer_relationships() -> None:
     assert restart.precede_rate == 1.0
     text = describe_key(bonus.cause, k) + " leads to " + describe_key(bonus.effect, k)
     assert text == "Progress of Checkpoint leads to Score gain of Score"
+
+
+# ---------------------------------------------------------- T-1004: a jump back
+
+
+def test_forget_recent_pairs_nothing_across_it() -> None:
+    """The app put the game back: what comes after did not follow what came before."""
+    k, control = Knowledge("g"), Knowledge("g")
+    f, plain = RelationshipFinder(k, window=5), RelationshipFinder(control, window=5)
+    for finder in (f, plain):
+        assert finder.observe([ev(EventKind.SETBACK, 10)]) == ()
+    f.forget_recent()
+    assert f.observe([ev(EventKind.PROGRESS, 12, "v2")]) == ()
+    (rel,) = plain.observe([ev(EventKind.PROGRESS, 12, "v2")])
+    assert rel.id == "setback:v1->progress:v2"
+    # What was counted is kept, and pairs are found again afterwards.
+    assert f.seen == 2
+    (rel,) = f.observe([ev(EventKind.SCORE_GAIN, 13, "v3")])
+    assert rel.id == "progress:v2->score_gain:v3" and rel.support == 1
+    f.forget_recent()
+    f.forget_recent()
+    assert f.seen == 3

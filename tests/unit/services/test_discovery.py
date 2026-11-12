@@ -1518,3 +1518,114 @@ def test_progress_that_rises_as_a_life_is_lost_is_doubted_then_dropped(
     connection.disconnect()
     connection.connect("fake", seed=5)
     assert discovery.aftermath.counts(mode.id) == (0, 0, 0, 0)
+
+
+# ---------------------------------------------------------- T-1004: a jump back
+
+
+def _hopper_until_a_life_is_lost(
+    connection: ConnectionService,
+    observation: ObservationService,
+    discovery: DiscoveryService,
+    bus: EventBus,
+) -> tuple[Any, Variable]:
+    """The practice game walked right until the first life is lost, with a save made
+    20 steps in. Returns the game and the life count the app was told of."""
+    from retro_ai_lab.emulator.fake.toy_hopper import LAYOUT as HOPPER
+
+    connection.connect("fake", game="hopper", seed=0)
+    adapter = connection.adapter
+    assert isinstance(adapter, FakeEmulatorAdapter)
+    k = discovery.knowledge
+    assert k is not None
+    sure = [Evidence("test", "", 6.0)]
+    lives = k.propose("ram", HOPPER.lives, kind=VariableKind.LIVES, name="Lives", evidence=sure)
+    scroll = k.propose(
+        "ram",
+        HOPPER.scroll,
+        encoding=Encoding.U16LE,
+        kind=VariableKind.PROGRESS,
+        name="Scroll",
+        evidence=sure,
+    )
+    bus.publish(DiscoveryUpdated((lives, scroll), (), (), ()))
+    right = [b for b in adapter.buttons() if b.name == "right"]
+    observation.observe()
+    for step in range(60):
+        if step == 20:
+            connection.call(lambda a: a.save_state("before"))
+        connection.call(lambda a: a.step(4, pressed=right))
+        observation.advance(4)
+        if adapter.game.state.lives < 3:
+            break
+    assert adapter.game.state.lives == 2
+    return adapter.game, lives
+
+
+def _walk(connection: ConnectionService, observation: ObservationService, steps: int) -> None:
+    adapter = connection.adapter
+    assert isinstance(adapter, FakeEmulatorAdapter)
+    right = [b for b in adapter.buttons() if b.name == "right"]
+    for _ in range(steps):
+        connection.call(lambda a: a.step(4, pressed=right))
+        observation.advance(4)
+
+
+def test_a_jump_back_in_a_go_is_nobody_s_event(
+    connection: ConnectionService,
+    observation: ObservationService,
+    bus: EventBus,
+    updates: list[DiscoveryUpdated],
+    tmp_path: Path,
+) -> None:
+    from retro_ai_lab.services import RewardService
+    from retro_ai_lab.services.rewards import RewardEarned
+    from retro_ai_lab.storage import RewardStore
+
+    discovery = DiscoveryService(connection, observation, bus, experiment_every=None)
+    RewardService(connection, discovery, bus, store=RewardStore(tmp_path / "r"))
+    paid: list[RewardEarned] = []
+    bus.subscribe(RewardEarned, paid.append)
+    game, lives = _hopper_until_a_life_is_lost(connection, observation, discovery, bus)
+    lost = [e for u in updates for e in u.events if e.variable_id == lives.id]
+    assert [e.kind for e in lost] == [EventKind.SETBACK]
+    assert sum(p.amount for p in paid if p.amount < 0) == -10.0
+    k = discovery.knowledge
+    assert k is not None
+    known = {r.id: (r.support, r.cause_count, r.effect_count) for r in k.relationships()}
+    heard, earned = len(updates), len(paid)
+
+    connection.call(lambda a: a.load_state("before"))
+    observation.expect_jump(back=True)
+    observation.observe()
+    assert game.state.lives == 3
+    # Nothing was announced, learned or paid for the jump.
+    assert updates[heard:] == [] and paid[earned:] == []
+    assert {r.id: (r.support, r.cause_count, r.effect_count) for r in k.relationships()} == known
+    # Walking on, it falls in again: one more life lost, seen from the three it was put
+    # back to, and paid once.
+    _walk(connection, observation, 20)
+    assert game.state.lives == 2
+    again = [e for u in updates[heard:] for e in u.events if e.variable_id == lives.id]
+    assert [(e.kind, e.before, e.after) for e in again] == [(EventKind.SETBACK, 3, 2)]
+    assert sum(p.amount for p in paid[earned:] if p.amount < 0) == -10.0
+    assert not any(e.kind is EventKind.RECOVERY for u in updates for e in u.events)
+
+
+def test_a_plain_restore_is_seen_as_before(
+    connection: ConnectionService,
+    observation: ObservationService,
+    bus: EventBus,
+    updates: list[DiscoveryUpdated],
+) -> None:
+    """A checkpoint or practise-spot restore is not a jump back within a go: the
+    understanding engine still sees it, as it did before T-1004."""
+    discovery = DiscoveryService(connection, observation, bus, experiment_every=None)
+    game, lives = _hopper_until_a_life_is_lost(connection, observation, discovery, bus)
+    heard = len(updates)
+    connection.call(lambda a: a.load_state("before"))
+    observation.expect_jump()
+    observation.observe()
+    assert game.state.lives == 3
+    seen = [e for u in updates[heard:] for e in u.events if e.variable_id == lives.id]
+    assert [(e.kind, e.before, e.after) for e in seen] == [(EventKind.RECOVERY, 2, 3)]
