@@ -112,6 +112,20 @@ prints how many frames the clock managed against how many it wanted, what each
 bridge command cost, what the app's own bookkeeping took per step and per
 picture, and the longest stall of the window's thread.
 
+To measure the AI itself without a game of your own, run the practice bench:
+
+```bash
+python -m retro_ai_lab.tools.practice_bench --goes 40
+```
+
+It runs the whole app on Toy Hopper, the built-in practice platform game
+(gaps that need a held jump, walkers, coins), with nobody watching, and
+prints how well the AI sees (how often it follows itself on the screen and
+whether that really is the player), what killed it against what it thought
+killed it, what it reads from memory, and how far it gets. The practice game
+knows the truth, so each number has it beside it. `--seed` picks another
+level, `--algorithm q_table` the simple table.
+
 The app's own log does the same every five seconds while it runs: next to the
 emulator link's line, an "App work" line counts the stalls of the window's
 thread and names what that thread did, event by event (`on DiscoveryUpdated`),

@@ -325,6 +325,11 @@ class TrainingService:
         return self._encoder
 
     @property
+    def watch(self) -> ScreenWatch | None:
+        """The AI's look at the screen, once it knows which thing is itself (T-976)."""
+        return self._watch
+
+    @property
     def episode(self) -> EpisodeRunner | None:
         """The go in progress, if one is."""
         return self._runner if self._runner is not None and self._runner.running else None
