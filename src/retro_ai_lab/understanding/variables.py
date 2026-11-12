@@ -127,6 +127,24 @@ def _is_pair(low: ByteStats, high: ByteStats) -> bool:
     return high.carry_ins >= 0.6 * high.changes and stray <= high.resets
 
 
+CLOCK_CHANGES = 3  # changes of the upper byte before it is judged the top of a clock
+
+
+def clock_top(low: ByteStats, high: ByteStats) -> bool:
+    """``high`` is the upper byte of a number that ticks at one pace: a clock (T-996).
+
+    The two bytes count together as one number (:func:`_is_pair`), the upper
+    one has changed at least ``CLOCK_CHANGES`` times, and the lower one moved
+    by the same hop as the time before in 95% of its changes. How often it
+    changes is not asked: a level's clock stops while the player is dying and
+    still ticks at one pace. A position's page counts roll-overs as well, of a
+    byte that moves by whatever the player's speed is; that is not a clock.
+    """
+    if high.changes < CLOCK_CHANGES or not _is_pair(low, high):
+        return False
+    return low.same_hops >= 0.95 * (low.changes - 1)
+
+
 def lives_bounce(st: ByteStats) -> bool:
     """A life count does not bounce: it is lost one at a time and restored on a restart.
 
@@ -464,6 +482,7 @@ __all__ = [
     "RARE_RATE",
     "SMALL_HOP",
     "Candidate",
+    "clock_top",
     "find_candidates",
     "flag_doubt",
     "lives_bounce",

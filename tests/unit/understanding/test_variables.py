@@ -30,6 +30,7 @@ from retro_ai_lab.understanding.variables import (
     LIVES_SAMPLES,
     MIN_TRANSITIONS,
     MOVER,
+    clock_top,
     flag_doubt,
     lives_bounce,
     lives_busy,
@@ -674,3 +675,41 @@ def test_proposals_skip_exactly_the_candidates_the_old_overlap_check_skipped(
     added = propose_candidates(new, tuple(candidates))
     assert [v.id for v in added] == expected
     assert {v.id for v in new} == {v.id for v in old}
+
+
+# ---------------------------------------------------------------- T-996
+
+
+def clock_and_walker(steps: int) -> ChangeTracker:
+    """Bytes 0-1: a clock, 4 a step, paused every tenth step, reset at each go.
+    Bytes 2-3: a position that moves by varying amounts, and its page.
+    Bytes 4-5: two bytes that have nothing to do with each other."""
+    rows = []
+    clock = place = 0
+    for i in range(steps):
+        if i % 450 == 0:
+            clock = place = 0  # a new go
+        elif i % 10 != 9:
+            clock += 4
+        place += (0, 3, 6, 9, 6, 3, 9, 0)[i % 8]
+        other = (i // 7) % 5
+        rows.append(
+            bytes([clock & 255, (clock >> 8) & 255, place & 255, (place >> 8) & 255, other, i % 3])
+        )
+    return track(rows)
+
+
+def test_the_top_of_a_clock_is_told_from_a_page_count() -> None:
+    t = clock_and_walker(1400)
+    low, high = t.stats("ram", 0), t.stats("ram", 1)
+    assert high.changes >= 3 and low.change_rate < 0.9  # it pauses: not "steady" by T-921
+    assert clock_top(low, high)
+    # A position's page counts roll-overs too, but the position moves at no one pace.
+    assert not clock_top(t.stats("ram", 2), t.stats("ram", 3))
+    # Unrelated neighbours, and the pair the wrong way round.
+    assert not clock_top(t.stats("ram", 4), t.stats("ram", 5))
+    assert not clock_top(high, low)
+    # Twice is not yet a habit: the top has to have changed three times.
+    short = clock_and_walker(150)  # 256 / 4 a step, a tenth of the steps paused: 72 a turn
+    assert short.stats("ram", 1).changes == 2
+    assert not clock_top(short.stats("ram", 0), short.stats("ram", 1))
