@@ -93,27 +93,45 @@ def test_a_new_go_starts_from_nothing() -> None:
     assert [ground.look((16, 0), ME, 16) for _ in range(3)] == [1, 1, 1]
 
 
-def test_the_camera_and_the_place_on_the_screen_add_up() -> None:
-    # A still screen: it walks across it, 8 pixels a look.
+def test_on_a_still_screen_it_is_where_it_stands() -> None:
+    # The screen never scrolls: it walks across it, 8 pixels a look.
     ground = started()
+    assert not ground.scrolls
     assert [ground.look(STILL, (80 + 8 * n, 200), 16) for n in range(1, 5)] == [0, 1, 0, 1]
-    # Then the camera starts to follow while it still gains on the screen.
-    assert ground.look((8, 0), (120, 200), 16) == 1  # 40 on the screen + 8 of camera
-    assert ground.place == (48, 0)
-    # The camera slides on while it stands still in the level: on the screen it
-    # slips back as far as the camera went, and nothing is new.
-    assert ground.look((16, 0), (104, 200), 16) == 0
-    assert ground.place == (48, 0)
+    assert ground.place == (32, 0) and ground.reach == (32, 0, 0, 0)
+    # Up a ladder is new ground as much as along the floor.
+    assert [ground.look(STILL, (112, 200 - 16 * n), 16) for n in range(1, 4)] == [1, 1, 1]
+    assert ground.reach == (32, 0, 0, 48)
+
+
+def test_once_the_screen_scrolls_only_the_cameras_travel_counts() -> None:
+    ground = started()
+    assert ground.look((16, 0), ME, 16) == 1 and ground.scrolls
+    # A jump, and a fall into a pit: the player moves on the screen and the camera
+    # does not. Neither is somewhere new.
+    for y in (160, 130, 160, 200, 216, 232):
+        assert ground.look(STILL, (80, y), 16) == 0
+    assert ground.place == (16, 0) and ground.reach == (16, 0, 0, 0)
+    # Gaining on the camera is not new ground either; the camera catching up is.
+    assert ground.look(STILL, (120, 200), 16) == 0
+    assert ground.look((16, 0), (120, 200), 16) == 1
+    # It stays so for the goes after: the game scrolls, whatever this go has done yet.
+    ground.begin()
+    assert ground.scrolls
+    assert ground.look(STILL, ME, 16) == 0 and ground.look(STILL, (80, 150), 16) == 0
+    assert ground.reach == (0, 0, 0, 0)
+    # What it reached on the screen before the first scroll stays reached.
+    fresh = started()
+    assert fresh.look(STILL, (112, 200), 16) == 2
+    assert fresh.look((8, 0), (112, 200), 16) == 0  # 8 of camera is not past the 32
+    assert fresh.place == (8, 0) and fresh.reach == (32, 0, 0, 0)
 
 
 def test_unseen_it_counts_the_camera_alone() -> None:
     ground = started()
-    assert ground.look(STILL, (96, 200), 16) == 1
-    # Out of sight for a look (behind something): it is taken to be where it was on
-    # the screen, and the camera's travel still counts.
+    # Out of sight for a look (behind something): the camera's travel still counts.
     assert ground.look((16, 0)) == 1
-    assert ground.place == (32, 0)
-    assert ground.look(STILL, (96, 200), 16) == 0
+    assert ground.place == (16, 0)
     # Never seen at all there is no size to count steps in: nothing is paid, and what
     # was reached is counted (four steps a look at most) once it is seen.
     blind = Ground()
@@ -121,6 +139,10 @@ def test_unseen_it_counts_the_camera_alone() -> None:
     assert [blind.look((16, 0)) for _ in range(3)] == [0, 0, 0]
     assert blind.unit is None and blind.reach == (48, 0, 0, 0)
     assert blind.look(STILL, ME, 16) == 3
+    # On a still screen an unseen look leaves it where it was last seen.
+    still = started()
+    assert still.look(STILL, (96, 200), 16) == 1
+    assert still.look(STILL) == 0 and still.place == (16, 0)
 
 
 def test_the_step_is_its_own_size() -> None:

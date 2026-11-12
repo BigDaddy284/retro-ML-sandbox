@@ -737,18 +737,22 @@ def test_a_cut_puts_it_back_where_the_go_began() -> None:
     assert walk == [0, 0, 0, 0, 1, 1]
 
 
+START = [(32, 192, HERO)]  # where the game puts it back: not where the camera holds it
+
+
 @pytest.mark.parametrize("late", [0, 2, -2])
 def test_a_life_lost_with_a_jump_of_the_screen_puts_it_back(late: int) -> None:
     """Put back at the start after dying, on a level so plain that the jump changes
-    little of the screen: with the life lost in the same look, or a couple of looks
-    before or after, it is taken to be back where the go began."""
+    little of the screen: it is seen somewhere else on the screen than it was, and
+    with the life lost in the same look, or a couple of looks before or after, it is
+    taken to be back where the go began."""
     watch = ScreenWatch(hero_with_colours((86, 200)))
     watch.begin_go()
     for i in range(9):
         watch.look(flat(16 * i, HELD))
     assert watch.take_new_ground() == 128 // 15 == 8
     for i in range(-3, 4):  # three looks either side of the jump at i == 0
-        frame = flat(128, HELD) if i < 0 else flat(0, HELD)
+        frame = flat(128, HELD) if i < 0 else flat(0, START)
         watch.look(frame, lost=1 if i == late else 0)
         if i == 0:
             assert watch.tracker.scroll == (0, 0)
@@ -774,14 +778,74 @@ def test_a_hit_does_not_put_it_back() -> None:
     watch.look(level(196, HELD))
     assert watch.ground.place == (96, 0)
     assert watch.take_new_ground() == 96 // 15 - 4 == 2
-    # A jump of the screen long after the life was lost is not put down to it, and
-    # is too small to be a cut by itself.
-    plain = ScreenWatch(hero_with_colours((86, 200)))
-    plain.begin_go()
+    # A life lost with a jolt of the screen that leaves it where it was on the screen
+    # (a crash: the thing it ran into is gone) is no putting back either.
+    crash = ScreenWatch(hero_with_colours((86, 200)))
+    crash.begin_go()
     for i in range(9):
-        plain.look(flat(16 * i, HELD), lost=1 if i == 2 else 0)
-    plain.look(flat(0, HELD))
-    assert plain.tracker.scroll == (0, 0) and plain.ground.place == (128, 0)
+        crash.look(flat(16 * i, HELD))
+    for _ in range(3):
+        crash.look(flat(128, HELD))
+    crash.look(flat(0, HELD), lost=1)  # as much of the screen changes as when put back
+    assert 0.02 <= crash.tracker.unexplained < 0.25
+    assert crash.ground.place == (128, 0)
+    # And a jolt that finds it somewhere else, long after the last life was lost, is
+    # not put down to that life.
+    late = ScreenWatch(hero_with_colours((86, 200)))
+    late.begin_go()
+    for i in range(9):
+        late.look(flat(16 * i, HELD), lost=1 if i == 2 else 0)
+    for _ in range(3):
+        late.look(flat(128, HELD))
+    late.look(flat(0, START))
+    assert late.tracker.scroll == (0, 0) and late.ground.place == (128, 0)
+
+
+def test_a_camera_it_cannot_follow_pays_nothing() -> None:
+    """Past the tracker's reach (32 pixels a look, less on a small screen) the camera's
+    move cannot be measured, and nothing is counted for that look. Where that is
+    common, counting the moves that can be measured would pay for going slowly: so
+    once a fifth of the last moves (20 at least) could not be measured, nothing is
+    counted at all, and the summary says so."""
+    watch = ScreenWatch(hero_with_colours((86, 200)))
+    watch.begin_go()
+    for camera in (100, 116, 132, 148):
+        watch.look(flat(camera, HELD))
+    assert watch.ground.place == (48, 0) and watch.take_new_ground() == 3
+    # One look of 100 pixels: not measured, nothing counted, and no harm done yet.
+    watch.look(flat(248, HELD))
+    assert watch.tracker.scroll == (0, 0) and watch.tracker.unexplained >= 0.02
+    assert watch.ground.place == (48, 0) and watch.follows_camera
+    watch.look(flat(264, HELD))
+    assert watch.take_new_ground() == 1  # the next measured move pays as before
+    assert "cannot follow" not in watch.describe()
+    # Now it races, back and forth 100 pixels a look: with the one before, the 19th
+    # such look makes 20 moves that could not be measured, of 24 in all.
+    for i in range(19):
+        assert watch.follows_camera
+        watch.look(flat(248 if i % 2 else 348, HELD))
+        assert watch.tracker.scroll == (0, 0)
+    assert not watch.follows_camera
+    assert watch.describe().endswith(
+        " It cannot follow the camera here (20 of the last 24 moves could not be measured), "
+        "so new ground is not counted."
+    )
+    # A slow stretch that can be measured is counted and not paid, then or later ...
+    watch.begin_go()
+    for i in range(12):
+        watch.look(flat(100 + 16 * i, HELD))
+    assert watch.ground.place == (176, 0) and watch.ground.steps == 11
+    assert watch.take_new_ground() == 0 and not watch.follows_camera
+    # ... until the moves it cannot measure are under a fifth of the last 200 again.
+    for _ in range(5):
+        watch.begin_go()
+        for i in range(16):
+            watch.look(flat(100 + 16 * i, HELD))
+    assert watch.follows_camera
+    watch.begin_go()
+    for i in range(5):
+        watch.look(flat(100 + 16 * i, HELD))
+    assert watch.take_new_ground() == 4
 
 
 def test_new_ground_is_taken_once_and_a_go_starts_from_nothing() -> None:

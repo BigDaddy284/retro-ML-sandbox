@@ -78,7 +78,7 @@ class Report:
     camera_still: int = 0
     camera_still_right: int = 0
     camera_cuts: int = 0  # the game put the camera somewhere else (a life lost)
-    # The new ground the watch counted, against how far the game says it got (T-993).
+    # The new ground the watch counted, against how far the game's own camera went (T-993).
     ground_steps: int = 0  # steps of new ground counted over the run
     ground_goes: int = 0  # goes in which the watch looked at the screen
     ground_right: int = 0  # ... and its furthest to the right was the game's, to a step
@@ -135,7 +135,8 @@ class Report:
         if self.ground_goes:
             out.append(
                 f"Ground: {self.ground_steps:,} steps of new ground counted for pay; the "
-                f"furthest it counted to the right was the game's own, to within a step, in "
+                f"furthest it counted to the right was as far as the game's own camera went, "
+                f"to within a step, in "
                 f"{_share(self.ground_right, self.ground_goes)}% of the {self.ground_goes} goes "
                 f"(target {GROUND_TARGET}%)."
             )
@@ -258,7 +259,7 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
         furthest, lost, level = 0, 0, game.state.level
         before = game.state
         camera: int | None = None  # where the game's camera was at the go's last look
-        began: int | None = None  # where the player was at the go's first look
+        began: int | None = None  # where the game's camera was at the go's first look
         got, counted, steps = 0, 0, 0  # furthest at a look: the game's, the watch's; its steps
         while training.episodes == go:
             training.step()
@@ -279,8 +280,8 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
                     _count_camera(report, now.scroll - camera, watch.tracker.scroll)
                 camera = now.scroll
                 if began is None:
-                    began = now.x
-                got = max(got, now.x - began)
+                    began = now.scroll
+                got = max(got, now.scroll - began)
                 counted = max(counted, watch.ground.reach[0])
                 steps = max(steps, watch.ground.steps)
                 if watch.around is not None:

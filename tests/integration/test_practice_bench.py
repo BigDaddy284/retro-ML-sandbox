@@ -64,7 +64,7 @@ def test_the_report_reads_in_words(report: Report) -> None:
     assert lines[2].endswith(f"{report.camera_cuts} cuts to another place not counted.")
     assert lines[3].startswith(
         f"Ground: {report.ground_steps:,} steps of new ground counted for pay; the furthest it "
-        "counted to the right was the game's own, to within a step, in "
+        "counted to the right was as far as the game's own camera went, to within a step, in "
     )
     assert lines[3].endswith(f"% of the {report.ground_goes} goes (target 90%).")
     assert lines[4].startswith(f"Deaths: {report.deaths} ({report.falls} falls, ")
@@ -167,17 +167,18 @@ def test_the_camera_is_followed(report: Report) -> None:
 
 @pytest.mark.slow
 def test_new_ground_is_paid_as_the_game_has_it(report: Report) -> None:
-    """T-993: the ground the AI is paid for is counted off the screen (the camera's
-    travel plus where it stands). Go by go, the furthest it counted to the right is
-    how far the game says the player got, to within a step of its own size."""
+    """T-993: the ground the AI is paid for is counted off the screen: on a game that
+    scrolls, the camera's travel. Go by go, the furthest it counted to the right is
+    how far the game's own camera went, to within a step of the player's size."""
     assert report.ground_goes == report.goes
     assert report.ground_right >= 0.9 * report.ground_goes
     assert report.ground_steps >= 1
     # A level on which it runs further and dies more: the count holds through the
-    # falls, and a life lost does not get the same ground paid twice (a step is 16
-    # pixels; up, down and back count too, so the steps are more than the furthest
-    # alone, but not by much).
+    # falls, and a life lost does not get the same ground paid twice. A step is 16
+    # pixels, and the camera starts to follow 80 pixels into the level, so a go's
+    # steps are those of its furthest less five, give or take one; nothing is paid
+    # for jumping or for falling into a gap.
     gaps = run(12, seed=3, algorithm="q_table", max_steps=200, play_frames=2000)
     assert gaps.ground_goes == 12 and gaps.ground_right >= 11
-    assert gaps.ground_steps >= sum(gaps.furthest) // 16 - 2 * 12
-    assert gaps.ground_steps <= sum(gaps.furthest) // 16 + 12 * 12
+    owed = sum(max(0, far - 80) // 16 for far in gaps.furthest)
+    assert owed - 12 <= gaps.ground_steps <= owed + 12 + 3  # the first go's 3 on the screen

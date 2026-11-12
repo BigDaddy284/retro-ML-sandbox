@@ -261,15 +261,19 @@ and "Pressing the same button again"; all start at 0, so they change nothing
 until you give one points (below zero to put the AI off hammering a button).
 "Getting somewhere new" (under Progression) is the one reward that needs no
 guess about the game's memory: once the AI has found itself on the screen, it
-counts how far it has got by the picture alone (how far the camera has
-travelled since the go began, plus where it stands on the screen), and every
-step of its own size past the furthest it has been this go pays the row, 1
-point to start with. The row appears the first time there is ground to pay
-for; change its points, switch it off or remove it like any other. The same
+counts how far it has got by the picture alone, and every step of its own
+size past the furthest it has been this go pays the row, 1 point to start
+with. On a game whose screen scrolls, how far it has got is how far the
+camera has travelled since the go began, so jumping on the spot and falling
+into a pit are not somewhere new; on a screen that never scrolls it is where
+the AI stands. The row appears the first time there is ground to pay for;
+change its points, switch it off or remove it like any other. The same
 ground never pays twice in a go: when the screen jumps to another place (a
 life lost and put back, a door), the AI is taken to be back where the go
-began. Up, down, left and right all count, so a first jump and a first fall
-into a pit each pay their two or three steps once a go.
+began. Up, down, left and right all count. Where the picture scrolls too fast
+for the AI to follow (on a very small screen, or a very fast game), it says
+so in the log ("It cannot follow the camera here") and counts no new ground
+at all, rather than pay for the slow stretches it can measure.
 
 The app uses the same look as Stills & Reels and StackSpace: dark by default,
 with the blue-to-purple accent. The button at the right of the toolbar switches
@@ -403,8 +407,8 @@ which the camera holds still on the screen, has no say, and neither have the
 rows it has found to be painted on the glass (a strip of lives and score
 stands still while everything else slides, so after two camera moves it is
 left out); and one small thing changing on a still screen is not taken for
-the camera moving. From the camera's travel and where it stands on the
-screen it counts the new ground of each go, which the reward "Getting
+the camera moving. From the camera's travel (on a screen that never scrolls,
+from where it stands) it counts the new ground of each go, which the reward "Getting
 somewhere new" pays (see Reading the rewards). It hears of every life lost, also those lost
 between two looks. A life lost after it went out of sight coming down, with
 nothing under it but the backdrop, is a fall, and is not blamed on whatever

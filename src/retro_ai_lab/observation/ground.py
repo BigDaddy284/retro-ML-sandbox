@@ -1,16 +1,21 @@
 """How much new ground a go has covered, measured off the screen (T-993).
 
-Nothing in a game's memory has to be understood for this. Where the player is
-in the level is how far the camera has travelled since the go began (the
-tracker measures that between every two looks, T-992) plus where the player
-stands on the screen, counted from where it was first seen. :class:`Ground`
-keeps the furthest that place has been to the right, to the left, down and up,
-and counts each step of the player's own size past it once.
+Nothing in a game's memory has to be understood for this. On a game whose
+screen scrolls, somewhere new is what the camera has newly shown: how far it
+has travelled since the go began (the tracker measures that between every two
+looks, T-992). On a screen that has never scrolled it is where the player
+newly stands, counted from where it was first seen. :class:`Ground` keeps the
+furthest that place has been to the right, to the left, down and up, and
+counts each step of the player's own size past it once.
 
 No direction is named as the way on and no game is known: a level that runs to
-the left, or up, pays the same. What it costs: the first jump of a go pays its
-two or three steps up, and so does a first fall into a pit. Both are paid once
-a go and are small beside a level's length.
+the left, or up, pays the same. Once the screen has been seen to scroll, where
+the player stands on it no longer counts, for good: a jump and a fall into a
+pit move the player and not the camera, and as first written (the camera's
+travel plus the place on the screen) a fall paid its two or three steps down
+at once, about what the life it cost took away a second later. On a screen
+that never scrolls a first jump and a first fall still pay their steps, once a
+go.
 
 After a cut to another place the camera's travel is no longer known. The
 caller says so with :meth:`Ground.back`, and the place is taken to be where the
@@ -49,6 +54,7 @@ class Ground:
             raise ConfigurationError("most must be a whole number, 1 or more.")
         self._most = most
         self._unit: int | None = None  # pixels in a step; kept from go to go
+        self._scrolls = False  # the camera has been seen to move; kept from go to go
         self._camera = (0, 0)  # the camera's travel since the go began or it was put back
         self._first: tuple[int, int] | None = None  # where on the screen it was first seen
         self._offset = (0, 0)  # where it stands on the screen, from there
@@ -61,9 +67,15 @@ class Ground:
         return self._unit
 
     @property
+    def scrolls(self) -> bool:
+        """The screen has been seen to scroll: only the camera's travel counts."""
+        return self._scrolls
+
+    @property
     def place(self) -> tuple[int, int]:
-        """Where it is, in pixels across and down from where the go began."""
-        return (self._camera[0] + self._offset[0], self._camera[1] + self._offset[1])
+        """Where it is, in pixels across and down from where the go began: the camera's
+        travel on a screen that scrolls, where it stands on one that never has."""
+        return self._camera if self._scrolls else self._offset
 
     @property
     def reach(self) -> tuple[int, int, int, int]:
@@ -76,7 +88,8 @@ class Ground:
         return sum(self._paid)
 
     def begin(self) -> None:
-        """A go starts: nothing reached, nothing counted. The step's size is kept."""
+        """A go starts: nothing reached, nothing counted. The step's size is kept, and
+        so is whether the screen scrolls."""
         self.back()
         self._reach = [0, 0, 0, 0]
         self._paid = [0, 0, 0, 0]
@@ -103,6 +116,8 @@ class Ground:
         if size is not None and (isinstance(size, bool) or not isinstance(size, int) or size < 1):
             raise ConfigurationError("The player's size is a whole number of pixels, 1 or more.")
         self._camera = (self._camera[0] + dx, self._camera[1] + dy)
+        if dx or dy:
+            self._scrolls = True
         if me is not None:
             if self._first is None:
                 self._first = me
