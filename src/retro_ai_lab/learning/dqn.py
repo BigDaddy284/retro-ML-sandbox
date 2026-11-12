@@ -20,7 +20,7 @@ import numpy as np
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning.actions import ActionSpace
-from retro_ai_lab.learning.exploring import ResultsWatch
+from retro_ai_lab.learning.exploring import ResultsWatch, Runs
 from retro_ai_lab.learning.features import DEFAULT_WIDTH, FeatureMap
 from retro_ai_lab.learning.learner import Decision, Learner, register_learner
 from retro_ai_lab.learning.network import DEFAULT_LEARNING_RATE, Network
@@ -30,6 +30,7 @@ from retro_ai_lab.learning.qlearning import (
     _check,
     _rng_state,
     settings_from_saved,
+    tries_words,
 )
 from retro_ai_lab.learning.replay import DEFAULT_CAPACITY, ReplayBuffer, Transition
 from retro_ai_lab.learning.state import State
@@ -121,6 +122,7 @@ class DQNLearner:
         self._trained = 0
         self._episodes = 0
         self._results = ResultsWatch(self._settings.rebound)
+        self._runs = Runs(self._settings.explore_run)
         self._build()
 
     def _build(self) -> None:
@@ -193,8 +195,8 @@ class DQNLearner:
             f"Knows {n} situation{'s' if n != 1 else ''}, learned from {self._updates} "
             f"step{'s' if self._updates != 1 else ''} over {self._episodes} "
             f"go{'es' if self._episodes != 1 else ''}; network trained {self._trained} "
-            f"time{'s' if self._trained != 1 else ''}; tries something new "
-            f"{self._epsilon:.0%} of the time."
+            f"time{'s' if self._trained != 1 else ''}; "
+            f"{tries_words(self._epsilon, self._settings.explore_run)}"
         )
 
     # ------------------------------------------------------------ acting
@@ -222,8 +224,9 @@ class DQNLearner:
 
     def choose(self, state: State) -> int:
         values = self._q(state)
-        if self._rng.random() < self._epsilon:
-            action = self._space.sample(self._rng)
+        tried = self._runs.next(self._rng, self._epsilon, self._space.sample)  # T-983
+        if tried is not None:
+            action = tried
             explored = True
         else:
             action = self._best(values, self._rng)
@@ -332,6 +335,7 @@ class DQNLearner:
 
     def end_episode(self, reward: float | None = None) -> float:
         self._episodes += 1
+        self._runs.drop()  # a run belongs to the go it started in (T-983)
         if reward is not None:
             self._results.note(reward, goes=self._episodes)
         decayed = self._epsilon * self._settings.epsilon_decay
@@ -355,6 +359,7 @@ class DQNLearner:
         self._settings = settings
         self._epsilon = settings.epsilon
         self._results.set_rebound(settings.rebound)
+        self._runs.set_most(settings.explore_run)
 
     def reset(self) -> None:
         self._last_decision = None
@@ -363,6 +368,7 @@ class DQNLearner:
         self._trained = 0
         self._episodes = 0
         self._results = ResultsWatch(self._settings.rebound)
+        self._runs = Runs(self._settings.explore_run)
         self._build()
 
     # ------------------------------------------------------------ persistence
@@ -379,6 +385,7 @@ class DQNLearner:
             "trained": self._trained,
             "episodes": self._episodes,
             "results": self._results.to_dict(),
+            "run": self._runs.to_dict(),
             "rng": self._rng.getstate(),
             "features": self._features.to_dict(),
             "network": self._net.to_dict(),
@@ -410,6 +417,7 @@ class DQNLearner:
             agent._trained = int(data.get("trained", 0))
             agent._episodes = int(data.get("episodes", 0))
             agent._results.load(data.get("results"))
+            agent._runs.load(data.get("run"), actions=len(saved))
             if "features" in data:
                 agent._features = FeatureMap.from_dict(data["features"])
             agent._net = Network.from_dict(data["network"])

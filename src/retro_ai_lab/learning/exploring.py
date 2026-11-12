@@ -8,11 +8,19 @@ rewards of the last goes and, when the latest window is worse than the one
 before, lifts exploring back to ``Settings.rebound`` and holds it there while the
 goes stay worse. Once they recover, the lift eases off over a window of goes and
 the schedule takes over again.
+
+Exploring comes in runs (T-983). Rolling for a random move at every step makes a
+try last one step, four frames: a twitch that never holds a button long enough
+to show what holding it does. :class:`Runs` holds a random move for a run of
+steps instead, and starts runs less often so the share of explored steps is
+still what the schedule says.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from random import Random
 from typing import Any
 
 from retro_ai_lab.core import ConfigurationError
@@ -21,6 +29,7 @@ log = logging.getLogger(__name__)
 
 RESULTS_WINDOW = 10  # goes per window; the latest window is judged against the one before
 NOTICEABLE = 0.1  # a drop smaller than this share of the rewards' spread is noise
+MOST_RUN = 100  # the longest run a setting may ask for
 
 
 class ResultsWatch:
@@ -99,4 +108,76 @@ class ResultsWatch:
         self._hold = hold
 
 
-__all__ = ["NOTICEABLE", "RESULTS_WINDOW", "ResultsWatch"]
+class Runs:
+    """A random move held for a run of steps (T-983).
+
+    At a free step a run starts with a chance chosen so that, with runs of 1 to
+    ``most`` steps (each length as likely as the next), the share of explored
+    steps is the ``epsilon`` asked for: ``e / (m(1 - e) + e)`` with ``m`` the
+    mean run. ``most`` of 1 is one roll and one draw a step, as it was before.
+    """
+
+    def __init__(self, most: int = 1) -> None:
+        self._most = _run_length(most)
+        self._left = 0  # steps of the run still to come
+        self._action = 0
+
+    @property
+    def most(self) -> int:
+        return self._most
+
+    @property
+    def left(self) -> int:
+        """Steps the run in hand still has to go (0 between runs)."""
+        return self._left
+
+    def set_most(self, most: int) -> None:
+        self._most = _run_length(most)
+        self.drop()
+
+    def drop(self) -> None:
+        """Forget the run in hand (a go ended; its move belonged to that go)."""
+        self._left = 0
+        self._action = 0
+
+    def chance(self, epsilon: float) -> float:
+        """The chance a run starts at a free step, for this share of explored steps."""
+        if self._most == 1:
+            return epsilon
+        mean = (1 + self._most) / 2
+        return epsilon / (mean * (1.0 - epsilon) + epsilon)
+
+    def next(self, rng: Random, epsilon: float, sample: Callable[[Random], int]) -> int | None:
+        """The move to explore with at this step, or None to do what looks best."""
+        if self._left > 0:
+            self._left -= 1
+            return self._action
+        if rng.random() >= self.chance(epsilon):
+            return None
+        action = sample(rng)
+        if self._most > 1:
+            self._left = rng.randint(1, self._most) - 1
+            self._action = action
+        return action
+
+    def to_dict(self) -> dict[str, int]:
+        return {"left": self._left, "action": self._action}
+
+    def load(self, data: dict[str, Any] | None, *, actions: int) -> None:
+        if not data:
+            return
+        left, action = int(data.get("left", 0)), int(data.get("action", 0))
+        if not 0 <= left < self._most:
+            raise ConfigurationError(f"A saved run must have 0 to {self._most - 1} steps left.")
+        if not 0 <= action < actions:
+            raise ConfigurationError("A saved run holds a move these controls don't have.")
+        self._left, self._action = left, action if left else 0
+
+
+def _run_length(most: object) -> int:
+    if isinstance(most, bool) or not isinstance(most, int) or not 1 <= most <= MOST_RUN:
+        raise ConfigurationError(f"A run must be a whole number of steps from 1 to {MOST_RUN}.")
+    return most
+
+
+__all__ = ["MOST_RUN", "NOTICEABLE", "RESULTS_WINDOW", "ResultsWatch", "Runs"]

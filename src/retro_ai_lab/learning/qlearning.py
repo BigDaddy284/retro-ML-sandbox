@@ -18,7 +18,7 @@ from typing import Any, ClassVar
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning.actions import ActionSpace
-from retro_ai_lab.learning.exploring import ResultsWatch
+from retro_ai_lab.learning.exploring import MOST_RUN, ResultsWatch, Runs
 from retro_ai_lab.learning.learner import Q_TABLE, Decision, Learner, register_learner
 from retro_ai_lab.learning.state import State
 
@@ -66,6 +66,10 @@ class Settings:
     # Exploring goes back up to this when the last ten goes are worse than the ten before
     # (T-932), and eases off again once they recover; 0 leaves the schedule alone.
     rebound: float = 0.25
+    # A random move is held for a run of 1 to this many steps (T-983): at four frames a
+    # step, a new move every step never holds a button long enough to show what holding
+    # it does. 8 steps is about half a second; 1 tries a new move at every step.
+    explore_run: int = 8
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "alpha", _check(self.alpha, "alpha", 0.0, 1.0))
@@ -77,6 +81,9 @@ class Settings:
         )
         object.__setattr__(self, "explore_steps", _whole(self.explore_steps, "explore_steps"))
         object.__setattr__(self, "rebound", _check(self.rebound, "rebound", 0.0, 1.0))
+        object.__setattr__(self, "explore_run", _whole(self.explore_run, "explore_run"))
+        if self.explore_run > MOST_RUN:
+            raise ConfigurationError(f"explore_run can't be above {MOST_RUN}.")
         if self.epsilon_min > self.epsilon:
             raise ConfigurationError("epsilon_min can't be above epsilon.")
         if self.alpha == 0.0:
@@ -91,6 +98,7 @@ class Settings:
             "epsilon_decay": self.epsilon_decay,
             "explore_steps": self.explore_steps,
             "rebound": self.rebound,
+            "explore_run": self.explore_run,
         }
 
     def exploring_after(self, updates: int) -> float:
@@ -98,6 +106,12 @@ class Settings:
         if updates >= self.explore_steps:
             return self.epsilon_min
         return self.epsilon - (self.epsilon - self.epsilon_min) * updates / self.explore_steps
+
+
+def tries_words(epsilon: float, run: int) -> str:
+    """How much a learner explores, in words: the end of every learner's ``stats()``."""
+    held = "" if run == 1 else f", holding each try for up to {run} steps"
+    return f"tries something new {epsilon:.0%} of the time{held}."
 
 
 def _check_steps(steps: int) -> None:
@@ -206,6 +220,7 @@ class QLearningAgent:
         self._updates = 0
         self._episodes = 0
         self._results = ResultsWatch(self._settings.rebound)
+        self._runs = Runs(self._settings.explore_run)
 
     # ------------------------------------------------------------ queries
 
@@ -242,8 +257,8 @@ class QLearningAgent:
         return (
             f"Knows {n} situation{'s' if n != 1 else ''}, learned from {self._updates} "
             f"step{'s' if self._updates != 1 else ''} over {self._episodes} "
-            f"go{'es' if self._episodes != 1 else ''}; tries something new "
-            f"{self._epsilon:.0%} of the time."
+            f"go{'es' if self._episodes != 1 else ''}; "
+            f"{tries_words(self._epsilon, self._settings.explore_run)}"
         )
 
     # ------------------------------------------------------------ acting
@@ -253,8 +268,9 @@ class QLearningAgent:
         return self._last_decision
 
     def choose(self, state: State) -> int:
-        if self._rng.random() < self._epsilon:
-            action = self._space.sample(self._rng)
+        tried = self._runs.next(self._rng, self._epsilon, self._space.sample)  # T-983
+        if tried is not None:
+            action = tried
             explored = True
         else:
             action = self._table.best(state, self._rng)
@@ -311,6 +327,7 @@ class QLearningAgent:
         With the go's ``reward``, exploring goes back up when the goes get worse (T-932).
         """
         self._episodes += 1
+        self._runs.drop()  # a run belongs to the go it started in (T-983)
         if reward is not None:
             self._results.note(reward, goes=self._episodes)
         decayed = self._epsilon * self._settings.epsilon_decay
@@ -340,6 +357,7 @@ class QLearningAgent:
         self._settings = settings
         self._epsilon = settings.epsilon
         self._results.set_rebound(settings.rebound)
+        self._runs.set_most(settings.explore_run)
 
     def reset(self) -> None:
         self._last_decision = None
@@ -348,6 +366,7 @@ class QLearningAgent:
         self._updates = 0
         self._episodes = 0
         self._results = ResultsWatch(self._settings.rebound)
+        self._runs = Runs(self._settings.explore_run)
 
     # ------------------------------------------------------------ persistence
 
@@ -361,6 +380,7 @@ class QLearningAgent:
             "updates": self._updates,
             "episodes": self._episodes,
             "results": self._results.to_dict(),
+            "run": self._runs.to_dict(),
             "rng": self._rng.getstate(),
             "table": self._table.to_dict(),
         }
@@ -383,6 +403,7 @@ class QLearningAgent:
             agent._updates = int(data.get("updates", 0))
             agent._episodes = int(data.get("episodes", 0))
             agent._results.load(data.get("results"))
+            agent._runs.load(data.get("run"), actions=len(saved))
             agent._table = QTable.from_dict(data["table"])
             if agent._table.actions != len(saved):
                 raise ConfigurationError("The Q-table does not match the action space.")

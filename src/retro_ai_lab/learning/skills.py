@@ -24,7 +24,7 @@ from retro_ai_lab.learning.learner import (
     make_learner,
     register_learner,
 )
-from retro_ai_lab.learning.qlearning import Settings
+from retro_ai_lab.learning.qlearning import Settings, tries_words
 from retro_ai_lab.learning.state import State
 
 SCHEMA_VERSION = 1
@@ -149,8 +149,8 @@ class SkillsLearner:
             f"{n} skill{'s' if n != 1 else ''} ({names}); using {active}. "
             f"Knows {known} situation{'s' if known != 1 else ''} in all, learned from "
             f"{updates} step{'s' if updates != 1 else ''} over {self._episodes} "
-            f"go{'es' if self._episodes != 1 else ''}; tries something new "
-            f"{self.epsilon:.0%} of the time."
+            f"go{'es' if self._episodes != 1 else ''}; "
+            f"{tries_words(self.epsilon, self._settings.explore_run)}"
         )
 
     def choose(self, state: State) -> int:

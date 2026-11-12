@@ -263,7 +263,10 @@ mostly choosing (6,000, about ten 40-second goes). Exploring also follows
 results: when the last ten goes score worse than the ten before, the AI goes
 back to trying random moves "Exploring rebound" of the time (25%) and stays
 there while the goes keep getting worse, so a bad habit is not locked in; the
-log says when that happens.
+log says when that happens. A random move is not a one-step twitch: the AI holds
+it for a run of 1 to "Exploring run" steps (8, about half a second), so it
+finds out what holding a button does, such as a long jump; runs start less
+often, so the share of random steps is still what the other settings say.
 
 To find a value yourself, like a cheat finder, use the Research window's
 "Search values" tab. Type the number you see on the screen (12, a score of

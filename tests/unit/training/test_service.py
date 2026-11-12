@@ -1402,7 +1402,7 @@ def test_go_settings_are_a_persons_choice_per_game(lab: Lab) -> None:
 def test_every_step_announces_the_buttons_held(lab: Lab) -> None:
     """T-874: the runner says what each step held, before the step's reward is collected."""
     from retro_ai_lab.rewards import AGAIN_ID, Category
-    from retro_ai_lab.services import ButtonsHeld
+    from retro_ai_lab.services import ButtonsHeld, GoStarted
 
     held: list[ButtonsHeld] = []
     lab.bus.subscribe(ButtonsHeld, held.append)
@@ -1421,6 +1421,25 @@ def test_every_step_announces_the_buttons_held(lab: Lab) -> None:
     repeats = sum(len(a.buttons & b.buttons) for a, b in pairwise(held))
     assert lab.rewards.tally.by_category(profile)[Category.CONTROLS] - before == float(repeats)
     assert t.last is not None and t.last.result.reward >= float(repeats) - 1e-9
+    # A go's first step is never a repeat of the last go's last buttons (T-983).
+    seen: list[ButtonsHeld | GoStarted] = []
+    lab.bus.subscribe(ButtonsHeld, seen.append)
+    lab.bus.subscribe(GoStarted, seen.append)
+    before = lab.rewards.tally.by_category(profile)[Category.CONTROLS]
+    for _ in range(6):
+        t.train(1)
+    last, opening, repeats, carried = held[-1].buttons, False, 0, 0
+    for event in seen:
+        if isinstance(event, GoStarted):
+            opening = True
+            continue
+        if opening:
+            carried += len(last & event.buttons)  # held as the last go ended: not a repeat
+        else:
+            repeats += len(last & event.buttons)
+        last, opening = event.buttons, False
+    assert carried >= 1  # some go did open on a button the go before closed on
+    assert lab.rewards.tally.by_category(profile)[Category.CONTROLS] - before == float(repeats)
 
 
 def test_the_search_runs_flat_out_and_puts_the_speed_back(
@@ -1666,8 +1685,12 @@ def test_a_start_that_loses_a_life_by_itself_moves_the_goes_past_the_loss(
         "(the last 3 goes all lost one there): the goes now start 6 steps later, where the "
         "game listens to the AI again." in caplog.text
     )
-    # Go 4 started after the loss: a life down, the car where it stood, stopped.
-    assert game.state.lives == lives - 1 and game.state.position == position
+    # Go 4 started after the loss: a life down, the car where it stood, stopped. Read from
+    # the frame the go began on, before the AI's first move (which may be to drive, T-983).
+    began = lab.observation.ring[-2].get("ram")
+    assert began is not None and began[LAYOUT.lives] == lives - 1
+    assert began[LAYOUT.position] == position and began[LAYOUT.speed] == 0
+    assert game.state.lives == lives - 1
     assert t.last is not None and t.last.result.first_setback_step == 6
     # The goes after it start there too.
     _run_goes(lab, 4)
