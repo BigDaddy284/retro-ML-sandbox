@@ -125,7 +125,7 @@ def test_a_start_that_gets_stuck_says_where_and_the_next_start_logs_it(tmp_path:
 def stuck_here():
     time.sleep(1.5)
 path = logbook.watch_start(folder, stuck_after=0.3)
-print(path)
+print(path, flush=True)  # os._exit below flushes nothing
 stuck_here()
 import os
 os._exit(0)  # killed, as a person would: nothing tidies up
