@@ -672,3 +672,90 @@ def test_the_ground_row_is_saved_and_left_alone_by_suggestions(
     report = apply_suggestions(profile, k)
     assert GROUND_ID in profile and GROUND_ID not in report.removed + report.updated
     assert profile.get(GROUND_ID).value == 1.0
+
+
+# ------------------------------------------------------------ T-994: a switch pays once a go
+
+
+def _switch(bus: EventBus, var_id: str, frame: int, on: bool) -> None:
+    kind = EventKind.FLAG_ON if on else EventKind.FLAG_OFF
+    flip = GameEvent(kind, frame, var_id, "", 0 if on else 1, 1 if on else 0)
+    bus.publish(DiscoveryUpdated((), (), (flip,), ()))
+
+
+def test_a_switch_pays_the_first_time_in_a_go(
+    rewards: RewardService,
+    connection: ConnectionService,
+    discovery: DiscoveryService,
+    bus: EventBus,
+    earned: list[RewardEarned],
+) -> None:
+    """On the practice game the two flags the jump button flips paid about 80 points a
+    go, at +1.5 a flip: the AI was being paid to jump on the spot."""
+    connection.connect("fake", seed=3)
+    k = teach(discovery, bus)
+    door = k.propose(RAM, LAYOUT.lap, kind=VariableKind.FLAG, name="Door", evidence=SURE)
+    lamp = k.propose(RAM, LAYOUT.lane, kind=VariableKind.FLAG, name="Lamp", evidence=SURE)
+    bus.publish(DiscoveryUpdated((door, lamp), (), (), ()))
+    profile = rewards.profile
+    assert profile is not None
+    on, off = f"flag_on:{door.id}", f"flag_off:{door.id}"
+    assert profile.get(on).value == 2.0 and profile.get(off).value == 0.0
+    bus.publish(GoStarted(0))
+    before = rewards.tally.count
+    for frame, way in ((10, True), (20, False), (30, True), (40, False), (50, True)):
+        _switch(bus, door.id, frame, way)
+    # Three times on in the go: paid once. Nothing is said or tallied for the rest.
+    assert [(e.frame, e.amount, e.behaviour_ids) for e in earned] == [(10, 2.0, (on,))]
+    # Going off is worth nothing here, so it is tallied (once) and nothing is said.
+    assert rewards.tally.count == before + 2
+    # Another switch has its own first time.
+    _switch(bus, lamp.id, 60, True)
+    _switch(bus, lamp.id, 70, False)
+    _switch(bus, lamp.id, 80, True)
+    assert [(e.frame, e.behaviour_ids) for e in earned[1:]] == [(60, (f"flag_on:{lamp.id}",))]
+    # Going off is counted apart from going on, and once too.
+    rewards.set_value(off, -1.0)
+    rewards.set_value(f"flag_off:{lamp.id}", -1.0)
+    _switch(bus, door.id, 90, False)  # the door's "off" was used up at frame 20
+    assert len(earned) == 2
+    # A person's points on the row are theirs to give, and still once a go.
+    rewards.set_value(on, 5.0)
+    _switch(bus, door.id, 100, True)
+    assert len(earned) == 2
+    # A new go: each pays again, once.
+    bus.publish(GoStarted(200))
+    for frame, way in ((210, True), (220, False), (230, True), (240, False)):
+        _switch(bus, door.id, frame, way)
+    assert [(e.frame, e.amount) for e in earned[2:]] == [(210, 5.0), (220, -1.0)]
+    # So does a game connected afresh: nothing is left over from the go before.
+    connection.disconnect()
+    connection.connect("fake", seed=3)
+    k = teach(discovery, bus)
+    again = k.propose(RAM, LAYOUT.lap, kind=VariableKind.FLAG, name="Door", evidence=SURE)
+    bus.publish(DiscoveryUpdated((again,), (), (), ()))
+    assert again.id == door.id
+    # (The row was kept with the person's 5 points and switched off while the game's
+    # memory was not yet known again; the person switches it back on.)
+    rewards.set_enabled(on, True)
+    _switch(bus, again.id, 300, True)
+    assert [(e.frame, e.amount) for e in earned[4:]] == [(300, 5.0)]
+
+
+def test_a_persons_own_row_on_a_switch_pays_every_time(
+    rewards: RewardService,
+    connection: ConnectionService,
+    discovery: DiscoveryService,
+    bus: EventBus,
+    earned: list[RewardEarned],
+) -> None:
+    connection.connect("fake", seed=3)
+    k = teach(discovery, bus)
+    door = k.propose(RAM, LAYOUT.lap, kind=VariableKind.FLAG, name="Door", evidence=SURE)
+    bus.publish(DiscoveryUpdated((door,), (), (), ()))
+    mine = rewards.add_own(door.id, goes_up=True, value=3.0)
+    bus.publish(GoStarted(0))
+    for frame in (10, 20, 30):
+        up = GameEvent(EventKind.UP, frame, door.id, "", 0, 1)
+        bus.publish(DiscoveryUpdated((), (), (up,), ()))
+    assert [e.frame for e in earned if mine.id in e.behaviour_ids] == [10, 20, 30]

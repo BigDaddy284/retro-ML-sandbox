@@ -325,3 +325,22 @@ def test_the_watch_reports_every_change_the_old_walk_found_and_no_more_than_the_
     watch.reset()
     assert watch.changed(k)
     assert watch.changed(Knowledge("g"))  # a fresh knowledge object counts as a change
+
+
+def test_a_switch_row_says_it_counts_once_a_go() -> None:
+    """T-994: a switch pays the first time it goes that way in a go, and its row says so."""
+    k = Knowledge("g")
+    door = k.propose(RAM, 0, kind=VariableKind.FLAG, name="Door", evidence=SURE)
+    unsure = k.propose(RAM, 1, kind=VariableKind.FLAG, name="Lamp", evidence=MAYBE)
+    lives = k.propose(RAM, 2, kind=VariableKind.LIVES, name="Lives", evidence=SURE)
+    lap = k.propose(RAM, 3, kind=VariableKind.PROGRESS, name="Lap", evidence=SURE)
+    got = by_key(suggest_behaviours(k))
+    once = "Counts the first time in a go."
+    assert got[f"flag_on:{door.id}"].notes == once
+    assert got[f"flag_off:{door.id}"].notes == once
+    # After what else there is to say about the row.
+    assert got[f"flag_on:{unsure.id}"].notes == (
+        "The AI is not sure yet; the value is smaller until it is. " + once
+    )
+    for key in (f"setback:{lives.id}", f"recovery:{lives.id}", f"progress:{lap.id}", "reset:*"):
+        assert once not in got[key].notes, key

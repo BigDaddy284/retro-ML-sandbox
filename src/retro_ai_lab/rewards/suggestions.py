@@ -53,6 +53,7 @@ PROGRESS_BOOST = 1.5
 UNSURE_NOTE = "The AI is not sure yet; the value is smaller until it is."
 PROGRESS_NOTE = "This leads to progress, so it is worth more."
 GAME_OVER_NOTE = "This is followed by everything starting over, so it looks like game over."
+ONCE_NOTE = "Counts the first time in a go."  # a switch (T-994; the reward service's rule)
 
 
 def _key(kind: EventKind, variable_id: str | None) -> str:
@@ -140,6 +141,8 @@ def _build(
     scale = CONFIDENCE_SCALE[var.confidence]
     if scale < 1.0:
         notes.append(UNSURE_NOTE)
+    if event_kind in (EventKind.FLAG_ON, EventKind.FLAG_OFF):
+        notes.append(ONCE_NOTE)
     value = clamp(round(base * scale, 2))
     return Behaviour(
         key,
@@ -264,6 +267,7 @@ def apply_suggestions(
 
 __all__ = [
     "CONFIDENCE_SCALE",
+    "ONCE_NOTE",
     "PROGRESS_BOOST",
     "RESET_KEY",
     "RULES",

@@ -60,6 +60,10 @@ class GoStarted:
 # Events that pay only past the go's best so far (T-878): a step back and forward
 # again is not progress, and a value that resets on death is not progress either.
 PAST_BEST_KINDS = frozenset({EventKind.PROGRESS, EventKind.SCORE_GAIN})
+# Events that pay the first time in a go (T-994). A switch has no "further", only a
+# first time: paid at every flip, the two flags a jump button flips earned about 80
+# points a go on the practice game, for jumping on the spot.
+ONCE_A_GO_KINDS = frozenset({EventKind.FLAG_ON, EventKind.FLAG_OFF})
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +112,7 @@ class RewardService:
         self._current: ExploitSuspected | None = None
         self._held: frozenset[str] = frozenset()  # the step before's buttons (T-874)
         self._best: dict[str, int] = {}  # per go: the best each progress/score reached
+        self._happened: set[tuple[EventKind, str | None]] = set()  # per go: switches paid
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
         bus.subscribe(ButtonsHeld, self._on_buttons_held)
@@ -334,6 +339,7 @@ class RewardService:
         game_id = game_id_for(info.system, info.title, info.rom_hash)
         self._tally.reset()
         self._best.clear()
+        self._happened.clear()
         self._enabled = event.capabilities.memory_read
         if not self._enabled:
             self._profile = None
@@ -386,6 +392,7 @@ class RewardService:
 
     def _on_go_started(self, event: GoStarted) -> None:
         self._best.clear()
+        self._happened.clear()
         # A go starts from its checkpoint with nothing held the step before: its first
         # step is not a repeat of the last go's last buttons (T-983 turned this up).
         self._held = frozenset()
@@ -401,9 +408,19 @@ class RewardService:
             return True
         return False
 
+    def _first_time(self, game_event: GameEvent) -> bool:
+        """Remember the switch and say whether it went this way before in the go (T-994)."""
+        key = (game_event.kind, game_event.variable_id)
+        if key in self._happened:
+            return False
+        self._happened.add(key)
+        return True
+
     def _score(self, game_event: GameEvent) -> None:
         assert self._profile is not None
         if game_event.kind in PAST_BEST_KINDS and not self._beats_best(game_event):
+            return
+        if game_event.kind in ONCE_A_GO_KINDS and not self._first_time(game_event):
             return
         matched = self._profile.matching(game_event)
         if not matched:
