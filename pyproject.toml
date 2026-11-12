@@ -61,3 +61,8 @@ python_version = "3.11"
 strict = true
 mypy_path = "src"
 packages = ["retro_ai_lab"]
+
+[[tool.mypy.overrides]]
+# The build tool's splash module exists only inside a built app (T-1002).
+module = "pyi_splash"
+ignore_missing_imports = true

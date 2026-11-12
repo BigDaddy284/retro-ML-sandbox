@@ -5,6 +5,10 @@
 # The result is a one-folder app in dist/RetroAILab/ (RetroAILab.exe on Windows).
 # `--exit-after-ms` still works in the built app, which is how CI smoke-tests it.
 
+import importlib.util
+import os
+import sys
+
 from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
@@ -42,9 +46,32 @@ a = Analysis(
 )
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# The "starting" window (T-1002). The bootloader draws it before Python is loaded, so a
+# first start that spends a minute reading new files has something on the screen; the app
+# writes the step it is on under the picture and closes it (retro_ai_lab/core/starting.py).
+# It is drawn with the build Python's Tcl/Tk, which is not supported on macOS and is
+# missing from some Linux Pythons: there the app is built without it and starts as before.
+# The Windows build must have it, and the smoke test in CI checks that it does.
+TEXT_POS = (28, 168)  # the lower left corner of the step's text, inside splash.png
+splash = None
+if sys.platform != "darwin" and importlib.util.find_spec("tkinter") is not None:
+    splash = Splash(
+        os.path.join(SPECPATH, "splash.png"),
+        binaries=a.binaries,
+        datas=a.datas,
+        text_pos=TEXT_POS,
+        text_size=11,
+        text_color="#eaeefa",
+        text_default="Starting",
+        always_on_top=False,  # a minute is long: other windows may be put in front of it
+    )
+elif sys.platform == "win32":
+    raise SystemExit("The Windows build needs tkinter for the starting window.")
+
 exe = EXE(
     pyz,
     a.scripts,
+    *([splash] if splash is not None else []),
     [],
     exclude_binaries=True,
     name="RetroAILab",
@@ -60,6 +87,7 @@ coll = COLLECT(
     a.binaries,
     a.zipfiles,
     a.datas,
+    *([splash.binaries] if splash is not None else []),
     strip=False,
     upx=False,
     name="RetroAILab",
