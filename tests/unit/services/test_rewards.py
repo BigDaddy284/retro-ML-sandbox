@@ -531,3 +531,144 @@ def test_the_values_a_person_penalises_are_known(
     rewards.remove_own(down.id)
     rewards.remove_own(up.id)
     assert rewards.penalised() == frozenset()
+
+
+# ------------------------------------------------------------ T-993: new ground
+
+
+def test_new_ground_adds_its_row_and_pays_each_step(
+    rewards: RewardService,
+    connection: ConnectionService,
+    bus: EventBus,
+    earned: list[RewardEarned],
+    changes: list[RewardProfileChanged],
+) -> None:
+    from retro_ai_lab.rewards import GROUND_ID
+    from retro_ai_lab.services import GroundCovered
+
+    bus.publish(GroundCovered(1, 2))  # nothing connected: ignored
+    connection.connect("fake", seed=3)
+    profile = rewards.profile
+    assert profile is not None and GROUND_ID not in profile  # not before there is ground
+    changes.clear()
+    bus.publish(GroundCovered(5, 0))  # no steps: no row, no pay
+    assert GROUND_ID not in profile and earned == [] and changes == []
+    bus.publish(GroundCovered(10, 3))
+    row = profile.get(GROUND_ID)
+    assert row.category is Category.PROGRESSION and row.value == 1.0 and row.enabled
+    assert changes == [RewardProfileChanged((GROUND_ID,), (), (), "suggestions")]
+    # A point a step, each step its own earning in the step it was found.
+    assert [(e.frame, e.amount, e.behaviour_ids) for e in earned] == [(10, 1.0, (GROUND_ID,))] * 3
+    assert earned[0].event.kind is EventKind.NEW_GROUND
+    assert rewards.tally.by_category(profile)[Category.PROGRESSION] == 3.0
+    bus.publish(GroundCovered(18, 1))
+    assert len(earned) == 4 and len(changes) == 1  # the row is added once
+
+
+def test_new_ground_respects_the_persons_value_and_switch(
+    rewards: RewardService,
+    connection: ConnectionService,
+    bus: EventBus,
+    earned: list[RewardEarned],
+    store: RewardStore,
+) -> None:
+    from retro_ai_lab.rewards import GROUND_ID
+    from retro_ai_lab.services import GroundCovered
+
+    connection.connect("fake", seed=3)
+    bus.publish(GroundCovered(10, 1))
+    rewards.set_value(GROUND_ID, 2.5)
+    bus.publish(GroundCovered(18, 2))
+    assert [e.amount for e in earned] == [1.0, 2.5, 2.5]
+    rewards.set_enabled(GROUND_ID, False)
+    bus.publish(GroundCovered(26, 4))
+    assert len(earned) == 3  # switched off: nothing
+    rewards.set_enabled(GROUND_ID, True)
+    rewards.set_value(GROUND_ID, 0)
+    bus.publish(GroundCovered(34, 4))
+    assert len(earned) == 3  # worth nothing: nothing said
+    # The row and the person's points come back with the game, before any ground.
+    rewards.set_value(GROUND_ID, 2.5)
+    connection.disconnect()
+    connection.connect("fake", seed=3)
+    profile = rewards.profile
+    assert profile is not None and profile.get(GROUND_ID).value == 2.5
+    assert store.load_or_new("toyracer-3").get(GROUND_ID).value == 2.5
+
+
+def test_a_dismissed_ground_row_stays_away(
+    rewards: RewardService,
+    connection: ConnectionService,
+    bus: EventBus,
+    earned: list[RewardEarned],
+) -> None:
+    from retro_ai_lab.rewards import GROUND_ID
+    from retro_ai_lab.services import GroundCovered
+
+    connection.connect("fake", seed=3)
+    bus.publish(GroundCovered(10, 1))
+    assert rewards.dismiss(GROUND_ID) == GROUND_ID
+    profile = rewards.profile
+    assert profile is not None and GROUND_ID not in profile
+    bus.publish(GroundCovered(18, 2))
+    assert GROUND_ID not in profile and len(earned) == 1
+    connection.disconnect()
+    connection.connect("fake", seed=3)
+    bus.publish(GroundCovered(26, 2))
+    profile = rewards.profile
+    assert profile is not None and GROUND_ID not in profile and len(earned) == 1
+    # Asking for the suggestions again lets it back in, at the next ground found.
+    rewards.suggest_again()
+    bus.publish(GroundCovered(34, 2))
+    assert GROUND_ID in profile and len(earned) == 3
+
+
+def test_new_ground_is_progress_to_the_exploit_detector(
+    connection: ConnectionService, discovery: DiscoveryService, bus: EventBus
+) -> None:
+    from retro_ai_lab.services import ExploitSuspected, GroundCovered
+
+    rewards = RewardService(connection, discovery, bus, exploit_window=100, exploit_min_reward=20)
+    seen: list[ExploitSuspected] = []
+    bus.subscribe(ExploitSuspected, seen.append)
+    connection.connect("fake", seed=3)
+    k = teach(discovery, bus)
+    score = k.at(RAM, LAYOUT.score)
+    assert score
+
+    def gain(frame: int) -> None:
+        bus.publish(
+            DiscoveryUpdated((), (), (GameEvent(EventKind.SCORE_GAIN, frame, score.id, ""),), ())
+        )
+
+    # Points pile up while it keeps getting somewhere new: that is no farming.
+    for f in range(10, 60, 10):
+        bus.publish(GroundCovered(f, 1))
+        gain(f)
+    assert seen == [] and rewards.current_warning is None
+    # The same points with no new ground for a whole window are.
+    for f in range(300, 350, 10):
+        gain(f)
+    assert len(seen) == 1 and seen[0].warning.kind == "farming"
+
+
+def test_the_ground_row_is_saved_and_left_alone_by_suggestions(
+    rewards: RewardService,
+    connection: ConnectionService,
+    discovery: DiscoveryService,
+    bus: EventBus,
+    store: RewardStore,
+) -> None:
+    from retro_ai_lab.rewards import GROUND_ID
+    from retro_ai_lab.services import GroundCovered
+
+    connection.connect("fake", seed=3)
+    bus.publish(GroundCovered(10, 1))
+    assert GROUND_ID in store.load_or_new("toyracer-3")  # saved the moment it is added
+    k = teach(discovery, bus)
+    profile = rewards.profile
+    assert profile is not None
+    rewards.refresh_suggestions()
+    report = apply_suggestions(profile, k)
+    assert GROUND_ID in profile and GROUND_ID not in report.removed + report.updated
+    assert profile.get(GROUND_ID).value == 1.0

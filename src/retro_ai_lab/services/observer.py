@@ -55,6 +55,19 @@ class ButtonsHeld:
     source: str  # "ai" or "child"
 
 
+@dataclass(frozen=True, slots=True)
+class GroundCovered:
+    """The AI's look at the screen found new ground (T-993): ``steps`` of the player's
+    own size past the furthest it had been this go.
+
+    Published by the episode runner after a look and before the step's reward is
+    collected, so the pay lands in the step that got there.
+    """
+
+    frame: int
+    steps: int
+
+
 class ObservationService:
     def __init__(
         self,

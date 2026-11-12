@@ -17,6 +17,13 @@ from retro_ai_lab.rewards.goals import (
     merge_suggestions,
     suggest_goal,
 )
+from retro_ai_lab.rewards.ground import (
+    GROUND_ID,
+    GROUND_NAME,
+    GROUND_POINTS,
+    ensure_ground_row,
+    ground_behaviour,
+)
 from retro_ai_lab.rewards.model import (
     MAX_VALUE,
     SCHEMA_VERSION,
@@ -53,6 +60,9 @@ __all__ = [
     "AGAIN_NAME",
     "CATEGORY_WORDS",
     "GOAL_IDEAS",
+    "GROUND_ID",
+    "GROUND_NAME",
+    "GROUND_POINTS",
     "MAX_VALUE",
     "MINE",
     "OWN_NOTE",
@@ -79,7 +89,9 @@ __all__ = [
     "button_behaviours",
     "describe_category",
     "ensure_button_rows",
+    "ensure_ground_row",
     "explain_behaviour",
+    "ground_behaviour",
     "is_automatic",
     "is_button",
     "is_own",

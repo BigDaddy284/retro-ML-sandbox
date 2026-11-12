@@ -19,11 +19,19 @@ than a track. A finding without colours is followed as a track, as before.
 Since T-989 every look in which it sees itself also reads what is around it
 (:mod:`retro_ai_lab.observation.surroundings`): the floor either side, the way
 at its own height and what is under it. The brain is given those first.
+
+Since T-993 the watch also measures the new ground the go covers
+(:mod:`retro_ai_lab.observation.ground`): the camera's travel plus where it
+stands on the screen, in steps of its own size. A cut to another place, or a
+life lost with a jump of the screen, puts it back where the go began. The
+runner asks :meth:`ScreenWatch.take_new_ground` after every look and the
+reward service pays it.
 """
 
 from __future__ import annotations
 
 from retro_ai_lab.core import Frame
+from retro_ai_lab.observation.ground import Ground
 from retro_ai_lab.observation.objects import ObjectCatalogue
 from retro_ai_lab.observation.signature import Box
 from retro_ai_lab.observation.sprites import SpriteTag
@@ -40,6 +48,9 @@ NEAR = 48  # pixels across within which a thing is "close" rather than "coming"
 LEVEL = 8  # pixels within which a thing is level with the player, or on top of it
 HIDE_MARGIN = 1  # pixels round the player's own colours left out with it (its outline)
 LOOK_SHIFT = 32  # pixels the camera may move between two looks, either way (T-992)
+CUT = 0.25  # share of the screen no camera move explains: a cut to another place (T-993)
+JOLT = 0.02  # ... and the share that, with a life lost about then, is a respawn
+BACK_LOOKS = 4  # looks between the life lost and the jolt for the two to be one event
 
 
 def side(apart: int, *, near: int | None = NEAR) -> int:
@@ -89,6 +100,11 @@ class ScreenWatch:
         self._fell_at: int | None = None  # the look at which it went out of sight, falling
         self._was_seen = False  # it was in sight at the look before
         self._around: Surroundings | None = None  # what was around it at the last look (T-989)
+        # The new ground the go covers (T-993).
+        self._ground = Ground()
+        self._new_ground = 0  # steps found since the last take
+        self._jolt_at: int | None = None  # the last look whose change no move explained
+        self._lost_at: int | None = None  # the last look that heard of a life lost
 
     @property
     def player(self) -> PlayerFinding:
@@ -138,9 +154,24 @@ class ScreenWatch:
         own height, what is under it (T-989). None when it did not see itself."""
         return self._around
 
+    @property
+    def ground(self) -> Ground:
+        """The new ground this go has covered so far (T-993)."""
+        return self._ground
+
+    def take_new_ground(self) -> int:
+        """The steps of new ground found since the last call (T-993); they are given
+        once."""
+        new, self._new_ground = self._new_ground, 0
+        return new
+
     def begin_go(self) -> None:
         """A go starts from the checkpoint: new tracks, the player looked for afresh."""
         self._tracker.reset()
+        self._ground.begin()
+        self._new_ground = 0
+        self._jolt_at = None
+        self._lost_at = None
         self._around = None
         self._me = None
         self._box = None
@@ -194,6 +225,7 @@ class ScreenWatch:
             )
             self._fell_at = None  # in sight again: it did not fall out of the screen
         self._was_seen = self._box is not None
+        self._cover_ground(lost)
         if scored:
             happened.append(Happening.SCORE_UP)
         self._learner.observe(
@@ -201,6 +233,35 @@ class ScreenWatch:
         )
         self._looks += 1
         self._looks_this_go += 1
+
+    def _cover_ground(self, lost: int) -> None:
+        """Count the new ground of this look (T-993). When the screen changed in a way
+        no camera move explains, where it is can no longer be counted on from where it
+        was: a quarter of the screen or more is a cut to another place, and less than
+        that with a life lost within a few looks is being put back after dying. Either
+        way it is taken to be back where the go began, so ground it walks again pays
+        nothing. A life lost with no such jump (a hit that costs health) changes
+        nothing."""
+        moved, share = self._tracker.scroll, self._tracker.unexplained
+        jolt = moved == (0, 0) and share >= JOLT
+        if jolt:
+            self._jolt_at = self._looks
+        if lost:
+            self._lost_at = self._looks
+        respawn = (
+            self._jolt_at is not None
+            and self._lost_at is not None
+            and abs(self._jolt_at - self._lost_at) <= BACK_LOOKS
+        )
+        if respawn or (jolt and share >= CUT):
+            self._ground.back()
+            if respawn:
+                self._jolt_at = self._lost_at = None
+        if self._box is None:
+            self._new_ground += self._ground.look(moved)
+        else:
+            x, y, w, h = self._box
+            self._new_ground += self._ground.look(moved, (x + w // 2, y + h // 2), max(w, h))
 
     def told(self, *, lost: int = 0) -> None:
         """Lives lost that no look will come for (the go ended): counted and put down to

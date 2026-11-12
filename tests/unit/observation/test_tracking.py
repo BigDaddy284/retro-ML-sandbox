@@ -635,3 +635,36 @@ def test_only_a_row_that_stood_still_both_ways_is_glass() -> None:
     # A block coming down through the top of the track is a thing in the level.
     tops = [t for t in tracker.tracks() if t.missing == 0 and t.y >= 8]
     assert tops and not any(t.glass for t in tops)
+
+
+# ---------------------------------------------------------------- T-993
+
+
+def test_what_the_move_leaves_unexplained() -> None:
+    """After a real move next to nothing still differs once the move is allowed for;
+    after a cut to another place most of what differed still does."""
+    w = level()
+    tracker = ObjectTracker(max_shift=32)
+    tracker.update(view(w, 100, [], 0))
+    assert tracker.unexplained == 0.0  # a first frame
+    tracker.update(view(w, 100, [], 1))
+    assert tracker.scroll == (0, 0) and tracker.unexplained == 0.0  # a still screen
+    tracker.update(view(w, 116, [], 2))
+    assert tracker.scroll == (16, 0) and tracker.unexplained == 0.0  # all of it explained
+    # One small thing changing needs no search, and leaves nothing to explain.
+    tracker.update(view(w, 116, [(200, 100, hero())], 3))
+    assert tracker.scroll == (0, 0) and tracker.unexplained == 0.0
+    # A cut: indoors, nothing like the level.
+    other = np.zeros((240, 1024, 3), np.uint8)
+    other[60:180:40, 30::70] = WHITE
+    other[200:] = (60, 60, 60)
+    tracker.update(view(other, 500, [], 4))
+    assert tracker.scroll == (0, 0) and tracker.unexplained > 0.5
+    # Looking on at the new place it is a still screen again.
+    tracker.update(view(other, 500, [], 5))
+    assert tracker.unexplained == 0.0
+    # A move past the reach is not explained either, though less of the screen differs.
+    tracker.update(view(other, 560, [], 6))
+    assert tracker.scroll == (0, 0) and 0.0 < tracker.unexplained < 0.5
+    tracker.reset()
+    assert tracker.unexplained == 0.0

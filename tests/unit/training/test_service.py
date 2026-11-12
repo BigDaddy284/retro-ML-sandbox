@@ -1729,11 +1729,13 @@ def test_a_loss_a_held_button_avoids_leaves_the_start_where_it_is(
     assert "loses a life by itself" not in caplog.text
     # Go 4 started where the others did: no life down, and the game's own clock (put
     # back with the start) one step on. How far that step drove is the AI's choice of
-    # button: since T-988 its eyes hear of the lives lost here and it has learnt
-    # something, so it brakes (3 on) where it used to steer (12 on at speed 3).
+    # button, and has moved with what it has learnt: it steered (12 on at speed 3),
+    # since T-988 its eyes hear of the lives lost here and it braked (3 on), and
+    # since T-993 it is paid for new ground and stops dead before the obstacle (0 on).
+    # What this test is about is where the go starts: at most that one step on.
     assert game.state.lives == lives
     assert game.state.frame == frame + t.frames_per_step
-    assert position < game.state.position <= position + 4 * t.frames_per_step
+    assert position <= game.state.position <= position + 4 * t.frames_per_step
     _run_goes(lab, 6)  # three more goes losing it at step 6: cleared, not checked again
     assert t.step() and game.state.lives == lives
     assert caplog.text.count("the AI's to avoid") == 1

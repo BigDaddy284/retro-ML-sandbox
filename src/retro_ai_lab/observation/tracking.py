@@ -318,6 +318,7 @@ class ObjectTracker:
         # in the same place every go.
         self._stuck: NDArray[np.int16] | None = None
         self._searches = 0
+        self._unexplained = 0.0
 
     @property
     def catalogue(self) -> ObjectCatalogue:
@@ -347,6 +348,14 @@ class ObjectTracker:
         change no bigger than one small thing need no search)."""
         return self._searches
 
+    @property
+    def unexplained(self) -> float:
+        """The share of the pixels with a say that still differed at the last look once
+        the camera's move was allowed for (T-993): next to nothing after a real move,
+        most of the screen after a cut to another place. 0 when the move needed no
+        search (a still screen, one small thing changing) and on a first frame."""
+        return self._unexplained
+
     def tracks(self) -> tuple[Track, ...]:
         """The things on screen now (seen this frame or missing only briefly)."""
         return tuple(sorted(self._tracks.values(), key=lambda t: t.id))
@@ -358,6 +367,7 @@ class ObjectTracker:
         self._camera = (0, 0)
         self._scroll = (0, 0)
         self._hidden = None
+        self._unexplained = 0.0
 
     def update(
         self, frame: Frame, *, hide: tuple[int, int, int, int] | None = None
@@ -399,6 +409,7 @@ class ObjectTracker:
             objects.extend(self._movers_in_scenery(prev, frame, objects, hide))
         else:
             self._scroll = (0, 0)
+            self._unexplained = 0.0
         self._match(objects, frame.number)
         self._previous = frame
         self._hidden = hide
@@ -410,6 +421,7 @@ class ObjectTracker:
         self, prev: Frame, frame: Frame, hide: tuple[int, int, int, int] | None
     ) -> tuple[int, int]:
         a, b = _packed(frame), _packed(prev)
+        self._unexplained = 0.0
         if self._stuck is None:
             self._stuck = np.zeros(frame.height, np.int16)
         out_a = np.zeros(a.shape, np.bool_)  # what has no say, on the new screen ...
@@ -441,14 +453,18 @@ class ObjectTracker:
             min(self._max_shift, frame.width // SCREEN_SHARE),
             min(self._max_shift, frame.height // SCREEN_SHARE),
         )
+        still = _mismatch(a, b, va, vb, 0, 0)
         if scroll == (0, 0):
+            self._unexplained = still or 0.0
             return scroll
         # The best of a bad lot is no measure: after a cut to another place, or a move
         # past the reach, some shift still fits best. A real move explains most of
         # what differed.
-        still, moved = _mismatch(a, b, va, vb, 0, 0), _mismatch(a, b, va, vb, *scroll)
+        moved = _mismatch(a, b, va, vb, *scroll)
         if still is None or moved is None or moved > EXPLAINS * still:
+            self._unexplained = still or 0.0
             return (0, 0)
+        self._unexplained = moved
         self._learn_glass(a, b, changed, out_a, out_b, scroll)
         return scroll
 

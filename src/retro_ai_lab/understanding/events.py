@@ -54,6 +54,7 @@ class EventKind(Enum):
     DOWN = "down"  # ... or down
     PRESS = "press"  # a button was held this step; variable_id is the button's name (T-874)
     REPEAT = "repeat"  # ... and was held the step before as well
+    NEW_GROUND = "new_ground"  # a step of new ground, measured off the screen (T-993)
 
     @property
     def label(self) -> str:

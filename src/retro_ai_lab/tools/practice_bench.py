@@ -52,6 +52,7 @@ MOST_KINDS = 30
 FLOOR_TARGET = 95  # the floor either side read as the game's level has it (T-989)
 CAMERA_TARGET = 90  # the camera's move between two looks measured right (T-992)
 MOST_CAMERA = 32  # further than this between two looks is a cut to another place
+GROUND_TARGET = 90  # goes whose counted ground is the game's own furthest, to a step (T-993)
 
 
 @dataclass
@@ -77,6 +78,10 @@ class Report:
     camera_still: int = 0
     camera_still_right: int = 0
     camera_cuts: int = 0  # the game put the camera somewhere else (a life lost)
+    # The new ground the watch counted, against how far the game says it got (T-993).
+    ground_steps: int = 0  # steps of new ground counted over the run
+    ground_goes: int = 0  # goes in which the watch looked at the screen
+    ground_right: int = 0  # ... and its furthest to the right was the game's, to a step
     # Deaths, by the game's account, and what the watch made of them.
     falls: int = 0
     walkers: int = 0
@@ -127,6 +132,15 @@ class Report:
             )
         else:
             out.append("Camera: not followed (the AI never looked at the screen twice in a go).")
+        if self.ground_goes:
+            out.append(
+                f"Ground: {self.ground_steps:,} steps of new ground counted for pay; the "
+                f"furthest it counted to the right was the game's own, to within a step, in "
+                f"{_share(self.ground_right, self.ground_goes)}% of the {self.ground_goes} goes "
+                f"(target {GROUND_TARGET}%)."
+            )
+        else:
+            out.append("Ground: none counted (the AI never looked at the screen).")
         explained = (
             f"{_share(self.fell + self.blamed, self.deaths)}% explained"
             if self.deaths
@@ -244,6 +258,8 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
         furthest, lost, level = 0, 0, game.state.level
         before = game.state
         camera: int | None = None  # where the game's camera was at the go's last look
+        began: int | None = None  # where the player was at the go's first look
+        got, counted, steps = 0, 0, 0  # furthest at a look: the game's, the watch's; its steps
         while training.episodes == go:
             training.step()
             now = game.state
@@ -262,12 +278,22 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
                 if camera is not None:
                     _count_camera(report, now.scroll - camera, watch.tracker.scroll)
                 camera = now.scroll
+                if began is None:
+                    began = now.x
+                got = max(got, now.x - began)
+                counted = max(counted, watch.ground.reach[0])
+                steps = max(steps, watch.ground.steps)
                 if watch.around is not None:
                     report.around += 1
                     floor = (watch.around.floor_right, watch.around.floor_left)
                     report.floor_right += floor == _floor_either_side(game)
         report.furthest.append(furthest)
         report.lost.append(lost)
+        if began is not None and training.watch is not None:
+            report.ground_goes += 1
+            report.ground_steps += steps
+            step = training.watch.ground.unit or toy_hopper.PLAYER_H
+            report.ground_right += abs(counted - got) <= step
         report.finished.append(max(0, game.state.level - level))
     watch = training.watch
     if watch is None:

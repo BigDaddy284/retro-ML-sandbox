@@ -27,7 +27,7 @@ from retro_ai_lab.services.connection import ConnectionService
 from retro_ai_lab.services.discovery import DiscoveryUpdated
 from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.goals import ObjectiveCompleted, ObjectiveSetback
-from retro_ai_lab.services.observer import ButtonsHeld, ObservationService
+from retro_ai_lab.services.observer import ButtonsHeld, GroundCovered, ObservationService
 from retro_ai_lab.services.rewards import GoStarted, RewardEarned
 from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, ScreenWatch
@@ -601,7 +601,6 @@ class EpisodeRunner:
     def _settle(self, state: State, action: int | None, frames: int, source: str) -> bool:
         """After the frames passed: collect the reward, read the next state, learn."""
         self._frames += frames
-        reward, resets = self._signals.take()
         lost = self._signals.take_setbacks()
         scored = self._signals.take_scores()
         if lost:
@@ -623,6 +622,12 @@ class EpisodeRunner:
                 with app_work.timed("step: look"):
                     self._watch.look(self._seen, lost=self._unseen_lost, scored=self._unseen_scored)
                 self._unseen_lost = self._unseen_scored = 0
+                # New ground the look found is paid before this step's reward is
+                # collected, so it lands in the step that got there (T-993).
+                steps = self._watch.take_new_ground()
+                if steps:
+                    self._bus.publish(GroundCovered(self._observation.frame, steps))
+        reward, resets = self._signals.take()
         self._seen = None
         self._last_state = state
         self._last_reward = reward

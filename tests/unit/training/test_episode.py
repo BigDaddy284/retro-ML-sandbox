@@ -670,14 +670,20 @@ def test_the_runner_hands_the_death_watch_the_sight_a_lookahead_before_the_loss(
 class _SpyWatch:
     """Stands in for the ScreenWatch: notes what each look and each telling was given."""
 
-    def __init__(self) -> None:
+    def __init__(self, ground: dict[int, int] | None = None) -> None:
         self.calls: list[tuple[str, int, int]] = []
+        self.ground = ground or {}  # steps of new ground found at the nth look of all
+        self.looks = 0
 
     def begin_go(self) -> None:
         self.calls.append(("go", 0, 0))
 
+    def take_new_ground(self) -> int:
+        return self.ground.get(self.looks, 0)
+
     def look(self, frame: object, *, lost: int = 0, scored: int = 0) -> None:
         assert frame is not None
+        self.looks += 1
         self.calls.append(("look", lost, scored))
 
     def told(self, *, lost: int = 0) -> None:
@@ -742,3 +748,55 @@ def test_a_life_lost_at_the_end_of_a_go_is_told_without_a_screen(
     assert spy.calls[-2:] == [("go", 0, 0), ("look", 0, 0)]
     r.finish()
     assert spy.calls[-1] == ("look", 0, 0)
+
+
+# ------------------------------------------------------------ T-993: new ground
+
+
+def test_new_ground_is_paid_in_the_step_that_found_it(lab: Lab) -> None:
+    """The runner looks first and collects the step's reward after, so what the look
+    found is in that step's reward and not the next one's."""
+    from retro_ai_lab.rewards import GROUND_ID
+    from retro_ai_lab.services import GroundCovered, RewardEarned
+
+    lab.connection.connect("fake", seed=3)
+    teach(lab)
+    spy = _SpyWatch({2: 3, 3: 1})  # looks come on steps 1, 3 and 5
+    r = runner(lab, frames_per_step=4, max_steps=6, watch=spy)
+    earned: list[RewardEarned] = []
+    found: list[GroundCovered] = []
+    lab.bus.subscribe(RewardEarned, earned.append)
+    lab.bus.subscribe(GroundCovered, found.append)
+    r.begin()
+    ground_by_step = []
+    for _ in range(5):
+        earned.clear()
+        assert r.step()
+        # Everything earned while the step ran is the step's reward, ground included.
+        assert r.last_reward == pytest.approx(sum(e.amount for e in earned))
+        ground_by_step.append(sum(e.amount for e in earned if GROUND_ID in e.behaviour_ids))
+    assert ground_by_step == [0.0, 0.0, 3.0, 0.0, 1.0]
+    assert [g.steps for g in found] == [3, 1]
+    profile = lab.rewards.profile
+    assert profile is not None and profile.get(GROUND_ID).value == 1.0
+    r.finish()
+    # The go's log line names it among what paid.
+    paid = {e.id: (e.count, e.amount) for e in r.signals.earned}
+    assert paid[GROUND_ID] == (4, 4.0)
+
+
+def test_a_go_without_a_watch_finds_no_ground(lab: Lab) -> None:
+    from retro_ai_lab.rewards import GROUND_ID
+    from retro_ai_lab.services import GroundCovered
+
+    lab.connection.connect("fake", seed=3)
+    teach(lab)
+    found: list[GroundCovered] = []
+    lab.bus.subscribe(GroundCovered, found.append)
+    r = runner(lab, frames_per_step=4, max_steps=6)
+    r.begin()
+    while r.step():
+        pass
+    r.finish()
+    profile = lab.rewards.profile
+    assert found == [] and profile is not None and GROUND_ID not in profile
