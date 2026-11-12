@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from retro_ai_lab.core import Button, ConfigurationError, EmulatorError
+from retro_ai_lab.core import Button, ConfigurationError, EmulatorError, Frame
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.core.worklog import app_work
 from retro_ai_lab.learning.learner import Learner
@@ -30,6 +30,7 @@ from retro_ai_lab.services.goals import ObjectiveCompleted, ObjectiveSetback
 from retro_ai_lab.services.observer import ButtonsHeld, ObservationService
 from retro_ai_lab.services.rewards import GoStarted, RewardEarned
 from retro_ai_lab.training.deaths import DeathWatch
+from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, ScreenWatch
 from retro_ai_lab.understanding.events import EventKind
 from retro_ai_lab.understanding.knowledge import Knowledge, VariableKind
 
@@ -102,6 +103,8 @@ class EpisodeSignals:
         self._last_reset_ids: tuple[str, ...] = ()
         self._setbacks = 0  # life or health drops since the last take (T-934)
         self._watched: frozenset[str] | None = None  # whose setbacks count (T-940)
+        self._score_ids: frozenset[str] = frozenset()  # whose rises are "score up" (T-976)
+        self._scores = 0
         bus.subscribe(RewardEarned, self._on_reward)
         bus.subscribe(ObjectiveCompleted, self._on_completed)
         bus.subscribe(ObjectiveSetback, self._on_setback)
@@ -146,6 +149,7 @@ class EpisodeSignals:
         self._last_reset = ""
         self._last_reset_ids = ()
         self._setbacks = 0
+        self._scores = 0
         self._listening = True
 
     def stop(self) -> None:
@@ -156,6 +160,16 @@ class EpisodeSignals:
         out = (self._reward, self._resets)
         self._reward = 0.0
         self._resets = 0
+        return out
+
+    def watch_scores(self, ids: frozenset[str]) -> None:
+        """The values whose rises count as the score going up (T-976)."""
+        self._score_ids = ids
+
+    def take_scores(self) -> int:
+        """Score rises since the last call; clears the count (T-976)."""
+        out = self._scores
+        self._scores = 0
         return out
 
     def take_setbacks(self) -> int:
@@ -204,6 +218,12 @@ class EpisodeSignals:
         if not self._listening:
             return
         dropped: set[str] = set()  # watched values that fell this update (T-967)
+        if any(
+            e.kind is EventKind.SCORE_GAIN
+            or (e.kind is EventKind.UP and e.variable_id in self._score_ids)
+            for e in update.events
+        ):
+            self._scores += 1  # T-976
         for event in update.events:
             if event.kind is EventKind.RESET:
                 self._resets += 1
@@ -300,8 +320,12 @@ class EpisodeRunner:
         on_learned: Callable[[Transition], None] | None = None,
         lookahead: int = LOOKAHEAD_STEPS,
         watched_setbacks: Callable[[], frozenset[str]] | None = None,
+        watch: ScreenWatch | None = None,
+        look_every: int = DEFAULT_LOOK_EVERY,
         deaths: DeathWatch | None = None,
     ) -> None:
+        if look_every < 1:
+            raise ConfigurationError("look_every must be at least 1.")
         if frames_per_step < 1:
             raise ConfigurationError("frames_per_step must be at least 1.")
         if lookahead < 1:
@@ -328,6 +352,9 @@ class EpisodeRunner:
         self._watched_setbacks = watched_setbacks  # the values a person penalises (T-964)
         self._deaths = deaths  # what the AI saw before it died (T-968)
         self._watched_last: frozenset[str] | None = None
+        self._watch = watch  # looks at the screen every few steps (T-976)
+        self._look_every = look_every
+        self._seen: Frame | None = None  # the screenshot of the step being settled
         self._restored = False
         self._unsticks = 0
         self._same_state = 0
@@ -438,6 +465,14 @@ class EpisodeRunner:
         return self._signals.last_reset_ids
 
     @property
+    def watch(self) -> ScreenWatch | None:
+        return self._watch
+
+    def set_watch(self, watch: ScreenWatch | None) -> None:
+        """Look at the screen while playing (T-976); None stops looking."""
+        self._watch = watch
+
+    @property
     def unsticks(self) -> int:
         """Times Start was pressed because nothing was changing (a game-over screen)."""
         return self._unsticks
@@ -470,6 +505,11 @@ class EpisodeRunner:
             self._harness.restore()
         self._encoder.refresh()
         self._watch_deaths(self._encoder.knowledge)
+        score = self._encoder.knowledge.best(VariableKind.SCORE)
+        self._signals.watch_scores(frozenset({score.id}) if score is not None else frozenset())
+        self._seen = None
+        if self._watch is not None:
+            self._watch.begin_go()
         # Observe before listening: putting the game back to the checkpoint looks like
         # a restart to the understanding engine, and that must not end the new episode.
         latest = self._observation.observe()
@@ -519,10 +559,12 @@ class EpisodeRunner:
             frames = self._frames_per_step
             reads = self._observation.snapshot_reads()
             pressed = frozenset(held)
+            look = self._watch is not None and self._steps % self._look_every == 0
             with app_work.timed("step: emulator"):
                 result = self._connection.call(
-                    lambda a: a.step(frames, pressed=pressed, reads=reads)
+                    lambda a: a.step(frames, pressed=pressed, reads=reads, screenshot=look)
                 )
+            self._seen = result.frame if look else None
             # The snapshot's readers (change tracker, discovery, rewards) run inside.
             with app_work.timed("step: observe"):
                 self._observation.advance(frames, snapshot=result.reads if reads else None)
@@ -556,6 +598,7 @@ class EpisodeRunner:
         self._frames += frames
         reward, resets = self._signals.take()
         lost = self._signals.take_setbacks()
+        scored = self._signals.take_scores()
         if lost:
             self._setbacks += lost
             if self._first_setback_step is None:
@@ -566,6 +609,10 @@ class EpisodeRunner:
                     self._deaths.death(before)
         if self._deaths is not None:
             self._deaths.step(state)
+        if self._seen is not None and self._watch is not None:
+            with app_work.timed("step: look"):
+                self._watch.look(self._seen, lost=lost, scored=scored)
+            self._seen = None
         self._last_state = state
         self._last_reward = reward
         # Putting the game back to the checkpoint looks like a restart to the engine, and

@@ -22,6 +22,7 @@ from retro_ai_lab.core import ConfigurationError
 
 if TYPE_CHECKING:
     from retro_ai_lab.observation.memory import MemorySnapshot
+    from retro_ai_lab.understanding.player import PlayerFinding
 
 BELIEVED_PER_KIND = 16  # the most guesses of one kind the AI acts on at once (T-850)
 OFFERED_PER_KIND = 1  # guesses of one kind offered as rewards and steps (T-858) ...
@@ -555,6 +556,9 @@ class Knowledge:
         # The button the AI found gets this game going when it stops listening
         # (a title screen, game over); worked out by experiment, never assumed (T-844).
         self.wake_button: str | None = None
+        # Which thing on the screen is the player, found by pressing buttons and
+        # watching what moves (T-974); None until the experiment has answered.
+        self.player: PlayerFinding | None = None
 
     # ------------------------------------------------------------ access
 
@@ -952,6 +956,7 @@ class Knowledge:
                 "variables": [v.to_dict() for v in self._variables.values()],
                 "relationships": [r.to_dict() for r in self._relationships.values()],
                 "wake_button": self.wake_button,
+                "player": self.player.to_dict() if self.player is not None else None,
             }
 
     @classmethod
@@ -971,6 +976,11 @@ class Knowledge:
             if wake is not None and (not isinstance(wake, str) or not wake):
                 raise ConfigurationError("wake_button must be a button name or null.")
             k.wake_button = wake
+            player = data.get("player")
+            if player is not None:
+                from retro_ai_lab.understanding.player import PlayerFinding
+
+                k.player = PlayerFinding.from_dict(player)
         except (KeyError, TypeError, AttributeError) as exc:
             raise ConfigurationError(f"Bad knowledge data: {exc}") from exc
         return k

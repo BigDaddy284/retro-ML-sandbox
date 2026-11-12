@@ -63,6 +63,7 @@ from retro_ai_lab.understanding.moments import (
     Narrowing,
     RestartWatch,
 )
+from retro_ai_lab.understanding.player import PlayerFinding
 from retro_ai_lab.understanding.relationships import RelationshipFinder
 from retro_ai_lab.understanding.variables import (
     RARE_RATE,
@@ -255,7 +256,7 @@ class DiscoveryService:
         self._experiments_allowed = True  # the training service holds them back (T-839)
         # The summary line, remembered with what it was built from (T-907): a review asks
         # for it on the worker and the panel twice more on the GUI thread.
-        self._summary: tuple[tuple[int, int, str | None], str] | None = None
+        self._summary: tuple[tuple[int, int, str | None, PlayerFinding | None], str] | None = None
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
         bus.subscribe(MemoryObserved, self._on_memory)
@@ -603,7 +604,7 @@ class DiscoveryService:
         k = self._knowledge
         if k is None or not self._enabled:
             return "Not watching a game."
-        key = (id(k), k.version, k.wake_button)
+        key = (id(k), k.version, k.wake_button, k.player)
         if self._summary is not None and self._summary[0] == key:
             return self._summary[1]
         beliefs = confident = asks = 0
@@ -623,6 +624,9 @@ class DiscoveryService:
         line = ", ".join(parts) + "."
         if k.wake_button:
             line += f" {k.wake_button.capitalize()} gets the game going."
+        if k.player is not None and k.player.confidence >= Confidence.MEDIUM:  # T-974
+            x, y = k.player.start
+            line += f" It found itself on the screen, near ({x}, {y})."
         self._summary = (key, line)
         return line
 

@@ -77,7 +77,9 @@ from retro_ai_lab.training.insights import (
     suggest_experiments,
 )
 from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
-from retro_ai_lab.understanding.knowledge import Variable, VariableKind
+from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, ScreenWatch
+from retro_ai_lab.understanding.knowledge import Confidence, Variable, VariableKind
+from retro_ai_lab.understanding.player import find_player_in_game
 from retro_ai_lab.understanding.wakeup import find_wake_button, probe_inputs
 
 CHECKPOINT_SLOT = "training"
@@ -247,6 +249,9 @@ class TrainingService:
         self._wake_button: str | None = None
         self._needs_wake = False
         self._probe_listening = False  # ask the game directly at the next go start (T-848)
+        self._player_checked = False  # looked for itself on the screen since Start (T-974)
+        self._watch: ScreenWatch | None = None  # what the AI makes of the screen (T-976)
+        self._can_see = False
         self._last_go: tuple[tuple[str, ...], bool] | None = None
         self._short_resets: list[tuple[str, ...]] = []
         self._early_losses: list[int] = []  # first-loss steps of restored goes (T-961)
@@ -647,6 +652,7 @@ class TrainingService:
         if not self._enabled:  # the link dropped while the checkpoint was being taken
             raise ConfigurationError("The game went away just as training was starting.")
         self._probe_listening = True  # the first go asks whether the game listens (T-848)
+        self._player_checked = False
         self._status = Status.RUNNING
         self._discovery.set_experiments_allowed(False)  # not over the game's link (T-839)
         self._apply_speed()
@@ -945,6 +951,8 @@ class TrainingService:
             else None
         )
         self._wake_button = knowledge.wake_button
+        self._watch = None  # a new game: things on its screen are looked at afresh (T-976)
+        self._can_see = caps.screen_capture
         self._needs_wake = False
         self._probe_listening = False
         self._last_go = None
@@ -1079,6 +1087,11 @@ class TrainingService:
                     woken = self._wake_up_or_wait()
                 if not woken:
                     return None  # training stopped: no go on a game that ignores the AI
+            if self._mode.ai_plays and self._harness is not None and not self._player_checked:
+                self._player_checked = True
+                with self._flat_out():
+                    self._find_player()
+            self._update_watch()
             if self._doomed_suspect is not None and self._mode.ai_plays:
                 suspect, self._doomed_suspect = self._doomed_suspect, None
                 with self._flat_out():
@@ -1173,6 +1186,79 @@ class TrainingService:
         self._apply_speed()
         self._announce("not listening")
         return False
+
+    def _update_watch(self) -> None:
+        """Look at the screen during goes once the AI is fairly sure which thing it is (T-976)."""
+        runner = self._runner
+        if runner is None:
+            return
+        knowledge = self._discovery.knowledge
+        player = knowledge.player if knowledge is not None else None
+        if (
+            player is None
+            or player.confidence < Confidence.MEDIUM
+            or not self._can_see
+            or not self._mode.ai_plays
+        ):
+            runner.set_watch(None)
+            if self._encoder is not None:
+                self._encoder.set_screen(None)
+            return
+        if self._watch is None or self._watch.player != player:
+            self._watch = ScreenWatch(player)
+            log.info(
+                "The AI will look at the screen every %d steps to learn what things are.",
+                DEFAULT_LOOK_EVERY,
+            )
+        runner.set_watch(self._watch)
+        if self._encoder is not None:
+            # The brain reads the nearest moving thing and the nearest thing found to
+            # hurt off the screen, beside the memory values (T-978).
+            told = self._encoder.sees_screen
+            self._encoder.set_screen(self._watch.parts)
+            if not told:
+                log.info("The AI's brain now also sees how far moving things are from it.")
+
+    def _tell_roles(self) -> None:
+        """Log what the AI now makes of things on the screen, when that changed (T-976)."""
+        if self._watch is None:
+            return
+        for role in self._watch.news():
+            log.info("On the screen: %s", role.describe())
+
+    def _find_player(self) -> None:
+        """Which thing on the screen is the AI? Found by pressing buttons (T-974).
+
+        Runs once after Start, from the spot goes start from, in a game that
+        listens; skipped when the game's knowledge already holds a fairly sure
+        answer, and when the emulator can't show the screen from a save state.
+        """
+        knowledge = self._discovery.knowledge
+        if knowledge is None:
+            return
+        if knowledge.player is not None and knowledge.player.confidence >= Confidence.MEDIUM:
+            return
+        harness = self._harness
+        if harness is None or not harness.has_checkpoint or not harness.available():
+            return
+        harness.restore()
+        try:
+            found = find_player_in_game(self._connection, self._playing_buttons())
+        except (ConfigurationError, UnsupportedCapabilityError) as exc:
+            log.info("Could not look for itself on the screen: %s", exc)
+            return
+        if found is None:
+            log.info(
+                "Pressing the buttons moved nothing on the screen; the AI can't see itself yet."
+            )
+            return
+        if found.confidence >= Confidence.MEDIUM:
+            log.info("Found itself on the screen. %s", found.describe())
+        else:  # one button only: kept, and looked for again at the next Start
+            log.info("Not sure yet which thing on the screen is the AI. %s", found.describe())
+        if knowledge.player != found:
+            knowledge.player = found
+            self._discovery.save()
 
     def _wake_up(self) -> bool:
         """The game stopped listening: find the button that gets it going (T-844).
@@ -1278,6 +1364,8 @@ class TrainingService:
                         FINE_STEP,
                         bucket_span(b, self._encoder.bins),
                     )
+            if self._watch is not None:
+                log.info("%s", self._watch.describe())  # T-977
         self._deaths.end_go()
         self._note_listening(result)
         if not self._needs_wake:  # a go the game ignored says nothing about play (T-870)
@@ -1288,6 +1376,7 @@ class TrainingService:
             self._probe_listening = True  # ask the game directly next time (T-848)
         if self._agent is not None:
             self._policies.append((self._episodes, policy_of(self._agent)))
+        self._tell_roles()
         self._bus.publish(EpisodeFinished(record))
         self._maybe_promote()
         if self._connection.is_connected:

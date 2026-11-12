@@ -173,6 +173,15 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-981 | The user restarts the app for every build, and T-979's closer looks lived only in the running app: the saved brain held fine states its table could not reach again until the deaths named the sight afresh. The sights the AI looks closer at are now saved with the brain and put back on connect, dropped by "Start from scratch" and replaced by a loaded brain's | 8 | Done | 2/2 | see PR #227 |
 | T-980 | The user's 11 Nov log ended with an ERROR: a memory handler ran as the app shut down, `ExperimentHarness.available()` saw the connection still up, called the emulator for its capabilities and got `EmulatorDisconnectedError`. `available()` now answers False when the link drops between the check and the call; the connection service records the disconnect as it did | 8 | Done | 1/1 | see PR #226 |
 | T-979 | The user's 11 Nov log (goes 2975–3295): before three deaths in four the AI saw its own x position in its top bucket (128–255), a sight it has at a fifth of its steps, and no moving thing near; the user says the spot could be an empty floor tile, a fall trap. The brain saw the trap and the ground before it as one state. The death watch now names those sights and the state encoder reads them in steps of 8 instead of the bucket's 128 around the death spot, so the AI can learn where to jump | 8 | Done | 4/4 | see PR #225 |
+| T-977 | The user's 11 Nov log (227 goes): the AI found itself (A, left, right; high), but none of about 400 lives lost was put down to a thing, everything touched read "harmless" and kinds ran past 250. Kinds are now the colours a thing is drawn in (every animation frame one kind); things cut out of the ground by their motion get a kind (the game's enemies walk on the ground); the player is found again near where it was last seen and its kind is learned; a score or timer that stays put on the screen is not taken for the player; every ten goes the log sums up the looking | 8 | Done | 7/7 | see PR |
+| T-978 | The AI's brain sees what is around it: how far the nearest moving thing and the nearest thing found to hurt are from the player, across and up or down, in a few coarse answers (far/close before, level, close/far after), added to every state on top of the memory values once the player is found | 8 | Done | 15/15 | see PR |
+| T-976 | The AI looks at the screen while it plays: once it is fairly sure which thing is itself, every other step's screenshot goes to a `ScreenWatch` (tracker, player's track, T-975's rule) with the lives lost and score rises memory reported, and the log says what it now makes of things ("thing 3 is an enemy"); touching sprites drawn as one patch keep their tracks | 8 | Done | 9/9 | see PR |
+| T-975 | The AI works out what each kind of thing is from what touching it does: a life lost soon after a touch makes it something that hurts (an enemy if it moves, a hazard if not), vanishing as the score goes up makes it an item, nothing happening makes it harmless; each with a confidence from how many touches agree | 8 | Done | 12/12 | see PR |
+| T-974 | The AI looks for itself on the real game: at the first go after Start, from the goes' start spot, it runs the T-973 button experiment on the emulator (save state, screenshots), keeps the answer with the game's knowledge and says so in the log and the Discovery summary; a fairly sure answer is not looked for again, a weak one is at the next Start | 8 | Done | 8/8 | see PR |
+| T-973 | The AI works out which thing on the screen is the player: from one start it plays the same frames holding nothing and then each button, follows every thing, and the thing that moves with a button and not without, for the most buttons, is the player (with a confidence); a hero standing on the ground is cut out by its motion | 8 | Done | 10/10 | see PR |
+| T-972 | The AI follows things between frames: it finds how far the screen scrolled, takes that away, and what still moved is a thing moving in the level (which also cuts a walker out of the ground it stands on); each thing gets a track with its velocity in the level. Background colour now counted on packed pixels (a busy screen 50 ms to 4 ms) | 8 | Done | 15/15 | see PR |
+| T-971 | The AI finds the things on a screen by itself: the commonest colour is the backdrop, other patches are things (parts a pixel apart joined, big patches are scenery), and a catalogue sorts them screen after screen into kinds by look, mirrors included, each with a template for the T-970 finder; the drawing UI is dropped from the plan (Boss: autonomous, no drawing) | 8 | Done | 20/20 | see PR |
+| T-970 | Find what a person tagged on the screen (enemy, ground, hazard, item, player): a masked template matcher for pixel art on NumPy, mirrored, partly covered and repeating tiles handled, about 1 ms a tag; Airtest assessed and not taken on (ADR-011, docs/VISION.md) | 8 | Done | 47/47 | see PR |
 | T-968 | The user's 10 Nov log: 636 goes with the points per go climbing from +9 to +50 and the deaths flat at 1.2 a go; nothing said whether the AI could see what killed it. The runner now hands a `DeathWatch` every step's state and, at a loss, the state a lookahead earlier; with the survival line the log names the sights there before most deaths and seldom otherwise, or that nothing stood out | 8 | Done | 4/4 | see PR #223 |
 | T-967 | The user's 23:06 log: "Lives lost are counted on x position at ram[134], Lifes at ram[1882]" and then lives lost per go 0.0 for 465 goes while "Lifes goes down" fired 1.3 times a go. T-964 took every penalised value for a death (a −2 on stepping back included) and counted only the SETBACK events the AI's own life-count guesses raise. A death is now the penalised life count or health value, else the heaviest penalty, and a watched value's DOWN or SETBACK event counts once per update | 8 | Done | 3/3 | see PR #222 |
 | T-966 | The user's 9 Nov log: deaths per go halved (6.3 to 3) while points per go fell from +14 to −30, nearly all of it from one penalty ("x position goes down" −26 to −84 a go): the AI learned to hang back, and nothing in the log said so. The survival line now also gives the points per go of both windows and names the reward that moved most between them | 8 | Done | 2/2 | see PR #221 |
@@ -3080,6 +3089,156 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** four tests; learning and training suites green; full suite 1471 passed, 10 skipped (169.56s); ruff and mypy clean.
 - **Commit:** see PR #225. **PR:** #225.
 - **Completion report:** `fine_bucket` and friends, `StateEncoder.look_closer`, `DeathWatch.standouts`, the service hook and line; the user's next log says where the AI looks closer, and the death-watch lines then name fine buckets ("12 (128..135)"), which says exactly where it dies.
+### T-978 – The AI's brain sees what is around it on the screen
+- **Status:** Done
+- **Phase:** 8 (`docs/VISION.md` step 5; the user's 11 Nov log: the same mistakes go after go, because what the AI saw never reached its decisions)
+- **Objective:** `ScreenWatch.parts()` gives `screen:mover dx/dy` and `screen:hurts dx/dy`, the nearest moving thing and the nearest thing of a kind found to hurt, relative to the player, within 128 px across, as coarse answers from `side()` (dx: -2 far before, -1 close before (48 px), 0 level (8 px), 1, 2; dy: -1, 0, 1); `StateEncoder.set_screen(source)` adds up to `SCREEN_SEATS`=4 of them to every state on top of the memory seats, names them in the state's words and says so in `describe()`; `TrainingService._update_watch` connects them whenever the screen watch is on and logs it once.
+- **Scope:** the nearest mover and the nearest thing that hurts. **Out of scope:** a grid map of solid ground and gaps; memory values confirmed by the screen (T-990).
+- **Decision:** exact pixel distances (the state's doubling bins) were tried first and split the practice racer's table so finely that the first demonstration's "the point-lover drives at least twice as fast" check failed; a few coarse answers keep the table small and the check passes.
+- **Acceptance criteria:**
+  1. A walker coming from the right gives a positive across and a level up/down answer.
+  2. A kind found to hurt gives its own across answer.
+  3. Nothing beyond 128 px, and nothing when the player is not seen.
+  4. The coarse answers are right at each boundary.
+  5. The state holds the screen parts and drops them when the screen is switched off.
+  6. With a MEDIUM player the service connects the screen to the brain; without one it does not.
+  7. The first demonstration still passes.
+- **Expected changes:** `training/vision.py`, `learning/state.py`, `training/service.py`, tests, docs.
+- **Test plan:** 4 vision tests, 10 boundary cases, 2 service checks; full suite.
+- **Results:** 15/15; full suite passes; ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** the brain can now learn "enemy close on the right: jump" from what it sees; the next log shows whether lives lost per go come down.
+### T-977 – Screen recognition that holds up in the user's game
+- **Status:** Done
+- **Phase:** 8 (the user's 11 Nov 18:08–19:20 log, 227 goes of the T-976 build: "Found itself on the screen. The thing at (48, 191) moves when a, left, right is held"; 62 "On the screen" lines, every one "harmless", kind numbers past 250; lives lost per go 1.5–2.2 throughout; the user: "Def looked better in places but also making the same stupid mistakes")
+- **Objective:** `ObjectCatalogue` keys kinds by palette (the colours making at least 4% of a thing's pixels) and offers `classify(crop, mask)` and the frame's `background`; `ObjectTracker` gives movers cut out of the scenery a kind from the colours where they moved (backdrop left out), marks them `cut_out`, keeps their trail, and matches them whatever their kind; `find_player` counts a thing as moved only when both its edges moved, and prefers things that moved on the screen itself over a HUD that only seems to move with the camera; `ScreenWatch` learns the player's kind, finds the player again near where it was last seen, and `describe()`s the looking (looks, share with the player followed, kinds, lives lost and how many soon after a touch, kinds found to hurt and to pick up), logged with the survival line every ten goes.
+- **Scope:** recognition only. **Out of scope:** using what is seen in the AI's state (T-978).
+- **Acceptance criteria:**
+  1. A walker's two animation frames are one kind; different colours are different kinds.
+  2. A walker on the ground, cut out by its motion, has a kind, the same as its kind seen whole.
+  3. A score that stays put on the screen is not taken for the player in a scrolling platformer; on the practice racer the car still is (the score bar growing and the lives row shrinking are not moves).
+  4. The player is found again after its track is lost.
+  5. The summary counts looks, lives lost and lives lost soon after a touch, and kinds found to hurt.
+- **Expected changes:** `observation/objects.py`, `observation/tracking.py`, `understanding/player.py`, `understanding/roles.py`, `training/vision.py`, `training/service.py`, tests, docs.
+- **Test plan:** 2 object tests, 1 tracking test, 1 player test, 2 vision tests (7 with the HUD check confirmed failing with the filter off); full suite.
+- **Results:** 7/7; full suite 1590 passed, 10 skipped (real emulator); ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** the causes visible in the log are fixed and tested on made-up frames; the next log's "On the screen so far" line says whether lives lost now follow touches in the user's game.
+### T-976 – The AI looks at the screen while it plays and learns what things are
+- **Status:** Done
+- **Phase:** 8 (`docs/VISION.md` §5, step 4 fed from play)
+- **Objective:** `training/vision.py` `ScreenWatch` (tracker, the player's track by kind or at a go's first look by where it was found, a `RoleLearner` fed lives lost and score rises; `news()` for the log); `EpisodeRunner(watch=, look_every=2)` asks the step for a screenshot every other step and hands it with that step's lives lost and score rises to the watch; `EpisodeSignals.watch_scores`/`take_scores` (the best score guess's UP events and any SCORE_GAIN); `TrainingService._update_watch` (only with screenshots, an AI mode and a MEDIUM or better player; announced once) and `_tell_roles` after each go ("On the screen: thing-3 is an enemy (medium, 2 touches)."); the tracker keeps both tracks when two touching sprites are drawn as one patch (`Track.merged`); `RoleLearner` puts a life lost down to the latest touch.
+- **Scope:** feeding and logging. **Out of scope:** keeping kinds and roles with the game across sessions; the map of what is around the player in the AI's state (next).
+- **Acceptance criteria:**
+  1. The hero is picked out at a go's first look near where it was found, and not when nothing is near.
+  2. A thing touched before a life is lost, twice, hurts (MEDIUM); one that vanishes as the score rises, twice, is an item.
+  3. `news()` tells each change once.
+  4. Two touching sprites keep their two tracks.
+  5. Score rises are counted once per update, only for the score's value.
+  6. With a MEDIUM player the runner looks every other step and the log says so; without one it does not look.
+- **Expected changes:** `training/vision.py`, `training/episode.py`, `training/service.py`, `observation/tracking.py`, `understanding/roles.py`, tests, docs.
+- **Test plan:** `tests/unit/training/test_vision.py` (6), one tracking test, two service tests; full suite.
+- **Results:** 9/9; full suite 1584 passed, 10 skipped (real emulator); ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** on a game where the AI has found itself, it now learns what things are while it plays and says so in the log. Cost: a screenshot and about 15 ms of looking every other step. Known limits: kinds and roles last as long as the app runs; a player cut out of the ground (no kind) is followed from the go's first look only while its track holds.
+### T-975 – What each kind of thing is, from what touching it does
+- **Status:** Done
+- **Phase:** 8 (`docs/VISION.md` §5, step 4)
+- **Objective:** `understanding/roles.py`: `RoleLearner.observe(frame, tracks, player, happenings)` counts per kind the player's touches (boxes within 2 pixels; a long touch once), puts a `LIFE_LOST` within `soon` frames down to the oldest waiting touch (one touch per life), a `SCORE_UP` to a touched thing that has vanished, and lets the rest expire as harmless; notes kinds that move on their own. `roles()` gives `Role(kind, tag, confidence, touches)`: ENEMY or HAZARD when at least half the touches hurt (moving or not), ITEM when at least half were collected, OTHER otherwise; confidence LOW for 1 agreeing touch, MEDIUM 2, HIGH 4.
+- **Scope:** the evidence and the decision. **Out of scope:** feeding it from the training loop (screens during play, the player's track, the memory events): the next task.
+- **Acceptance criteria:**
+  1. A moving kind that costs a life twice is an enemy (MEDIUM); a still one four times a hazard (HIGH).
+  2. A kind that vanishes as the score goes up twice is an item; score with the thing still there is not.
+  3. Touches with nothing after are harmless; one unlucky touch among three harmless ones is not a hazard; a life lost after `soon` frames is not put down to the touch.
+  4. A long touch counts once; one life is put down to one touch.
+  5. Untouched kinds, kindless tracks and no player give no roles; bad settings are refused.
+- **Expected changes:** `src/retro_ai_lab/understanding/roles.py`, `tests/unit/understanding/test_roles.py`, docs.
+- **Test plan:** `tests/unit/understanding/test_roles.py` (12 tests); full suite.
+- **Results:** 12/12; full suite 1575 passed, 10 skipped (real emulator); ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** the decision rule is in place and tested on made-up tracks; it starts learning on a real game once the training loop hands it screens, the player's track and the memory events.
+### T-974 – The AI looks for itself on the real game
+- **Status:** Done
+- **Phase:** 8 (`docs/VISION.md` §5; Boss: the AI should recognise things itself)
+- **Objective:** `understanding/player.py`: `emulator_run` (a run from a save slot: screenshot, then a bundled `step(every, pressed, screenshot=True)` per screen, pad let go) and `find_player_in_game` (saves `PLAYER_SLOT`, runs `find_player`, loads the slot back; None without screenshots, save states, input or frame advance); `PlayerFinding.to_dict`/`from_dict`; `Knowledge.player`, saved with the knowledge; `TrainingService._find_player` once per Start before the first go in an AI mode, from the checkpoint, unless the knowledge holds a MEDIUM or better answer; the log line ("Found itself on the screen…" or "Not sure yet…"); the Discovery summary names a sure answer.
+- **Scope:** running and remembering. **Out of scope:** using the player's position in the AI's state (T-976), what other kinds do (T-975).
+- **Acceptance criteria:**
+  1. On the practice console over the emulator link, the car is found (left and right) and the game is put back exactly where it was.
+  2. Without screenshots there is no answer; unknown buttons and `every` < 1 are refused.
+  3. A finding round-trips through a dict and through the knowledge; broken saved findings are refused.
+  4. The first go after Start finds the car, keeps it in the knowledge and logs it; the summary says so.
+  5. A MEDIUM answer is not looked for again; with no answer it is looked for once per Start.
+- **Expected changes:** `understanding/player.py`, `understanding/knowledge.py`, `training/service.py`, `services/discovery.py`, `tests/unit/understanding/test_player.py`, `tests/unit/training/test_service.py`, docs.
+- **Test plan:** 5 new tests in `test_player.py`, 3 in `test_service.py`; two older service tests adjusted for the new step (the link-loss test gets enough link for the search and part of a go, 400 operations instead of 60, so it still tests a go closed by a lost link; the brain-log test leaves the new lines out of its exact list, as it does go lines); full suite.
+- **Results:** 8/8; full suite 1563 passed, 10 skipped (real emulator); ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** the AI now runs its "which one is me" experiment on the user's game by itself and remembers the answer. On the practice console at its very start the car sits on the start line and only "up" moves that patch, which gives a LOW answer and a retry at the next Start: the confidence rule works as meant.
+### T-973 – The AI works out which thing is the player
+- **Status:** Done
+- **Phase:** 8 (`docs/VISION.md` §5, step 2)
+- **Objective:** `understanding/player.py`: `find_player(run, buttons)` plays from one start holding nothing and then each button (through a `run(held, frames)` callback), follows the things in each run, and returns a `PlayerFinding` (start position, kind when seen whole, buttons that moved it, buttons tried, confidence: one button LOW, two MEDIUM, three or more HIGH), or None when nothing answered.
+- **Scope:** the experiment's logic on pictures. **Out of scope:** running it against the emulator from the training service and remembering the answer with the game's knowledge (the next task), what other kinds do (T-974).
+- **Acceptance criteria:**
+  1. In a scrolling platformer whose camera follows the hero, the hero standing on the ground is found, answering to left, right and jump and not to a button that does nothing (HIGH).
+  2. A walker that walks by itself and a coin that never moves are not taken for the player.
+  3. A game that ignores the buttons gives None; one answering button gives LOW.
+  4. A player seen whole has its catalogue kind.
+  5. On the Toy Racer the car (left, right) is the player, not the track that scrolls when it speeds up.
+  6. No buttons, fewer than two frames and an empty run are a `ConfigurationError`.
+- **Expected changes:** `src/retro_ai_lab/understanding/player.py`, `tests/unit/understanding/test_player.py`, `TASK_TRACKER.md`, `CHANGELOG.md`, `ARCHITECTURE.md`.
+- **Test plan:** `tests/unit/understanding/test_player.py` (10 tests, a made-up scrolling platformer and the Toy Racer); full suite.
+- **Results:** 10/10; full suite 1555 passed, 10 skipped (real emulator); ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** the AI can tell which thing is itself from its own experiment; wiring it to the emulator (save state, held buttons, frames) is next.
+### T-972 – The AI follows things between frames
+- **Status:** Done
+- **Phase:** 8 (`docs/VISION.md` §5, step 1)
+- **Objective:** `observation/tracking.py`: `estimate_scroll` (the camera's move between two frames), `moving_mask` (what changed once the scroll is taken away), `ObjectTracker` (a `Track` per thing: box, kind, velocity in the level, whether it moves, history).
+- **Scope:** scroll, motion, tracks. **Out of scope:** which track is the player (T-973), what kinds do (T-974).
+- **Acceptance criteria:**
+  1. A horizontal scroll of −8..8 pixels on a textured level, and a vertical one, is found; a plain screen reads as no scroll.
+  2. With the scroll taken away, only a walking thing's pixels have moved; a still level has nothing.
+  3. A walker touching the ground is followed with its level velocity although the camera scrolls; a coin sliding past with the camera stands still in the level; two walkers keep their own tracks and share a kind.
+  4. A one-frame flicker keeps the track; longer than `max_missing` drops it; `reset` forgets tracks and keeps kinds; a frame of another size starts over; bad settings are a `ConfigurationError`.
+  5. A tracker update on a 256x240 frame costs under 100 ms (run now and then, not every frame).
+- **Expected changes:** `src/retro_ai_lab/observation/tracking.py`, `src/retro_ai_lab/observation/objects.py` (faster background colour), `tests/unit/observation/test_tracking.py`, `TASK_TRACKER.md`, `CHANGELOG.md`, `ARCHITECTURE.md`.
+- **Test plan:** `tests/unit/observation/test_tracking.py` (15 tests, a hypothesis property over camera positions and scrolls); observation suite; full suite.
+- **Results:** 15/15; observation suite 218 passed; full suite 1545 passed, 10 skipped (real emulator); ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** tracks with level velocities are what T-973 needs to tell the player (moves with the buttons) from the rest, and T-974 to tell enemies (move on their own) from items and scenery.
+### T-971 – The AI finds the things on a screen by itself
+- **Status:** Done
+- **Phase:** 8 (Boss, 10 Nov: "i dont want to draw anything, i want the AI to recognise it … This whole project was meant to be autonomous")
+- **Objective:** `observation/objects.py`: `background_colour`, `find_objects` (things and scenery on one frame), `ObjectCatalogue` (kinds by look across frames, mirrored copies one kind, a template per kind).
+- **Scope:** finding and grouping. **Out of scope:** motion and scrolling (T-972), which kind is the player (T-973), what kinds do (T-974); see `docs/VISION.md` §5.
+- **Acceptance criteria:**
+  1. Each thing on a plain backdrop is found with the box round its own pixels, wherever it is; nothing on an empty screen.
+  2. Parts one pixel apart are one thing, parts three apart are two; specks under `min_pixels` are ignored; patches over `max_size` are scenery and are not catalogued.
+  3. Copies and mirrored copies are one kind; kinds are named in the order first seen and count sightings and screens; a kind's template is found again by `SpriteFinder`.
+  4. The catalogue stops at `most` kinds and counts what it dropped; bad settings and an unknown kind are a `ConfigurationError`.
+  5. The Toy Racer's car is found unaided; a busy 256x240 screen takes under 50 ms.
+- **Expected changes:** `src/retro_ai_lab/observation/objects.py`, `tests/unit/observation/test_objects.py`, `docs/VISION.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `tests/unit/observation/test_objects.py` (20 tests including a hypothesis property over every position); observation suite; full suite.
+- **Results:** 20/20; observation suite 203 passed; full suite 1530 passed, 10 skipped (real emulator); ruff and mypy clean.
+- **Commit:** see PR. **PR:** #224.
+- **Completion report:** the AI can now list the things on a screen and recognise the same kind again with nobody pointing. On a single still screen a sprite touching the ground merges into it; T-972 uses motion to separate them.
+### T-970 – Find what a person tagged on the screen
+- **Status:** Done
+- **Phase:** 8 (Boss asked whether Airtest's image recognition could let the AI recognise enemies and tag them, and its surroundings in general; see `docs/VISION.md`)
+- **Objective:** `observation/sprites.py`: `SpriteTemplate.from_frame` cuts a tagged box out of a frame with its background colour see-through; `SpriteFinder.find` returns every copy on a later frame as `SpriteMatch` (name, tag, box, score, mirrored).
+- **Scope:** the template, the tags, the finder, JSON round trip. **Out of scope:** storing tags per game, the UI to tag, feeding what is seen to the AI (T-971 to T-976 in `docs/VISION.md`).
+- **Acceptance criteria:**
+  1. A sprite tagged against one background is found in front of another, wherever it is put, facing either way (mirrors can be turned off).
+  2. A slightly different palette matches within the tolerance; a partly covered sprite scores below 1 and `min_score` decides.
+  3. One hit per thing: shifted copies and repeating tiles collapse; two enemies overlapping by a quarter and adjacent ground tiles are all kept.
+  4. Bad boxes, names, tags, settings, channels and saved dicts are a `ConfigurationError`; the frame is not changed.
+  5. A Toy Racer obstacle tagged on one frame is followed down the screen.
+  6. Four tags on a 256x240 colour frame with five enemies take under 30 ms (measured 2.5 ms).
+- **Expected changes:** `src/retro_ai_lab/observation/sprites.py`, `src/retro_ai_lab/observation/__init__.py`, `tests/unit/observation/test_sprites.py`, `docs/VISION.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`, `CHANGELOG.md`.
+- **Test plan:** `tests/unit/observation/test_sprites.py`: template masks, explicit background, crop bounds, names, tags, inconsistent fields, dict round trip and broken dicts; finding several copies, none, see-through backgrounds, mirrored, edges, tolerance, partial cover, collapse, overlap, several tags, stable order, too-big template, channel mismatch, settings, frame untouched, a hypothesis property over every position and facing, ground tiles, Toy Racer, cost; full suite.
+- **Results:** 47 tests in `test_sprites.py`, all passing; full suite passed (exit 0, no failures); ruff and mypy clean.
+- **Commit:** see PR. **PR:** see PR.
+- **Completion report:** the finder works on its own; nothing in the app uses it yet. Airtest was installed in a scratch venv and measured: 418 MB over 39 packages with `numpy<2.0` and OpenCV ≤ 4.6 pinned, and its matcher missed a mirrored enemy, so ADR-011 keeps it out.
 ### T-968 – The log says what the AI saw before its deaths
 - **Status:** Done
 - **Phase:** 8 (the user's 10 Nov 12:15 log, 636 goes of the T-967 build: the deaths counted match "Lifes goes down" in every go; points per go from +9 to +40..+58, forward steps 250 to 340 a go, retreats 13, score confirmed 3 times a go; deaths 1.2 a go throughout, the first at step 250 to 340. Whether the AI can see what kills it decides what to fix next, and nothing in the log said)

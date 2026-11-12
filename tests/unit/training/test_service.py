@@ -652,7 +652,8 @@ def test_switching_mode_mid_go_closes_it_and_carries_on(lab: Lab) -> None:
 
 
 def test_link_loss_closes_the_go_and_reconnect_starts_afresh(lab: Lab) -> None:
-    lab.connect(drop_after_ops=60)
+    # Enough link for the look for itself on the screen (T-974) and part of a go.
+    lab.connect(drop_after_ops=400)
     t = lab.training
     agent = t.agent
     t.start()
@@ -760,7 +761,9 @@ def test_the_log_says_whether_the_saved_brain_was_picked_up(
     messages = [
         (r.levelname, r.getMessage())
         for r in caplog.records
-        if not r.getMessage().startswith(("Go ", "The brain after"))
+        if not r.getMessage().startswith(
+            ("Go ", "The brain after", "Found itself", "Not sure yet which thing")
+        )
     ]
     assert messages == [
         ("INFO", "No saved brain for this game yet: the AI starts with a new one."),
@@ -1866,6 +1869,104 @@ def test_deaths_are_counted_on_the_value_your_reward_penalises(
     assert best is not None and t.episode.signals.watched == frozenset({best.id})
     assert caplog.text.count("Lives lost are counted on") == 1
     assert "the AI's best life count and health guesses" in caplog.text
+    t.stop()
+
+
+# ------------------------------------------------------------ T-974: it finds itself on the screen
+
+
+def test_the_first_go_finds_the_ai_on_the_screen(
+    lab: Lab, caplog: pytest.LogCaptureFixture
+) -> None:
+    k = lab.connect()
+    for _ in range(8):  # off the start line, which is drawn through the car
+        lab.adapter().game.step(["up"])
+    lab.observation.observe()
+    t = lab.training
+    caplog.set_level(logging.INFO)
+    t.start(Mode.INDEPENDENT)
+    assert t.step()
+    assert k.player is not None
+    assert {"left", "right"} <= k.player.buttons
+    assert "Found itself on the screen" in caplog.text
+    assert "It found itself on the screen" in lab.discovery.summary()
+    t.stop()
+
+
+def test_a_sure_answer_is_not_looked_for_again(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    import retro_ai_lab.training.service as module
+    from retro_ai_lab.understanding.knowledge import Confidence
+    from retro_ai_lab.understanding.player import PlayerFinding
+
+    k = lab.connect()
+    k.player = PlayerFinding(None, (30, 45), frozenset({"left", "right"}), 2, Confidence.MEDIUM)
+    calls: list[int] = []
+    monkeypatch.setattr(module, "find_player_in_game", lambda *a, **kw: calls.append(1))
+    t = lab.training
+    t.start(Mode.INDEPENDENT)
+    assert t.step()
+    assert calls == []
+    t.stop()
+
+
+def test_a_weak_answer_is_looked_for_once_per_start(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import retro_ai_lab.training.service as module
+
+    lab.connect()
+    calls: list[int] = []
+    monkeypatch.setattr(module, "find_player_in_game", lambda *a, **kw: calls.append(1))
+    t = lab.training
+    t.start(Mode.INDEPENDENT)
+    for _ in range(30):
+        t.step()
+    t.stop()
+    assert calls == [1]  # nothing found: not asked again until the next Start
+    t.start(Mode.INDEPENDENT)
+    t.step()
+    t.stop()
+    assert calls == [1, 1]
+
+
+# ------------------------------------------------ T-976: it looks at the screen while it plays
+
+
+def test_a_sure_player_makes_the_ai_look_at_the_screen_while_it_plays(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import retro_ai_lab.training.service as module
+    from retro_ai_lab.understanding.knowledge import Confidence
+    from retro_ai_lab.understanding.player import PlayerFinding
+
+    k = lab.connect()
+    k.player = PlayerFinding(None, (31, 45), frozenset({"left", "right"}), 2, Confidence.MEDIUM)
+    monkeypatch.setattr(module, "find_player_in_game", lambda *a, **kw: None)
+    caplog.set_level(logging.INFO)
+    t = lab.training
+    t.start(Mode.INDEPENDENT)
+    for _ in range(6):
+        t.step()
+    runner = t.episode
+    assert runner is not None and runner.watch is not None
+    assert runner.watch.looks == 3  # every other step
+    assert "look at the screen every 2 steps" in caplog.text
+    # T-978: what it sees goes into the brain's state.
+    assert t.encoder is not None and t.encoder.sees_screen
+    assert "brain now also sees how far moving things are" in caplog.text
+    t.stop()
+
+
+def test_no_sure_player_means_no_looking(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    import retro_ai_lab.training.service as module
+
+    lab.connect()
+    monkeypatch.setattr(module, "find_player_in_game", lambda *a, **kw: None)
+    t = lab.training
+    t.start(Mode.INDEPENDENT)
+    t.step()
+    assert t.episode is not None and t.episode.watch is None
+    assert t.encoder is not None and not t.encoder.sees_screen
     t.stop()
 
 

@@ -43,8 +43,8 @@ src/retro_ai_lab/
     bizhawk/       adapter, line protocol, hello description, PNG decoding,
                    BizHawkSimulator, retro_ai_lab.lua (EmuHawk)
     mgba/          MgbaAdapter (the BizHawk adapter under mGBA's name), retro_ai_lab.lua (mGBA)
-  observation/     frames, memory snapshots, diffs, input log
-  understanding/   knowledge, variables, events, relations, confidence (a reset needs two values back at their start together, one of them at least MEDIUM: T-838; and at least half of all the values that have moved: T-846)
+  observation/     frames, memory snapshots, diffs, input log, tagged sprites on the screen (T-970), things found unaided and sorted into kinds (T-971), followed between frames with the scroll taken away (T-972)
+  understanding/   knowledge, variables, events, relations, confidence, which thing on screen is the player (T-973) (a reset needs two values back at their start together, one of them at least MEDIUM: T-838; and at least half of all the values that have moved: T-846)
   rewards/         reward profile, personalities, suggestions, exploitation, goals
   learning/        action space, state encoder, Q-table, DQN (NumPy), skills, greedy player
   training/        episode runner, training service, brain, curve, insights, research (step log)
@@ -340,6 +340,7 @@ Status: **Accepted** (in force), **Proposed** (needs user sign-off before work d
 | ADR-008 | NumPy is a runtime dependency from Phase 2 (screen diffs) onwards | Accepted | Pixel work in pure Python is too slow at real console resolutions; PyTorch (Phase 5) depends on NumPy anyway, so this adds nothing new to the final package. |
 | ADR-009 | Phase 7 neural learners (DQN) are implemented on NumPy behind a `Learner` interface; PyTorch is a later, optional backend | Accepted | The states here are a few dozen binned numbers, which a two-layer network in NumPy trains in real time. PyTorch adds ~200 MB to the Windows build (and gigabytes with CUDA on Linux), which is a lot for a children's app and for CI; the `Learner` contract (T-701) makes a PyTorch learner a drop-in later without touching the training service, the brain store or the panels. Overturn by adding `torch` as an optional extra and registering a learner. |
 | ADR-010 | The second real adapter targets mGBA (Lua scripting with sockets, 0.10+) rather than VBA-M; Game Boy family games are reachable today through BizHawk's cores; VBA-M is revisited when its Lua engine ships in a release; see §6 | Accepted (T-808 spike; script T-810; adapter T-811; the real-machine checks of §6.4 are pending on the user's PC) | The released VBA-M (v2.2.3) has no scripting or remote-control interface: its only external route is a GDB stub (SDL port, GBA only) that reads memory but can't press buttons, step frames or take save states. VBA-M's unreleased Lua engine has no socket library, no screenshot and no range reads. mGBA's scripting API has everything the bridge protocol needs, one call each. |
+| ADR-011 | Screen recognition of tagged things (enemies, ground, items) is a masked template matcher on NumPy (`observation/sprites.py`), not the Airtest library or OpenCV; see `docs/VISION.md` | Accepted (T-970) | Airtest is a phone/desktop UI-automation framework: 418 MB over 39 packages, pins `numpy<2.0` (the app runs on NumPy 2) and OpenCV ≤ 4.6, and its unmasked matcher missed a mirrored sprite. Pixel-art sprites are never scaled, so a masked match with mirrors does the job at the same ~1 ms a tag. `opencv-python-headless` stays the route if real computer vision (OCR, learned detectors) is needed later. |
 
 ## 5. BizHawk bridge protocol (ADR-005, T-110)
 

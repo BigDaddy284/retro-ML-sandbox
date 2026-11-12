@@ -38,7 +38,7 @@ chosen ones are still ordered by address, so a tabular key stays stable.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from retro_ai_lab.core import ConfigurationError
@@ -66,6 +66,14 @@ SEEN_WORDS: dict[VariableKind, tuple[str, str]] = {  # how describe() counts eac
     VariableKind.FLAG: ("switch", "switches"),
 }
 DISTANCE_SEP = "~"  # a distance part's id is "<mover id>~<my position's id>"
+SCREEN_PREFIX = "screen:"  # parts the AI reads off the screen, not memory (T-978)
+SCREEN_SEATS = 4  # seats kept for them when the AI looks at the screen
+SCREEN_WORDS = {
+    "screen:mover dx": "nearest moving thing across",
+    "screen:mover dy": "nearest moving thing up/down",
+    "screen:hurts dx": "nearest thing that hurts across",
+    "screen:hurts dy": "nearest thing that hurts up/down",
+}
 FINE_STEP = 8  # values per step where the AI looks closer (T-979)
 FINE_KEY = 1 << 32  # a fine bucket is coarse * FINE_KEY + (value - the bucket's low) // FINE_STEP
 MOST_CLOSER = 8  # sights the encoder looks closer at, at most
@@ -207,7 +215,10 @@ class State:
 
 
 def part_name(vid: str, knowledge: Knowledge | None) -> str:
-    """A state part in words: a variable's display name, or "<mover> from <mine>"."""
+    """A state part in words: a variable's display name, "<mover> from <mine>", or
+    what the AI reads off the screen (T-978)."""
+    if vid.startswith(SCREEN_PREFIX):
+        return SCREEN_WORDS.get(vid, vid[len(SCREEN_PREFIX) :])
     pair = split_distance(vid)
     if pair is not None:
         mover, mine = (part_name(x, knowledge) for x in pair)
@@ -234,8 +245,24 @@ class StateEncoder:
         self._most = most
         self._variables: tuple[Variable, ...] = ()
         self._pairs: tuple[tuple[Variable, Variable], ...] = ()
+        self._screen: Callable[[], tuple[tuple[str, int], ...]] | None = None
         self._closer: dict[str, set[int]] = {}  # part id -> coarse buckets read finely
         self.refresh()
+
+    def set_screen(self, source: Callable[[], tuple[tuple[str, int], ...]] | None) -> None:
+        """Add what the AI reads off the screen to every state (T-978); None stops it.
+
+        ``source`` gives ``(id, bucket)`` parts whose ids start with ``screen:``.
+        At most ``SCREEN_SEATS`` of them are added, on top of the memory seats.
+        """
+        changed = (source is None) != (self._screen is None)
+        self._screen = source
+        if changed:
+            self.refresh()
+
+    @property
+    def sees_screen(self) -> bool:
+        return self._screen is not None
 
     @property
     def knowledge(self) -> Knowledge:
@@ -325,6 +352,8 @@ class StateEncoder:
         if self._closer:
             c = sum(len(bs) for bs in self._closer.values())
             seen += f"; looking closer at {_plural(c, 'sight', 'sights')} where it keeps dying"
+        if self._screen is not None:
+            seen += "; and off the screen, how far the nearest moving thing is"
         return seen
 
     def refresh(self) -> tuple[Variable, ...]:
@@ -364,6 +393,8 @@ class StateEncoder:
                 apart = values[mover.id] - values[mine.id]
                 did = distance_id(mover.id, mine.id)
                 parts.append((did, self._bucket(did, apart, mover.kind)))
+        if self._screen is not None:
+            parts.extend(self._screen()[:SCREEN_SEATS])
         return State(tuple(parts))
 
 
