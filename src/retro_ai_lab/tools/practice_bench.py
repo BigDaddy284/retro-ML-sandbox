@@ -50,6 +50,8 @@ FOLLOWED_TARGET = 95
 EXPLAINED_TARGET = 80
 MOST_KINDS = 30
 FLOOR_TARGET = 95  # the floor either side read as the game's level has it (T-989)
+CAMERA_TARGET = 90  # the camera's move between two looks measured right (T-992)
+MOST_CAMERA = 32  # further than this between two looks is a cut to another place
 
 
 @dataclass
@@ -69,6 +71,12 @@ class Report:
     floor_right: int = 0  # ... and the floor either side was as the game's level has it
     hurts: int = 0
     items: int = 0
+    # The camera's move between two looks of a go, against the game's (T-992).
+    camera_moved: int = 0
+    camera_moved_right: int = 0
+    camera_still: int = 0
+    camera_still_right: int = 0
+    camera_cuts: int = 0  # the game put the camera somewhere else (a life lost)
     # Deaths, by the game's account, and what the watch made of them.
     falls: int = 0
     walkers: int = 0
@@ -109,6 +117,16 @@ class Report:
             out.append(
                 "Eyes: the AI never looked at the screen (it did not find itself in memory)."
             )
+        if self.camera_moved or self.camera_still:
+            out.append(
+                f"Camera: it moved between two looks {self.camera_moved:,} times, measured "
+                f"right in {_share(self.camera_moved_right, self.camera_moved)}% (target "
+                f"{CAMERA_TARGET}%); it stood still {self.camera_still:,} times, read as still "
+                f"in {_share(self.camera_still_right, self.camera_still)}%; {self.camera_cuts} "
+                f"cuts to another place not counted."
+            )
+        else:
+            out.append("Camera: not followed (the AI never looked at the screen twice in a go).")
         explained = (
             f"{_share(self.fell + self.blamed, self.deaths)}% explained"
             if self.deaths
@@ -225,6 +243,7 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
         go = training.episodes
         furthest, lost, level = 0, 0, game.state.level
         before = game.state
+        camera: int | None = None  # where the game's camera was at the go's last look
         while training.episodes == go:
             training.step()
             now = game.state
@@ -240,6 +259,9 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
             if watch is not None and watch.looks != looks:
                 looks = watch.looks
                 report.right += _on_the_player(training, game)
+                if camera is not None:
+                    _count_camera(report, now.scroll - camera, watch.tracker.scroll)
+                camera = now.scroll
                 if watch.around is not None:
                     report.around += 1
                     floor = (watch.around.floor_right, watch.around.floor_left)
@@ -270,6 +292,19 @@ def _on_the_player(training: TrainingService, game: ToyHopper) -> bool:
     y = st.y + toy_hopper.PLAYER_H // 2
     mx, my = left + width // 2, top + height // 2
     return abs(mx - x) <= ON_PLAYER and abs(my - y) <= ON_PLAYER
+
+
+def _count_camera(report: Report, moved: int, measured: tuple[int, int]) -> None:
+    """Set the tracker's measure of the camera's move since the last look against the
+    game's (which only ever moves across)."""
+    if abs(moved) > MOST_CAMERA:
+        report.camera_cuts += 1
+    elif moved:
+        report.camera_moved += 1
+        report.camera_moved_right += measured == (moved, 0)
+    else:
+        report.camera_still += 1
+        report.camera_still_right += measured == (0, 0)
 
 
 def _floor_either_side(game: ToyHopper) -> tuple[int, int]:
@@ -372,6 +407,7 @@ if __name__ == "__main__":  # pragma: no cover - exercised through main() in the
 
 
 __all__ = [
+    "CAMERA_TARGET",
     "DEFAULT_ALGORITHM",
     "DEFAULT_GOES",
     "DEFAULT_PLAY_FRAMES",
