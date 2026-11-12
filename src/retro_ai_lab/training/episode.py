@@ -12,11 +12,17 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from retro_ai_lab.core import Button, ConfigurationError, EmulatorError, Frame
+from retro_ai_lab.core import (
+    Button,
+    ConfigurationError,
+    EmulatorError,
+    Frame,
+    UnsupportedCapabilityError,
+)
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.core.worklog import app_work
 from retro_ai_lab.learning.learner import Learner
@@ -30,7 +36,8 @@ from retro_ai_lab.services.goals import ObjectiveCompleted, ObjectiveSetback
 from retro_ai_lab.services.observer import ButtonsHeld, GroundCovered, ObservationService
 from retro_ai_lab.services.rewards import GoStarted, RewardEarned
 from retro_ai_lab.training.deaths import DeathWatch
-from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, ScreenWatch
+from retro_ai_lab.training.moments import Moment, Moments
+from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, Mark, ScreenWatch
 from retro_ai_lab.understanding.events import EventKind
 from retro_ai_lab.understanding.knowledge import Knowledge, VariableKind
 
@@ -323,6 +330,7 @@ class EpisodeRunner:
         watch: ScreenWatch | None = None,
         look_every: int = DEFAULT_LOOK_EVERY,
         deaths: DeathWatch | None = None,
+        moments: Moments | None = None,
     ) -> None:
         if look_every < 1:
             raise ConfigurationError("look_every must be at least 1.")
@@ -358,6 +366,11 @@ class EpisodeRunner:
         # Lives lost and score rises on steps without a look, kept for the next look (T-988).
         self._unseen_lost = 0
         self._unseen_scored = 0
+        # Saved moments of the go and what it did since each, to go back to (T-1004).
+        self._moments = moments
+        self._forced: deque[int] = deque()  # moves to play next without asking the learner
+        self._times_back = 0
+        self._cannot_save = False
         self._restored = False
         self._unsticks = 0
         self._same_state = 0
@@ -476,6 +489,16 @@ class EpisodeRunner:
         self._watch = watch
 
     @property
+    def moments(self) -> Moments | None:
+        """The saved moments this go keeps, if it keeps any (T-1004)."""
+        return self._moments
+
+    @property
+    def times_back(self) -> int:
+        """How often this go was put back to one of its saved moments."""
+        return self._times_back
+
+    @property
     def unsticks(self) -> int:
         """Times Start was pressed because nothing was changing (a game-over screen)."""
         return self._unsticks
@@ -501,6 +524,10 @@ class EpisodeRunner:
         self._first_setback_step = None
         self._actions_seen = set()
         self._pending.clear()
+        self._forced.clear()
+        self._times_back = 0
+        if self._moments is not None:
+            self._moments.forget()  # a new go is a new story
         self._buttons = {b.name: b for b in self._connection.call(lambda a: a.buttons())}
         self._restored = restore and self._harness is not None and self._harness.has_checkpoint
         if self._restored:
@@ -549,9 +576,15 @@ class EpisodeRunner:
             action = None
             self._unsticks += 1
             self._same_state = 0
+            self._forced.clear()
         else:
-            with app_work.timed("step: choose"):
-                action = self._agent.choose(state)
+            if not self._keep_moment():
+                return False
+            if self._forced:
+                action = self._forced.popleft()  # a way worked out for it (T-1004)
+            else:
+                with app_work.timed("step: choose"):
+                    action = self._agent.choose(state)
             names = self._agent.space.buttons_for(action)
         held = [self._buttons[n] for n in names]
         self._last_buttons = frozenset(names)
@@ -577,7 +610,80 @@ class EpisodeRunner:
             self._ended_by = "disconnected"
             self._signals.stop()
             return False
+        if self._moments is not None:
+            self._moments.did(action)  # an unstick press is a hole: it forgets them
         return self._settle(state, action, self._frames_per_step, "ai")
+
+    def _keep_moment(self) -> bool:
+        """Save the game when a moment is due (T-1004). False if the link dropped.
+
+        Only while a life or health value is watched: without one nothing can be seen
+        to be lost, so there is never a reason to go back.
+        """
+        moments = self._moments
+        if moments is None or self._cannot_save or not moments.due():
+            return True
+        if not self._signals.watched:
+            return True
+        slot = moments.next_slot()
+        try:
+            with app_work.timed("step: save"):
+                self._connection.call(lambda a: a.save_state(slot))
+        except UnsupportedCapabilityError:
+            self._cannot_save = True
+            log.info("This console can't save the game, so the AI cannot go back and retry.")
+            return True
+        except EmulatorError:
+            self._ended_by = "disconnected"
+            self._signals.stop()
+            return False
+        moments.saved(self._watch.mark() if self._watch is not None else None)
+        return True
+
+    def go_back(self, moment: Moment, then: Sequence[int] = ()) -> State:
+        """Put the game back to a saved moment of this go and carry on from there.
+
+        The jump is the app's doing, not the game's: nothing is paid, lost or taken
+        for a restart across it. The steps still waiting for their lookahead are
+        learned as final first, because the story they belonged to ends here. The
+        moves in ``then`` are played next, one a step, through the ordinary step
+        (looked at, paid and learned from) without asking the learner. Returns the
+        state the go is in again.
+        """
+        if self._state is None or self._ended_by is not None:
+            raise ConfigurationError("There is no go running to put back.")
+        moments = self._moments
+        if moments is None or not any(kept is moment for kept in moments.kept):
+            raise ConfigurationError("That is not a saved moment of this go.")
+        size = len(self._agent.space)
+        moves = tuple(then)
+        for move in moves:
+            if isinstance(move, bool) or not isinstance(move, int) or not 0 <= move < size:
+                raise ConfigurationError(f"The controls have no move {move!r}.")
+        self._connection.call(lambda a: a.load_state(moment.slot))
+        self._observation.expect_jump(back=True)  # nobody's event (T-1004)
+        latest = self._observation.observe()
+        snapshot = latest.snapshot if latest is not None else self._observation.latest
+        # Whatever the jump looked like to the reward and goal services is dropped.
+        self._signals.take()
+        self._signals.take_setbacks()
+        self._signals.take_scores()
+        self._flush(self._state, done=True)
+        if snapshot is not None:
+            self._state = self._encoder.encode(snapshot)
+        self._states.add(self._state.key)
+        self._same_state = 0
+        self._seen = None
+        if self._watch is not None:
+            if self._unseen_lost:
+                self._watch.told(lost=self._unseen_lost)  # no look will come for it now
+            if isinstance(moment.mark, Mark):
+                self._watch.back_to(moment.mark)
+        self._unseen_lost = self._unseen_scored = 0
+        moments.went_back(moment)
+        self._forced = deque(moves)
+        self._times_back += 1
+        return self._state
 
     def observe_step(self, buttons: Iterable[str], frames: int) -> bool:
         """Learn from a step someone else drove (the child, via the play clock).
@@ -595,6 +701,9 @@ class EpisodeRunner:
         action = self._agent.space.matches(buttons).index
         self._last_buttons = self._agent.space.buttons_for(action)
         self._last_action = action
+        self._forced.clear()  # somebody else is playing: no list of moves holds (T-1004)
+        if self._moments is not None:
+            self._moments.forget()
         self._bus.publish(ButtonsHeld(self._observation.frame, self._last_buttons, "child"))
         return self._settle(self._state, action, frames, "child")
 
