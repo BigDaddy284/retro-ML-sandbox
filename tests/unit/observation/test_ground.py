@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from retro_ai_lab.core import ConfigurationError
-from retro_ai_lab.observation.ground import LARGEST, MOST_A_LOOK, SMALLEST, Ground
+from retro_ai_lab.observation.ground import LARGEST, MOST_A_LOOK, SMALLEST, Ground, Kept
 
 ME = (80, 200)  # where the camera holds the player
 STILL = (0, 0)
@@ -171,3 +171,62 @@ def test_nonsense_is_refused() -> None:
     for most in (0, -1, 1.5, True):
         with pytest.raises(ConfigurationError):
             Ground(most=most)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------- T-1000
+
+
+def test_put_back_it_pays_only_past_its_furthest() -> None:
+    ground = started()
+    assert [ground.look((16, 0), ME, 16) for _ in range(2)] == [1, 1]
+    kept = ground.keep()
+    assert isinstance(kept, Kept) and ground.place == (32, 0)
+    assert [ground.look((16, 0), ME, 16) for _ in range(4)] == [1, 1, 1, 1]
+    assert ground.place == (96, 0) and ground.steps == 6
+    # The game is put back to the kept moment: the place goes back, what was reached stays.
+    ground.put_back(kept)
+    assert ground.place == (32, 0)
+    assert ground.reach == (96, 0, 0, 0) and ground.steps == 6
+    # The same ground again pays nothing; the first step past the furthest does.
+    assert [ground.look((16, 0), ME, 16) for _ in range(5)] == [0, 0, 0, 0, 1]
+    assert ground.place == (112, 0) and ground.steps == 7
+    # Put back more than once, and to a moment before it had moved at all.
+    ground.put_back(kept)
+    assert ground.place == (32, 0) and ground.steps == 7
+    for bad in (None, (32, 0), "kept"):
+        with pytest.raises(ConfigurationError):
+            ground.put_back(bad)  # type: ignore[arg-type]
+
+
+def test_put_back_on_a_screen_that_does_not_scroll() -> None:
+    """There the place is where the player stands on the screen, from where it was
+    first seen: that comes back too."""
+    ground = Ground()
+    ground.begin()
+    ground.look(STILL, (40, 200), 16)
+    ground.look(STILL, (72, 200), 16)
+    kept = ground.keep()
+    ground.look(STILL, (120, 200), 16)
+    assert ground.place == (80, 0) and ground.steps == 5
+    ground.put_back(kept)
+    assert ground.place == (32, 0) and not ground.scrolls
+    assert ground.look(STILL, (104, 200), 16) == 0  # 64 from where it was first seen
+    assert ground.look(STILL, (136, 200), 16) == 1  # 96: a step past its furthest
+
+
+def test_a_copy_is_its_own() -> None:
+    ground = started()
+    assert [ground.look((16, 0), ME, 16) for _ in range(3)] == [1, 1, 1]
+    other = ground.copy()
+    assert (other.place, other.reach, other.steps) == (ground.place, ground.reach, ground.steps)
+    assert other.unit == 16 and other.scrolls
+    assert [other.look((16, 0), ME, 16) for _ in range(2)] == [1, 1]
+    assert other.steps == 5 and other.place == (80, 0)
+    assert ground.steps == 3 and ground.place == (48, 0) and ground.reach == (48, 0, 0, 0)
+    # And the other way round.
+    assert ground.look((16, 0), ME, 16) == 1
+    assert other.steps == 5
+    # What was kept on the one can be put back on its copy.
+    kept = ground.keep()
+    other.put_back(kept)
+    assert other.place == (64, 0) and other.reach == (80, 0, 0, 0)

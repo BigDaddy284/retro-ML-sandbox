@@ -32,9 +32,10 @@ reward service pays it.
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass
 
-from retro_ai_lab.core import Frame
-from retro_ai_lab.observation.ground import Ground
+from retro_ai_lab.core import ConfigurationError, Frame
+from retro_ai_lab.observation.ground import Ground, Kept
 from retro_ai_lab.observation.objects import ObjectCatalogue
 from retro_ai_lab.observation.signature import Box
 from retro_ai_lab.observation.sprites import SpriteTag
@@ -69,6 +70,15 @@ def side(apart: int, *, near: int | None = NEAR) -> int:
     if near is None or abs(apart) <= near:
         return sign
     return 2 * sign
+
+
+@dataclass(frozen=True, slots=True)
+class Mark:
+    """A moment of a go the watch can be put back to (T-1000): where the ground count
+    stood and where the player was last seen."""
+
+    ground: Kept
+    last_me: tuple[int, int] | None
 
 
 class ScreenWatch:
@@ -205,6 +215,53 @@ class ScreenWatch:
         self._fell_at = None
         self._nothing_under = False
         self._was_seen = False
+
+    def mark(self) -> Mark:
+        """This moment, to be put back to if the game is (T-1000)."""
+        return Mark(self._ground.keep(), self._last_me)
+
+    def back_to(self, mark: Mark) -> None:
+        """The game was put back to the moment ``mark`` was taken (a save loaded).
+
+        The tracker starts afresh, so the jump is not measured as a move of the
+        camera or taken for a cut to another place. What was waiting from the last
+        looks is dropped: a jolt, a life lost (it would be read as a respawn at the
+        start of the go), a fall, touches not yet blamed. The ground is put back:
+        what was reached stays reached. The counts for the summary stay.
+        """
+        if not isinstance(mark, Mark):
+            raise ConfigurationError("Only a moment this watch marked can be gone back to.")
+        self._tracker.reset()
+        self._ground.put_back(mark.ground)
+        self._learner.let_go()
+        self._jolt_at = None
+        self._prior_box = None
+        self._lost_at = None
+        self._was_jolt = False
+        self._around = None
+        self._me = None
+        self._box = None
+        self._last_me = mark.last_me
+        self._before = None
+        self._last_box = None
+        self._fell_at = None
+        self._nothing_under = False
+        self._was_seen = False
+
+    def trial(self, mark: Mark) -> ScreenWatch:
+        """A watch for a try from the moment ``mark`` was taken: the same player, a
+        copy of the ground put back to that moment, and whether the camera can be
+        followed here. Its looks change nothing in this watch, and its
+        :meth:`take_new_ground` is what the try would be paid."""
+        if not isinstance(mark, Mark):
+            raise ConfigurationError("Only a moment this watch marked can be tried from.")
+        other = ScreenWatch(self._player, soon=self._soon)
+        other._my_kind = None  # a kind is a name in this watch's own catalogue
+        other._ground = self._ground.copy()
+        other._ground.put_back(mark.ground)
+        other._last_me = mark.last_me
+        other._measured = deque(self._measured, maxlen=self._measured.maxlen)
+        return other
 
     def look(self, frame: Frame, *, lost: int = 0, scored: int = 0) -> None:
         self._prior_box = self._last_box
@@ -448,4 +505,4 @@ class ScreenWatch:
         return tuple(out)
 
 
-__all__ = ["DEFAULT_LOOK_EVERY", "SOON_LOOKS", "ScreenWatch", "side"]
+__all__ = ["DEFAULT_LOOK_EVERY", "SOON_LOOKS", "Mark", "ScreenWatch", "side"]
