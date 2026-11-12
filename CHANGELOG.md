@@ -5,6 +5,7 @@ All notable changes are recorded here, one entry per completed task. Format loos
 ## [Unreleased]
 
 ### Added
+- T-983: when the AI tries a random move it now holds it for a run of 1 to 8 steps instead of picking a new one every step (four frames), so it finds out what holding a button does; runs start less often, so the share of random steps is unchanged. New "Exploring run" setting in the Research window; 1 is the old behaviour. On a practice corridor whose gaps need jump held four steps, ten of ten seeds find the way across within 300 goes, against four of ten before. Also fixed: the first step of a go was paid as "pressing the same button again" when it matched the last go's last buttons.
 - T-982: when the AI looks closer at a spot, its table starts each fine situation there from what it had learned of the whole stretch, instead of from nothing.
 - T-981: the sights the AI looks closer at (T-979) are saved with its brain and come back when the game connects again, so a restart does not send it back to coarse steps at the spot where it kept dying.
 - T-980: the ERROR at the end of the user's log (a memory handler asking a just-vanished emulator for its capabilities as the app shut down) is gone: the experiment harness answers "not available" when the link drops during the check.

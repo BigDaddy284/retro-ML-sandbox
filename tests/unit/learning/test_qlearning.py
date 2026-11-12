@@ -31,6 +31,10 @@ def test_settings_and_table_validation() -> None:
         dict(rebound=1.5),
         dict(rebound=-0.1),
         dict(explore_steps="many"),
+        dict(explore_run=0),
+        dict(explore_run=2.5),
+        dict(explore_run=101),
+        dict(explore_run="long"),
     ):
         with pytest.raises(ConfigurationError):
             Settings(**bad)  # type: ignore[arg-type]
@@ -258,3 +262,72 @@ def test_a_fine_situation_starts_from_what_the_coarse_one_knew() -> None:
     other = State((("v1", fine_bucket(70, VariableKind.POSITION)), ("v2", 3)))
     assert t.values(other) == (0.0, 0.0)  # bucket 11 was never learned
     assert t.values(State((("v1", 12), ("v2", 5)))) == (0.0, 0.0)  # a coarse unknown: nothing
+
+
+def _streaks(agent: QLearningAgent, state: State, steps: int) -> tuple[int, list[list[int]]]:
+    """Explored steps, and the moves of each unbroken stretch of them."""
+    explored, streaks, running = 0, [], False
+    for _ in range(steps):
+        action = agent.choose(state)
+        decision = agent.last_decision
+        assert decision is not None and decision.action == action
+        if decision.explored:
+            explored += 1
+            if running:
+                streaks[-1].append(action)
+            else:
+                streaks.append([action])
+        running = decision.explored
+    return explored, streaks
+
+
+def test_the_table_learner_explores_in_runs() -> None:
+    """T-983: a random move is held for a run of steps; a run of one is the old exploring."""
+    assert Settings().explore_run == 8 and Settings().to_dict()["explore_run"] == 8
+    assert Settings(explore_run=3.0).explore_run == 3  # a whole number as a float
+    fixed = dict(epsilon=0.3, epsilon_min=0.3, epsilon_decay=1.0, rebound=0.0)
+    # Runs of one: the same draws, in the same order, as before the change.
+    single = QLearningAgent(SPACE, Settings(explore_run=1, **fixed), seed=7)
+    rng, table = Random(7), QTable(2)
+    before = [rng.randrange(2) if rng.random() < 0.3 else table.best(A, rng) for _ in range(300)]
+    assert [single.choose(A) for _ in range(300)] == before
+    assert single.stats().endswith("tries something new 30% of the time.")
+    # Runs of up to eight: the share explored is still 30%, in stretches instead of twitches.
+    agent = QLearningAgent(SPACE, Settings(**fixed), seed=7)
+    agent.table.row(A)[RIGHT] = 1.0  # what looks best is always RIGHT
+    assert agent.stats().endswith(
+        "tries something new 30% of the time, holding each try for up to 8 steps."
+    )
+    steps = 20_000
+    explored, streaks = _streaks(agent, A, steps)
+    assert abs(explored / steps - 0.3) < 0.02
+    assert explored / len(streaks) > 4.0  # a new move every step averaged 1.4
+    held_left = [s for s in streaks if len(s) >= 4 and set(s) == {LEFT}]
+    assert held_left  # LEFT, never the best move here, is held for four steps and more
+    one, _ = _streaks(QLearningAgent(SPACE, Settings(explore_run=1, **fixed), seed=7), A, steps)
+    assert abs(one / steps - 0.3) < 0.02
+    # A go's end, new settings and a reset each drop the run in hand.
+    nothing = {"left": 0, "action": 0}
+    for drop in (
+        lambda a: a.end_episode(),
+        lambda a: a.configure(Settings(**fixed)),
+        lambda a: a.reset(),
+    ):
+        while agent.to_dict()["run"]["left"] == 0:
+            agent.choose(A)
+        drop(agent)
+        assert agent.to_dict()["run"] == nothing
+    # Saved part-way through a run and loaded, it carries on with the same moves.
+    while agent.to_dict()["run"]["left"] < 2:
+        agent.choose(A)
+    data = json.loads(json.dumps(agent.to_dict()))
+    again = QLearningAgent.from_dict(data, space=SPACE)
+    assert [again.choose(A) for _ in range(100)] == [agent.choose(A) for _ in range(100)]
+    # A brain saved before runs existed explores in runs of eight; a bad saved run is refused.
+    del data["settings"]["explore_run"], data["run"]
+    old = QLearningAgent.from_dict(data, space=SPACE)
+    assert old.settings.explore_run == 8 and old.to_dict()["run"] == nothing
+    for bad in ({"left": 8, "action": 0}, {"left": 1, "action": 2}):
+        data["run"] = bad
+        with pytest.raises(ConfigurationError):
+            QLearningAgent.from_dict(data, space=SPACE)

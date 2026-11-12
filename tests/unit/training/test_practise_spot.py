@@ -48,8 +48,11 @@ def test_pin_restarts_every_go_and_every_start_from_the_spot(lab: Lab) -> None:
     t.stop()
     t.unpin_spot()
     assert not t.spot_pinned and lab.changes[-1].reason == "spot forgotten"
-    _play_on(lab)
+    # The child waits a while with nothing held: driving on from wherever the AI's last
+    # step left the car can end the game, and a Start on a finished game restarts it (T-983).
+    lab.play([], 40)
     here = lab.adapter().game.ram
+    assert here != spot and not lab.adapter().game.state.game_over
     t.start()
     t.step()
     assert lab.observation.ring[-2].get("ram") == here  # back to "wherever the game is"

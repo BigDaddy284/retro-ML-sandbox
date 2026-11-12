@@ -384,6 +384,9 @@ class RewardService:
 
     def _on_go_started(self, event: GoStarted) -> None:
         self._best.clear()
+        # A go starts from its checkpoint with nothing held the step before: its first
+        # step is not a repeat of the last go's last buttons (T-983 turned this up).
+        self._held = frozenset()
 
     def _beats_best(self, game_event: GameEvent) -> bool:
         """Remember the value and say whether it is the go's best so far (T-878)."""

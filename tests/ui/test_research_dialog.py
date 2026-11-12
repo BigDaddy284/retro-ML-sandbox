@@ -83,6 +83,15 @@ def test_settings_follow_the_live_ones_and_apply(
     assert dialog.settings_values()["rebound"] == 0.25
     dialog.set_settings_values(rebound=0.0)
     assert dialog.apply_settings() and t.settings.rebound == 0.0
+    # Exploring run is a whole number of steps from 1 to 100 (T-983).
+    assert dialog.settings_values()["explore_run"] == 8
+    dialog.set_settings_values(explore_run=0)
+    assert dialog.settings_values()["explore_run"] == 1
+    dialog.set_settings_values(explore_run=500)
+    assert dialog.settings_values()["explore_run"] == 100
+    dialog.set_settings_values(explore_run=3.4)
+    assert dialog.settings_values()["explore_run"] == 3
+    assert dialog.apply_settings() and t.settings.explore_run == 3
     # Not while training runs.
     t.start()
     assert not dialog.findChild(object, "setting_alpha").isEnabled()  # type: ignore[union-attr]

@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 
 from retro_ai_lab.core import ConfigurationError, UnsupportedCapabilityError
 from retro_ai_lab.learning import Settings
+from retro_ai_lab.learning.exploring import MOST_RUN
 from retro_ai_lab.observation import MemorySnapshot, ScanKind, ValueSearch, parse_number
 from retro_ai_lab.observation.search import Match, typed_digits
 from retro_ai_lab.services import EmulatorConnected, EmulatorDisconnected
@@ -79,6 +80,7 @@ SETTING_FIELDS: tuple[tuple[str, str, str], ...] = (
     ("epsilon_decay", "Exploring decay", "Exploring is multiplied by this after every go."),
     ("explore_steps", "Exploring steps", "Learned steps over which exploring falls to the floor."),
     ("rebound", "Exploring rebound", "Exploring goes back up to this when goes get worse; 0 off."),
+    ("explore_run", "Exploring run", "A random move is held for up to this many steps; 1 is none."),
 )
 TAB_TITLES: tuple[str, ...] = (
     "Learning settings",
@@ -113,7 +115,10 @@ SCAN_BUTTONS: tuple[tuple[str, str, ScanKind], ...] = (
     ("search_changed_button", "Changed", ScanKind.CHANGED),
     ("search_same_button", "Didn't change", ScanKind.UNCHANGED),
 )
-WHOLE_NUMBER_FIELDS: dict[str, tuple[int, int]] = {"explore_steps": (1, 1_000_000)}
+WHOLE_NUMBER_FIELDS: dict[str, tuple[int, int]] = {
+    "explore_steps": (1, 1_000_000),
+    "explore_run": (1, MOST_RUN),
+}
 WHAT_IS_THIS = (
     "For grown-ups and researchers: how the AI learns, what it thinks right now and "
     "every step it took. Changing the settings affects the next goes, not the ones done."
@@ -156,7 +161,7 @@ class ResearchDialog(QDialog):
                 low, high = WHOLE_NUMBER_FIELDS[key]
                 spin.setRange(low, high)
                 spin.setDecimals(0)
-                spin.setSingleStep(100)
+                spin.setSingleStep(100 if high > MOST_RUN else 1)
             else:
                 spin.setRange(0.0, 1.0)
                 spin.setDecimals(3)

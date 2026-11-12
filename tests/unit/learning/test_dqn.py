@@ -86,8 +86,14 @@ def test_conformance_registry_and_validation() -> None:
 
 
 def test_learns_the_chain_and_the_corridor() -> None:
+    # Seed 1 starts this 16-unit network with a single live unit for A and B; it learns
+    # the chain only on the draws it was written for, so this test keeps runs of one
+    # (T-983). test_the_network_learner_explores_in_runs learns the chain in runs.
     agent = DQNLearner(
-        SPACE, Settings(gamma=0.9, epsilon=0.3, epsilon_min=0.3), seed=1, config=QUICK
+        SPACE,
+        Settings(gamma=0.9, epsilon=0.3, epsilon_min=0.3, explore_run=1),
+        seed=1,
+        config=QUICK,
     )
     chain(agent, 400)
     assert agent.greedy(A) == RIGHT and agent.greedy(B) == RIGHT
@@ -298,3 +304,60 @@ def test_the_network_discounts_a_return_by_the_steps_it_spans(
     future = agent._target.forward(agent._features.batch([B])).max(axis=1)[0]
     assert seen[0][:, 1] == pytest.approx(2.0 + 0.9**3 * future)
     assert agent._replay.sample(1)[0].steps == 3
+
+
+def test_the_network_learner_explores_in_runs() -> None:
+    """T-983: the network learner holds a random move for a run, and still learns."""
+    fixed = dict(epsilon=0.3, epsilon_min=0.3, epsilon_decay=1.0, rebound=0.0)
+    agent = DQNLearner(SPACE, Settings(**fixed), seed=4, config=QUICK)
+    assert agent.stats().endswith(
+        "tries something new 30% of the time, holding each try for up to 8 steps."
+    )
+    steps = 6000
+    explored, starts, held = 0, 0, 0
+    running, last = False, -1
+    for _ in range(steps):
+        action = agent.choose(A)
+        decision = agent.last_decision
+        assert decision is not None and decision.action == action
+        if decision.explored:
+            explored += 1
+            starts += not running
+            held += running and action == last
+        running, last = decision.explored, action
+    assert abs(explored / steps - 0.3) < 0.03
+    assert explored / starts > 4.0  # a new move every step averaged 1.4
+    assert held / (explored - starts) > 0.8  # within a stretch the move is mostly the same
+    # A go's end, new settings and a reset each drop the run in hand.
+    nothing = {"left": 0, "action": 0}
+    for drop in (
+        lambda a: a.end_episode(),
+        lambda a: a.configure(Settings(**fixed)),
+        lambda a: a.reset(),
+    ):
+        while agent.to_dict()["run"]["left"] == 0:
+            agent.choose(A)
+        drop(agent)
+        assert agent.to_dict()["run"] == nothing
+    # Saved part-way through a run and loaded, it carries on with the same moves.
+    while agent.to_dict()["run"]["left"] < 2:
+        agent.choose(A)
+    data = json.loads(json.dumps(agent.to_dict()))
+    again = DQNLearner.from_dict(data, space=SPACE)
+    assert [again.choose(A) for _ in range(100)] == [agent.choose(A) for _ in range(100)]
+    del data["settings"]["explore_run"], data["run"]  # a brain saved before runs existed
+    old = DQNLearner.from_dict(data, space=SPACE)
+    assert old.settings.explore_run == 8 and old.to_dict()["run"] == nothing
+    for bad in ({"left": 8, "action": 0}, {"left": 1, "action": 2}):
+        data["run"] = bad
+        with pytest.raises(ConfigurationError):
+            DQNLearner.from_dict(data, space=SPACE)
+    # Exploring in runs of eight (the default), the chain is learned as it was in runs of one.
+    for seed in (0, 2, 3):
+        learner = DQNLearner(
+            SPACE, Settings(gamma=0.9, epsilon=0.3, epsilon_min=0.3), seed=seed, config=QUICK
+        )
+        assert learner.settings.explore_run == 8
+        chain(learner, 400)
+        assert learner.greedy(A) == RIGHT and learner.greedy(B) == RIGHT
+        assert learner.value(B, RIGHT) > learner.value(A, RIGHT) > 0
