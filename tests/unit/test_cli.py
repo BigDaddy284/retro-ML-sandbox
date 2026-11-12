@@ -146,3 +146,73 @@ def test_a_launch_that_fails_is_logged_once_and_raised(  # type: ignore[no-untyp
     # Where the hook does run (from source), it does not write the same thing again.
     sys.excepthook(RuntimeError, caught.value, caught.value.__traceback__)
     assert "Uncaught exception" not in _launch_log.read_text(encoding="utf-8")
+
+
+class _Splash:
+    """A stand-in for the build tool's ``pyi_splash`` module (T-1002)."""
+
+    def __init__(self) -> None:
+        self.did: list[str] = []
+        self.alive = True
+
+    def is_alive(self) -> bool:
+        return self.alive
+
+    def update_text(self, text: str) -> None:
+        self.did.append(text)
+
+    def close(self) -> None:
+        self.did.append("closed")
+        self.alive = False
+
+
+@pytest.fixture
+def _splash(monkeypatch: pytest.MonkeyPatch) -> _Splash:
+    from retro_ai_lab.core import starting
+
+    splash = _Splash()
+    monkeypatch.setattr(starting, "_window", starting._UNKNOWN)
+    monkeypatch.setitem(sys.modules, "pyi_splash", splash)
+    return splash
+
+
+def test_the_launch_says_its_steps_on_the_starting_window(  # type: ignore[no-untyped-def]
+    _launch_log, _splash: _Splash, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import retro_ai_lab.ui.app as ui_app
+    from retro_ai_lab.cli import _default_launch
+
+    seen: list[list[str]] = []
+
+    def opened(argv: Sequence[str], exit_after_ms: int | None = None) -> int:
+        seen.append(list(_splash.did))
+        return 0
+
+    monkeypatch.setattr(ui_app, "run_app", opened)
+    assert _default_launch(()) == 0
+    # Both loading steps were named before the app itself was started; the rest is the app's.
+    assert seen == [["Step 1 of 4: loading the window toolkit", "Step 2 of 4: loading the app"]]
+    text = _launch_log.read_text(encoding="utf-8")
+    places = [text.index(line) for line in ("Loading Qt", "The starting window is showing")]
+    assert places == sorted(places)
+
+
+def test_a_launch_that_fails_closes_the_starting_window_first(  # type: ignore[no-untyped-def]
+    _launch_log, _splash: _Splash, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import retro_ai_lab.ui.app as ui_app
+    from retro_ai_lab.cli import _default_launch
+
+    def broken(argv: Sequence[str], exit_after_ms: int | None = None) -> int:
+        raise RuntimeError("the window never came")
+
+    monkeypatch.setattr(ui_app, "run_app", broken)
+    monkeypatch.setattr(sys, "excepthook", lambda *a: None)
+    with pytest.raises(RuntimeError, match="the window never came"):
+        _default_launch(())
+    assert _splash.did[-1] == "closed" and _splash.did.count("closed") == 1
+    text = _launch_log.read_text(encoding="utf-8")
+    places = [
+        text.index(line) for line in ("The app could not start", "The starting window is closed")
+    ]
+    assert places == sorted(places)

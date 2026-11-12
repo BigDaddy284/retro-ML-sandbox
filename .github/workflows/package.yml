@@ -30,7 +30,7 @@ jobs:
       - name: Build
         run: pyinstaller packaging/retro_ai_lab.spec --noconfirm --distpath dist --workpath build
       - name: Smoke test the built app
-        run: python packaging/smoke_test.py dist/RetroAILab/RetroAILab.exe
+        run: python packaging/smoke_test.py dist/RetroAILab/RetroAILab.exe --starting-window
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:

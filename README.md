@@ -59,6 +59,12 @@ The desktop window opens with the console box at the top. To play on a real
 emulator, follow [docs/BIZHAWK.md](docs/BIZHAWK.md) or
 [docs/MGBA.md](docs/MGBA.md).
 
+The Windows build shows a small "starting" window as soon as it is started and
+closes it when the main window is up. The first start after unzipping a new
+build can take a minute, because Windows reads every new file once; the
+starting window says which of four steps it is on, so wait for it rather than
+starting the app a second time. Later starts are much quicker.
+
 If the app does not appear or closes on its own, every run writes a log at
 `%LOCALAPPDATA%\RetroAILab\logs\retro-ai-lab.log` (paste `%LOCALAPPDATA%\RetroAILab\logs`
 into Explorer's address bar); send that file with your report. The log names
@@ -455,6 +461,8 @@ arrangement is remembered between runs.
 
 Every push to `main` runs the **Package** workflow, which builds `RetroAILab.exe` with PyInstaller, launches it as a smoke test and uploads the folder as the `RetroAILab-windows` artifact (Actions tab → latest Package run → Artifacts). To build locally: `pip install pyinstaller && pyinstaller packaging/retro_ai_lab.spec --noconfirm`.
 
+The build carries a "starting" window (PyInstaller's splash screen, drawn with the build Python's Tcl/Tk before the app's own Python is loaded). Its picture is `packaging/splash.png`; `python packaging/make_splash.py` draws it again. The smoke test is run with `--starting-window`, which fails the build if the built app's log does not say the window was showing and was closed. On a Python without tkinter (some Linux installs) and on macOS the app is built without it.
+
 ## Planned stack
 
 Python 3.11+, PySide6 (Qt) desktop UI, NumPy for screen and memory analysis, PyTorch and Gymnasium for learning, SQLite and JSON for storage. Target platform is Windows; the code is kept cross-platform so it can be developed and tested on Linux CI.
@@ -473,6 +481,8 @@ Retro AI Lab is built on other people's work. Everything taken from another sour
 |---|---|---|
 | LuaSocket DLLs (`emulator/bizhawk/luasocket/x64/socket-windows-5-4.dll`, `-5-1.dll`) | Prebuilt binaries from the [Archipelago](https://github.com/ArchipelagoMW/Archipelago) multiworld project (`data/lua/x64/`), unmodified copies of [LuaSocket](https://github.com/lunarmodules/luasocket) by Diego Nehab | MIT (both); full text in `emulator/bizhawk/luasocket/LICENSE` |
 | `emulator/bizhawk/socket.lua` loader | Written for Retro AI Lab, modelled on Archipelago's `data/lua/socket.lua` (how the DLL is found and `bind`/`connect` are added) | MIT (Archipelago); our file is part of this project |
+| Tcl/Tk libraries and scripts (in the built app only, for the "starting" window) | Copied by PyInstaller from the Python the app is built with ([tcl.tk](https://www.tcl.tk)) | Tcl/Tk licence (BSD-style) |
+| `packaging/splash.png`, the "starting" window's picture | Drawn for Retro AI Lab by `packaging/make_splash.py`; its lettering is set in [Inter](https://rsms.me/inter/) by Rasmus Andersson | Picture: part of this project. Inter: SIL Open Font Licence 1.1 |
 | BizHawk bridge design (Lua script as a TCP server, newline-delimited JSON) | Approach borrowed from Archipelago's `connector_bizhawk_generic.lua`; no code copied | n/a |
 
 **Libraries used (installed with the app)**

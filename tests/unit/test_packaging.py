@@ -86,3 +86,74 @@ def test_spec_and_package_data_ship_the_luasocket_loader() -> None:
     assert "emulator/bizhawk/luasocket" in text
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert '"luasocket/x64/*"' in pyproject
+
+
+def test_the_starting_picture_and_the_spec() -> None:
+    """T-1002: the built app's "starting" window has a picture the build tool takes as it is."""
+    import re
+
+    from PySide6.QtGui import QImage
+
+    picture = ROOT / "packaging" / "splash.png"
+    assert picture.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    image = QImage(str(picture))
+    assert not image.isNull()
+    # No larger than the build tool shows without resizing (which would need Pillow).
+    assert 0 < image.width() <= 760 and 0 < image.height() <= 480
+    # Pure magenta is see-through on Windows.
+    colours = {
+        image.pixel(x, y) & 0xFFFFFF for x in range(image.width()) for y in range(image.height())
+    }
+    assert 0xFF00FF not in colours
+    assert len(colours) > 8  # something is drawn on it
+
+    text = SPEC.read_text(encoding="utf-8")
+    found = re.search(r"TEXT_POS = \((\d+), (\d+)\)", text)
+    assert found is not None
+    x, y = int(found[1]), int(found[2])
+    # The step is written with its lower left corner here: inside the picture, with room.
+    assert 0 < x < image.width() // 4 and image.height() // 2 < y < image.height() - 8
+    # The spec makes the window from the picture, gives it to the program and ships its files.
+    assert 'Splash(\n        os.path.join(SPECPATH, "splash.png")' in text
+    assert "*([splash] if splash is not None else [])" in text
+    assert "*([splash.binaries] if splash is not None else [])" in text
+    # The CI build is told to expect it.
+    assert "RetroAILab.exe --starting-window" in WORKFLOW.read_text(encoding="utf-8")
+
+
+def _smoke():  # type: ignore[no-untyped-def]
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("retro_ai_lab_smoke_test", SMOKE)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_smoke_test_can_expect_the_starting_window(tmp_path: Path) -> None:
+    """T-1002: told to, the smoke test wants the starting window's two lines, each in its place."""
+    smoke = _smoke()
+    plain = "\n".join(smoke.STAGES)
+    whole = "\n".join(smoke.stages(starting_window=True))
+    assert smoke.stages() == smoke.STAGES
+    assert len(smoke.stages(starting_window=True)) == len(smoke.STAGES) + 2
+    log = tmp_path / "retro-ai-lab.log"
+
+    def problem(text: str, *, starting_window: bool) -> str:
+        log.write_text(text, encoding="utf-8")
+        return str(smoke.check_log(tmp_path, starting_window=starting_window))
+
+    assert problem(plain, starting_window=False) == ""
+    assert problem(whole, starting_window=False) == ""
+    assert problem(whole, starting_window=True) == ""
+    # Built without the window: the log never says it was showing.
+    assert "The starting window is showing" in problem(plain, starting_window=True)
+    # Shown but never taken down.
+    never_closed = whole.replace("The starting window is closed\n", "")
+    assert "The starting window is closed" in problem(never_closed, starting_window=True)
+    # Taken down before the main window was up: the line is there, but not in its place.
+    early = never_closed.replace(
+        "Building the main window", "The starting window is closed\nBuilding the main window"
+    )
+    assert "The starting window is closed" in problem(early, starting_window=True)

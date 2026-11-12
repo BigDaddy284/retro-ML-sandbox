@@ -343,6 +343,70 @@ def test_real_entry_point_launches_headless_and_exits_zero(tmp_path: Path) -> No
     # It started in time and nothing crashed: no trace is left behind, or spoken of.
     assert list((tmp_path / "logs").glob("start-*.txt")) == []
     assert "left a trace" not in text
+    # T-1002: run from source there is no "starting" window, and nothing is said of one.
+    assert "starting window" not in text
+
+
+def test_the_real_launch_talks_to_the_starting_window_of_a_built_app(tmp_path: Path) -> None:
+    """T-1002: the whole start, with a stand-in for the build tool's splash module."""
+    told = tmp_path / "told.txt"
+    modules = tmp_path / "modules"
+    modules.mkdir()
+    (modules / "pyi_splash.py").write_text(
+        "import os\n"
+        "_alive = True\n"
+        "def _note(line):\n"
+        "    with open(os.environ['TOLD'], 'a', encoding='utf-8') as out:\n"
+        "        out.write(line + '\\n')\n"
+        "def is_alive():\n"
+        "    return _alive\n"
+        "def update_text(text):\n"
+        "    _note(text)\n"
+        "def close():\n"
+        "    global _alive\n"
+        "    _alive = False\n"
+        "    _note('closed')\n",
+        encoding="utf-8",
+    )
+    data = tmp_path / "data"
+    path = os.pathsep.join(filter(None, [str(modules), os.environ.get("PYTHONPATH", "")]))
+    env = {
+        **os.environ,
+        "QT_QPA_PLATFORM": "offscreen",
+        "RETRO_AI_LAB_DATA_DIR": str(data),
+        "PYTHONPATH": path,
+        "TOLD": str(told),
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "retro_ai_lab", "--exit-after-ms", "200"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert told.read_text(encoding="utf-8").splitlines() == [
+        "Step 1 of 4: loading the window toolkit",
+        "Step 2 of 4: loading the app",
+        "Step 3 of 4: starting the window toolkit",
+        "Step 4 of 4: building the window",
+        "closed",
+    ]
+    text = (data / "logs" / "retro-ai-lab.log").read_text(encoding="utf-8")
+    stages = (
+        "Loading Qt",
+        "The starting window is showing",
+        "Loading the app's own code",
+        "Building the main window",
+        "Main window shown",
+        "The starting window is closed",
+        "Event loop finished",
+    )
+    places = [text.index(stage) for stage in stages]
+    assert places == sorted(places)
+    assert text.count("The starting window is showing") == 1
+    assert text.count("The starting window is closed") == 1
 
 
 # ------------------------------------------------- T-881: one title per panel

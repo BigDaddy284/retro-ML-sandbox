@@ -10,7 +10,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from retro_ai_lab import __version__
-from retro_ai_lab.core import logbook
+from retro_ai_lab.core import logbook, starting
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.main_window import LAYOUT_FILE, MainWindow
 from retro_ai_lab.ui.theme import THEME_FILE, apply_theme, install_watcher
@@ -47,9 +47,11 @@ def run_app(
     delay, which is how the launch smoke test runs the real entry point.
     """
     log.info("Creating the Qt application")  # T-995: each stage named before it begins
+    starting.step(3)  # T-1002: and shown on a built app's "starting" window
     app = create_app(argv)
     log.info("Qt application created (platform %s)", app.platformName())
     log.info("Building the main window")
+    starting.step(4)
     if context is None:
         context = AppContext()
     window = MainWindow(
@@ -59,6 +61,7 @@ def run_app(
     )
     window.show()
     log.info("Main window shown")
+    starting.close()
     logbook.started()
     if before_exec is not None:
         QTimer.singleShot(0, lambda: before_exec(app, window))

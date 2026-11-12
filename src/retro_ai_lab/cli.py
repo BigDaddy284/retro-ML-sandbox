@@ -41,16 +41,18 @@ def _default_launch(argv: Sequence[str]) -> int:
     # Qt is imported lazily so ``--version`` works without loading it.
     # Each stage is logged before it begins (T-995): the last line of a start that
     # stops is then the stage it stopped in, and the watch writes down where.
-    from retro_ai_lab.core import logbook
+    from retro_ai_lab.core import logbook, starting
 
     logbook.setup_logging()
     logbook.watch_start()
     log = logging.getLogger("retro_ai_lab")
     try:
         log.info("Loading Qt")
+        starting.step(1)  # T-1002: a built app's "starting" window says where it is
         import PySide6.QtWidgets  # noqa: F401
 
         log.info("Loading the app's own code")
+        starting.step(2)
         import retro_ai_lab.ui.app as ui_app
 
         log.info("Starting the app")
@@ -58,6 +60,7 @@ def _default_launch(argv: Sequence[str]) -> int:
         return ui_app.run_app(argv, exit_after_ms=args.exit_after_ms)
     except Exception as error:
         logbook.log_failure(error)
+        starting.close()  # so it is not left sitting over the error
         raise
 
 
