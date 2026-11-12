@@ -25,6 +25,7 @@ from retro_ai_lab.services import (
     ObservationService,
 )
 from retro_ai_lab.services.discovery import (
+    AT_LOSS,
     BOUNCES,
     BUSY,
     CLOCK_TOP,
@@ -32,6 +33,7 @@ from retro_ai_lab.services.discovery import (
     PLAYED,
     game_id_for,
 )
+from retro_ai_lab.services.observer import MemoryObserved
 from retro_ai_lab.storage import KnowledgeStore
 from retro_ai_lab.understanding import (
     Confidence,
@@ -1454,3 +1456,65 @@ def test_the_top_of_a_clock_is_doubted_then_dropped(
         now = k.get(other.id)
         assert not now.rejected and not any(e.kind == CLOCK_TOP for e in now.evidence)
     assert k.get(sworn.id).confirmed
+
+
+def test_progress_that_rises_as_a_life_is_lost_is_doubted_then_dropped(
+    discovery: DiscoveryService,
+    connection: ConnectionService,
+    bus: EventBus,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """T-997: on the practice game the mode value (playing, dying, game over) was
+    "progress": 10 points for dying, against 7.5 taken for the life."""
+    connection.connect("fake", seed=5)
+    k = discovery.knowledge
+    assert k is not None
+    sure = [Evidence("test", "Planted.", 6.0)]  # believed, so the detector watches them
+    lives = k.propose("ram", 0, kind=VariableKind.LIVES, name="Lives", evidence=sure)
+    mode = k.propose("ram", 1, kind=VariableKind.PROGRESS, name="Mode", evidence=sure)
+    level = k.propose("ram", 2, kind=VariableKind.PROGRESS, name="Level", evidence=sure)
+    sworn = k.propose("ram", 3, kind=VariableKind.PROGRESS, name="Sworn", evidence=sure)
+    k.confirm(sworn.id)
+    frame = 0
+
+    def see(*ram: int) -> None:
+        nonlocal frame
+        frame += 20
+        bus.publish(MemoryObserved(MemorySnapshot(frame, {"ram": bytes(ram)}), None))
+
+    left = 9
+    see(left, 0, 0, 0)
+    for death in range(6):
+        for step in range(30):
+            # Playing. Every other life, early in it, the level goes up: ten seconds
+            # before the next life goes.
+            see(left, 0, (death + (step >= 3)) // 2, 0)
+        level_now = (death + 1) // 2
+        see(left, 1, level_now, 1)  # the dying pause begins: mode (and "Sworn") go up
+        left -= 1
+        see(left, 0, level_now, 0)  # the life goes, play goes on
+    assert discovery.aftermath.counts(mode.id) == (6, 6, 6, 6)
+    assert discovery.aftermath.counts(level.id)[:2] == (3, 0)
+    seen: list[DiscoveryUpdated] = []
+    bus.subscribe(DiscoveryUpdated, seen.append)
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
+    changed = discovery.doubt_bouncing(frame=7)
+    assert [v.id for v in changed] == [mode.id] and not k.get(mode.id).rejected
+    last = k.get(mode.id).evidence[-1]
+    assert last.kind == AT_LOSS and last.frame == 7
+    assert "went up 6 times, 6 of them as a life was lost" in last.detail.lower()
+    assert "what goes up when you lose is not progress" in last.detail
+    # The person's word is kept, and asked about.
+    (question,) = discovery.questions
+    assert question.var_id == sworn.id and question.reason == AT_LOSS
+    assert 'You confirmed "Sworn", but it went up 6 times, 6 of them as a life' in question.text
+    changed = discovery.doubt_bouncing()
+    assert [v.id for v in changed] == [mode.id] and k.get(mode.id).rejected
+    assert discovery.doubt_bouncing() == ()
+    for other in (level, lives, sworn):
+        assert not k.get(other.id).rejected
+        assert not any(e.kind == AT_LOSS for e in k.get(other.id).evidence)
+    # A game connected afresh starts counting afresh.
+    connection.disconnect()
+    connection.connect("fake", seed=5)
+    assert discovery.aftermath.counts(mode.id) == (0, 0, 0, 0)

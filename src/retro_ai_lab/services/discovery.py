@@ -43,6 +43,7 @@ from retro_ai_lab.services.connection import (
 from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.observer import MemoryObserved, ObservationService
 from retro_ai_lab.storage.knowledge import KnowledgeStore, export, load
+from retro_ai_lab.understanding.aftermath import Aftermath
 from retro_ai_lab.understanding.events import CYCLES, EventDetector, EventKind, EventLog, GameEvent
 from retro_ai_lab.understanding.knowledge import (
     AI,
@@ -97,7 +98,8 @@ CLOCK_TOP = "clock-top"
 CLOCK_KINDS = frozenset({VariableKind.SCORE, VariableKind.PROGRESS, VariableKind.FLAG})
 BOUNCES = "bounces"  # evidence kind: a "lives" byte going up nearly as often as down (T-864)
 BUSY = "busy"  # evidence kind: a "lives" byte changing more than once in ten steps (T-865)
-NOT_LIVES = frozenset({BOUNCES, BUSY})
+AT_LOSS = "at-loss"  # evidence kind: a "progress" byte that goes up as lives are lost (T-997)
+NOT_LIVES = frozenset({BOUNCES, BUSY, AT_LOSS})
 # Kinds a game has one of: confirming one sets the AI's other guesses of it aside (T-939).
 ONE_PER_GAME = frozenset({VariableKind.LIVES, VariableKind.HEALTH, VariableKind.SCORE})
 # Kinds re-checked at every review against the byte's fresh statistics (T-864 to T-866, T-869):
@@ -241,6 +243,7 @@ class DiscoveryService:
         self._detector: EventDetector | None = None
         self._asked: frozenset[str] = frozenset()  # values a person rewards up/down (T-860)
         self._look: LongLook | None = None
+        self._aftermath = Aftermath()  # T-997; a new one with each knowledge
         self._finder: RelationshipFinder | None = None
         self._events = EventLog()
         # Snapshots arrive from the play clock's worker and from the GUI thread
@@ -464,6 +467,11 @@ class DiscoveryService:
         return tops
 
     @property
+    def aftermath(self) -> Aftermath:
+        """Which values rise as something is lost (T-997); a new one with each game."""
+        return self._aftermath
+
+    @property
     def questions(self) -> tuple[Question, ...]:
         """Confirmed guesses whose bytes behave unlike their kind, for the person (T-895)."""
         with self._lock:
@@ -492,19 +500,30 @@ class DiscoveryService:
             for v in k:
                 if v.rejected or v.kind not in KIND_DOUBTS:
                     continue
+                judge, words = KIND_DOUBTS[v.kind]
                 try:
                     stats = tracker.stats(v.region, v.offset)
                 except ConfigurationError:
+                    stats = None  # never observed: only when it rises can still be judged
+                reason = judge(stats) if stats is not None else None
+                rises_at_loss = v.kind is VariableKind.PROGRESS and self._aftermath.verdict(v.id)
+                if reason is None and rises_at_loss:
+                    reason = AT_LOSS  # T-997
+                if reason is None or (reason != AT_LOSS and stats is None):
                     continue
-                judge, words = KIND_DOUBTS[v.kind]
-                reason = judge(stats)
-                if reason is None:
-                    continue
-                if reason == BOUNCES:
+                if reason == AT_LOSS:
+                    rises, met, _, _ = self._aftermath.counts(v.id)
+                    what = (
+                        f"went up {rises} times, {met} of them as a life was lost; "
+                        "what goes up when you lose is not progress"
+                    )
+                elif reason == BOUNCES:
+                    assert stats is not None
                     what = (
                         f"went up {stats.ups} times and down {stats.downs}; {words} does not bounce"
                     )
                 else:
+                    assert stats is not None
                     what = (
                         f"changed {stats.changes} times in {stats.samples} steps; {words} "
                         "changes rarely"
@@ -563,6 +582,7 @@ class DiscoveryService:
         """A go starts: remember how often every byte had changed so far (T-870)."""
         with self._lock:
             tracker = self._observation.tracker
+            self._aftermath.begin()  # nothing is matched across the game being put back
             self._go_changes = {loc: st.changes for loc, st in tracker.all_stats().items()}
             self._go_transitions = tracker.transitions
 
@@ -1081,6 +1101,7 @@ class DiscoveryService:
             self._detector.ask(self._asked)
             self._finder = RelationshipFinder(knowledge, window=self._event_window)
             self._look = LongLook(knowledge)
+            self._aftermath = Aftermath()
 
     def review(self) -> DiscoveryUpdated:
         """Turn the statistics gathered so far into proposals, right now."""
@@ -1272,6 +1293,7 @@ class DiscoveryService:
             self._events.extend(events)
             with app_work.timed("discovery: relationships"):
                 relationships = self._finder.observe(events)
+        self._aftermath.note(events, event.snapshot.frame)
         if events or relationships:
             with app_work.timed("discovery: announce"):
                 self._announce(DiscoveryUpdated((), (), events, relationships))

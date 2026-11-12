@@ -200,7 +200,11 @@ two such checks, drops any "score" or "progress" guess among them. The same
 goes for the value just above a clock that counts how many times the clock has
 gone round (the minutes over the seconds): it changes too rarely to be caught
 in the act, so the AI goes by the clock under it, and no longer takes time
-passing for progress. The Discovery
+passing for progress. It also drops a "progress" guess that turns out to go
+up whenever a life is lost and hardly ever otherwise (the game's own "dying"
+or "game over" marker): what goes up when you lose is not progress. If you
+confirmed such a guess yourself it is kept, and the Learning panel asks you
+about it. The Discovery
 panel still lists a dropped guess, and you can put it back.
 
 Two boxes in the Learning panel set the go timers: "Each go lasts" (40
