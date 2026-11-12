@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import re
 import time
 
 import pytest
@@ -41,11 +42,13 @@ def test_a_busy_gui_thread_is_a_stall_and_the_window_is_logged(
         work.note("learn", 0.02)
         qtbot.waitUntil(lambda: watch.reports >= 1, timeout=4000)
     # Another watch (a window left by an earlier test) may write its own line here;
-    # this watch's line is the one that carries the "learn" timing noted above.
+    # this watch's line is the one that carries the "learn" timing noted above. The
+    # other's line can hold the app's own "step: learn" (T-986: it once came first and
+    # was taken for this one), so the note is matched as a work item of its own.
     line = next(
         r.message
         for r in caplog.records
-        if r.message.startswith("App work") and "learn" in r.message
+        if r.message.startswith("App work") and re.search(r"(?<!step): learn |; learn ", r.message)
     )
     assert f"GUI stall {X}1" in line and f"learn {X}1 avg 20 ms" in line
     assert work.summary() == "nothing"  # a new window

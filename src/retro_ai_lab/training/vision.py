@@ -71,6 +71,20 @@ class ScreenWatch:
         return self._looks
 
     @property
+    def seen_me(self) -> int:
+        """Looks in which the thing it takes for itself was in sight."""
+        return self._seen_me
+
+    @property
+    def lives_lost(self) -> int:
+        return self._lives_lost
+
+    @property
+    def lives_after_touch(self) -> int:
+        """Lives lost soon after touching something."""
+        return self._lives_after_touch
+
+    @property
     def tracker(self) -> ObjectTracker:
         return self._tracker
 
