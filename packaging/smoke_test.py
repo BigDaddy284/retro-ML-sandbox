@@ -4,7 +4,9 @@ Usage: python packaging/smoke_test.py <path-to-executable>
 
 Runs the executable with ``--exit-after-ms`` so the real window is created
 and torn down, and then with ``--version`` to check the CLI survived
-packaging. Exit code 0 means both passed.
+packaging. The window run writes its log to a fresh folder, and the log must
+name every stage of the start in order and leave no trace of a start that got
+stuck or crashed (T-995). Exit code 0 means all of it passed.
 """
 
 from __future__ import annotations
@@ -12,13 +14,27 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 LAUNCH_TIMEOUT_S = 120
+STAGES = (
+    "starting",
+    "Loading Qt",
+    "Loading the app's own code",
+    "Starting the app",
+    "Creating the Qt application",
+    "Qt application created",
+    "Building the main window",
+    "Main window shown",
+    "Event loop finished",
+)
 
 
-def run(exe: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def run(exe: Path, *args: str, data_dir: Path | None = None) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
+    if data_dir is not None:
+        env["RETRO_AI_LAB_DATA_DIR"] = str(data_dir)
     if sys.platform != "win32":
         env.setdefault("QT_QPA_PLATFORM", "offscreen")
     return subprocess.run(
@@ -31,6 +47,25 @@ def run(exe: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def check_log(logs: Path) -> str:
+    """What is wrong with the log the window run left, or "" when nothing is."""
+    log_file = logs / "retro-ai-lab.log"
+    if not log_file.exists():
+        return f"no log at {log_file}"
+    text = log_file.read_text(encoding="utf-8", errors="replace")
+    print(text)
+    at = 0
+    for stage in STAGES:
+        found = text.find(stage, at)
+        if found == -1:
+            return f"the log does not reach {stage!r} in order"
+        at = found + len(stage)
+    traces = [p for p in logs.glob("start-*.txt") if p.read_text(errors="replace").strip()]
+    if traces:
+        return "a trace was left behind:\n" + traces[0].read_text(errors="replace")
+    return ""
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print(__doc__)
@@ -40,12 +75,15 @@ def main(argv: list[str]) -> int:
         print(f"not found: {exe}")
         return 2
 
-    window = run(exe, "--exit-after-ms", "1500")
-    print(f"window run: exit {window.returncode}")
-    if window.stderr.strip():
-        print(window.stderr)
-    if window.returncode != 0:
-        return 1
+    with tempfile.TemporaryDirectory() as folder:
+        window = run(exe, "--exit-after-ms", "1500", data_dir=Path(folder))
+        print(f"window run: exit {window.returncode}")
+        if window.stderr.strip():
+            print(window.stderr)
+        problem = check_log(Path(folder) / "logs")
+        if window.returncode != 0 or problem:
+            print(problem)
+            return 1
 
     version = run(exe, "--version")
     print(f"version run: exit {version.returncode}, stdout={version.stdout.strip()!r}")

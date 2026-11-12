@@ -88,3 +88,61 @@ def test_module_script_propagates_error_code() -> None:
     )
     assert result.returncode == 2
     assert "usage:" in result.stderr
+
+
+# ---------------------------------------------------------------- T-995
+
+
+@pytest.fixture
+def _launch_log(tmp_path, monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+    """The real launcher with its log in a temp folder and no process-wide watch."""
+    import logging
+
+    from retro_ai_lab.core import logbook
+    from retro_ai_lab.core.paths import ENV_VAR
+
+    monkeypatch.setenv(ENV_VAR, str(tmp_path))
+    monkeypatch.setattr(logbook, "watch_start", lambda *a, **k: None)
+    root = logging.getLogger()
+    before, level, hook = list(root.handlers), root.level, sys.excepthook
+    yield logbook.log_path(tmp_path)
+    for handler in list(root.handlers):
+        if handler not in before:
+            root.removeHandler(handler)
+            handler.close()
+    root.setLevel(level)
+    sys.excepthook = hook
+
+
+def test_the_launch_logs_its_stages(_launch_log, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
+    import retro_ai_lab.ui.app as ui_app
+    from retro_ai_lab.cli import _default_launch
+
+    monkeypatch.setattr(ui_app, "run_app", lambda argv, exit_after_ms=None: 0)
+    assert _default_launch(()) == 0
+    text = _launch_log.read_text(encoding="utf-8")
+    stages = ["starting", "Loading Qt", "Loading the app's own code", "Starting the app"]
+    places = [text.index(stage) for stage in stages]
+    assert places == sorted(places)
+
+
+def test_a_launch_that_fails_is_logged_once_and_raised(  # type: ignore[no-untyped-def]
+    _launch_log, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import retro_ai_lab.ui.app as ui_app
+    from retro_ai_lab.cli import _default_launch
+
+    def broken(argv: Sequence[str], exit_after_ms: int | None = None) -> int:
+        raise RuntimeError("the window never came")
+
+    monkeypatch.setattr(ui_app, "run_app", broken)
+    # The windowed build's own error box takes the place of the hook: stand in for it.
+    monkeypatch.setattr(sys, "excepthook", lambda *a: None)
+    with pytest.raises(RuntimeError, match="the window never came") as caught:
+        _default_launch(())
+    text = _launch_log.read_text(encoding="utf-8")
+    assert "The app could not start" in text and "the window never came" in text
+    assert "Traceback" in text
+    # Where the hook does run (from source), it does not write the same thing again.
+    sys.excepthook(RuntimeError, caught.value, caught.value.__traceback__)
+    assert "Uncaught exception" not in _launch_log.read_text(encoding="utf-8")
