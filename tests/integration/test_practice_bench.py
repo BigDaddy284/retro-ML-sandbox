@@ -178,6 +178,20 @@ def test_deaths_are_explained() -> None:
 
 
 @pytest.mark.slow
+def test_lives_lost_to_a_walker_are_put_down_to_it() -> None:
+    """T-1016: three goes on level 0, the app's way (the remembered way on), get to the
+    first walkers and lose lives to them. Before, none of those lives was put down to
+    touching anything and no kind was found to hurt (0 of 28 and 0 of 17 in the long
+    runs): the walker was seen only by the edge it leads with, or not at all."""
+    report = run(goes=3, seed=0, algorithm="q_table", max_steps=250, play_frames=2000)
+    assert report.walkers >= 2 and report.falls >= 1
+    # Each to its own cause. (The last death's pause can outlast the run.)
+    assert report.walkers - 1 <= report.blamed <= report.walkers
+    assert report.falls - 1 <= report.fell <= report.falls
+    assert report.hurts == 1 and report.kinds <= 6
+    assert report.right == report.followed  # and what it follows is still the player
+
+
 def test_the_floor_is_read_right(report: Report) -> None:
     """T-989: what the AI reads of the floor to its right and left, at every look in
     which it sees itself, is what the game's own level has there."""
