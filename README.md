@@ -240,6 +240,11 @@ last seconds again, again with one small change at a time. If it finds a
 way it plays on from there, so the go continues beyond the spot that
 killed it, and the brain learns from the way that worked.
 
+Many games put you back at the start of the level when a life goes, and
+the app takes the game starting over for the end of a go. Where it can go
+back it looks for the way past first, and the go only ends there if it
+finds none.
+
 A search runs at the emulator's top speed and is over within 15 seconds;
 a go searches at most three times. In a game where eight searches in a row
 find nothing, the AI stops going back for the rest of that session, because
