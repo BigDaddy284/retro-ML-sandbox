@@ -47,6 +47,13 @@ def test_a_save_is_due_at_once_and_then_every_so_many_steps() -> None:
     assert plain.due()
 
 
+def test_the_slots_can_be_read() -> None:
+    moments = Moments(["back0", "back1"])
+    assert moments.slots == ("back0", "back1")
+    moments.saved()
+    assert moments.slots == ("back0", "back1")  # the names, whether in use or not
+
+
 def test_slots_go_round_and_the_oldest_moment_is_forgotten() -> None:
     moments = Moments(SLOTS, every=2, lead=3)
     made = []

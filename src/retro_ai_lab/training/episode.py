@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from collections.abc import Callable, Iterable, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -37,6 +38,7 @@ from retro_ai_lab.services.observer import ButtonsHeld, GroundCovered, Observati
 from retro_ai_lab.services.rewards import GoStarted, RewardEarned
 from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.training.moments import Moment, Moments
+from retro_ai_lab.training.search import BUDGET, find_way
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, Mark, ScreenWatch
 from retro_ai_lab.understanding.events import EventKind
 from retro_ai_lab.understanding.knowledge import Knowledge, VariableKind
@@ -55,6 +57,7 @@ FINGERPRINT_STEPS = 64  # state keys a go remembers, for spotting two identical 
 # instead of one (n-step returns, T-963). Half a second at four frames a step.
 LOOKAHEAD_STEPS = 8
 DEFAULT_SETTLE_FRAMES = 5  # the understanding engine's event window
+NOW_SLOT = "back_now"  # where the present is saved while a search plays its tries (T-1007)
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,10 +264,27 @@ class EpisodeResult:
     earned: tuple[Earning, ...] = ()  # what paid, biggest first (T-857)
     setbacks: int = 0  # lives or health lost during the go (T-934)
     first_setback_step: int | None = None  # the step the first was lost at, 1-based
+    ways_sought: int = 0  # times it went back to look for a way past a life lost (T-1007)
+    ways_found: int = 0  # times that found one
 
     @property
     def succeeded(self) -> bool:
         return self.objectives > 0
+
+    def describe_ways(self) -> str:
+        """ ", went back 2 times and found a way past once", or "" when it never looked (T-1007)."""
+        if self.ways_sought == 0:
+            return ""
+        back = "once" if self.ways_sought == 1 else f"{self.ways_sought} times"
+        if self.ways_found == 0:
+            found = "found no way past"
+        elif self.ways_found == self.ways_sought:
+            found = "found a way past" if self.ways_found == 1 else "found a way past each time"
+        else:
+            found = (
+                f"found a way past {'once' if self.ways_found == 1 else f'{self.ways_found} times'}"
+            )
+        return f", went back {back} and {found}"
 
     def describe_losses(self) -> str:
         """ ", lost a life 2 times, the first at step 3", or "" when none were lost (T-934)."""
@@ -289,6 +309,8 @@ class EpisodeResult:
             "earned": [e.to_dict() for e in self.earned],
             "setbacks": self.setbacks,
             "first_setback_step": self.first_setback_step,
+            "ways_sought": self.ways_sought,
+            "ways_found": self.ways_found,
         }
 
     @classmethod
@@ -304,6 +326,8 @@ class EpisodeResult:
                 tuple(Earning.from_dict(e) for e in data.get("earned", ())),
                 int(data.get("setbacks", 0)),
                 None if data.get("first_setback_step") is None else int(data["first_setback_step"]),
+                int(data.get("ways_sought", 0)),
+                int(data.get("ways_found", 0)),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"Bad go result: {exc}") from exc
@@ -331,7 +355,18 @@ class EpisodeRunner:
         look_every: int = DEFAULT_LOOK_EVERY,
         deaths: DeathWatch | None = None,
         moments: Moments | None = None,
+        ways_per_go: int = 0,
+        way_tries: int = BUDGET,
+        flat_out: Callable[[], AbstractContextManager[None]] | None = None,
     ) -> None:
+        for value, what, least in ((ways_per_go, "ways_per_go", 0), (way_tries, "way_tries", 1)):
+            if isinstance(value, bool) or not isinstance(value, int) or value < least:
+                raise ConfigurationError(f"{what} must be a whole number, {least} or more.")
+        if moments is not None and NOW_SLOT in moments.slots:
+            raise ConfigurationError(
+                f"The slot {NOW_SLOT!r} is where the present is kept during a search: "
+                "saved moments need other names."
+            )
         if look_every < 1:
             raise ConfigurationError("look_every must be at least 1.")
         if frames_per_step < 1:
@@ -371,6 +406,13 @@ class EpisodeRunner:
         self._forced: deque[int] = deque()  # moves to play next without asking the learner
         self._times_back = 0
         self._cannot_save = False
+        # At a life lost, go back and look for a way past (T-1007).
+        self._ways_per_go = ways_per_go
+        self._way_tries = way_tries
+        self._flat_out = flat_out
+        self._ways_left = 0
+        self._ways_sought = 0
+        self._ways_found = 0
         self._restored = False
         self._unsticks = 0
         self._same_state = 0
@@ -499,6 +541,16 @@ class EpisodeRunner:
         return self._times_back
 
     @property
+    def ways_sought(self) -> int:
+        """Times this go went back to look for a way past a life lost (T-1007)."""
+        return self._ways_sought
+
+    @property
+    def ways_found(self) -> int:
+        """Times that found one."""
+        return self._ways_found
+
+    @property
     def unsticks(self) -> int:
         """Times Start was pressed because nothing was changing (a game-over screen)."""
         return self._unsticks
@@ -526,6 +578,9 @@ class EpisodeRunner:
         self._pending.clear()
         self._forced.clear()
         self._times_back = 0
+        self._ways_left = self._ways_per_go
+        self._ways_sought = 0
+        self._ways_found = 0
         if self._moments is not None:
             self._moments.forget()  # a new go is a new story
         self._buttons = {b.name: b for b in self._connection.call(lambda a: a.buttons())}
@@ -612,7 +667,13 @@ class EpisodeRunner:
             return False
         if self._moments is not None:
             self._moments.did(action)  # an unstick press is a hole: it forgets them
-        return self._settle(state, action, self._frames_per_step, "ai")
+        lost_before = self._setbacks
+        if not self._settle(state, action, self._frames_per_step, "ai"):
+            return False
+        if self._setbacks > lost_before:
+            self._forced.clear()  # whatever way was being played did not get past
+            return self._seek()
+        return True
 
     def _keep_moment(self) -> bool:
         """Save the game when a moment is due (T-1004). False if the link dropped.
@@ -625,6 +686,8 @@ class EpisodeRunner:
             return True
         if not self._signals.watched:
             return True
+        if self._ways_per_go and not self._ways_left:
+            return True  # no search is left to go back for (T-1007)
         slot = moments.next_slot()
         try:
             with app_work.timed("step: save"):
@@ -638,6 +701,91 @@ class EpisodeRunner:
             self._signals.stop()
             return False
         moments.saved(self._watch.mark() if self._watch is not None else None)
+        return True
+
+    def _seek(self) -> bool:
+        """A life just went: go back and look for a way past (T-1007). False if the link dropped.
+
+        The loss itself stands for the learner and the count: it happened. What goes
+        back is the game. From the saved moment before, the small changes to what
+        it did are tried off the record (:func:`find_way`); a way found is played
+        from that moment through the ordinary step, and with none the game is put
+        back to where it was and the go carries on a life down. A loss that stands
+        makes the moments before it useless (every try from them would lose that
+        life again first), so they are forgotten.
+        """
+        moments = self._moments
+        if moments is None or not self._ways_per_go:
+            return True  # nothing here searches: the moments are the caller's (T-1005)
+        watch = self._watch
+        found = moments.before_loss()
+        knowledge = self._encoder.knowledge
+        lives = [knowledge.get(i) for i in sorted(self._signals.watched or ()) if i in knowledge]
+        if (
+            not self._ways_left
+            or watch is None
+            or found is None
+            or not isinstance(found[0].mark, Mark)
+            or not lives
+        ):
+            moments.forget()
+            return True
+        moment, trace = found
+        mark = moment.mark
+        assert isinstance(mark, Mark)
+        self._ways_left -= 1
+        self._ways_sought += 1
+        space = self._agent.space
+        at = self._steps
+        try:
+            fast = self._flat_out() if self._flat_out is not None else nullcontext()
+            with fast, app_work.timed("step: search"):
+                self._connection.call(lambda a: a.save_state(NOW_SLOT))
+                search = find_way(
+                    self._connection,
+                    moment.slot,
+                    trace,
+                    space,
+                    frames_per_step=self._frames_per_step,
+                    lives=lives,
+                    watch=lambda: watch.trial(mark),
+                    budget=self._way_tries,
+                    look_every=self._look_every,
+                )
+                if search.way is None:
+                    self._connection.call(lambda a: a.load_state(NOW_SLOT))
+            if search.way is not None:
+                self.go_back(moment, then=search.way.moves)
+        except EmulatorError:
+            self._ended_by = "disconnected"
+            self._signals.stop()
+            return False
+        back = f"{len(trace)} step{'' if len(trace) == 1 else 's'}"
+        way = search.way
+        if way is None:
+            moments.forget()
+            log.info(
+                "Lost a life at step %d. Went back %s and made %d tries: none got past.",
+                at,
+                back,
+                search.tries,
+            )
+            return True
+        self._ways_found += 1
+        change = way.change
+        before = len(trace) - change.at
+        log.info(
+            "Lost a life at step %d. Went back %s and found a way past on try %d: "
+            "%s for %d step%s, starting %d step%s before the life went.",
+            at,
+            back,
+            way.tries,
+            space[change.move].label,
+            change.hold,
+            "" if change.hold == 1 else "s",
+            before,
+            "" if before == 1 else "s",
+        )
         return True
 
     def go_back(self, moment: Moment, then: Sequence[int] = ()) -> State:
@@ -871,6 +1019,8 @@ class EpisodeRunner:
             self._signals.earned,
             self._setbacks,
             self._first_setback_step,
+            self._ways_sought,
+            self._ways_found,
         )
         self._state = None
         return result
@@ -887,6 +1037,7 @@ __all__ = [
     "DEFAULT_MAX_STEPS",
     "DEFAULT_SETTLE_FRAMES",
     "LOOKAHEAD_STEPS",
+    "NOW_SLOT",
     "Earning",
     "EpisodeResult",
     "EpisodeRunner",

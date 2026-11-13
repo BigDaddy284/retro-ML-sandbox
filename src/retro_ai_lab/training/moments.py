@@ -70,6 +70,11 @@ class Moments:
         self._moves: list[int] = []  # the moves made since the oldest moment kept
 
     @property
+    def slots(self) -> tuple[str, ...]:
+        """The names of the slots the moments are kept in."""
+        return self._slots
+
+    @property
     def steps(self) -> int:
         """Steps of the story so far."""
         return self._steps
