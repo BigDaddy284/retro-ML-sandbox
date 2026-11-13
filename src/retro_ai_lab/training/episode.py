@@ -469,9 +469,10 @@ class EpisodeRunner:
         # been paid is kept over the goes; 0 never presses on.
         self._press_after = press_after
         self._press_for = press_for
-        # The furthest way played, to begin a go with (T-1014).
+        # The best way played, to begin a go with (T-1014, T-1015).
         self._route = route
         self._route_left = 0  # moves of it still waiting to be played this go
+        self._from_memory = 0  # steps this go has played from it (T-1015)
         self._remembered = 0  # steps of it this go began with
         self._paid: dict[str, float] = {}
         self._unpaid = 0  # steps since anything was paid
@@ -645,6 +646,12 @@ class EpisodeRunner:
         return self._remembered
 
     @property
+    def own_steps(self) -> int:
+        """Steps of this go that were not played from the way it remembers: what the
+        go's length is counted in (T-1015)."""
+        return self._steps - self._from_memory
+
+    @property
     def paid_buttons(self) -> tuple[str, ...]:
         """The buttons that have been paid, over this runner's goes, the best-paid first."""
         return tuple(sorted(self._paid, key=lambda name: (-self._paid[name], name)))
@@ -717,22 +724,51 @@ class EpisodeRunner:
         self._begin_route()
         return self._state
 
+    def _loss_stands(self) -> None:
+        """A life went and the go did not get it back. What the go remembers of itself
+        ends ``LEAD`` steps before it (T-1014), and so does the way it began with, if
+        the life went that close behind the way's end (T-1015): a way that ends within
+        a few steps of a loss the AI finds no way past would bring every go to the
+        same end. The next go arrives earlier, with room to do something else."""
+        route = self._route
+        if route is None:
+            return
+        had = len(route.moves)
+        if route.failed(LEAD):
+            log.info(
+                "A life went at step %d, close behind the end of the way the AI remembers, "
+                "and it found no way past: it now remembers %d steps of that way instead "
+                "of %d, to arrive there earlier.",
+                self._steps,
+                len(route.moves),
+                had,
+            )
+        route.lost(LEAD)
+
     def _begin_route(self) -> None:
         """Queue the way remembered from this go's start, if there is one (T-1014).
 
-        Only a go put back to the checkpoint starts where the way starts, and only a
-        go that looks at the screen can say how far it got: any other go plays and
-        remembers nothing. The moves are played through the ordinary step, like a way
-        found by going back, without asking the learner.
+        Only a go put back to the checkpoint starts where the way starts, and a way is
+        remembered where the AI can go back, which takes its look at the screen: any
+        other go plays and remembers nothing. The moves are played through the ordinary
+        step, like a way found by going back, without asking the learner.
         """
-        self._route_left = self._remembered = 0
+        self._route_left = self._remembered = self._from_memory = 0
         route = self._route
         if route is None:
             return
         start = None
         if self._restored and self._watch is not None and self._harness is not None:
             start = (self._harness.slot, self._harness.taken)
+        had = len(route.moves)
         moves = route.begin(start)
+        if had and start is not None and not moves:
+            log.info(
+                "The spot the goes start from has changed, so the way the AI remembered "
+                "from the old one (%d step%s) is forgotten.",
+                had,
+                "" if had == 1 else "s",
+            )
         size = len(self._agent.space)
         if any(move >= size for move in moves):
             route.forget()  # remembered with other controls
@@ -779,6 +815,7 @@ class EpisodeRunner:
                 action = self._forced.popleft()  # a way worked out for it (T-1004)
                 if self._route_left:
                     self._route_left -= 1
+                    self._from_memory += 1
                     from_route = True
             else:
                 with app_work.timed("step: choose"):
@@ -822,7 +859,7 @@ class EpisodeRunner:
                     LEAD,
                 )
             if not settled:
-                route.lost(LEAD)  # the go ends with the loss: its story ends before it
+                self._loss_stands()  # the go ends with the loss: its story ends before it
         if not settled:
             return False
         if self._setbacks > lost_before:
@@ -833,8 +870,8 @@ class EpisodeRunner:
             back = self._times_back
             if not self._seek():
                 return False
-            if route is not None and self._times_back == back:
-                route.lost(LEAD)  # the loss stands: the story ends before it (T-1014)
+            if self._times_back == back:
+                self._loss_stands()  # the story ends before it (T-1014)
             if waiting and self._times_back == back:
                 self._ended_by = "reset"  # no way past: the restart stands (T-1013)
                 self._signals.stop()
@@ -1186,8 +1223,9 @@ class EpisodeRunner:
         self._reward += reward
         self._steps += 1
         if self._route is not None:
-            ground = self._watch.ground.steps if self._watch is not None else 0
-            self._route.did(action if source == "ai" else None, ground)
+            # What the story has been paid so far (T-1015): the person's rewards, so
+            # the way remembered is the best go by what they pay for.
+            self._route.did(action if source == "ai" else None, self._route.counted + reward)
         if action is not None:
             self._actions_seen.add(action)
         if len(self._fingerprint) < FINGERPRINT_STEPS:
@@ -1204,13 +1242,15 @@ class EpisodeRunner:
             if (
                 lost
                 and source == "ai"
-                and self._steps < self._max_steps
+                and self.own_steps < self._max_steps
                 and self._way_back() is not None
             ):
                 self._held_reset = True
             else:
                 self._ended_by = "reset"
-        elif self._steps >= self._max_steps:
+        elif self.own_steps >= self._max_steps:
+            # The steps of the way it remembers are not the go's own (T-1015): a long way
+            # would leave a go no steps to get any further in.
             self._ended_by = "max_steps"
         if self._ended_by is not None:
             self._signals.stop()
@@ -1306,7 +1346,7 @@ class EpisodeRunner:
         self._last_buttons = frozenset()
         if self._route is not None and self._route.end():
             log.info(
-                "The AI got further than the way it remembered: it now remembers %d steps "
+                "The AI did better than the way it remembered: it now remembers %d steps "
                 "from the start, and its next go begins by playing them again.",
                 len(self._route.moves),
             )

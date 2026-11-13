@@ -137,7 +137,12 @@ whether that really is the player), what killed it against what it thought
 killed it, what it reads from memory, how far it gets, and how often going
 back after a life lost found a way past. The practice game
 knows the truth, so each number has it beside it. `--seed` picks another
-level, `--algorithm q_table` the simple table.
+level, `--algorithm q_table` the simple table. A go of the default 300
+steps is too short to reach the end of a level: `--steps 700` gives it the
+time, and the "Brain" line then says in how many goes the level was
+finished and in how many of those before any life was lost. `--no-memory`
+trains without the way the AI remembers (see "When the AI loses a life"),
+for comparing.
 
 The app's own log does the same every five seconds while it runs: next to the
 emulator link's line, an "App work" line counts the stalls of the window's
@@ -215,7 +220,8 @@ about it. The Discovery
 panel still lists a dropped guess, and you can put it back.
 
 Two boxes in the Learning panel set the go timers: "Each go lasts" (40
-seconds unless you change it) and "Give up when nothing changes for" (about
+seconds unless you change it; the way the AI plays from memory at the start
+of a go, see "When the AI loses a life", comes on top) and "Give up when nothing changes for" (about
 two seconds), both in seconds and remembered for that game. Change them while
 training is stopped.
 
@@ -262,6 +268,27 @@ steps, it holds the button that has paid it best so far for 16 steps
 would have done. If that costs a life, going back looks for the way past,
 and the go carries on from there. Each go's line in the log ends with how
 often it pressed on.
+
+What it finds is not lost when the go ends. Where the AI can go back, it
+remembers the best go it has played from the spot the goes start from: its
+own button presses, step by step, up to the step at which the go had been
+paid the most by the rewards you set, without the steps that lost a life.
+The next go begins by playing that way again, arrives where it ends with
+every life and its three searches unused, and practises from there. A go
+that is paid more becomes the new way. It is your rewards that decide: with
+the usual ones (getting somewhere new, progress) the best go is the one
+that got furthest; with every reward that pays switched off there is no
+best go, and nothing is remembered. If a life goes while the way is being
+played (a game does not always do the same thing twice), the way is cut
+back to before that place. The same happens when a life goes within a few
+steps of the way's end and the AI finds no way past: the next go then
+arrives a little earlier, with room to do something else. The steps played
+from memory do not count towards "Each go lasts": every go has its full
+length of its own play after them. The log says when the way grows or is
+cut and each go's line says how many steps it began with. The way is kept while training runs: pressing Start again makes
+wherever the game is the new spot the goes start from, and a way from the
+old spot is forgotten, as it is when you start the AI from scratch. It is
+not kept when the app is closed.
 
 ## Reading the rewards
 

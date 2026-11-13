@@ -78,6 +78,7 @@ from retro_ai_lab.training.insights import (
 )
 from retro_ai_lab.training.moments import Moments
 from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
+from retro_ai_lab.training.route import Route
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, ScreenWatch
 from retro_ai_lab.understanding.knowledge import Confidence, Variable, VariableKind
 from retro_ai_lab.understanding.player import find_player_in_game
@@ -204,8 +205,11 @@ class TrainingService:
         rewards: RewardService | None = None,
         ways_per_go: int = WAYS_PER_GO,
         way_seconds: float | None = WAY_SECONDS,
+        remember: bool = True,
     ) -> None:
         _check_algorithm(algorithm)
+        if not isinstance(remember, bool):
+            raise ConfigurationError("remember must be True or False.")
         if isinstance(ways_per_go, bool) or not isinstance(ways_per_go, int) or ways_per_go < 0:
             raise ConfigurationError("ways_per_go must be a whole number, 0 or more.")
         if way_seconds is not None and (
@@ -233,8 +237,12 @@ class TrainingService:
         self._lookahead = lookahead  # steps a return spans when the AI learns (T-963)
         self._ways_per_go = ways_per_go  # going back for a way past a life lost (T-1009)
         self._way_seconds = way_seconds
+        self._remember = remember  # begin each go with the best way played (T-1015)
         self._can_save = False  # the console has save states
         self._back_said = False  # the log has said the AI will go back, for this game
+        # The best go played from the spot goes start from (T-1015): one for the
+        # connected game, so it outlives a runner being rebuilt.
+        self._route = Route()
         self._default_max_steps = max_steps  # a game with no choice of its own uses these (T-873)
         self._default_unstick_after = unstick_after
         self._use_checkpoint = checkpoint
@@ -417,6 +425,11 @@ class TrainingService:
     def harness(self) -> ExperimentHarness | None:
         """The checkpoint harness for the connected game (None without save states)."""
         return self._harness
+
+    @property
+    def remembered(self) -> int:
+        """Steps of the way the AI remembers from the spot goes start from (T-1015)."""
+        return len(self._route.moves)
 
     @property
     def store(self) -> BrainStore | None:
@@ -786,6 +799,7 @@ class TrainingService:
         if self.brain() is None or self._agent is None or self._game_id is None:
             raise ConfigurationError("There is no brain to forget.")
         self._agent = self._new_agent(self._agent.space)
+        self._route.forget()  # from scratch is from scratch (T-1015)
         self._demonstrations.clear()
         self._history.clear()
         self._policies.clear()
@@ -983,6 +997,7 @@ class TrainingService:
         self._wake_button = knowledge.wake_button
         self._can_save = caps.save_states
         self._back_said = False
+        self._route = Route()  # a way belongs to the game it was played in (T-1015)
         self._watch = None  # a new game: things on its screen are looked at afresh (T-976)
         self._can_see = caps.screen_capture
         self._needs_wake = False
@@ -1098,6 +1113,12 @@ class TrainingService:
                     self._ways_per_go,
                     "" if self._ways_per_go == 1 else "s",
                 )
+                if self._remember:
+                    log.info(
+                        "It remembers the best go it has played from the spot the goes "
+                        "start from, by the rewards you set, and begins each go by playing "
+                        "that way again."
+                    )
             self._runner = EpisodeRunner(
                 self._connection,
                 self._observation,
@@ -1114,6 +1135,7 @@ class TrainingService:
                 watched_setbacks=self._penalised,
                 deaths=self._deaths,
                 moments=Moments(BACK_SLOTS) if goes_back else None,
+                route=self._route if goes_back and self._remember else None,
                 ways_per_go=self._ways_per_go if goes_back else 0,
                 way_seconds=self._way_seconds,
                 give_up_after=GIVE_UP_AFTER,
@@ -1389,13 +1411,14 @@ class TrainingService:
         why = self._runner.last_reset if self._runner is not None else ""
         earners = describe_earned(result.earned, most=None)  # the whole breakdown (T-877)
         log.info(
-            "Go %d ended by %s after %d steps (%d frames), %+.1f points%s%s%s%s%s",
+            "Go %d ended by %s after %d steps (%d frames), %+.1f points%s%s%s%s%s%s",
             self._episodes,
             result.ended_by,
             result.steps,
             result.frames,
             result.reward,
             f", from {earners}" if earners else "",
+            result.describe_remembered(),  # the way it began with (T-1015)
             result.describe_losses(),  # survival in the log (T-934)
             result.describe_ways(),  # and what going back came to (T-1009)
             result.describe_pressing(),  # and how often it pressed on (T-1011)
@@ -1454,6 +1477,14 @@ class TrainingService:
         """Did this go show the game ignoring the AI? Then the next go starts by waking it."""
         runner = self._runner
         if runner is None or not self._mode.ai_plays:
+            return
+        if result.remembered and not runner.stuck_from_start:
+            # A go that began by playing the way it remembers begins like the last one
+            # by design (T-1015): that says nothing about the game ignoring the AI, and
+            # the remedy for that (wherever the game is becomes the new start) would
+            # throw the level's start away. The game is still asked directly after a
+            # go that ends stuck or by a reset (T-848).
+            self._last_go = None
             return
         this = (runner.fingerprint, runner.actions_varied)
         # A go stuck part-way (the lives ran out) just needs the checkpoint back, which

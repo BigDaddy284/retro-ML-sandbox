@@ -21,7 +21,7 @@ from tests.unit.training.test_search_at_a_loss import GAP_ENDS
 
 lab = going_back.lab  # the practice game behind the real services (pytest fixture)
 
-GREW = "The AI got further than the way it remembered: it now remembers %d steps from the start"
+GREW = "The AI did better than the way it remembered: it now remembers %d steps from the start"
 
 
 def remembering(
@@ -58,8 +58,8 @@ def across(lab: Lab, r: EpisodeRunner, beyond: int = 16) -> None:
 
 
 def planted(route: Route, harness: ExperimentHarness, moves: Sequence[int]) -> None:
-    """Have ``route`` remember ``moves`` from the harness's checkpoint, a step of new
-    ground counted with each."""
+    """Have ``route`` remember ``moves`` from the harness's checkpoint, a point paid
+    with each."""
     route.begin((harness.slot, harness.taken))
     for count, move in enumerate(moves, start=1):
         route.did(move, count)
@@ -82,7 +82,7 @@ def test_a_go_leaves_the_way_that_got_across(lab: Lab, caplog: pytest.LogCapture
     # What it remembers is the way that got across: none of the 36 steps that fell in.
     way = route.moves
     assert way[:23] == (walk,) * 19 + (jump,) * 4 and set(way[23:]) == {walk}
-    assert 23 < len(way) <= played and route.ground >= 2
+    assert 23 < len(way) <= played and route.paid >= 2
     assert [rec.getMessage() for rec in caplog.records if "remembers" in rec.getMessage()] == [
         (GREW % len(way)) + ", and its next go begins by playing them again."
     ]
@@ -129,13 +129,13 @@ def test_only_a_go_that_gets_further_replaces_it(lab: Lab) -> None:
     steps(r, DIED_AT)
     across(lab, r)
     r.finish()
-    first, counted = route.moves, route.ground
+    first, counted = route.moves, route.paid
     # A go stopped part-way through the way, and one stopped at its end: kept as it was.
     for upto in (5, len(first)):
         r.begin()
         steps(r, upto)
         r.finish()
-        assert (route.moves, route.ground) == (first, counted)
+        assert (route.moves, route.paid) == (first, counted)
     # A go that walks on further: the way grows, and begins as it did.
     r.begin()
     steps(r, len(first))
@@ -145,7 +145,7 @@ def test_only_a_go_that_gets_further_replaces_it(lab: Lab) -> None:
     r.finish()
     longer = route.moves
     assert len(first) < len(longer) <= len(first) + 12 and longer[: len(first)] == first
-    assert route.ground > counted
+    assert route.paid > counted
     plays_from_the_start(lab, harness, longer)
     assert lab.game.state.x > reached + 40 and lab.game.state.lives == toy_hopper.START_LIVES
 
@@ -271,6 +271,72 @@ def test_a_list_of_moves_is_not_ended_by_standing_still(lab: Lab) -> None:
     while fresh.step():
         count += 1
     assert fresh.finish().ended_by == "stuck" and count == DEFAULT_UNSTICK_AFTER
+
+
+def test_the_steps_from_memory_do_not_count_towards_the_gos_length(lab: Lab) -> None:
+    """T-1015: a way longer than a go would leave the go no steps of its own."""
+    r, route, harness = remembering(lab, max_steps=12)
+    walk, stand = lab.move("right"), lab.move()
+    planted(route, harness, [walk] * 20)
+    lab.agent.script.extend([stand] * 50)
+    r.begin()
+    assert (r.remembered, r.steps, r.own_steps) == (20, 0, 0)
+    steps(r, 20)  # the whole way, past where a go of 12 steps used to end
+    assert (r.steps, r.own_steps, lab.agent.asked) == (20, 0, 0)
+    count = 0
+    while r.step():
+        count += 1
+    assert (count, r.steps, r.own_steps, lab.agent.asked) == (11, 32, 12, 12)
+    result = r.finish()
+    assert (result.ended_by, result.steps, result.remembered) == ("max_steps", 32, 20)
+    # A go with nothing to play from memory is as long as it always was.
+    route.forget()
+    r.begin()
+    count = 0
+    while r.step():
+        count += 1
+    result = r.finish()
+    assert (count, result.ended_by, result.steps, result.remembered) == (11, "max_steps", 12, 0)
+
+
+def test_a_life_lost_close_behind_the_way_with_no_way_past_cuts_it(
+    lab: Lab, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T-1015: a way that ends a few steps short of a loss the AI finds no way past
+    would bring every go to the same end. It is cut back, so the next go arrives
+    earlier, with room to do something else."""
+    r, route, harness = remembering(lab, ways_per_go=0)  # no search: the loss stands
+    walk = lab.move("right")
+    planted(route, harness, [walk] * 30)  # six steps short of the fall
+    lab.agent.script.extend([walk] * 20)
+    r.begin()
+    assert r.remembered == 30
+    steps(r, 30)
+    assert lab.agent.asked == 0 and route.moves == (walk,) * 30
+    with caplog.at_level(logging.INFO, logger="retro_ai_lab.training.episode"):
+        steps(r, DIED_AT - 30)  # its own steps: into the gap, and the life goes
+    assert lab.game.state.lives == toy_hopper.START_LIVES - 1 and r.ways_sought == 0
+    assert route.moves == (walk,) * (DIED_AT - LEAD)
+    said = [rec.getMessage() for rec in caplog.records]
+    assert said == [
+        f"A life went at step {DIED_AT}, close behind the end of the way the AI remembers, "
+        f"and it found no way past: it now remembers {DIED_AT - LEAD} steps of that way "
+        "instead of 30, to arrive there earlier."
+    ]
+    r.finish()
+    assert route.moves == (walk,) * (DIED_AT - LEAD)  # the go that lost the life adds nothing
+    # A life lost well beyond the way's end leaves the way alone.
+    far, route, harness = remembering(lab, ways_per_go=0)
+    planted(route, harness, [walk] * 4)
+    lab.agent.script.extend([walk] * 40)
+    far.begin()
+    steps(far, DIED_AT)
+    assert lab.game.state.lives == toy_hopper.START_LIVES - 1
+    assert route.moves[:4] == (walk,) * 4 and len(route.moves) >= 4
+    far.finish()
+    # Its own story ends 30 steps before the loss, and what is kept of it is up to the
+    # last of those steps that was paid for (the fifth).
+    assert route.story == (walk,) * (DIED_AT - LEAD) and route.moves == (walk,) * 5
 
 
 def test_the_record_counts_the_steps_from_memory() -> None:
