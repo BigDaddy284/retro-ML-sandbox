@@ -6,7 +6,10 @@ from __future__ import annotations
 import pytest
 
 from retro_ai_lab.core import ConfigurationError, Frame
+from retro_ai_lab.observation.tracking import ObjectTracker
 from retro_ai_lab.training.vision import HIDE_MARGIN, Mark, ScreenWatch
+from retro_ai_lab.understanding import Confidence
+from retro_ai_lab.understanding.player import PlayerFinding
 from tests.unit.training.test_trial import FRAMES, Hopper
 from tests.unit.training.test_vision_camera_memory import (
     STEP,
@@ -73,6 +76,15 @@ def test_a_mark_carries_the_screen_it_was_taken_at(hopper: Hopper) -> None:
     with pytest.raises(ConfigurationError, match="Only a moment this watch marked"):
         watch.back_to(frame)  # type: ignore[arg-type]
 
+    # A watch that knows the player by no colours hides nothing, and carries the
+    # screen all the same.
+    blind = ScreenWatch(PlayerFinding(None, (46, 200), frozenset({"a"}), 2, Confidence.MEDIUM))
+    blind.begin_go()
+    frame = frame_of(hopper)
+    blind.look(frame)
+    assert (blind.mark().screen, blind.mark().hide) == (frame, None)
+    assert blind.mark().screen is frame
+
 
 def test_the_first_look_after_going_back_is_measured(hopper: Hopper) -> None:
     new, old = walking(hopper)
@@ -125,9 +137,21 @@ def test_showing_the_screen_counts_as_nothing(
     looks, seen, kinds = new.looks, new.seen_me, new.describe()
     assert new.around is not None and new.me is not None
     spy = Spy(monkeypatch)
+    started: list[tuple[Frame, object]] = []
+    start_from = ObjectTracker.start_from
+
+    def starting(tracker: ObjectTracker, frame: Frame, *, hide: object = None) -> object:
+        started.append((frame, hide))
+        return start_from(tracker, frame, hide=hide)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ObjectTracker, "start_from", starting)
     adapter.load_state("here")
     new.back_to(mark)
-    # No look of the tracker's, and nothing shown to the camera's memory.
+    # The tracker starts from the mark's screen, with what was hidden in it (the
+    # player, which the watch follows itself) ...
+    assert len(started) == 1 and started[0][0] is mark.screen
+    assert started[0][1] == mark.hide and mark.hide is not None
+    # ... which is no look of the tracker's, and shows nothing to the camera's memory.
     assert spy.since() == (0, [])
     assert (new.looks, new.seen_me, new.take_new_ground()) == (looks, seen, 0)
     assert new.describe() == kinds
