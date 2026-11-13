@@ -44,7 +44,14 @@ from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.observer import MemoryObserved, ObservationService
 from retro_ai_lab.storage.knowledge import KnowledgeStore, export, load
 from retro_ai_lab.understanding.aftermath import Aftermath
-from retro_ai_lab.understanding.events import CYCLES, EventDetector, EventKind, EventLog, GameEvent
+from retro_ai_lab.understanding.events import (
+    CYCLES,
+    HOME_OFTEN,
+    EventDetector,
+    EventKind,
+    EventLog,
+    GameEvent,
+)
 from retro_ai_lab.understanding.knowledge import (
     AI,
     Confidence,
@@ -349,6 +356,22 @@ class DiscoveryService:
             return False
         self.experiment()
         return True
+
+    def _say_home_goers(self, variable_ids: tuple[str, ...]) -> None:
+        """Values the detector has now seen come home in mid-play often enough
+        (T-1021): said once, in plain words. Nothing in what the AI knows is changed."""
+        k = self._knowledge
+        if not variable_ids or k is None:
+            return
+        names = ", ".join(k.get(i).display_name for i in variable_ids if i in k)
+        if names:
+            log.info(
+                "%s went back to where %s started %d times while most other values stayed "
+                "where they were. That alone is no longer read as the game starting over.",
+                names,
+                "it" if len(variable_ids) == 1 else "they",
+                HOME_OFTEN,
+            )
 
     def doubt_reset(self, variable_ids: Iterable[str]) -> tuple[Variable, ...]:
         """These values went back to their start every few frames: not a restart (T-845).
@@ -1295,7 +1318,8 @@ class DiscoveryService:
             return
         # Each stage is timed for the "App work" log line (T-947).
         with app_work.timed("discovery: events"):
-            events = self._detector.observe(event.snapshot)
+            events = self._detector.observe(event.snapshot, put_back=event.put_back)
+            self._say_home_goers(self._detector.take_home_goers())
         if self._look is not None:
             with app_work.timed("discovery: long look"):
                 self._look.observe(event.snapshot)

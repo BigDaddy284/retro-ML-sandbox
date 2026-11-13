@@ -294,3 +294,53 @@ def test_a_jump_back_marks_only_the_next_snapshot(
     observer.expect_jump()
     observer.observe()
     assert events[-1].went_back is False
+
+
+def test_the_first_snapshot_after_a_saved_state_is_loaded_is_marked(
+    observer: ObservationService, connection: ConnectionService, events: list[MemoryObserved]
+) -> None:
+    """T-1021: whoever loaded it, the values it shows were put there by the app."""
+    connection.connect("fake")
+    adapter = fake(connection)
+    assert adapter.states_loaded == 0
+    observer.observe()
+    observer.advance(4)
+    adapter.save_state("t1021")
+    observer.advance(4)
+    assert adapter.states_loaded == 0  # saving is not loading
+    assert [e.put_back for e in events] == [False, False, False]
+    # A load nobody told the observer about (the checkpoint at the start of a go, an
+    # experiment putting the game back): the next snapshot is marked, and only that one.
+    adapter.load_state("t1021")
+    assert adapter.states_loaded == 1
+    marked = observer.observe()
+    assert marked is not None and marked.put_back and not marked.went_back
+    observer.advance(4)
+    assert [e.put_back for e in events[-2:]] == [True, False]
+    # Several loads between two snapshots (a search's tries) are one mark.
+    for _ in range(3):
+        adapter.load_state("t1021")
+    assert adapter.states_loaded == 4
+    observer.advance(4)
+    observer.advance(4)
+    assert [e.put_back for e in events[-2:]] == [True, False]
+    # A load that did not load is not counted, and marks nothing.
+    with pytest.raises(ConfigurationError):
+        adapter.load_state("never_saved_t1021")
+    assert adapter.states_loaded == 4
+    observer.advance(4)
+    assert events[-1].put_back is False
+    # A jump the observer was told of is marked too, with what it was told.
+    observer.expect_jump(back=True)
+    adapter.load_state("t1021")
+    back = observer.observe()
+    assert back is not None and back.put_back and back.went_back
+    observer.expect_jump()  # told of a jump, but nothing was loaded: no mark
+    observer.advance(4)
+    assert (events[-1].put_back, events[-1].went_back) == (False, False)
+    # Another connection starts its own count: what was loaded before is not its doing.
+    connection.disconnect()
+    connection.connect("fake")
+    first = observer.observe()
+    assert first is not None and first.put_back is False
+    assert fake(connection).states_loaded == 0
