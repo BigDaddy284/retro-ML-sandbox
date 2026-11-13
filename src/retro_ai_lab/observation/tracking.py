@@ -60,6 +60,10 @@ GLASS_AFTER = 2  # camera moves a row stood still through before it counts as gl
 GLASS_MOST = 4  # ... and the most that are counted, so a row can be unlearnt again
 SCREEN_SHARE = 4  # the camera's reach is at most a quarter of the screen either way
 EXPLAINS = 0.5  # a move must leave at most this share of what differed still differing
+# A move the caller expects is taken where it leaves at most this share of the pixels
+# with a say differing more than the picture's own answer does (T-1020): a thing or
+# two that moved by themselves, not scenery that tells.
+SLACK = 0.01
 MOST_MOVERS = 16  # kinds known by their colours at most: each costs a pass over the screen
 FITS_MOST = 4_000_000  # pixels compared at most to see whether a patch stood elsewhere (T-1016)
 DEFAULT_MAX_JUMP = 24  # farthest a thing may be from where it was expected to be
@@ -334,6 +338,7 @@ class ObjectTracker:
         self._next_id = 1
         self._camera = (0, 0)  # where the camera is in the level, summed scrolls
         self._scroll = (0, 0)
+        self._sighted = (0, 0)  # the camera's last move as the picture alone had it (T-1020)
         self._hidden: tuple[int, int, int, int] | None = None  # the box left out last frame
         # Camera moves each row stood still through although the move would have changed
         # it (T-992). Kept over a reset, like the kinds: the strip of lives and score is
@@ -377,6 +382,12 @@ class ObjectTracker:
         return self._searches
 
     @property
+    def sighted(self) -> tuple[int, int]:
+        """The camera's move at the last look as the picture alone had it (T-1020):
+        :attr:`scroll` unless a move the caller expected was taken instead."""
+        return self._sighted
+
+    @property
     def unexplained(self) -> float:
         """The share of the pixels with a say that still differed at the last look once
         the camera's move was allowed for (T-993): next to nothing after a real move,
@@ -394,11 +405,16 @@ class ObjectTracker:
         self._tracks.clear()
         self._camera = (0, 0)
         self._scroll = (0, 0)
+        self._sighted = (0, 0)
         self._hidden = None
         self._unexplained = 0.0
 
     def update(
-        self, frame: Frame, *, hide: tuple[int, int, int, int] | None = None
+        self,
+        frame: Frame,
+        *,
+        hide: tuple[int, int, int, int] | None = None,
+        expect: tuple[int | None, int | None] | None = None,
     ) -> tuple[Track, ...]:
         """Follow the things on ``frame``. ``hide`` is a box (x, y, width, height) to
                 leave out of the picture: nothing in it is a thing, and neither is the change
@@ -411,9 +427,32 @@ class ObjectTracker:
         changing is no camera move: when all that changed fits in half a thing's
         largest size, the camera stood still. (Things known to move are not left out:
         a wrong scroll makes the scenery's own edges look like movers, and leaving
-        those out would keep the scroll wrong.)"""
+        those out would keep the scroll wrong.)
+
+        ``expect`` is the camera's move since the last frame as the caller has it from
+        somewhere that is not the picture (T-1020: the game's own count of where its
+        camera is, :class:`~retro_ai_lab.observation.camera_memory.CameraMemory`):
+        across and down, each a whole number or None for "not known". One thing
+        walking on bare ground, a screen on which nothing tells, scenery that repeats:
+        there the picture cannot say how far the camera moved (T-1017), and what is
+        expected is taken, if the new screen laid over the old one that way differs in
+        at most :data:`SLACK` more of the pixels with a say than under the picture's
+        own answer, and it explains what changed as a move must (:data:`EXPLAINS`)
+        unless next to nothing changed at all. So scenery that tells, a cut to another
+        place and a move past the camera's reach are still the picture's to judge.
+        :attr:`sighted` is what the picture alone said."""
         if not isinstance(frame, Frame):
             raise ConfigurationError("update() needs a Frame.")
+        if expect is not None and (
+            not isinstance(expect, tuple)
+            or len(expect) != 2
+            or any(
+                v is not None and (isinstance(v, bool) or not isinstance(v, int)) for v in expect
+            )
+        ):
+            raise ConfigurationError(
+                "expect must be the camera's move across and down: each a whole number, or None."
+            )
         if hide is not None and (
             len(hide) != 4
             or not all(isinstance(v, int) and not isinstance(v, bool) for v in hide)
@@ -434,11 +473,11 @@ class ObjectTracker:
         if self._whole:
             objects.extend(self._known_by_their_colours(frame, objects, hide))
         if prev is not None:
-            self._scroll = self._camera_move(prev, frame, hide)
+            self._scroll = self._camera_move(prev, frame, hide, expect)
             self._camera = (self._camera[0] + self._scroll[0], self._camera[1] + self._scroll[1])
             objects.extend(self._movers_in_scenery(prev, frame, objects, hide))
         else:
-            self._scroll = (0, 0)
+            self._scroll = self._sighted = (0, 0)
             self._unexplained = 0.0
         self._match(objects, frame.number)
         self._previous = frame
@@ -448,7 +487,11 @@ class ObjectTracker:
     # ------------------------------------------------------------ internals
 
     def _camera_move(
-        self, prev: Frame, frame: Frame, hide: tuple[int, int, int, int] | None
+        self,
+        prev: Frame,
+        frame: Frame,
+        hide: tuple[int, int, int, int] | None,
+        expect: tuple[int | None, int | None] | None = None,
     ) -> tuple[int, int]:
         a, b = _packed(frame), _packed(prev)
         self._unexplained = 0.0
@@ -463,26 +506,41 @@ class ObjectTracker:
                 mask[max(0, y) : max(0, y + h), max(0, x) : max(0, x + w)] = True
         changed = (a != b) & ~(out_a | out_b)  # with no shift, what either screen leaves out
         glass = self._stuck >= GLASS_AFTER
-        telling = changed & ~glass[:, None]
-        if not telling.any():
-            return (0, 0)
-        ys, xs = np.nonzero(telling)
-        # Small, and far, are measured against the screen: on a small screen a thing
-        # is smaller and a move past a quarter of it leaves too little to compare.
-        thin = min(self._max_size // 2, frame.width // (2 * SCREEN_SHARE))
-        tall = min(self._max_size // 2, frame.height // (2 * SCREEN_SHARE))
-        if int(np.max(xs) - np.min(xs)) < thin and int(np.max(ys) - np.min(ys)) < tall:
-            return (0, 0)  # one small thing changed: that is no camera move
-        self._searches += 1
         va, vb = ~(out_a | glass[:, None]), ~(out_b | glass[:, None])
-        scroll = _search(
-            a,
-            b,
-            va,
-            vb,
+        reach = (
             min(self._max_shift, frame.width // SCREEN_SHARE),
             min(self._max_shift, frame.height // SCREEN_SHARE),
         )
+        scroll = self._sighted = self._sighted_move(a, b, va, vb, changed & ~glass[:, None], reach)
+        told = self._told(a, b, va, vb, scroll, expect, reach)
+        if told is not None:
+            scroll = told
+        if scroll != (0, 0):
+            self._learn_glass(a, b, changed, out_a, out_b, scroll)
+        return scroll
+
+    def _sighted_move(
+        self,
+        a: NDArray[np.int32],
+        b: NDArray[np.int32],
+        va: NDArray[np.bool_],
+        vb: NDArray[np.bool_],
+        telling: NDArray[np.bool_],
+        reach: tuple[int, int],
+    ) -> tuple[int, int]:
+        """The camera's move as the picture alone has it (T-992)."""
+        if not telling.any():
+            return (0, 0)
+        ys, xs = np.nonzero(telling)
+        height, width = a.shape
+        # Small, and far, are measured against the screen: on a small screen a thing
+        # is smaller and a move past a quarter of it leaves too little to compare.
+        thin = min(self._max_size // 2, width // (2 * SCREEN_SHARE))
+        tall = min(self._max_size // 2, height // (2 * SCREEN_SHARE))
+        if int(np.max(xs) - np.min(xs)) < thin and int(np.max(ys) - np.min(ys)) < tall:
+            return (0, 0)  # one small thing changed: that is no camera move
+        self._searches += 1
+        scroll = _search(a, b, va, vb, *reach)
         still = _mismatch(a, b, va, vb, 0, 0)
         if scroll == (0, 0):
             self._unexplained = still or 0.0
@@ -495,8 +553,42 @@ class ObjectTracker:
             self._unexplained = still or 0.0
             return (0, 0)
         self._unexplained = moved
-        self._learn_glass(a, b, changed, out_a, out_b, scroll)
         return scroll
+
+    def _told(
+        self,
+        a: NDArray[np.int32],
+        b: NDArray[np.int32],
+        va: NDArray[np.bool_],
+        vb: NDArray[np.bool_],
+        sighted: tuple[int, int],
+        expect: tuple[int | None, int | None] | None,
+        reach: tuple[int, int],
+    ) -> tuple[int, int] | None:
+        """The move the caller expects, where it is to be taken over the picture's own
+        (T-1020); None where the picture stands."""
+        if expect is None:
+            return None
+        told = (
+            sighted[0] if expect[0] is None else expect[0],
+            sighted[1] if expect[1] is None else expect[1],
+        )
+        if told == sighted or abs(told[0]) > reach[0] or abs(told[1]) > reach[1]:
+            return None
+        still = _mismatch(a, b, va, vb, 0, 0)
+        if still is None:
+            return None  # nothing on the screen has a say: nothing to check it against
+        here = still if sighted == (0, 0) else _mismatch(a, b, va, vb, *sighted)
+        there = still if told == (0, 0) else _mismatch(a, b, va, vb, *told)
+        if here is None or there is None:
+            return None
+        # No worse than the picture's own answer by more than a thing or two moving by
+        # themselves; and a move at all: after a cut to another place nothing fits, and
+        # what fits least badly is no measure.
+        if there > here + SLACK or there > max(EXPLAINS * still, SLACK):
+            return None
+        self._unexplained = there
+        return told
 
     def _learn_glass(
         self,

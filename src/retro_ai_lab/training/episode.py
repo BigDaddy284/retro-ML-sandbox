@@ -1380,8 +1380,16 @@ class EpisodeRunner:
             self._unseen_lost += lost
             self._unseen_scored += scored
             if self._seen is not None:
+                # The memory read with this screen goes with it (T-1020): the watch
+                # finds in it the game's own count of where its camera is.
+                read = self._observation.latest
                 with app_work.timed("step: look"):
-                    self._watch.look(self._seen, lost=self._unseen_lost, scored=self._unseen_scored)
+                    self._watch.look(
+                        self._seen,
+                        lost=self._unseen_lost,
+                        scored=self._unseen_scored,
+                        memory=read.regions if read is not None else None,
+                    )
                 self._unseen_lost = self._unseen_scored = 0
                 # New ground the look found is paid before this step's reward is
                 # collected, so it lands in the step that got there (T-993).
