@@ -45,7 +45,7 @@ def test_the_bench_is_repeatable(report: Report) -> None:
 @pytest.mark.slow
 def test_the_report_reads_in_words(report: Report) -> None:
     lines = report.lines()
-    assert len(lines) == 7
+    assert len(lines) == 8
     assert lines[0] == "Practice bench: Toy Hopper level 0, 5 goes of up to 80 steps, Simple table."
     assert lines[1].startswith(
         f"Eyes: {report.looks:,} looks; followed what it takes for itself in "
@@ -74,6 +74,7 @@ def test_the_report_reads_in_words(report: Report) -> None:
     assert lines[5].startswith(f"Memory: measures distances from {report.own_position} (")
     assert "lives found" in lines[5]
     assert lines[6].startswith("Brain: furthest reached ") and "of 2,496 to the flag" in lines[6]
+    assert lines[7].startswith("Ways past: ")
     # A run in which the AI never looked says so instead of dividing by nothing.
     blind = Report(seed=1, goes=2, max_steps=10, algorithm="dqn", furthest=[40, 50], lost=[0, 1])
     blind.finished = [0, 0]
@@ -90,7 +91,7 @@ def test_the_report_reads_in_words(report: Report) -> None:
 def test_the_command_line(capsys: pytest.CaptureFixture[str]) -> None:
     code = main(["--goes", "1", "--steps", "20", "--play-frames", "600", "--algorithm", "q_table"])
     out = capsys.readouterr().out.splitlines()
-    assert code == 0 and len(out) == 7
+    assert code == 0 and len(out) == 8
     assert out[0] == "Practice bench: Toy Hopper level 0, 1 goes of up to 20 steps, Simple table."
     for bad in (
         ["--goes", "0"],
@@ -108,6 +109,31 @@ def test_the_command_line(capsys: pytest.CaptureFixture[str]) -> None:
     assert practice_bench.FOLLOWED_TARGET == 95 and practice_bench.EXPLAINED_TARGET == 80
     assert practice_bench.FLOOR_TARGET == 95 and practice_bench.CAMERA_TARGET == 90
     assert practice_bench.GROUND_TARGET == 90
+
+
+@pytest.mark.slow
+def test_the_bench_reports_the_ways_past() -> None:
+    """T-1010: training goes back at a life lost, and the bench says what came of it."""
+    # Measured: 12 deaths, 9 searches, 8 ways found. (The short runs on level 3 with the
+    # simple table, used below, search 4 times and find nothing: its goes wander.)
+    first = run(8, seed=0, algorithm="dqn", max_steps=200, play_frames=2000)
+    assert first.deaths >= 3
+    assert 1 <= first.ways_found <= first.ways_sought <= 3 * 8  # at most three a go
+    assert first.ways_sought <= first.deaths  # one search a life lost at most
+    share = round(100 * first.ways_found / first.ways_sought)
+    assert first.lines()[7] == (
+        f"Ways past: after losing a life it went back {first.ways_sought:,} "
+        f"time{'' if first.ways_sought == 1 else 's'} and found a way past in "
+        f"{first.ways_found:,} ({share}%)."
+    )
+    # A run in which it never went back says so, and one search is not "1 times".
+    none = Report(seed=1, goes=1, max_steps=10, algorithm="dqn", furthest=[40], lost=[0])
+    none.finished = [0]
+    assert none.lines()[7] == "Ways past: it never went back to look for one."
+    none.ways_sought, none.ways_found = 1, 1
+    assert none.lines()[7] == (
+        "Ways past: after losing a life it went back 1 time and found a way past in 1 (100%)."
+    )
 
 
 @pytest.mark.slow
