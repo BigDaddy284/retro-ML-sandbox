@@ -754,6 +754,17 @@ class EpisodeRunner:
             return self._seek()
         return True
 
+    def _paid_moves(self) -> list[tuple[str, int]]:
+        """The buttons that have been paid, best first, each with its own move."""
+        space = self._agent.space
+        moves = []
+        for name in self.paid_buttons:
+            try:
+                moves.append((name, space.index_of([name])))
+            except ConfigurationError:
+                continue  # no move of its own: it is only ever held with another
+        return moves
+
     def _press_on(self, *, stuck: bool = False) -> bool:
         """Paid nothing for a while, hold the best-paid button for a while (T-1011).
 
@@ -782,13 +793,7 @@ class EpisodeRunner:
                 return False
         elif self._unpaid < self._press_after:
             return False
-        space = self._agent.space
-        moves = []
-        for name in self.paid_buttons:
-            try:
-                moves.append((name, space.index_of([name])))
-            except ConfigurationError:
-                continue  # no move of its own: it is only ever held with another
+        moves = self._paid_moves()
         if not moves:
             return False
         name, move = moves[self._press_next % len(moves)]
@@ -840,8 +845,9 @@ class EpisodeRunner:
         """A life just went: go back and look for a way past (T-1007). False if the link dropped.
 
         The loss itself stands for the learner and the count: it happened. What goes
-        back is the game. From the saved moment before, the small changes to what
-        it did are tried off the record (:func:`find_way`); a way found is played
+        back is the game. From the saved moment before, the best-paid button held
+        and the small changes to that, and then the small changes to what it did,
+        are tried off the record (:func:`find_way`); a way found is played
         from that moment through the ordinary step, and with none the game is put
         back to where it was and the go carries on a life down. A loss that stands
         makes the moments before it useless (every try from them would lose that
@@ -870,6 +876,7 @@ class EpisodeRunner:
         self._ways_sought += 1
         space = self._agent.space
         at = self._steps
+        paid = self._paid_moves()  # the best-paid button's move is the plain way (T-1012)
         try:
             fast = self._flat_out() if self._flat_out is not None else nullcontext()
             with fast, app_work.timed("step: search"):
@@ -885,6 +892,7 @@ class EpisodeRunner:
                     budget=self._way_tries,
                     look_every=self._look_every,
                     seconds=self._way_seconds,
+                    plain=paid[0][1] if paid else None,
                 )
                 if search.way is None:
                     self._connection.call(lambda a: a.load_state(NOW_SLOT))
@@ -921,20 +929,28 @@ class EpisodeRunner:
         self._missed = 0
         self._ways_found += 1
         change = way.change
-        before = len(trace) - change.at
-        log.info(
-            "Lost a life at step %d. Went back %s and found a way past on try %d, after %.1f s: "
-            "%s for %d step%s, starting %d step%s before the life went.",
-            at,
-            back,
-            way.tries,
-            search.seconds,
-            space[change.move].label,
-            change.hold,
-            "" if change.hold == 1 else "s",
-            before,
-            "" if before == 1 else "s",
+        lead = (
+            f"Lost a life at step {at}. Went back {back} and found a way past on try "
+            f"{way.tries}, after {search.seconds:.1f} s: "
         )
+        held = f"{space[change.move].label} for {change.hold} step{'' if change.hold == 1 else 's'}"
+        if way.plain is None:
+            before = len(trace) - change.at
+            how = (
+                f"{held}, starting {before} step{'' if before == 1 else 's'} before the life went."
+            )
+        else:
+            # The plain way (T-1012): not what it did, but its best-paid button held.
+            how = f"holding {space[way.plain].label} instead of what it did"
+            if way.lost_at is None:
+                how += "."
+            else:
+                before = way.lost_at - change.at
+                how += (
+                    f", with {held}, starting {before} step{'' if before == 1 else 's'} "
+                    "before that would lose the life."
+                )
+        log.info("%s%s", lead, how)
         return True
 
     def go_back(self, moment: Moment, then: Sequence[int] = ()) -> State:
