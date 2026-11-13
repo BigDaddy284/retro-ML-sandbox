@@ -770,6 +770,7 @@ def test_the_log_says_whether_the_saved_brain_was_picked_up(
                 "It knows what it looks like",  # T-987: said with either of the two above
                 "It has no colours of its own",
                 "When the AI loses a life it goes back",  # T-1010: not about the brain either
+                "It remembers the best go",  # T-1015: said with the line above
                 "Lost a life at step",
                 "Going back found no way",
             )

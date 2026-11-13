@@ -63,6 +63,7 @@ class Report:
     goes: int
     max_steps: int
     algorithm: str
+    remember: bool = True  # goes began with the best way played (T-1015)
     # Eyes.
     looks: int = 0
     followed: int = 0  # looks in which the watch had what it calls itself in sight
@@ -78,6 +79,7 @@ class Report:
     camera_still: int = 0
     camera_still_right: int = 0
     camera_cuts: int = 0  # the game put the camera somewhere else (a life lost)
+    camera_skipped: int = 0  # looks not compared: the game had just been put back (T-1015)
     # The new ground the watch counted, against how far the game's own camera went (T-993).
     ground_steps: int = 0  # steps of new ground counted over the run
     ground_goes: int = 0  # goes in which the watch looked at the screen
@@ -100,6 +102,7 @@ class Report:
     furthest: list[int] = field(default_factory=list)
     lost: list[int] = field(default_factory=list)
     finished: list[int] = field(default_factory=list)
+    clean: int = 0  # goes that finished a level before losing any life (T-1015)
     # Going back at a life lost to look for a way past (T-1009), over the run.
     ways_sought: int = 0
     ways_found: int = 0
@@ -108,12 +111,23 @@ class Report:
     def deaths(self) -> int:
         return self.falls + self.walkers
 
+    def _describe_clean(self) -> str:
+        """ ", in 34 goes, 33 of them before any life was lost", or "" with none finished."""
+        goes = sum(1 for n in self.finished if n)
+        if not goes:
+            return ""
+        return (
+            f", in {goes} go{'' if goes == 1 else 'es'}, {self.clean} of them before any "
+            "life was lost"
+        )
+
     def lines(self) -> list[str]:
         """The report as the lines the tool prints."""
         label = describe_algorithm(self.algorithm)[0]
         out = [
             f"Practice bench: Toy Hopper level {self.seed}, {self.goes} goes of up to "
-            f"{self.max_steps} steps, {label}."
+            f"{self.max_steps} steps, {label}"
+            f"{'' if self.remember else ', without the way it remembers'}."
         ]
         if self.looks:
             out.append(
@@ -175,7 +189,7 @@ class Report:
                 f"the last {len(last)}, of {flag:,} to the flag; lives lost a go "
                 f"{statistics.fmean(self.lost[:WINDOW]):.2f} then "
                 f"{statistics.fmean(self.lost[-WINDOW:]):.2f}; levels finished "
-                f"{sum(self.finished)}."
+                f"{sum(self.finished)}{self._describe_clean()}."
             )
         if self.ways_sought:
             out.append(
@@ -219,8 +233,15 @@ def run(
     algorithm: str = DEFAULT_ALGORITHM,
     max_steps: int = DEFAULT_STEPS,
     play_frames: int = DEFAULT_PLAY_FRAMES,
+    remember: bool = True,
 ) -> Report:
-    """Run the bench and return what it measured. Seeded: the same arguments, the same report."""
+    """Run the bench and return what it measured. Seeded: the same arguments, the same report.
+
+    ``remember=False`` trains without the best way remembered (T-1015): every go
+    is the brain's own from its first step, as all goes were before.
+    """
+    if not isinstance(remember, bool):
+        raise ConfigurationError("The bench needs remember to be True or False.")
     for value, what in ((goes, "goes"), (max_steps, "steps"), (play_frames, "play frames")):
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ConfigurationError(f"The bench needs a whole number of {what}, 1 or more.")
@@ -228,7 +249,9 @@ def run(
         raise ConfigurationError(
             f"No way of learning called {algorithm!r} (choices: {', '.join(algorithm_choices())})."
         )
-    report = Report(seed=seed, goes=goes, max_steps=max_steps, algorithm=algorithm)
+    report = Report(
+        seed=seed, goes=goes, max_steps=max_steps, algorithm=algorithm, remember=remember
+    )
     with tempfile.TemporaryDirectory() as scratch:
         data = Path(scratch)
         bus = EventBus()
@@ -249,6 +272,7 @@ def run(
             goals=goals,
             rewards=rewards,
             way_seconds=None,  # a search cut short by the clock would not be repeatable
+            remember=remember,
         )
         training.set_algorithm(algorithm)
         connection.connect("fake", game="hopper", seed=seed)
@@ -271,24 +295,31 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
     training.start(Mode.INDEPENDENT)
     looks = 0
     scrolled = False  # the game's camera has moved between two looks since the AI started
+    seen_me = 0  # the watch's count of looks in which it had itself in sight, at the last look
+    unchecked = 0  # of those, the looks the game was put back after, in the same step
     while training.episodes < report.goes:
         go = training.episodes
-        furthest, lost, level = 0, 0, game.state.level
+        # Levels are counted as they are finished (T-1015): the level read here is
+        # the last go's, from before this go is put back to its start.
+        furthest, lost, finished = 0, 0, 0
         before = game.state
         camera: int | None = None  # where the game's camera was at the go's last look
         began: int | None = None  # where the game's camera was at the go's first look
         stood = 0  # where the player was at the go's first look
         fresh = not scrolled  # the go began before the camera had ever moved
         got, counted, steps = 0, 0, 0  # furthest at a look: the game's, the watch's; its steps
+        carried = 0  # the camera's travel in the levels this go has finished (T-1015)
         back = 0  # times the go has gone back to an earlier moment (T-1009)
         while training.episodes == go:
             training.step()
             runner = training.episode
+            went_back = False
             if runner is not None and runner.times_back != back:
                 # The game was put back: where the camera is now against where it was
                 # is the app's own jump, not a move for the watch to have measured.
                 back = runner.times_back
                 camera = None
+                went_back = True
             now = game.state
             furthest = max(furthest, now.x)
             if now.mode == toy_hopper.DYING and before.mode != toy_hopper.DYING:
@@ -297,13 +328,28 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
                 else:
                     report.walkers += 1
             lost += max(0, before.lives - now.lives)
+            if now.level > before.level:
+                report.clean += finished == 0 and lost == 0
+                finished += now.level - before.level
+                # The next level starts with the camera back at 0: what it travelled
+                # in this one is ground the go has been over all the same.
+                carried += before.scroll
             before = now
             watch = training.watch
             if watch is not None and watch.looks != looks:
                 looks = watch.looks
-                report.right += _on_the_player(training, game)
+                if went_back and watch.me is None:
+                    # The look was taken, the life went and the game was put back, all in
+                    # this step (T-1015): what the look followed is no longer in the game
+                    # to check, so it counts neither as followed nor as the player.
+                    unchecked += watch.seen_me - seen_me
+                else:
+                    report.right += _on_the_player(training, game)
+                seen_me = watch.seen_me
                 if camera is not None:
                     _count_camera(report, now.scroll - camera, watch.tracker.scroll)
+                elif began is not None:
+                    report.camera_skipped += 1  # the first look after the game was put back
                 first_move = camera is not None and now.scroll != camera
                 camera = now.scroll
                 if began is None:
@@ -311,7 +357,7 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
                 # The camera's travel, once the camera has been seen to move. Up to the
                 # look at which it first does, how far the player itself has gone:
                 # nothing else has moved, and that is what the watch can count.
-                got = max(got, now.scroll - began if scrolled else now.x - stood)
+                got = max(got, carried + now.scroll - began if scrolled else now.x - stood)
                 scrolled = scrolled or first_move
                 counted = max(counted, watch.ground.reach[0])
                 steps = max(steps, watch.ground.steps)
@@ -330,11 +376,11 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
             report.ground_steps += steps
             step = training.watch.ground.unit or toy_hopper.PLAYER_H
             report.ground_right += abs(counted - got) <= step
-        report.finished.append(max(0, game.state.level - level))
+        report.finished.append(finished)
     watch = training.watch
     if watch is None:
         return
-    report.looks, report.followed = watch.looks, watch.seen_me
+    report.looks, report.followed = watch.looks, watch.seen_me - unchecked
     report.blamed = watch.lives_after_touch
     report.fell = watch.lives_after_fall
     report.kinds = len(watch.tracker.catalogue.kinds())
@@ -427,6 +473,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_PLAY_FRAMES,
         help="frames of the scripted first go discovery learns from",
     )
+    parser.add_argument(
+        "--no-memory",
+        action="store_true",
+        help="do not begin each go with the best way played so far",
+    )
     return parser
 
 
@@ -458,6 +509,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         algorithm=args.algorithm,
         max_steps=args.steps,
         play_frames=args.play_frames,
+        remember=not args.no_memory,
     )
     for line in report.lines():
         print(line)

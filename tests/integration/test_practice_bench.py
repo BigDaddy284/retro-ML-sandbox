@@ -9,6 +9,12 @@ from retro_ai_lab.tools import practice_bench
 from retro_ai_lab.tools.practice_bench import Report, main, run
 
 SHORT = dict(seed=0, algorithm="q_table", max_steps=80, play_frames=2000)
+# The run the eyes were measured on in T-988, T-992 and T-993: level 3, on which the
+# simple table runs and falls, without the way it remembers (T-1015). With it the same
+# brain gets to the end of the level, past walkers, where the eyes have gaps that are
+# known and written down (TASK_TRACKER.md, T-1015): these three tests are about the
+# first screens of the level, and stay on the goes they were written for.
+NEAR = dict(goes=12, seed=3, algorithm="q_table", max_steps=200, play_frames=2000, remember=False)
 
 
 @pytest.fixture(scope="module")
@@ -106,6 +112,15 @@ def test_the_command_line(capsys: pytest.CaptureFixture[str]) -> None:
             run(**kwargs)  # type: ignore[arg-type]
     with pytest.raises(ConfigurationError, match="No way of learning called"):
         run(1, algorithm="magic")
+    # T-1015: without the way it remembers, said in the first line.
+    with pytest.raises(ConfigurationError, match="remember"):
+        run(1, remember="no")  # type: ignore[arg-type]
+    code = main(["--goes", "1", "--steps", "20", "--play-frames", "600", "--no-memory"])
+    out = capsys.readouterr().out.splitlines()
+    assert code == 0 and out[0] == (
+        "Practice bench: Toy Hopper level 0, 1 goes of up to 20 steps, Neural network, "
+        "without the way it remembers."
+    )
     assert practice_bench.FOLLOWED_TARGET == 95 and practice_bench.EXPLAINED_TARGET == 80
     assert practice_bench.FLOOR_TARGET == 95 and practice_bench.CAMERA_TARGET == 90
     assert practice_bench.GROUND_TARGET == 90
@@ -153,7 +168,7 @@ def test_the_eyes_are_on_the_player(report: Report) -> None:
 def test_deaths_are_explained() -> None:
     """T-988: every life lost reaches the eyes (on this game none used to: the dying
     pause is a whole number of looks long), and a fall is known for a fall."""
-    report = run(12, seed=3, algorithm="q_table", max_steps=200, play_frames=2000)
+    report = run(**NEAR)  # type: ignore[arg-type]
     assert report.deaths >= 3 and report.walkers == 0  # level 3's first deaths are falls
     # Each fall the game counted, the eyes counted; none was put down to the pillar
     # the player stood on before it fell. (The last death's pause can outlast the run.)
@@ -180,12 +195,16 @@ def test_the_camera_is_followed(report: Report) -> None:
     """T-992: the camera's move between two looks, as the tracker measures it, is the
     game's own (before: right in about 3 of 10 looks in which it moved)."""
     counted = report.camera_moved + report.camera_still + report.camera_cuts
-    assert counted == report.looks - report.goes  # every look but each go's first
+    # Every look but each go's first, and the first after the game was put back to an
+    # earlier moment (T-1015: this run now goes back once; the camera's jump there is
+    # the app's own doing).
+    assert counted == report.looks - report.goes - report.camera_skipped
+    assert 0 <= report.camera_skipped <= report.ways_found
     assert report.camera_moved >= 15  # a short run: the table mostly stands and jumps
     assert report.camera_moved_right >= 0.9 * report.camera_moved
     assert report.camera_still_right >= 0.99 * report.camera_still
     # A level on which it runs and falls more.
-    gaps = run(12, seed=3, algorithm="q_table", max_steps=200, play_frames=2000)
+    gaps = run(**NEAR)  # type: ignore[arg-type]
     assert gaps.camera_moved >= 100
     assert gaps.camera_moved_right >= 0.9 * gaps.camera_moved
     assert gaps.camera_still_right >= 0.99 * gaps.camera_still
@@ -210,8 +229,62 @@ def test_new_ground_is_paid_as_the_game_has_it(report: Report) -> None:
     # pixels, and the camera starts to follow 80 pixels into the level, so a go's
     # steps are those of its furthest less five, give or take one; nothing is paid
     # for jumping or for falling into a gap.
-    gaps = run(12, seed=3, algorithm="q_table", max_steps=200, play_frames=2000)
+    gaps = run(**NEAR)  # type: ignore[arg-type]
     assert gaps.ground_goes == 12 and gaps.ground_right >= 11
     assert gaps.ground_before == 1  # it runs: the camera moves in the first go
     owed = sum(max(0, far - 80) // 16 for far in gaps.furthest)
     assert owed - 12 <= gaps.ground_steps <= owed + 12 + 3  # the first go's 3 on the screen
+
+
+@pytest.mark.slow
+def test_every_go_that_finishes_a_level_is_counted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """T-1015: the flag is brought to just beyond the first gap, so short goes finish levels."""
+    from retro_ai_lab.emulator.fake import toy_hopper
+    from retro_ai_lab.emulator.fake.toy_hopper import LAYOUT, ToyHopper
+
+    monkeypatch.setattr(toy_hopper, "FLAG_COL", 20)
+    passed = 0  # every time the game itself moved on a level, tries of a search included
+    simulate = ToyHopper._simulate
+
+    def counted(game: ToyHopper, *args: object, **kwargs: object) -> None:
+        nonlocal passed
+        level = game.ram[LAYOUT.level]
+        simulate(game, *args, **kwargs)  # type: ignore[arg-type]
+        passed += game.ram[LAYOUT.level] > level
+
+    monkeypatch.setattr(ToyHopper, "_simulate", counted)
+    before_training = 0
+
+    def first_go(*args: object, **kwargs: object) -> object:
+        nonlocal before_training
+        out = scripted(*args, **kwargs)
+        before_training = passed
+        return out
+
+    scripted = practice_bench.first_go
+    monkeypatch.setattr(practice_bench, "first_go", first_go)
+    report = run(8, seed=0, algorithm="q_table", max_steps=150, play_frames=2000)
+    goes = sum(1 for n in report.finished if n)
+    # The old count read the level before the go was put back to its start, so of goes
+    # that each finish the level only the first was counted.
+    assert goes >= 3 and len(report.finished) == 8
+    assert goes <= sum(report.finished) <= passed - before_training
+    assert 0 <= report.clean <= goes
+    assert report.clean == sum(
+        1 for n, lost in zip(report.finished, report.lost, strict=True) if n and not lost
+    ) or report.clean >= sum(
+        1 for n, lost in zip(report.finished, report.lost, strict=True) if n and not lost
+    )  # a life lost after the flag does not spoil a level finished before it
+    line = report.lines()[6]
+    assert (
+        f"levels finished {sum(report.finished)}, in {goes} goes, {report.clean} of them " in line
+    )
+    assert line.endswith("before any life was lost.")
+    # None finished: nothing more is said. One go is not "1 goes".
+    none = Report(seed=1, goes=2, max_steps=10, algorithm="dqn", furthest=[40, 50], lost=[0, 1])
+    none.finished = [0, 0]
+    assert none.lines()[6].endswith("levels finished 0.")
+    none.finished, none.clean = [0, 2], 1
+    assert none.lines()[6].endswith(
+        "levels finished 2, in 1 go, 1 of them before any life was lost."
+    )
