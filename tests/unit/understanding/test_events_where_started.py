@@ -87,6 +87,19 @@ def test_the_lowest_and_highest_belong_to_the_place() -> None:
     called = restarts(d.observe(snap(7, *NEW)))
     assert len(called) == 1 and called[0].variables == ALL
 
+    # What a watch saw first is seen too. Here the game is watched from its start;
+    # then every watch is made anew while the game is over.
+    k = knowledge_for(GAME)
+    d = EventDetector(k)
+    d.observe(snap(0, *NEW))
+    d.observe(snap(1, *LAST))
+    d.observe(snap(2, *OVER))
+    for var_id in ALL:
+        k.support(var_id, Evidence("test", "seen again", 1.0))
+    assert d.observe(snap(3, *OVER)) == ()
+    called = restarts(d.observe(snap(4, *NEW)))
+    assert len(called) == 1 and called[0].variables == ("v2", "v3", "v4", "v5")
+
     # A new go: every watch starts again, at "game over" this time. What was seen of
     # the numbers is kept; the switch has only its watch to go by, and is not home.
     d = seen_a_new_game(k)
