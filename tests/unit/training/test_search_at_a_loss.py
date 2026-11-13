@@ -321,6 +321,92 @@ def test_a_search_out_of_time_leaves_the_loss_standing(
     assert limits == [None] and free.finish().ways_found == 1
 
 
+GAVE_UP = (
+    "Going back found no way past 3 times in a row, so the AI stops going back in this "
+    "game: here it only costs time."
+)
+
+
+def test_it_gives_up_when_searches_keep_finding_nothing(
+    lab: Lab, caplog: pytest.LogCaptureFixture
+) -> None:
+    r, moments = searching(lab, ways_per_go=2, way_tries=5, give_up_after=3)
+    with caplog.at_level(logging.INFO, logger="retro_ai_lab.training.episode"):
+        # The first go falls in twice and looks twice, for nothing.
+        r.begin()
+        while lab.game.state.lives > toy_hopper.START_LIVES - 2:
+            assert r.step()
+        assert r.ways_sought == 2 and not r.gave_up
+        assert r.finish().ways_sought == 2
+        # The third search for nothing, in the next go, is the last.
+        lab.game.reset()
+        r.begin()
+        steps(r, DIED_AT)
+        assert r.ways_sought == 1 and r.ways_found == 0 and r.gave_up
+        saves, loads = len(lab.saved), len(lab.loaded)
+        while lab.game.state.lives > toy_hopper.START_LIVES - 2:
+            assert r.step()
+        assert r.ways_sought == 1 and len(moments) == 0
+        assert r.finish().ways_sought == 1
+        # From here on its goes are as they were before going back existed.
+        lab.game.reset()
+        r.begin()
+        steps(r, DIED_AT + 5)
+        assert r.gave_up and len(moments) == 0
+        assert r.finish().ways_sought == 0
+    assert (len(lab.saved), len(lab.loaded)) == (saves, loads)
+    said = [rec.getMessage() for rec in caplog.records if "stops going back" in rec.getMessage()]
+    assert said == [GAVE_UP]
+
+
+def test_a_way_found_starts_the_count_again(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = episode.find_way
+    nothing = Search(None, 5)
+    script: list[object] = [
+        nothing,
+        "the real search",
+        Search(None, 5, out_of_time=True),
+        EmulatorError("the link dropped"),
+        nothing,
+    ]
+
+    def scripted(*args: object, **kw: object) -> Search:
+        out = script.pop(0)
+        if isinstance(out, Exception):
+            raise out
+        return out if isinstance(out, Search) else real(*args, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(episode, "find_way", scripted)
+    r, _ = searching(lab, give_up_after=2)
+    came_to = []
+    for _ in range(5):
+        lab.game.reset()
+        r.begin()
+        steps(r, DIED_AT - 1)
+        went_on = r.step()
+        came_to.append((went_on, r.ways_found, r.gave_up))
+        r.finish()
+    assert came_to == [
+        (True, 0, False),  # nothing: one in a row
+        (True, 1, False),  # a way: the count starts again
+        (True, 0, False),  # out of time is nothing found: one in a row
+        (False, 0, False),  # the link dropped: no search came to anything, none counted
+        (True, 0, True),  # nothing: two in a row
+    ]
+    assert script == []
+
+
+def test_it_never_gives_up_unless_told_when(lab: Lab) -> None:
+    r, _ = searching(lab, way_tries=5)
+    for _ in range(6):
+        lab.game.reset()
+        r.begin()
+        steps(r, DIED_AT)
+        assert r.ways_sought == 1 and r.ways_found == 0 and not r.gave_up
+        r.finish()
+    assert NOW_SLOT in lab.saved
+
+
 def test_the_result_and_the_log_say_what_was_found(
     lab: Lab, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -379,6 +465,10 @@ def test_nonsense_is_refused(lab: Lab) -> None:
         {"way_seconds": 0},
         {"way_seconds": "long"},
         {"way_seconds": True},
+        {"give_up_after": 0},
+        {"give_up_after": -2},
+        {"give_up_after": 1.5},
+        {"give_up_after": True},
         {"moments": Moments(("back0", NOW_SLOT))},
     ):
         with pytest.raises(ConfigurationError):
