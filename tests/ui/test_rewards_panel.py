@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import time
+from types import SimpleNamespace
+
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QLabel, QTreeWidget
@@ -11,6 +14,7 @@ from retro_ai_lab.core import Capabilities
 from retro_ai_lab.emulator.fake.toy_racer import LAYOUT
 from retro_ai_lab.rewards import Category, ExploitWarning
 from retro_ai_lab.services import DiscoveryUpdated, ExploitSuspected
+from retro_ai_lab.ui import coalesce
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.main_window import MainWindow
 from retro_ai_lab.ui.rewards_panel import IDLE_TEXT, YOU_SET_THIS, RewardsPanel
@@ -245,7 +249,7 @@ def test_main_window_hosts_the_panel(qtbot: QtBot, context: AppContext) -> None:
 
 
 def test_many_profile_changes_rebuild_the_tree_once(
-    panel: RewardsPanel, context: AppContext, qtbot: QtBot
+    panel: RewardsPanel, context: AppContext, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """T-843: suggestions change on many training steps; the tree follows a few times a second."""
     context.connection.connect("fake", seed=3)
@@ -262,6 +266,12 @@ def test_many_profile_changes_rebuild_the_tree_once(
     qtbot.waitUntil(lambda: not panel.refresher.pending, timeout=2000)
     qtbot.wait(300)  # out of the window the teach() refresh opened
     rebuilds.clear()
+    # The twelve changes come within one window. The window is 250 ms of real time,
+    # and on a loaded machine one rebuild can take that long: the next change is then
+    # rightly shown at once, and this test counted two (T-1018, seen on CI). So the
+    # refresher's clock stands still while they come; its timer runs on as it does.
+    now = time.monotonic()
+    monkeypatch.setattr(coalesce, "time", SimpleNamespace(monotonic=lambda: now))
     for i in range(12):  # each new confirmed value takes the score's seat (T-858)
         v = k.propose(RAM, 27 - i, kind=VariableKind.SCORE, name=f"S{i}", evidence=SURE)
         k.confirm(v.id)
