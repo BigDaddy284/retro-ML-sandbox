@@ -51,11 +51,21 @@ class Change:
     hold: int
 
     def apply(
-        self, trace: Sequence[int], carry_on: int = 0, *, space: ActionSpace | None = None
+        self,
+        trace: Sequence[int],
+        carry_on: int = 0,
+        *,
+        space: ActionSpace | None = None,
+        whole: bool = False,
     ) -> tuple[int, ...]:
         """The moves to play: the trace with the stretch replaced (cut at the trace's
         end), then ``carry_on`` steps more of the move it mostly made, so a try runs
-        on past where the life went. ``space`` checks the move is one it has."""
+        on past where the life went. ``space`` checks the move is one it has.
+
+        With ``whole`` the stretch is not cut (T-1018): a hold that reaches past the
+        end of the trace is played out, and the carrying on comes after it."""
+        if not isinstance(whole, bool):
+            raise ConfigurationError("whole must be true or false.")
         if not trace:
             raise ConfigurationError("There is nothing it did to change.")
         _whole(carry_on, "carry_on", 0)
@@ -67,7 +77,7 @@ class Change:
         if space is not None:
             space[self.move]  # refuses a move these controls don't have
         moves = list(trace)
-        end = min(len(moves), self.at + self.hold)
+        end = self.at + self.hold if whole else min(len(moves), self.at + self.hold)
         moves[self.at : end] = [self.move] * (end - self.at)
         return (*moves, *([carry(trace)] * carry_on))
 
@@ -79,6 +89,8 @@ def changes(
     holds: Sequence[int] = HOLDS,
     stride: int = STRIDE,
     most: int | None = None,
+    early: bool = False,
+    whole: bool = False,
 ) -> Iterator[Change]:
     """Every change worth trying, most promising first.
 
@@ -87,7 +99,19 @@ def changes(
     near the one it made. A change that comes to the same moves as an earlier one
     (a long hold cut off by the end of the trace) is left out. ``most`` stops the
     list.
+
+    With ``early`` the places go from the start of the trace forwards (T-1018).
+    That is for a trace that ends in standing still, where nothing was a mistake:
+    the earliest change that gets on is the one with the least standing in it.
+
+    With ``whole`` the changes are told apart as :meth:`Change.apply` plays them
+    with it: a long hold near the end of the trace is no longer the same as a
+    shorter one, and is listed.
     """
+    if not isinstance(early, bool):
+        raise ConfigurationError("early must be true or false.")
+    if not isinstance(whole, bool):
+        raise ConfigurationError("whole must be true or false.")
     _whole(stride, "stride", 1)
     if not holds:
         raise ConfigurationError("There must be at least one hold to try.")
@@ -99,10 +123,15 @@ def changes(
     played: set[tuple[int, ...]] = set()
     given = 0
     for hold in holds:
-        for at in range(len(trace) - 1, -1, -stride):
+        last = len(trace) - 1
+        for back in range(0, len(trace), stride):
+            # The same places either way: the last step, and every stride before it.
+            at = last - back
+            if early:
+                at = last % stride + back
             for move in near[at]:
                 change = Change(at, move, hold)
-                moves = change.apply(trace)
+                moves = change.apply(trace, whole=whole)
                 if moves in played:
                     continue
                 played.add(moves)

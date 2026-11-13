@@ -101,6 +101,42 @@ def test_the_moment_before_a_loss_and_what_it_did_since() -> None:
     assert moments.steps == 10 and moments.kept == (start, later)
 
 
+def test_the_moment_before_it_came_to_a_spot() -> None:
+    # T-1018: where to go back to for a standstill that began at some step.
+    moments = Moments(SLOTS, every=4, lead=6)
+    assert moments.since(0) is None  # nothing is kept
+    start = moments.saved("start")
+    play(moments, [1, 1, 1, 1])
+    later = moments.saved("later")
+    play(moments, [2, 2, 2])
+    # The newest moment at or before the step, and all it did since that moment.
+    assert moments.since(0) == (start, (1, 1, 1, 1, 2, 2, 2))
+    assert moments.since(3) == (start, (1, 1, 1, 1, 2, 2, 2))
+    assert moments.since(4) == (later, (2, 2, 2))
+    assert moments.since(7) == moments.since(99) == (later, (2, 2, 2))
+    # Asking changes nothing.
+    assert moments.steps == 7 and moments.kept == (start, later)
+    # The slots go round and the first moments are written over: every moment kept
+    # is then later than the step, and the oldest of them is the one.
+    play(moments, [3])
+    third = moments.saved()
+    play(moments, [3, 3, 3, 3])
+    fourth = moments.saved()
+    play(moments, [4])
+    assert moments.kept == (later, third, fourth)
+    assert moments.since(2) == (later, (2, 2, 2, 3, 3, 3, 3, 3, 4))
+    assert moments.since(8) == (third, (3, 3, 3, 3, 4))
+    # Gone back, the moments after are no longer there to be given.
+    moments.went_back(third)
+    assert moments.since(12) == (third, ())
+    # Forgotten, there is none.
+    moments.forget()
+    assert moments.since(0) is None
+    for bad in (-1, 1.5, True, None, "3"):
+        with pytest.raises(ConfigurationError):
+            moments.since(bad)  # type: ignore[arg-type]
+
+
 def test_going_back_drops_what_came_after() -> None:
     moments = Moments(SLOTS, every=4, lead=2)
     first = moments.saved()

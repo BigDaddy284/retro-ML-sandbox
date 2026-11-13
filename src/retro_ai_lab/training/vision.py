@@ -170,6 +170,17 @@ class ScreenWatch:
         return self._box
 
     @property
+    def spot(self) -> tuple[int, int]:
+        """Where the AI is in the level, in pixels (T-1018): the camera's travel since
+        the go began, plus where on the screen it last saw itself. On a screen that
+        never scrolls that is where it stands on the screen; where it has not seen
+        itself, the camera's travel alone. Only for telling whether it has moved."""
+        x, y = self._ground.place if self._ground.scrolls else (0, 0)
+        if self._last_me is not None:
+            x, y = x + self._last_me[0], y + self._last_me[1]
+        return (x, y)
+
+    @property
     def around(self) -> Surroundings | None:
         """What was around it at the last look: the floor either side, the way at its
         own height, what is under it (T-989). None when it did not see itself."""

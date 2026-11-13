@@ -40,6 +40,7 @@ from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.training.moments import LEAD, Moment, Moments
 from retro_ai_lab.training.route import Route
 from retro_ai_lab.training.search import BUDGET, find_way
+from retro_ai_lab.training.trial import Outcome
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, Mark, ScreenWatch
 from retro_ai_lab.understanding.events import EventKind
 from retro_ai_lab.understanding.knowledge import Knowledge, Variable, VariableKind
@@ -59,6 +60,14 @@ FINGERPRINT_STEPS = 64  # state keys a go remembers, for spotting two identical 
 LOOKAHEAD_STEPS = 8
 DEFAULT_SETTLE_FRAMES = 5  # the understanding engine's event window
 NOW_SLOT = "back_now"  # where the present is saved while a search plays its tries (T-1007)
+STAND_AFTER = 60  # steps about one spot, no life lost, before a way on is sought (T-1018)
+STAND_WITHIN = 64  # pixels either way that are still "about one spot": dithering, a jump
+# A search at a standstill may make this many times the plays of one after a life
+# lost. There most changes lose the life again and cost one blind play; here nearly
+# all stay alive, and each that ends on a new screen costs a second, under the watch.
+STAND_TRIES = 2
+STAND_NEAR = 8  # pixels: it "came to the spot" at the first look this near where it now is
+STAND_REACH = 4  # steps past that look which the way tried from before it still covers
 PRESS_FOR = 16  # steps a go that was paid nothing holds its best-paid button for (T-1011)
 
 
@@ -270,6 +279,7 @@ class EpisodeResult:
     ways_found: int = 0  # times that found one
     pressed_on: int = 0  # times it was paid nothing for a while and pressed on (T-1011)
     remembered: int = 0  # steps it began with from the way it remembered (T-1014)
+    ways_stood: int = 0  # of ways_sought, those where it stood still, no life lost (T-1018)
 
     @property
     def succeeded(self) -> bool:
@@ -289,10 +299,19 @@ class EpisodeResult:
         return f", began with the {steps} it remembered"
 
     def describe_ways(self) -> str:
-        """ ", went back 2 times and found a way past once", or "" when it never looked (T-1007)."""
+        """ ", went back 2 times and found a way past once", or "" when it never looked
+        (T-1007). Where some of those were at a standstill and not after a life lost
+        (T-1018): ", went back 2 times (once where it stood still) and ..."."""
         if self.ways_sought == 0:
             return ""
         back = "once" if self.ways_sought == 1 else f"{self.ways_sought} times"
+        if self.ways_stood and self.ways_sought == 1:
+            back += " (where it stood still)"
+        elif self.ways_stood == self.ways_sought:
+            back += " (each time where it stood still)"
+        elif self.ways_stood:
+            stood = "once" if self.ways_stood == 1 else f"{self.ways_stood} times"
+            back += f" ({stood} where it stood still)"
         if self.ways_found == 0:
             found = "found no way past"
         elif self.ways_found == self.ways_sought:
@@ -330,6 +349,7 @@ class EpisodeResult:
             "ways_found": self.ways_found,
             "pressed_on": self.pressed_on,
             "remembered": self.remembered,
+            "ways_stood": self.ways_stood,
         }
 
     @classmethod
@@ -349,6 +369,7 @@ class EpisodeResult:
                 int(data.get("ways_found", 0)),
                 int(data.get("pressed_on", 0)),
                 int(data.get("remembered", 0)),
+                int(data.get("ways_stood", 0)),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"Bad go result: {exc}") from exc
@@ -384,6 +405,7 @@ class EpisodeRunner:
         press_after: int = 0,
         press_for: int = PRESS_FOR,
         route: Route | None = None,
+        stand_after: int = 0,
     ) -> None:
         if route is not None and not isinstance(route, Route):
             raise ConfigurationError("route must be a Route (or None).")
@@ -391,6 +413,7 @@ class EpisodeRunner:
             (ways_per_go, "ways_per_go", 0),
             (way_tries, "way_tries", 1),
             (press_after, "press_after", 0),
+            (stand_after, "stand_after", 0),
             (press_for, "press_for", 1),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value < least:
@@ -464,6 +487,7 @@ class EpisodeRunner:
         self._ways_left = 0
         self._ways_sought = 0
         self._ways_found = 0
+        self._ways_stood = 0
         # Paid nothing for press_after steps, a go that can still go back holds the
         # button that has paid best for press_for steps (T-1011). What each button has
         # been paid is kept over the goes; 0 never presses on.
@@ -473,12 +497,29 @@ class EpisodeRunner:
         self._route = route
         self._route_left = 0  # moves of it still waiting to be played this go
         self._from_memory = 0  # steps this go has played from it (T-1015)
+        self._way_left = 0  # moves of a way a search found that are still to play (T-1018)
         self._remembered = 0  # steps of it this go began with
         self._paid: dict[str, float] = {}
         self._unpaid = 0  # steps since anything was paid
         self._press_next = 0  # which of the paid buttons the next press holds, best first
         self._pressing = False  # the moves being played are a press
         self._pressed_stuck = False  # this standstill has had its press
+        # A standstill (T-1018): the spot the watch had it at when it last left one, the
+        # steps since, whether this go has counted any new ground, and whether this
+        # standstill has had its search.
+        # About one spot for stand_after steps with no life lost, a go that can still
+        # go back looks for a way on (T-1018). 0 is never; the training service passes
+        # STAND_AFTER.
+        self._stand_after = stand_after
+        self._stood_at: tuple[int, int] | None = None
+        self._stood_for = 0
+        self._stood_from = 0  # the step of the story at which it came to that spot
+        # Where it was at each look since then, with the story's step (T-1018).
+        self._stood_spots: deque[tuple[int, tuple[int, int]]] = deque(maxlen=256)
+        self._got_somewhere = False
+        self._stood_sought = False
+        self._stood_missed = 0  # such searches in a row that found nothing, go to go
+        self._stood_gave_up = False
         self._held_reset = False  # a restart with a life lost is waiting for its search
         self._held_said = False
         self._pressed_on = 0
@@ -621,9 +662,27 @@ class EpisodeRunner:
         return self._ways_found
 
     @property
+    def ways_stood(self) -> int:
+        """Of :attr:`ways_sought`, those made where it stood still with no life lost
+        (T-1018)."""
+        return self._ways_stood
+
+    @property
+    def stand_after(self) -> int:
+        """Steps about one spot, with no life lost, before it looks for a way on
+        (T-1018); 0 when it never does."""
+        return self._stand_after
+
+    @property
     def gave_up(self) -> bool:
         """Its searches kept finding nothing, so it no longer goes back (T-1009)."""
         return self._gave_up
+
+    @property
+    def stood_gave_up(self) -> bool:
+        """Its searches at a standstill kept finding nothing, so it makes no more of
+        them (T-1018). After a life lost it still goes back."""
+        return self._stood_gave_up
 
     @property
     def press_after(self) -> int:
@@ -690,9 +749,15 @@ class EpisodeRunner:
         self._press_next = 0
         self._pressing = False
         self._pressed_stuck = False
+        self._stood_sought = False
+        self._stood_at = None
+        self._stood_for = 0
+        self._stood_spots.clear()
+        self._got_somewhere = False
         self._pressed_on = 0
         self._ways_sought = 0
         self._ways_found = 0
+        self._ways_stood = 0
         if self._moments is not None:
             self._moments.forget()  # a new go is a new story
         self._buttons = {b.name: b for b in self._connection.call(lambda a: a.buttons())}
@@ -754,6 +819,7 @@ class EpisodeRunner:
         step, like a way found by going back, without asking the learner.
         """
         self._route_left = self._remembered = self._from_memory = 0
+        self._way_left = 0
         route = self._route
         if route is None:
             return
@@ -795,6 +861,13 @@ class EpisodeRunner:
             # about before it got on (T-1014). Otherwise nothing changing is getting
             # nowhere too: press on first, once.
             stuck = False
+        if stuck and self._stands_still(stuck=True):
+            # Nothing changing is a standstill whatever the count of steps says, and
+            # the go is about to end or to press a wake button, which ends the story
+            # the saved moments belong to: look for the way on first (T-1018).
+            if not self._seek(stood=True):
+                return False
+            stuck = not self._forced
         if stuck:
             names = frozenset(n for n in self._unstick_buttons if n in self._buttons)
             if not names:
@@ -810,9 +883,13 @@ class EpisodeRunner:
         else:
             if not self._keep_moment():
                 return False
+            if self._stands_still() and not self._seek(stood=True):
+                return False
             self._press_on()
             if self._forced:
                 action = self._forced.popleft()  # a way worked out for it (T-1004)
+                if self._way_left:
+                    self._way_left -= 1
                 if self._route_left:
                     self._route_left -= 1
                     self._from_memory += 1
@@ -944,6 +1021,66 @@ class EpisodeRunner:
         self._press_said = True
         return True
 
+    def _stands_still(self, *, stuck: bool = False) -> bool:
+        """The go got somewhere and has then stayed about one spot for ``stand_after``
+        steps, with no life lost (T-1018): a wall, a ledge too high. Then there is a
+        way on to look for, as after a life lost. Once for each standstill, and not
+        while a list of moves is being played. With ``stuck`` nothing at all has
+        changed for as long as ends a go, and the count of steps is not waited for.
+
+        By where the watch has it and not by the pay: something is nearly always paid
+        a little (a jump on the spot reaches a new height, a clock taken for progress
+        ticks). And not by new ground alone: put back to the start after a life lost
+        it walks over old ground, which is no standstill.
+        """
+        if not self._stand_after or self._forced or self._stood_sought or self._stood_gave_up:
+            return False
+        if self._moments is None or not self._ways_per_go or self._ways_left < 1:
+            return False
+        if self._watch is None or not self._watch.follows_camera:
+            return False
+        return self._got_somewhere and (stuck or self._stood_for >= self._stand_after)
+
+    def _note_place(self, new_ground: int) -> None:
+        """After a look: whether it is still about the spot it was at (T-1018)."""
+        assert self._watch is not None
+        if new_ground:
+            self._got_somewhere = True
+        x, y = self._watch.spot
+        at = self._stood_at
+        now = self._moments.steps if self._moments is not None else 0
+        if at is None or max(abs(x - at[0]), abs(y - at[1])) > STAND_WITHIN:
+            self._stood_at = (x, y)
+            self._stood_for = 0
+            self._stood_from = now
+            self._stood_sought = False
+            self._stood_spots.clear()
+        self._stood_spots.append((now, (x, y)))
+
+    def _left_the_spot(self, seen: Outcome) -> bool:
+        """A try from where it stood still ended out of "about one spot": more than
+        ``STAND_WITHIN`` pixels from where the go came to stand, by the same measure
+        the standing was told by. New ground alone will not do: a hop of two steps
+        and standing again counts some, and where the camera has not begun to move
+        a run across half the screen counts next to none."""
+        at = self._stood_at
+        if at is None or seen.spot is None:
+            return False
+        x, y = seen.spot
+        return max(abs(x - at[0]), abs(y - at[1])) > STAND_WITHIN
+
+    def _came_to_the_spot(self) -> int:
+        """The step of the story at which it was first seen where it now stands: the
+        first look of this standstill within ``STAND_NEAR`` pixels of the last."""
+        if not self._stood_spots:
+            return self._stood_from
+        x, y = self._stood_spots[-1][1]
+        return next(
+            step
+            for step, (sx, sy) in self._stood_spots
+            if max(abs(sx - x), abs(sy - y)) <= STAND_NEAR
+        )
+
     def _keep_moment(self) -> bool:
         """Save the game when a moment is due (T-1004). False if the link dropped.
 
@@ -972,20 +1109,35 @@ class EpisodeRunner:
         moments.saved(self._watch.mark() if self._watch is not None else None)
         return True
 
-    def _way_back(self) -> tuple[Moment, tuple[int, ...], list[Variable]] | None:
+    def _way_back(
+        self, *, stood: bool = False
+    ) -> tuple[Moment, tuple[int, ...], list[Variable]] | None:
         """Where a search for a way past a life lost now would start: the moment, what
-        was done since, and the life values to watch. None where none can be made."""
+        was done since, and the life values to watch. None where none can be made.
+
+        For a standstill (``stood``) it is the moment before the go came to about the
+        spot, and what it did up to ``STAND_REACH`` steps past the look at which it was
+        first seen where it now stands: the changes tried, from the end of that
+        backwards, then begin where the standing did, and next to none of the standing
+        is in the way found.
+        """
         moments = self._moments
         if moments is None or not self._ways_left or self._watch is None:
             return None
-        found = moments.before_loss()
+        found = moments.since(self._stood_from) if stood else moments.before_loss()
         if found is None or not isinstance(found[0].mark, Mark):
             return None
+        if stood:
+            moment, moves = found
+            came = self._came_to_the_spot()
+            found = moment, moves[: max(0, came - moment.step) + STAND_REACH]
+            if not found[1]:
+                return None
         knowledge = self._encoder.knowledge
         lives = [knowledge.get(i) for i in sorted(self._signals.watched or ()) if i in knowledge]
         return (*found, lives) if lives else None
 
-    def _seek(self) -> bool:
+    def _seek(self, *, stood: bool = False) -> bool:
         """A life just went: go back and look for a way past (T-1007). False if the link dropped.
 
         The loss itself stands for the learner and the count: it happened. What goes
@@ -1000,9 +1152,12 @@ class EpisodeRunner:
         moments = self._moments
         if moments is None or not self._ways_per_go:
             return True  # nothing here searches: the moments are the caller's (T-1005)
-        start = self._way_back()
+        if stood:
+            self._stood_sought = True
+        start = self._way_back(stood=stood)
         if start is None:
-            moments.forget()
+            if not stood:
+                moments.forget()
             return True
         moment, trace, lives = start
         watch = self._watch
@@ -1010,8 +1165,12 @@ class EpisodeRunner:
         assert watch is not None and isinstance(mark, Mark)
         self._ways_left -= 1
         self._ways_sought += 1
+        if stood:
+            self._ways_stood += 1
         space = self._agent.space
         at = self._steps
+        gone = moments.steps - moment.step
+        stayed = max(self._stood_for, self._same_state)
         paid = self._paid_moves()  # the best-paid button's move is the plain way (T-1012)
         try:
             fast = self._flat_out() if self._flat_out is not None else nullcontext()
@@ -1025,21 +1184,46 @@ class EpisodeRunner:
                     frames_per_step=self._frames_per_step,
                     lives=lives,
                     watch=lambda: watch.trial(mark),
-                    budget=self._way_tries,
+                    budget=self._way_tries * (STAND_TRIES if stood else 1),
                     look_every=self._look_every,
                     seconds=self._way_seconds,
                     plain=paid[0][1] if paid else None,
+                    stood=stood,
+                    enough=self._left_the_spot if stood else None,
                 )
                 if search.way is None:
                     self._connection.call(lambda a: a.load_state(NOW_SLOT))
             if search.way is not None:
                 self.go_back(moment, then=search.way.moves)
+                self._way_left = len(search.way.moves)
         except EmulatorError:
             self._ended_by = "disconnected"
             self._signals.stop()
             return False
-        back = f"{len(trace)} step{'' if len(trace) == 1 else 's'}"
+        back = f"{gone} step{'' if gone == 1 else 's'}"
         way = search.way
+        if way is None and stood:
+            log.info(
+                "Stayed about one spot for %d steps, with no life lost. Went back %s and "
+                "made %d tries in %.1f s%s: none got on.",
+                stayed,
+                back,
+                search.tries,
+                search.seconds,
+                ", all the time a search may take" if search.out_of_time else "",
+            )
+            self._stood_missed += 1
+            # As many in a row for nothing as stop the searches after a life lost
+            # (``give_up_after``), counted apart: one kind can be of no use in a game
+            # where the other is.
+            if self._give_up_after is not None and self._stood_missed >= self._give_up_after:
+                self._stood_gave_up = True
+                log.info(
+                    "Looking for a way on where it stands still found none %d times in a "
+                    "row, so the AI stops doing that in this game: here it only costs time.",
+                    self._stood_missed,
+                )
+            return True
         if way is None:
             moments.forget()
             log.info(
@@ -1062,15 +1246,23 @@ class EpisodeRunner:
                     "" if self._missed == 1 else "s",
                 )
             return True
-        self._missed = 0
+        if stood:
+            self._stood_missed = 0
+        else:
+            self._missed = 0
         self._ways_found += 1
         change = way.change
         lead = (
-            f"Lost a life at step {at}. Went back {back} and found a way past on try "
+            f"Stayed about one spot for {stayed} steps, with no life lost. Went back "
+            f"{back} and found a way on at try {way.tries}, after {search.seconds:.1f} s: "
+            if stood
+            else f"Lost a life at step {at}. Went back {back} and found a way past on try "
             f"{way.tries}, after {search.seconds:.1f} s: "
         )
         held = f"{space[change.move].label} for {change.hold} step{'' if change.hold == 1 else 's'}"
-        if way.plain is None:
+        if way.plain is None and stood:
+            how = f"{held} from step {change.at + 1} of what it did from there."
+        elif way.plain is None:
             before = len(trace) - change.at
             how = (
                 f"{held}, starting {before} step{'' if before == 1 else 's'} before the life went."
@@ -1078,8 +1270,10 @@ class EpisodeRunner:
         else:
             # The plain way (T-1012): not what it did, but its best-paid button held.
             how = f"holding {space[way.plain].label} instead of what it did"
-            if way.lost_at is None:
+            if way.lost_at is None and change.move == way.plain:
                 how += "."
+            elif way.lost_at is None:
+                how += f", with {held} from step {change.at + 1} of that."
             else:
                 before = way.lost_at - change.at
                 how += (
@@ -1132,6 +1326,9 @@ class EpisodeRunner:
         if self._route is not None:
             self._route.went_back(moments.steps - moment.step)
         moments.went_back(moment)
+        self._stood_at = None  # wherever it stood, the game is somewhere else now (T-1018)
+        self._stood_for = 0
+        self._stood_spots.clear()
         self._forced = deque(moves)
         self._route_left = 0
         self._pressing = False
@@ -1191,6 +1388,9 @@ class EpisodeRunner:
                 steps = self._watch.take_new_ground()
                 if steps:
                     self._bus.publish(GroundCovered(self._observation.frame, steps))
+                if self._stand_after and self._moments is not None and self._ways_per_go:
+                    self._note_place(steps)
+        self._stood_for += 1
         reward, resets = self._signals.take()
         if reward > 0:
             self._unpaid = 0
@@ -1248,9 +1448,13 @@ class EpisodeRunner:
                 self._held_reset = True
             else:
                 self._ended_by = "reset"
-        elif self.own_steps >= self._max_steps:
+        elif self.own_steps >= self._max_steps and not (self._way_left and self._forced):
             # The steps of the way it remembers are not the go's own (T-1015): a long way
-            # would leave a go no steps to get any further in.
+            # would leave a go no steps to get any further in. And a way a search has
+            # just found is played to its end first (T-1018): a go that ran out part of
+            # the way through it had gone back over ground it was paid for and ended
+            # short of it again, so nothing of the way was remembered and the next go
+            # did the same, search and all.
             self._ended_by = "max_steps"
         if self._ended_by is not None:
             self._signals.stop()
@@ -1364,6 +1568,7 @@ class EpisodeRunner:
             self._ways_found,
             self._pressed_on,
             self._remembered,
+            self._ways_stood,
         )
         self._state = None
         return result

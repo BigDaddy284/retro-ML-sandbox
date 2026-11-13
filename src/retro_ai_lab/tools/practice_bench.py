@@ -36,6 +36,7 @@ from retro_ai_lab.services import (
 )
 from retro_ai_lab.storage import GoalStore, KnowledgeStore, RewardStore
 from retro_ai_lab.training import Mode, TrainingService
+from retro_ai_lab.training.episode import STAND_AFTER
 from retro_ai_lab.understanding import VariableKind
 
 PROG = "python -m retro_ai_lab.tools.practice_bench"
@@ -64,6 +65,7 @@ class Report:
     max_steps: int
     algorithm: str
     remember: bool = True  # goes began with the best way played (T-1015)
+    stand: bool = True  # a go that stood still went back to look for a way on (T-1018)
     # Eyes.
     looks: int = 0
     followed: int = 0  # looks in which the watch had what it calls itself in sight
@@ -91,6 +93,10 @@ class Report:
     # Deaths, by the game's account, and what the watch made of them.
     falls: int = 0
     walkers: int = 0
+    # Deaths that had begun when their go ended, with the life not gone yet (T-1018):
+    # the game was put back to the start first, so no life was lost for the eyes to
+    # explain. They are in neither count above.
+    unfinished: int = 0
     blamed: int = 0  # lives the watch put down to touching something
     fell: int = 0  # lives the watch put down to falling off the bottom of the screen (T-988)
     # Memory.
@@ -106,6 +112,7 @@ class Report:
     # Going back at a life lost to look for a way past (T-1009), over the run.
     ways_sought: int = 0
     ways_found: int = 0
+    ways_stood: int = 0  # of those sought, the ones where it stood still (T-1018)
 
     @property
     def deaths(self) -> int:
@@ -127,7 +134,8 @@ class Report:
         out = [
             f"Practice bench: Toy Hopper level {self.seed}, {self.goes} goes of up to "
             f"{self.max_steps} steps, {label}"
-            f"{'' if self.remember else ', without the way it remembers'}."
+            f"{'' if self.remember else ', without the way it remembers'}"
+            f"{'' if self.stand else ', without going back where it stands still'}."
         ]
         if self.looks:
             out.append(
@@ -168,8 +176,14 @@ class Report:
             if self.deaths
             else "none to explain"
         )
+        more = (
+            f", and {self.unfinished} more that had begun when a go ended, with no life gone"
+            if self.unfinished
+            else ""
+        )
         out.append(
-            f"Deaths: {self.deaths} ({self.falls} falls, {self.walkers} walkers); the eyes put "
+            f"Deaths: {self.deaths} ({self.falls} falls, {self.walkers} walkers){more}; "
+            "the eyes put "
             f"{self.fell} down to a fall and {self.blamed} to touching something ({explained}, "
             f"target {EXPLAINED_TARGET}% and for the right reason); {self.hurts} kinds found to "
             f"hurt, {self.items} to pick up."
@@ -191,7 +205,16 @@ class Report:
                 f"{statistics.fmean(self.lost[-WINDOW:]):.2f}; levels finished "
                 f"{sum(self.finished)}{self._describe_clean()}."
             )
-        if self.ways_sought:
+        if self.ways_stood:
+            lost = self.ways_sought - self.ways_stood
+            out.append(
+                f"Ways past: it went back {self.ways_sought:,} "
+                f"time{'' if self.ways_sought == 1 else 's'}, {lost:,} after losing a life and "
+                f"{self.ways_stood:,} where it stood still with none lost, and found a way "
+                f"past in {self.ways_found:,} "
+                f"({_share(self.ways_found, self.ways_sought)}%)."
+            )
+        elif self.ways_sought:
             out.append(
                 f"Ways past: after losing a life it went back {self.ways_sought:,} "
                 f"time{'' if self.ways_sought == 1 else 's'} and found a way past in "
@@ -234,14 +257,19 @@ def run(
     max_steps: int = DEFAULT_STEPS,
     play_frames: int = DEFAULT_PLAY_FRAMES,
     remember: bool = True,
+    stand: bool = True,
 ) -> Report:
     """Run the bench and return what it measured. Seeded: the same arguments, the same report.
 
     ``remember=False`` trains without the best way remembered (T-1015): every go
     is the brain's own from its first step, as all goes were before.
+    ``stand=False`` trains without going back where a go stays about one spot with no
+    life lost (T-1018): it goes back after a life lost only, as before.
     """
     if not isinstance(remember, bool):
         raise ConfigurationError("The bench needs remember to be True or False.")
+    if not isinstance(stand, bool):
+        raise ConfigurationError("The bench needs stand to be True or False.")
     for value, what in ((goes, "goes"), (max_steps, "steps"), (play_frames, "play frames")):
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ConfigurationError(f"The bench needs a whole number of {what}, 1 or more.")
@@ -250,7 +278,12 @@ def run(
             f"No way of learning called {algorithm!r} (choices: {', '.join(algorithm_choices())})."
         )
     report = Report(
-        seed=seed, goes=goes, max_steps=max_steps, algorithm=algorithm, remember=remember
+        seed=seed,
+        goes=goes,
+        max_steps=max_steps,
+        algorithm=algorithm,
+        remember=remember,
+        stand=stand,
     )
     with tempfile.TemporaryDirectory() as scratch:
         data = Path(scratch)
@@ -273,6 +306,7 @@ def run(
             rewards=rewards,
             way_seconds=None,  # a search cut short by the clock would not be repeatable
             remember=remember,
+            stand_after=STAND_AFTER if stand else 0,
         )
         training.set_algorithm(algorithm)
         connection.connect("fake", game="hopper", seed=seed)
@@ -310,6 +344,7 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
         got, counted, steps = 0, 0, 0  # furthest at a look: the game's, the watch's; its steps
         carried = 0  # the camera's travel in the levels this go has finished (T-1015)
         back = 0  # times the go has gone back to an earlier moment (T-1009)
+        dying = ""  # the death now under way: "fall", "walker", or "" for none
         while training.episodes == go:
             training.step()
             runner = training.episode
@@ -323,10 +358,12 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
             now = game.state
             furthest = max(furthest, now.x)
             if now.mode == toy_hopper.DYING and before.mode != toy_hopper.DYING:
-                if now.y >= toy_hopper.SCREEN_HEIGHT:
-                    report.falls += 1
-                else:
-                    report.walkers += 1
+                fall = now.y >= toy_hopper.SCREEN_HEIGHT
+                dying = "fall" if fall else "walker"
+                report.falls += fall
+                report.walkers += not fall
+            elif now.mode != toy_hopper.DYING:
+                dying = ""  # the pause is over and the life gone, or the game was put back
             lost += max(0, before.lives - now.lives)
             if now.level > before.level:
                 report.clean += finished == 0 and lost == 0
@@ -365,11 +402,18 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
                     report.around += 1
                     floor = (watch.around.floor_right, watch.around.floor_left)
                     report.floor_right += floor == _floor_either_side(game)
+        if dying:
+            # The go ended in the dying pause: the next go starts from its save, and
+            # the life never goes. Not a death the eyes were given to explain.
+            report.falls -= dying == "fall"
+            report.walkers -= dying == "walker"
+            report.unfinished += 1
         report.furthest.append(furthest)
         report.lost.append(lost)
         result = training.history[-1].result
         report.ways_sought += result.ways_sought
         report.ways_found += result.ways_found
+        report.ways_stood += result.ways_stood
         if began is not None and training.watch is not None:
             report.ground_goes += 1
             report.ground_before += fresh
@@ -478,6 +522,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not begin each go with the best way played so far",
     )
+    parser.add_argument(
+        "--no-standstill",
+        action="store_true",
+        help="do not go back to look for a way on where a go stands still with no life lost",
+    )
     return parser
 
 
@@ -510,6 +559,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_steps=args.steps,
         play_frames=args.play_frames,
         remember=not args.no_memory,
+        stand=not args.no_standstill,
     )
     for line in report.lines():
         print(line)

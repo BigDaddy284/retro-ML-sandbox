@@ -771,6 +771,7 @@ def test_the_log_says_whether_the_saved_brain_was_picked_up(
                 "It has no colours of its own",
                 "When the AI loses a life it goes back",  # T-1010: not about the brain either
                 "It remembers the best go",  # T-1015: said with the line above
+                "It also goes back where it stays",  # T-1018: said with the lines above
                 "Lost a life at step",
                 "Going back found no way",
             )

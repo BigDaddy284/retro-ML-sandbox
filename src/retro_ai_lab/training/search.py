@@ -32,6 +32,7 @@ to stay in, and where the plain way only walks into a wall.
 
 from __future__ import annotations
 
+import hashlib
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -39,7 +40,7 @@ from dataclasses import dataclass, field
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning.actions import ActionSpace
 from retro_ai_lab.services.connection import ConnectionService
-from retro_ai_lab.training.trial import play
+from retro_ai_lab.training.trial import Outcome, play
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, ScreenWatch
 from retro_ai_lab.training.ways import Change, changes
 from retro_ai_lab.understanding.knowledge import Variable
@@ -60,6 +61,8 @@ class Way:
     # The plain way (T-1012): the move held all the way, when the change is to that and
     # not to what it did, and the step holding it lost the life at. With no life lost
     # there is nothing to change: the change is then that move, held from the start.
+    # At a standstill (T-1018) no life is lost either, and the change is to the plain
+    # way where holding it stood still too.
     plain: int | None = None
     lost_at: int | None = None
 
@@ -97,6 +100,8 @@ def find_way(
     seconds: float | None = None,
     clock: Callable[[], float] = time.monotonic,
     plain: int | None = None,
+    stood: bool = False,
+    enough: Callable[[Outcome], bool] | None = None,
 ) -> Search:
     """Look for a small change to ``trace``, played from the save in ``slot``, that
     stays alive and reaches new ground.
@@ -117,6 +122,24 @@ def find_way(
     to that step, with at most ``PLAIN_SHARE`` of the budget; after that, and at
     once where the plain way stays alive and gets nowhere new, the changes to
     ``trace``. Moves played once are not played again and cost no try.
+
+    With ``stood`` the search is for a way on from where the AI stood still with no
+    life lost (T-1018), and ``trace`` is what it did up to shortly after it came to
+    the spot. Where the plain way stays alive and gets nowhere new (a wall), the
+    small changes to the plain way are tried before the changes to ``trace``, and
+    both from the start forwards: the earliest that gets on has the least standing
+    in it. At a
+    wall nearly every change stays alive, so the blind play weeds out next to
+    nothing and every try would cost a play under the watch, some twenty times a
+    blind one. So the blind play of a change also takes the screen it ends on, and a
+    change that ends on the very screen a play that got nowhere ended on (holding
+    the plain move, or an earlier change that was looked at) has got nowhere
+    either: it is not looked at.
+
+    ``enough`` is asked of every try that stayed alive and counted new ground, and
+    False says it is no way all the same. After a life lost nobody asks: past the
+    place is enough. At a standstill the caller asks that the try ended out of the
+    spot it stood about: a hop of two steps and standing again is no way on.
     """
     if not slot or not isinstance(slot, str):
         raise ConfigurationError("A search needs the name of the save to start from.")
@@ -138,6 +161,10 @@ def find_way(
         raise ConfigurationError("The time a search may take must be a number above 0.")
     if not callable(clock):
         raise ConfigurationError("clock must give the time when called.")
+    if not isinstance(stood, bool):
+        raise ConfigurationError("stood must be true or false.")
+    if enough is not None and not callable(enough):
+        raise ConfigurationError("enough must say of a try whether it is a way, when called.")
     for move in trace:
         space[move]  # refuses a move the controls don't have, before anything is played
     if plain is not None:
@@ -157,23 +184,43 @@ def find_way(
         return not late
 
     played: set[tuple[int, ...]] = set()
+    # The screens that plays which got nowhere new ended on (``stood``), as digests.
+    nowhere: set[bytes] = set()
+
+    def got_on(seen: Outcome) -> bool:
+        """Alive and on ground the go had not been on, and ``enough`` where it is asked."""
+        return seen.past and (enough is None or bool(enough(seen)))
+
+    def ended_on(outcome: Outcome) -> bytes | None:
+        if outcome.screen is None:
+            return None
+        return hashlib.blake2b(outcome.screen, digest_size=16).digest()
 
     def seek(base: Sequence[int], limit: int) -> tuple[Change, tuple[int, ...], int] | None:
         """The first small change to ``base`` that gets past, with its moves and the
         new ground counted, while the tries stay under ``limit``."""
         nonlocal tries
-        for change in changes(base, space):
-            moves = change.apply(base, carry_on)
+        # At a standstill the earliest change that gets on is tried first: it is the
+        # one with the least standing in it (T-1018). And a hold is played out whole:
+        # the trace ends where it came to stand, with no room in it for a long one.
+        for change in changes(base, space, early=stood, whole=stood):
+            moves = change.apply(base, carry_on, whole=stood)
             if moves in played:
                 continue  # the other part of the search has been here
             if tries >= limit or not may_play():
                 break
             tries += 1
             blind = play(
-                connection, slot, moves, space, frames_per_step=frames_per_step, lives=lives
+                connection,
+                slot,
+                moves,
+                space,
+                frames_per_step=frames_per_step,
+                lives=lives,
+                end=stood,
             )
-            if blind.lost:
-                played.add(moves)
+            if blind.lost or ended_on(blind) in nowhere:
+                played.add(moves)  # lost, or where getting nowhere ended up (T-1018)
                 continue
             if tries >= limit or not may_play():
                 break  # alive and not looked at yet: not settled, so not marked as played
@@ -189,15 +236,26 @@ def find_way(
                 watch=watch(),
                 look_every=look_every,
             )
-            if seen.past:
+            if got_on(seen):
                 return change, moves, seen.ground
+            end = ended_on(blind)
+            if end is not None:
+                nowhere.add(end)
         return None
 
     share = int(budget * PLAIN_SHARE)
     if plain is not None and share >= 1 and may_play():
         held = (plain,) * (len(trace) + carry_on)
         tries += 1
-        first = play(connection, slot, held, space, frames_per_step=frames_per_step, lives=lives)
+        first = play(
+            connection,
+            slot,
+            held,
+            space,
+            frames_per_step=frames_per_step,
+            lives=lives,
+            end=stood,
+        )
         if first.lost:
             base = (plain,) * first.steps
             got = seek(base, share)
@@ -217,9 +275,21 @@ def find_way(
                 watch=watch(),
                 look_every=look_every,
             )
-            if seen.past:
+            if got_on(seen):
                 way = Way(held, Change(0, plain, len(trace)), tries, seen.ground, plain=plain)
                 return Search(way, tries, taken())
+            if stood:
+                # It stood still and holding the plain move stands still too (a wall):
+                # the small changes to the plain way, a jump at some step of it. The
+                # screen this ended on is what getting nowhere looks like.
+                played.add(held)
+                end = ended_on(first)
+                if end is not None:
+                    nowhere.add(end)
+                got = seek((plain,) * len(trace), share)
+                if got is not None:
+                    change, moves, ground = got
+                    return Search(Way(moves, change, tries, ground, plain=plain), tries, taken())
     got = None if late else seek(trace, budget)
     if got is not None:
         change, moves, ground = got
