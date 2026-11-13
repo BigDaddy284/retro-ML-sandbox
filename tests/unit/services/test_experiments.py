@@ -78,6 +78,18 @@ def test_needs_a_checkpoint_first(harness: ExperimentHarness) -> None:
         harness.restore()
 
 
+def test_it_counts_the_checkpoints_taken(harness: ExperimentHarness) -> None:
+    """T-1014: what was worked out from one checkpoint can tell it is another now."""
+    assert harness.taken == 0
+    harness.checkpoint()
+    assert harness.taken == 1 and harness.has_checkpoint
+    harness.restore()
+    harness.run(constant_plan(["up"], 2))
+    assert harness.taken == 1  # going back to it, and trials from it, take no new one
+    harness.checkpoint()
+    assert harness.taken == 2
+
+
 # -------------------------------------------------------------- trials
 
 

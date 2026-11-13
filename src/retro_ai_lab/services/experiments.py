@@ -98,6 +98,7 @@ class ExperimentHarness:
         self._on_restore = on_restore  # told after every load_state (T-935)
         self._capture = MemoryCapture(connection)
         self._has_checkpoint = False
+        self._taken = 0
         self._trials = 0
 
     # ------------------------------------------------------------ queries
@@ -109,6 +110,12 @@ class ExperimentHarness:
     @property
     def has_checkpoint(self) -> bool:
         return self._has_checkpoint
+
+    @property
+    def taken(self) -> int:
+        """How many times the checkpoint has been saved: a count that changes whenever
+        the spot it stands for does, for whatever was worked out from that spot (T-1014)."""
+        return self._taken
 
     @property
     def trials(self) -> int:
@@ -150,6 +157,7 @@ class ExperimentHarness:
         self._require()
         self._connection.call(lambda a: a.save_state(self._slot))
         self._has_checkpoint = True
+        self._taken += 1
 
     def restore(self) -> None:
         """Put the game back to the checkpoint."""
