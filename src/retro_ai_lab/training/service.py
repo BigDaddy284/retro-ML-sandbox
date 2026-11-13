@@ -129,6 +129,9 @@ BACK_SLOTS = ("back0", "back1", "back2", "back3", "back4", "back5")
 WAYS_PER_GO = 3  # searches a go may make
 WAY_SECONDS = 15.0  # the longest a search may hold a step up, on any machine
 GIVE_UP_AFTER = 8  # searches in a row for nothing before it stops going back in a game
+# Steps a go may be paid nothing before it presses on with its best-paid button, where
+# it goes back (T-1011): one short of the unchanged steps that end a go as stuck.
+PRESS_AFTER = 24
 DEFAULT_HISTORY = 200
 DEFAULT_PROMOTE_AT = 1000  # known situations before an "auto" brain moves to a network
 
@@ -1114,6 +1117,7 @@ class TrainingService:
                 ways_per_go=self._ways_per_go if goes_back else 0,
                 way_seconds=self._way_seconds,
                 give_up_after=GIVE_UP_AFTER,
+                press_after=PRESS_AFTER if goes_back else 0,
                 flat_out=self._flat_out,
             )
         self._busy = True
@@ -1385,7 +1389,7 @@ class TrainingService:
         why = self._runner.last_reset if self._runner is not None else ""
         earners = describe_earned(result.earned, most=None)  # the whole breakdown (T-877)
         log.info(
-            "Go %d ended by %s after %d steps (%d frames), %+.1f points%s%s%s%s",
+            "Go %d ended by %s after %d steps (%d frames), %+.1f points%s%s%s%s%s",
             self._episodes,
             result.ended_by,
             result.steps,
@@ -1394,6 +1398,7 @@ class TrainingService:
             f", from {earners}" if earners else "",
             result.describe_losses(),  # survival in the log (T-934)
             result.describe_ways(),  # and what going back came to (T-1009)
+            result.describe_pressing(),  # and how often it pressed on (T-1011)
             f": {why}" if result.ended_by == "reset" and why else "",
         )
         if self._agent is not None and self._encoder is not None:
@@ -1664,6 +1669,7 @@ __all__ = [
     "CHECKPOINT_SLOT",
     "GIVE_UP_AFTER",
     "IDENTICAL_GO_STEPS",
+    "PRESS_AFTER",
     "RESET_SUSPECT_GOES",
     "RESET_SUSPECT_STEPS",
     "WAYS_PER_GO",

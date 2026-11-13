@@ -58,6 +58,7 @@ FINGERPRINT_STEPS = 64  # state keys a go remembers, for spotting two identical 
 LOOKAHEAD_STEPS = 8
 DEFAULT_SETTLE_FRAMES = 5  # the understanding engine's event window
 NOW_SLOT = "back_now"  # where the present is saved while a search plays its tries (T-1007)
+PRESS_FOR = 16  # steps a go that was paid nothing holds its best-paid button for (T-1011)
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,10 +267,17 @@ class EpisodeResult:
     first_setback_step: int | None = None  # the step the first was lost at, 1-based
     ways_sought: int = 0  # times it went back to look for a way past a life lost (T-1007)
     ways_found: int = 0  # times that found one
+    pressed_on: int = 0  # times it was paid nothing for a while and pressed on (T-1011)
 
     @property
     def succeeded(self) -> bool:
         return self.objectives > 0
+
+    def describe_pressing(self) -> str:
+        """ ", pressed on 2 times", or "" when it never did (T-1011)."""
+        if self.pressed_on == 0:
+            return ""
+        return f", pressed on {'once' if self.pressed_on == 1 else f'{self.pressed_on} times'}"
 
     def describe_ways(self) -> str:
         """ ", went back 2 times and found a way past once", or "" when it never looked (T-1007)."""
@@ -311,6 +319,7 @@ class EpisodeResult:
             "first_setback_step": self.first_setback_step,
             "ways_sought": self.ways_sought,
             "ways_found": self.ways_found,
+            "pressed_on": self.pressed_on,
         }
 
     @classmethod
@@ -328,6 +337,7 @@ class EpisodeResult:
                 None if data.get("first_setback_step") is None else int(data["first_setback_step"]),
                 int(data.get("ways_sought", 0)),
                 int(data.get("ways_found", 0)),
+                int(data.get("pressed_on", 0)),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"Bad go result: {exc}") from exc
@@ -360,8 +370,15 @@ class EpisodeRunner:
         way_seconds: float | None = None,
         give_up_after: int | None = None,
         flat_out: Callable[[], AbstractContextManager[None]] | None = None,
+        press_after: int = 0,
+        press_for: int = PRESS_FOR,
     ) -> None:
-        for value, what, least in ((ways_per_go, "ways_per_go", 0), (way_tries, "way_tries", 1)):
+        for value, what, least in (
+            (ways_per_go, "ways_per_go", 0),
+            (way_tries, "way_tries", 1),
+            (press_after, "press_after", 0),
+            (press_for, "press_for", 1),
+        ):
             if isinstance(value, bool) or not isinstance(value, int) or value < least:
                 raise ConfigurationError(f"{what} must be a whole number, {least} or more.")
         if way_seconds is not None and (
@@ -433,6 +450,18 @@ class EpisodeRunner:
         self._ways_left = 0
         self._ways_sought = 0
         self._ways_found = 0
+        # Paid nothing for press_after steps, a go that can still go back holds the
+        # button that has paid best for press_for steps (T-1011). What each button has
+        # been paid is kept over the goes; 0 never presses on.
+        self._press_after = press_after
+        self._press_for = press_for
+        self._paid: dict[str, float] = {}
+        self._unpaid = 0  # steps since anything was paid
+        self._press_next = 0  # which of the paid buttons the next press holds, best first
+        self._pressing = False  # the moves being played are a press
+        self._pressed_stuck = False  # this standstill has had its press
+        self._pressed_on = 0
+        self._press_said = False
         self._restored = False
         self._unsticks = 0
         self._same_state = 0
@@ -576,6 +605,21 @@ class EpisodeRunner:
         return self._gave_up
 
     @property
+    def press_after(self) -> int:
+        """Steps paid nothing before it presses on; 0 when it never does (T-1011)."""
+        return self._press_after
+
+    @property
+    def pressed_on(self) -> int:
+        """Times this go pressed on."""
+        return self._pressed_on
+
+    @property
+    def paid_buttons(self) -> tuple[str, ...]:
+        """The buttons that have been paid, over this runner's goes, the best-paid first."""
+        return tuple(sorted(self._paid, key=lambda name: (-self._paid[name], name)))
+
+    @property
     def unsticks(self) -> int:
         """Times Start was pressed because nothing was changing (a game-over screen)."""
         return self._unsticks
@@ -604,6 +648,11 @@ class EpisodeRunner:
         self._forced.clear()
         self._times_back = 0
         self._ways_left = 0 if self._gave_up else self._ways_per_go
+        self._unpaid = 0
+        self._press_next = 0
+        self._pressing = False
+        self._pressed_stuck = False
+        self._pressed_on = 0
         self._ways_sought = 0
         self._ways_found = 0
         if self._moments is not None:
@@ -647,6 +696,8 @@ class EpisodeRunner:
         # no way out. Press the wake button the service found, if it has one; with
         # none known the go ends "stuck" and the service goes looking for it (T-844).
         stuck = self._unstick_after is not None and self._same_state >= self._unstick_after
+        if stuck and ((self._pressing and self._forced) or self._press_on(stuck=True)):
+            stuck = False  # nothing changing is getting nowhere too: press on first, once
         if stuck:
             names = frozenset(n for n in self._unstick_buttons if n in self._buttons)
             if not names:
@@ -657,9 +708,11 @@ class EpisodeRunner:
             self._unsticks += 1
             self._same_state = 0
             self._forced.clear()
+            self._pressing = False
         else:
             if not self._keep_moment():
                 return False
+            self._press_on()
             if self._forced:
                 action = self._forced.popleft()  # a way worked out for it (T-1004)
             else:
@@ -697,7 +750,62 @@ class EpisodeRunner:
             return False
         if self._setbacks > lost_before:
             self._forced.clear()  # whatever way was being played did not get past
+            self._pressing = False  # a press that cost a life is not one that got nothing
             return self._seek()
+        return True
+
+    def _press_on(self, *, stuck: bool = False) -> bool:
+        """Paid nothing for a while, hold the best-paid button for a while (T-1011).
+
+        A brain that has come to rate waiting above going on stands still or dithers,
+        loses no life, and so never looks for the way past what it is avoiding. Only
+        where the go can still go back: there a life lost to the press is how the way
+        is found. A press that was paid nothing (and cost no life, or the search would
+        have followed) is followed by the next-best-paid button, round and round; any
+        pay starts again from the best.
+
+        ``stuck`` is the go about to end because nothing changes: that is getting
+        nowhere whatever the count of unpaid steps says (the last pay can come a step
+        or two after the last change), so it presses on first, once for each such
+        standstill; if that changes nothing either, the go is stuck as before. True
+        when a press was started.
+        """
+        if self._forced:
+            return False
+        if self._pressing:  # the last press ran its course, paid nothing
+            self._pressing = False
+            self._press_next += 1
+        if not self._press_after or self._moments is None or self._ways_left < 1:
+            return False
+        if stuck:
+            if self._pressed_stuck:
+                return False
+        elif self._unpaid < self._press_after:
+            return False
+        space = self._agent.space
+        moves = []
+        for name in self.paid_buttons:
+            try:
+                moves.append((name, space.index_of([name])))
+            except ConfigurationError:
+                continue  # no move of its own: it is only ever held with another
+        if not moves:
+            return False
+        name, move = moves[self._press_next % len(moves)]
+        self._forced.extend([move] * self._press_for)
+        self._pressing = True
+        self._pressed_stuck = stuck
+        self._pressed_on += 1
+        self._unpaid = 0
+        log.log(
+            logging.DEBUG if self._press_said else logging.INFO,
+            "The AI has been paid nothing for %d steps, so it presses on with %s for %d steps. "
+            "It does this where it can go back: if that costs a life, it looks for the way past.",
+            self._press_after,
+            name,
+            self._press_for,
+        )
+        self._press_said = True
         return True
 
     def _keep_moment(self) -> bool:
@@ -871,6 +979,7 @@ class EpisodeRunner:
         self._unseen_lost = self._unseen_scored = 0
         moments.went_back(moment)
         self._forced = deque(moves)
+        self._pressing = False
         self._times_back += 1
         return self._state
 
@@ -891,6 +1000,7 @@ class EpisodeRunner:
         self._last_buttons = self._agent.space.buttons_for(action)
         self._last_action = action
         self._forced.clear()  # somebody else is playing: no list of moves holds (T-1004)
+        self._pressing = False
         if self._moments is not None:
             self._moments.forget()
         self._bus.publish(ButtonsHeld(self._observation.frame, self._last_buttons, "child"))
@@ -926,6 +1036,15 @@ class EpisodeRunner:
                 if steps:
                     self._bus.publish(GroundCovered(self._observation.frame, steps))
         reward, resets = self._signals.take()
+        if reward > 0:
+            self._unpaid = 0
+            self._press_next = 0
+            self._pressing = False
+            if action is not None:
+                for name in self._agent.space.buttons_for(action):
+                    self._paid[name] = self._paid.get(name, 0.0) + reward
+        else:
+            self._unpaid += 1
         self._seen = None
         self._last_state = state
         self._last_reward = reward
@@ -952,6 +1071,8 @@ class EpisodeRunner:
         if len(self._fingerprint) < FINGERPRINT_STEPS:
             self._fingerprint.append(next_state.key)
         self._same_state = self._same_state + 1 if next_state == state else 0
+        if not self._same_state:
+            self._pressed_stuck = False
         self._state = next_state
         self._states.add(next_state.key)
         if done:
@@ -1062,6 +1183,7 @@ class EpisodeRunner:
             self._first_setback_step,
             self._ways_sought,
             self._ways_found,
+            self._pressed_on,
         )
         self._state = None
         return result
@@ -1079,6 +1201,7 @@ __all__ = [
     "DEFAULT_SETTLE_FRAMES",
     "LOOKAHEAD_STEPS",
     "NOW_SLOT",
+    "PRESS_FOR",
     "Earning",
     "EpisodeResult",
     "EpisodeRunner",

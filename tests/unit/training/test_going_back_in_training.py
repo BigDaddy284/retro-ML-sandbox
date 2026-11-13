@@ -169,6 +169,45 @@ def test_a_search_runs_at_top_speed(lab: Lab, monkeypatch: pytest.MonkeyPatch) -
     t.stop()
 
 
+def test_training_presses_on_where_it_goes_back(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """T-1011: a brain that stands still is pressed on after 24 steps paid nothing."""
+    assert module.PRESS_AFTER == 24 < module.DEFAULT_UNSTICK_AFTER
+    t = lab.training(max_steps=120)
+    game = lab.connect()
+    t.start(Mode.INDEPENDENT)
+    agent = t.agent
+    assert agent is not None
+    walk, stand = agent.space.index_of(["right"]), agent.space.index_of([])
+    moves = iter([walk] * 8)
+    monkeypatch.setattr(agent, "choose", lambda state: next(moves, stand))
+    with caplog.at_level(logging.INFO, logger="retro_ai_lab.training"):
+        assert t.step()
+        go = t.episode
+        assert go is not None and go.press_after == module.PRESS_AFTER
+        while t.episodes == 0:
+            assert t.step()
+    # Left to itself it would have stood short of the gap until the go ended stuck.
+    result = t.history[-1].result
+    assert result.pressed_on >= 1 and result.ways_sought >= 1
+    assert game.state.x > GAP_ENDS or result.setbacks >= 1
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("Go 1 "))
+    assert result.describe_pressing() in line and ", pressed on " in line
+    assert sum("presses on with right" in r.getMessage() for r in caplog.records) == 1
+    t.stop()
+    # Going back switched off, or a console that cannot save: it never presses on.
+    for kw, connect in (({"ways_per_go": 0}, {}), ({}, {"capabilities": NO_SAVES})):
+        lab.connection.disconnect()
+        other = lab.training(**kw)
+        lab.connect(**connect)
+        other.start(Mode.INDEPENDENT)
+        assert other.step()
+        go = other.episode
+        assert go is not None and go.press_after == 0
+        other.stop()
+
+
 def test_a_console_without_save_states_trains_as_before(
     lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
