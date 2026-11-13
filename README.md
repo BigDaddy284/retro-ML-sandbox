@@ -252,7 +252,15 @@ killed it, and the brain learns from the way that worked.
 Many games put you back at the start of the level when a life goes, and
 the app takes the game starting over for the end of a go. Where it can go
 back it looks for the way past first, and the go only ends there if it
-finds none.
+finds none. It tells the game starting over by the values it follows going
+back to where they started, together. Some values do that all the time in
+play (after a jump the fall speed is back at nothing and "on the ground" is
+on again), so the AI keeps count of where each value comes to while nearly
+everything else it follows stays exactly as it was. A value seen coming to
+its starting value that way three times is named in the log, and values like
+that going back by themselves are no longer taken for the game starting
+over. When a game really starts over nearly everything changes at once, so
+the life count and the score are never counted that way.
 
 A search runs at the emulator's top speed and is over within 15 seconds;
 a go searches at most three times. In a game where eight searches in a row

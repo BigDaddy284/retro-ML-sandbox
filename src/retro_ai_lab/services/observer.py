@@ -32,6 +32,11 @@ class MemoryObserved:
     # The app had just put the game back to an earlier moment of the go (T-1004): how
     # the values moved since the last snapshot is its doing, not the game's.
     went_back: bool = False
+    # This is the first snapshot since a saved state was loaded, by whoever loaded it
+    # (T-1021): the checkpoint at the start of a go, a practise spot, a go put back, an
+    # experiment or a search putting the game back where it was. Values back at their
+    # first values in it were put there by the app.
+    put_back: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +89,7 @@ class ObservationService:
         self._ring = SnapshotRing(ring_capacity)
         self._tracker = ChangeTracker()
         self._went_back = False  # the next snapshot follows a jump back in a go (T-1004)
+        self._loads = 0  # the adapter's count of saved states loaded, at the last snapshot
         self._screen = ScreenTracker()
         self._inputs = InputLog()
         self._frames_seen = 0
@@ -194,10 +200,16 @@ class ObservationService:
         self._ring.append(captured)
         with app_work.timed("observe: track"):
             diff = self._tracker.observe(captured)
-        event = MemoryObserved(captured, diff, self._went_back)
+        loads = self._states_loaded()
+        event = MemoryObserved(captured, diff, self._went_back, loads != self._loads)
+        self._loads = loads
         self._went_back = False
         self._bus.publish(event)
         return event
+
+    def _states_loaded(self) -> int:
+        adapter = self._connection.adapter
+        return adapter.states_loaded if adapter is not None else self._loads
 
     def observe_frame(self, frame: Frame) -> ScreenObserved | None:
         """Feed a captured screen frame (the game panel's pump calls this)."""
@@ -226,6 +238,7 @@ class ObservationService:
         self._ring.clear()
         self._tracker.reset()
         self._went_back = False
+        self._loads = self._states_loaded()  # what was loaded before is not this game's
         self._screen.reset()
         self._inputs.clear()
         self._frames_seen = 0

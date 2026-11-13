@@ -19,7 +19,13 @@ from enum import Enum
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.observation.memory import MemorySnapshot
-from retro_ai_lab.understanding.knowledge import Confidence, Knowledge, Variable, VariableKind
+from retro_ai_lab.understanding.knowledge import (
+    Confidence,
+    Encoding,
+    Knowledge,
+    Variable,
+    VariableKind,
+)
 
 RESET_NEEDS = 2  # values back at their starting values together, for a reset
 RESET_SURE = Confidence.MEDIUM  # and at least one of them this sure (T-838)
@@ -32,6 +38,51 @@ others were not, and every go ended within eight frames as a "reset" blaming
 a different handful each time. The game starting over puts most of what has
 moved back where it began, so the values going home together must be at
 least half of all the values that have moved since the detector saw them.
+"""
+HOME_OFTEN = 3  # times a value came to its first value in mid-play: a home-goer
+HOMES_KEPT = 64  # different values of one variable whose comings are counted
+"""Values that come home in the middle of play cannot make a restart by themselves
+(T-1021).
+
+After a jump the fall speed is back at nothing and "on the ground" is back on,
+together, and one of them is a number that went down. Early in a go, before much
+else has moved, that was the whole rule for a restart, and goes ended at their
+first landing, three to six in a row. By then the AI had seen both values come to
+those very values dozens of times while nearly everything else it follows did not
+so much as change.
+
+That is what the detector counts. A snapshot in which fewer than ``RESET_SHARE``
+of the values that have moved changed at all is the game playing on: whatever the
+game starting over does, it changes most of what has moved. For every value that
+changed in such a snapshot, the value it came to is counted. A watched value whose
+first value has been come to ``HOME_OFTEN`` times that way is a home-goer, and a
+restart needs at least one value going home that is not one. A snapshot the app
+made itself by loading a saved state is not counted.
+
+Counted by the value come to, not by the variable: a switch has two resting
+places, and which of them a watch calls its first value changes whenever the AI
+learns something about the switch and the watch is made anew. A life count that
+is watched from 1 comes to 1 in play and to 3 only when the game starts over: at 1
+it is a home-goer, at 3 it is the sign of a restart that it should be. Only the
+first ``HOMES_KEPT`` different values of a variable are counted; what a roaming
+number comes to after that stays a sign of a restart, which is the safe side.
+
+Three other ways of counting were built first and dropped. (1) Every return at
+which no restart was called: a restart that goes uncalled for any other reason is
+then a return "in play" for all it sends home, and the life count and the score
+were home-goers after three. (2) A return within sixty snapshots of leaving: on
+the racing game a whole game is shorter than that while the AI is still looking
+about, the "game over" switch and the life count were home-goers before the first
+go, no restart was called any more and the training ran aground (the first
+demonstration's test failed). (3) A return with fewer than half of what had moved
+going home with it: no better there, because at a restart nearly everything
+changes but little of it lands on what its watch calls its first value. So the
+measure is what changed, not what came home.
+
+A home-goer still counts with the others. Leaving such values out altogether was
+tried before any of this and dropped: on the racing game the next checkpoint goes
+home every lap and also when the game starts over, and with it left out the game
+starting over was no longer seen.
 """
 """Shaky values going home together are not a restart (T-838).
 
@@ -97,6 +148,15 @@ def _cycles(var: Variable) -> bool:
     return any(e.kind == CYCLES for e in var.evidence)
 
 
+# Where a value is held and how it is read (T-1021): what was seen of a value is kept
+# by this and not by its id, which the next guess takes over when a guess is removed.
+_Place = tuple[str, int, Encoding, int]
+
+
+def _place(var: Variable) -> _Place:
+    return (var.region, var.offset, var.encoding, var.length)
+
+
 @dataclass(slots=True)
 class _Watch:
     variable: Variable
@@ -131,6 +191,13 @@ class EventDetector:
         self._tracked_for: tuple[int, tuple[str, ...], frozenset[str]] | None = None
         self._tracked_list: list[Variable] = []
         self._asked: frozenset[str] = frozenset()  # values a person wants UP/DOWN for (T-860)
+        # The values each variable has come to while most of what had moved did not
+        # stir, and how often (T-1021); and the variables that have just come to
+        # their first value often enough. Kept across goes: it is what the AI has
+        # seen of the game.
+        self._homes: dict[_Place, dict[int, int]] = {}  # by place, then by the value come to
+        self._said: set[_Place] = set()  # the places given out as home-goers
+        self._home_goers: list[str] = []
 
     @property
     def observed(self) -> int:
@@ -148,6 +215,18 @@ class EventDetector:
     @property
     def asked(self) -> frozenset[str]:
         return self._asked
+
+    def homes(self, variable_id: str) -> int:
+        """How often this value has come to the first value its watch has now, in
+        snapshots in which most of what had moved did not change (T-1021)."""
+        watch = self._watches.get(variable_id)
+        return 0 if watch is None else self._times_home(watch)
+
+    def take_home_goers(self) -> tuple[str, ...]:
+        """The values found to be home-goers since last asked, each given once
+        (T-1021)."""
+        out, self._home_goers = tuple(self._home_goers), []
+        return out
 
     def ask(self, var_ids: Iterable[str]) -> None:
         """Report every move of these values as UP or DOWN, whatever their kind (T-860)."""
@@ -179,6 +258,11 @@ class EventDetector:
             for var_id in [i for i in self._watches if i not in keep]:
                 if self._watches.pop(var_id).moved:
                     self._moved -= 1
+            # ... and what was seen at a place the knowledge holds nothing at any more
+            # is dropped (T-1021).
+            for place in [p for p in self._homes if self._knowledge.at(p[0], p[1]) is None]:
+                del self._homes[place]
+            self._said = {p for p in self._said if self._knowledge.at(p[0], p[1]) is not None}
         return self._tracked_list
 
     def rebase(self, snapshot: MemorySnapshot) -> None:
@@ -206,13 +290,20 @@ class EventDetector:
             else:
                 watch.last = value
 
-    def observe(self, snapshot: MemorySnapshot) -> tuple[GameEvent, ...]:
+    def observe(self, snapshot: MemorySnapshot, *, put_back: bool = False) -> tuple[GameEvent, ...]:
+        """The events ``snapshot`` implies. ``put_back`` says it is the first snapshot
+        since the app loaded a saved state (T-1021): its events are as ever, but a
+        value at its first value again in it was put there, and is not counted as
+        having come home in play."""
         if not isinstance(snapshot, MemorySnapshot):
             raise ConfigurationError("EventDetector.observe needs a MemorySnapshot.")
+        if not isinstance(put_back, bool):
+            raise ConfigurationError("put_back must be true or false.")
         self._observed += 1
         events: list[GameEvent] = []
         returned_home: list[_Watch] = []
         dropped = False
+        stirred: list[_Watch] = []  # the values that changed at all (T-1021)
         for var in self._tracked(snapshot.region_names):
             try:
                 value = var.decode(snapshot)
@@ -226,6 +317,7 @@ class EventDetector:
                 self._watches[var.id] = _Watch(var, value, value)
                 continue
             if value != watch.last:
+                stirred.append(watch)
                 if not watch.moved:
                     watch.moved = True
                     self._moved += 1
@@ -239,7 +331,10 @@ class EventDetector:
             watch.last = value
         sure = any(w.variable.confidence >= RESET_SURE for w in returned_home)
         most = len(returned_home) >= RESET_SHARE * self._moved
-        if len(returned_home) >= RESET_NEEDS and most and dropped and sure:
+        # ... and one of them is no home-goer: it does not come home in mid-play (T-1021).
+        rare = any(self._times_home(w) < HOME_OFTEN for w in returned_home)
+        would = len(returned_home) >= RESET_NEEDS and most and dropped and sure
+        if would and rare:
             names = ", ".join(w.variable.display_name for w in returned_home)
             events.append(
                 GameEvent(
@@ -250,7 +345,33 @@ class EventDetector:
                     variables=tuple(w.variable.id for w in returned_home),
                 )
             )
+        elif would:
+            # Home-goers and nothing else: no restart. Any of them not yet given out
+            # (its watch was made anew at a value already counted) is given out now.
+            for watch in returned_home:
+                if _place(watch.variable) not in self._said:
+                    self._said.add(_place(watch.variable))
+                    self._home_goers.append(watch.variable.id)
+        elif len(stirred) < RESET_SHARE * self._moved and not put_back:
+            # Most of what has moved did not stir: the game is playing on, and where
+            # each value that changed has come to is somewhere it comes to in play.
+            for watch in stirred:
+                if _cycles(watch.variable):
+                    continue
+                place = _place(watch.variable)
+                come_to = self._homes.setdefault(place, {})
+                if watch.last not in come_to and len(come_to) >= HOMES_KEPT:
+                    continue  # a number that roams: no more of its values are kept
+                seen = come_to.get(watch.last, 0) + 1
+                come_to[watch.last] = seen
+                if seen == HOME_OFTEN and watch.last == watch.first and place not in self._said:
+                    self._said.add(place)
+                    self._home_goers.append(watch.variable.id)
         return tuple(events)
+
+    def _times_home(self, watch: _Watch) -> int:
+        """How often this value has come to its watch's first value in mid-play."""
+        return self._homes.get(_place(watch.variable), {}).get(watch.first, 0)
 
     def _judge(self, watch: _Watch, value: int, frame: int) -> list[GameEvent]:
         var = watch.variable
@@ -371,6 +492,8 @@ class EventLog:
 
 __all__ = [
     "CYCLES",
+    "HOMES_KEPT",
+    "HOME_OFTEN",
     "RESET_NEEDS",
     "RESET_SHARE",
     "RESET_SURE",
