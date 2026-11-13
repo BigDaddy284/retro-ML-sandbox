@@ -103,6 +103,63 @@ def test_the_budget_is_never_overspent(hopper: Hopper, monkeypatch: pytest.Monke
     assert played[-1] is True and not any(played[:-1])
 
 
+class Clock:
+    """A clock the test moves: a second passes with every play."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.now = 100.0
+        self.plays: list[bool] = []
+        real = search.play
+
+        def timed(*args: object, **kw: object) -> Outcome:
+            self.plays.append(kw.get("watch") is not None)
+            self.now += 1.0
+            return real(*args, **kw)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(search, "play", timed)
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_no_play_starts_once_the_time_is_up(
+    hopper: Hopper, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    watch, mark, died = a_go_that_fell_in(hopper)
+    trace = [hopper.move("right")] * died
+    clock = Clock(monkeypatch)
+    out = look_for(hopper, trace, lambda: watch.trial(mark), seconds=5, clock=clock)
+    assert out == Search(None, 5, out_of_time=True) and out.seconds == 5.0
+    assert clock.plays == [False] * 5
+    # A play that is started is finished, however little time was left.
+    clock.plays.clear()
+    out = look_for(hopper, trace, lambda: watch.trial(mark), seconds=0.25, clock=clock)
+    assert out == Search(None, 1, out_of_time=True) and clock.plays == [False]
+
+
+def test_a_way_found_in_time_is_the_same_way(
+    hopper: Hopper, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    watch, mark, died = a_go_that_fell_in(hopper)
+    trace = [hopper.move("right")] * died
+    plain = look_for(hopper, trace, lambda: watch.trial(mark))
+    assert plain.way is not None and not plain.out_of_time
+    assert 0.0 < plain.seconds < 60.0  # how long it really took, with no limit set
+    needed = plain.tries
+    clock = Clock(monkeypatch)
+    # Its last play, the one with the screen, starts with a second still to go.
+    timed = look_for(hopper, trace, lambda: watch.trial(mark), seconds=needed, clock=clock)
+    assert timed == plain and timed.seconds == float(needed) and not timed.out_of_time
+    # A second less: the change stayed alive without the screen, and that is all.
+    clock.plays.clear()
+    short = look_for(hopper, trace, lambda: watch.trial(mark), seconds=needed - 1, clock=clock)
+    assert short == Search(None, needed - 1, out_of_time=True)
+    assert clock.plays == [False] * (needed - 1)
+    # How long it took is not part of what it found.
+    assert Search(None, 3, seconds=1.0) == Search(None, 3, seconds=2.0)
+    assert Search(None, 3) != Search(None, 3, out_of_time=True)
+
+
 def test_no_way_when_the_fall_has_begun(hopper: Hopper) -> None:
     watch, mark, died = a_go_that_fell_in(hopper)
     right = hopper.move("right")
@@ -194,17 +251,41 @@ def test_a_try_that_fails_under_the_screen_is_not_the_way(
     assert found.way is not None and found.way.change == listed[1] and found.tries == 4
 
 
+def test_the_time_is_checked_before_the_second_play_too(
+    hopper: Hopper, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script, _, trace = scripted(hopper, monkeypatch, [DEAD, ALIVE, ACROSS])
+    now = [0.0]
+
+    def played(*args: object, **kw: object) -> Outcome:
+        now[0] += 1.0
+        return script(*args, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(search, "play", played)
+    out = look_for(hopper, trace, object, seconds=2, clock=lambda: now[0])
+    assert out == Search(None, 2, out_of_time=True)
+    assert [seen for _, seen in script.calls] == [False, False]  # the look was not made
+    # With the time for it, the look is made and the way found.
+    script.outcomes[:] = [DEAD, ALIVE, ACROSS]
+    script.calls.clear()
+    now[0] = 0.0
+    out = look_for(hopper, trace, object, seconds=2.5, clock=lambda: now[0])
+    assert out.way is not None and out.tries == 3 and not out.out_of_time
+
+
 def test_every_play_counts_and_the_list_can_run_out(
     hopper: Hopper, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A budget that ends between the blind try and the look: the look is not made.
     script, listed, trace = scripted(hopper, monkeypatch, [DEAD, DEAD, ALIVE, ACROSS])
-    assert look_for(hopper, trace, object, budget=3) == Search(None, 3)
+    out = look_for(hopper, trace, object, budget=3, seconds=10_000)
+    assert out == Search(None, 3) and not out.out_of_time  # the tries ran out, not the time
     assert [seen for _, seen in script.calls] == [False, False, False]
     # Every change loses the life: the search stops when the list does.
     script, listed, trace = scripted(hopper, monkeypatch, [DEAD] * 500)
     assert 0 < len(listed) < 500
-    assert look_for(hopper, trace, object, budget=10_000) == Search(None, len(listed))
+    out = look_for(hopper, trace, object, budget=10_000, seconds=10_000)
+    assert out == Search(None, len(listed)) and not out.out_of_time
     # An emulator error is the caller's to deal with.
     script, listed, trace = scripted(hopper, monkeypatch, [DEAD, EmulatorError("gone")])
     with pytest.raises(EmulatorError, match="gone"):
@@ -221,6 +302,11 @@ def test_nonsense_is_refused(hopper: Hopper, monkeypatch: pytest.MonkeyPatch) ->
         {"carry_on": -1},
         {"frames_per_step": 0},
         {"look_every": 0},
+        {"seconds": 0},
+        {"seconds": -1.5},
+        {"seconds": "soon"},
+        {"seconds": True},
+        {"clock": None},
     ):
         with pytest.raises(ConfigurationError):
             look_for(hopper, trace, object, **bad)

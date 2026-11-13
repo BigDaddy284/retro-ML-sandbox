@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -281,6 +282,45 @@ def test_a_dropped_link_in_the_search_ends_the_go(
     assert (result.setbacks, result.ways_sought, result.ways_found) == (1, 1, 0)
 
 
+def test_a_search_out_of_time_leaves_the_loss_standing(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    now = [0.0]
+
+    def clock() -> float:  # a second passes every time it is read
+        now[0] += 1.0
+        return now[0]
+
+    real = episode.find_way
+    limits: list[object] = []
+
+    def timed(*args: object, **kw: object) -> Search:
+        limits.append(kw["seconds"])
+        return real(*args, **kw, clock=clock)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(episode, "find_way", timed)
+    r, moments = searching(lab, way_seconds=4.5)
+    with caplog.at_level(logging.INFO, logger="retro_ai_lab.training.episode"):
+        r.begin()
+        steps(r, DIED_AT)
+    assert limits == [4.5]
+    assert (r.ways_sought, r.ways_found, r.times_back) == (1, 0, 0)
+    assert len(lab.loaded) == 4 + 1 and lab.loaded[-1] == NOW_SLOT
+    assert lab.game.state.lives == toy_hopper.START_LIVES - 1 and len(moments) == 0
+    said = [rec.getMessage() for rec in caplog.records if rec.getMessage().startswith("Lost a")]
+    assert said == [
+        f"Lost a life at step {DIED_AT}. Went back {DIED_AT} steps and made 4 tries in 6.0 s, "
+        "all the time a search may take: none got past."
+    ]
+    assert r.step() and r.finish().setbacks == 1
+    # With no limit asked for, none is passed on.
+    limits.clear()
+    free, _ = searching(lab)
+    free.begin()
+    steps(free, DIED_AT)
+    assert limits == [None] and free.finish().ways_found == 1
+
+
 def test_the_result_and_the_log_say_what_was_found(
     lab: Lab, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -294,12 +334,18 @@ def test_the_result_and_the_log_say_what_was_found(
         steps(none, DIED_AT)
         missed = none.finish()
     said = [rec.getMessage() for rec in caplog.records if rec.getMessage().startswith("Lost a")]
-    assert said == [
-        f"Lost a life at step {DIED_AT}. Went back {DIED_AT} steps and found a way past "
-        f"on try {FOUND_ON}: {WAY}.",
-        f"Lost a life at step {DIED_AT}. Went back {DIED_AT} steps and made 5 tries: "
-        "none got past.",
-    ]
+    took = r"\d+\.\d s"  # how long the search took, to a tenth of a second
+    assert len(said) == 2
+    assert re.fullmatch(
+        f"Lost a life at step {DIED_AT}\\. Went back {DIED_AT} steps and found a way past "
+        f"on try {FOUND_ON}, after {took}: {re.escape(WAY)}\\.",
+        said[0],
+    )
+    assert re.fullmatch(
+        f"Lost a life at step {DIED_AT}\\. Went back {DIED_AT} steps and made 5 tries "
+        f"in {took}: none got past\\.",
+        said[1],
+    )
     assert found.describe_ways() == ", went back once and found a way past"
     assert missed.describe_ways() == ", went back once and found no way past"
     for result in (found, missed):
@@ -330,6 +376,9 @@ def test_nonsense_is_refused(lab: Lab) -> None:
         {"ways_per_go": True},
         {"way_tries": 0},
         {"way_tries": "many"},
+        {"way_seconds": 0},
+        {"way_seconds": "long"},
+        {"way_seconds": True},
         {"moments": Moments(("back0", NOW_SLOT))},
     ):
         with pytest.raises(ConfigurationError):

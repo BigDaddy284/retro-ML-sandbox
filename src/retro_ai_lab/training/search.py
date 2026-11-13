@@ -20,8 +20,9 @@ move one button from the one made, held 4 to 16 steps.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning.actions import ActionSpace
@@ -51,6 +52,10 @@ class Search:
 
     way: Way | None
     tries: int  # plays made, blind and looked at
+    # How long it took (T-1008). Not part of what was found: two searches that
+    # find the same in the same tries are the same search.
+    seconds: float = field(default=0.0, compare=False)
+    out_of_time: bool = False  # it stopped because its time was up, not its tries
 
 
 def _whole(value: object, what: str, least: int) -> int:
@@ -71,6 +76,8 @@ def find_way(
     budget: int = BUDGET,
     carry_on: int = CARRY_ON,
     look_every: int = DEFAULT_LOOK_EVERY,
+    seconds: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> Search:
     """Look for a small change to ``trace``, played from the save in ``slot``, that
     stays alive and reaches new ground.
@@ -80,6 +87,10 @@ def find_way(
     fresh screen watch for one try each time it is called (the go's
     :meth:`ScreenWatch.trial`). The game is left wherever the last try ended:
     putting it back is the caller's, and so is an emulator error.
+
+    On a real emulator a try costs real time. With ``seconds``, no play is started
+    once that long has passed on ``clock`` since the search began (T-1008); a play
+    in flight is finished.
     """
     if not slot or not isinstance(slot, str):
         raise ConfigurationError("A search needs the name of the save to start from.")
@@ -95,16 +106,35 @@ def find_way(
     _whole(carry_on, "carry_on", 0)
     _whole(frames_per_step, "frames_per_step", 1)
     _whole(look_every, "look_every", 1)
-    tries = 0
-    for change in changes(trace, space):  # refuses a move the controls don't have
+    if seconds is not None and (
+        isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not seconds > 0
+    ):
+        raise ConfigurationError("The time a search may take must be a number above 0.")
+    if not callable(clock):
+        raise ConfigurationError("clock must give the time when called.")
+    began = clock()
+    tries, late = 0, False
+
+    def taken() -> float:
+        return max(0.0, clock() - began)
+
+    def may_play() -> bool:
+        """Whether another play may start; says so when it is the time that is up."""
+        nonlocal late
         if tries >= budget:
+            return False
+        late = seconds is not None and taken() >= seconds
+        return not late
+
+    for change in changes(trace, space):  # refuses a move the controls don't have
+        if not may_play():
             break
         moves = change.apply(trace, carry_on)
         tries += 1
         blind = play(connection, slot, moves, space, frames_per_step=frames_per_step, lives=lives)
         if blind.lost:
             continue
-        if tries >= budget:
+        if not may_play():
             break
         tries += 1
         seen = play(
@@ -118,8 +148,8 @@ def find_way(
             look_every=look_every,
         )
         if seen.past:
-            return Search(Way(moves, change, tries, seen.ground), tries)
-    return Search(None, tries)
+            return Search(Way(moves, change, tries, seen.ground), tries, taken())
+    return Search(None, tries, taken(), late)
 
 
 __all__ = ["BUDGET", "CARRY_ON", "Search", "Way", "find_way"]
