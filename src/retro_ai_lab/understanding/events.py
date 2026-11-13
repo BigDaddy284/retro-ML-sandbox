@@ -84,6 +84,38 @@ tried before any of this and dropped: on the racing game the next checkpoint goe
 home every lap and also when the game starts over, and with it left out the game
 starting over was no longer seen.
 """
+"""Where a value started (T-1022).
+
+A watch takes the value of the moment it is made for the value's first, and a watch
+is made anew whenever the AI learns something about the value. So the life count
+was "first" at 1 and the score at 92 or 487, the game starting over never sent them
+there, and most real restarts went uncalled (on the practice game all nine measured;
+on the racing game 26 of 42).
+
+The AI never sees a start being set, but it knows which way its numbers run. What
+it takes for a score or for progress counts up from its start, so the lowest it has
+been seen at stands for the start; what it takes for lives or health is at its
+most there. A value is at a start where its watch began, as before, or back at that
+lowest or highest: back, so a number that goes lower than ever before is not at a
+start, and the first time a game starts over under the AI's eyes may go uncalled.
+Both are kept by place, like the counts above, so they outlive a watch made anew,
+and whether such a return is too common to count is judged by how often the value
+has come to the value it now came to.
+
+It leans on the guess's kind: a countdown taken for progress starts at its top and
+is "at a start" at its bottom, and a life count that has been above its starting
+value (an extra life) is not back at a restart. Six ways were tried before this
+one; the task's section tells them (keeping the watch, the last or the most
+frequent landing in a busy snapshot, the extremes alone).
+
+A life lost is not the game starting over. The game putting the player back at the
+level's start lands the place in the level and the switches where a restart lands
+them, and it was what most called "restarts" were. What tells the two apart is the
+life count: it goes down there, and when the game starts over it comes back. So no
+restart is called in a snapshot in which a life count went down (though health be
+filled up again in it, as games do for the next life), nor in one in which health
+went down and no life or health value went up.
+"""
 """Shaky values going home together are not a restart (T-838).
 
 On the user's Super Mario Bros. the 6502's stack page and other scratch
@@ -157,6 +189,11 @@ def _place(var: Variable) -> _Place:
     return (var.region, var.offset, var.encoding, var.length)
 
 
+# The kinds whose start is the lowest, and the highest, they have been seen at (T-1022).
+_STARTS_LOW = frozenset({VariableKind.SCORE, VariableKind.PROGRESS})
+_STARTS_HIGH = frozenset({VariableKind.LIVES, VariableKind.HEALTH})
+
+
 @dataclass(slots=True)
 class _Watch:
     variable: Variable
@@ -198,6 +235,10 @@ class EventDetector:
         self._homes: dict[_Place, dict[int, int]] = {}  # by place, then by the value come to
         self._said: set[_Place] = set()  # the places given out as home-goers
         self._home_goers: list[str] = []
+        # The lowest and the highest each number that has a start there has been
+        # seen at, by place (T-1022). Kept across goes and across watches made anew.
+        self._low: dict[_Place, int] = {}
+        self._high: dict[_Place, int] = {}
 
     @property
     def observed(self) -> int:
@@ -263,6 +304,9 @@ class EventDetector:
             for place in [p for p in self._homes if self._knowledge.at(p[0], p[1]) is None]:
                 del self._homes[place]
             self._said = {p for p in self._said if self._knowledge.at(p[0], p[1]) is not None}
+            for ends in (self._low, self._high):
+                for place in [p for p in ends if self._knowledge.at(p[0], p[1]) is None]:
+                    del ends[place]
         return self._tracked_list
 
     def rebase(self, snapshot: MemorySnapshot) -> None:
@@ -304,6 +348,7 @@ class EventDetector:
         returned_home: list[_Watch] = []
         dropped = False
         stirred: list[_Watch] = []  # the values that changed at all (T-1021)
+        life_gone = hurt = given_back = False  # what lives and health did (T-1022)
         for var in self._tracked(snapshot.region_names):
             try:
                 value = var.decode(snapshot)
@@ -315,6 +360,7 @@ class EventDetector:
                 if watch is not None and watch.moved:
                     self._moved -= 1
                 self._watches[var.id] = _Watch(var, value, value)
+                self._seen_at(var, value)
                 continue
             if value != watch.last:
                 stirred.append(watch)
@@ -322,18 +368,34 @@ class EventDetector:
                     watch.moved = True
                     self._moved += 1
                 events.extend(self._judge(watch, value, snapshot.frame))
-                if value == watch.first and value != watch.last and not _cycles(var):
+                if var.kind in _STARTS_HIGH:
+                    if value > watch.last:
+                        given_back = True
+                    elif var.kind is VariableKind.LIVES:
+                        life_gone = True
+                    else:
+                        hurt = True
+                if self._at_a_start(watch, value) and not _cycles(var):
                     returned_home.append(watch)
                     # A flag switching back is what flags do; a restart is a number
                     # (score, lives, progress) going back down to its start (T-867).
                     if value < watch.last and var.kind is not VariableKind.FLAG:
                         dropped = True
+                # Judged first, noted after: a value is back at its lowest only if
+                # it has been there before (T-1022).
+                self._seen_at(var, value)
             watch.last = value
         sure = any(w.variable.confidence >= RESET_SURE for w in returned_home)
         most = len(returned_home) >= RESET_SHARE * self._moved
         # ... and one of them is no home-goer: it does not come home in mid-play (T-1021).
-        rare = any(self._times_home(w) < HOME_OFTEN for w in returned_home)
-        would = len(returned_home) >= RESET_NEEDS and most and dropped and sure
+        # Counted at the value come to, which may be a lowest or highest and not the
+        # watch's first (T-1022).
+        rare = any(self._times_at(w, w.last) < HOME_OFTEN for w in returned_home)
+        # A life count went down, or health did and nothing was given back: a life
+        # lost, with or without the player put back, and not the game starting over
+        # (T-1022).
+        life_lost = life_gone or (hurt and not given_back)
+        would = len(returned_home) >= RESET_NEEDS and most and dropped and sure and not life_lost
         if would and rare:
             names = ", ".join(w.variable.display_name for w in returned_home)
             events.append(
@@ -371,7 +433,35 @@ class EventDetector:
 
     def _times_home(self, watch: _Watch) -> int:
         """How often this value has come to its watch's first value in mid-play."""
-        return self._homes.get(_place(watch.variable), {}).get(watch.first, 0)
+        return self._times_at(watch, watch.first)
+
+    def _times_at(self, watch: _Watch, value: int) -> int:
+        """How often this value has come to ``value`` in mid-play."""
+        return self._homes.get(_place(watch.variable), {}).get(value, 0)
+
+    def _seen_at(self, var: Variable, value: int) -> None:
+        """Keep the lowest, or the highest, a number with such a start was seen at."""
+        if var.kind in _STARTS_LOW:
+            place = _place(var)
+            if value < self._low.get(place, value + 1):
+                self._low[place] = value
+        elif var.kind in _STARTS_HIGH:
+            place = _place(var)
+            if value > self._high.get(place, value - 1):
+                self._high[place] = value
+
+    def _at_a_start(self, watch: _Watch, value: int) -> bool:
+        """Is ``value`` where this value starts: where its watch began, or, for a
+        number that counts up from its start, the lowest it had been seen at before
+        now, and for lives and health the highest (T-1022)."""
+        if value == watch.first:
+            return True
+        kind = watch.variable.kind
+        if kind in _STARTS_LOW:
+            return value == self._low.get(_place(watch.variable))
+        if kind in _STARTS_HIGH:
+            return value == self._high.get(_place(watch.variable))
+        return False
 
     def _judge(self, watch: _Watch, value: int, frame: int) -> list[GameEvent]:
         var = watch.variable
