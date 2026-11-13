@@ -957,3 +957,61 @@ def test_marks_before_it_is_seen_and_nonsense() -> None:
             watch.back_to(bad)  # type: ignore[arg-type]
         with pytest.raises(ConfigurationError):
             watch.trial(bad)  # type: ignore[arg-type]
+
+
+# ------------------------------------------------------------ T-1016: a walker on the ground
+
+
+def into_a_walker(watch: ScreenWatch) -> None:
+    """A go on plain ground, the camera holding the hero at x=80 while the level slides
+    by 16 pixels a look. A walker comes the other way, 4 pixels a look, and they meet
+    past the first gap, where it is the only other thing in view. The game then holds
+    the picture for three looks (the pause before a life is taken), takes the life and
+    puts the hero back at the start."""
+    watch.begin_go()
+    for i in range(26):
+        camera, at = 16 * i, 590 - 4 * i
+        things = list(HELD)
+        if 0 <= at - camera <= 242:
+            things.append((at - camera, 194, WALKER))
+        watch.look(flat(camera, things))
+    assert camera == 400 and at - camera == 90  # side by side: its body starts at x=91
+    for _ in range(3):
+        watch.look(flat(camera, [*HELD, (at - camera, 194, WALKER)]))
+    watch.look(flat(0, HELD), lost=1)
+
+
+def test_a_life_lost_to_a_walker_on_the_ground_is_put_down_to_it() -> None:
+    """On the practice game none of the lives lost to a walker was put down to touching
+    it: standing on the ground it was seen only by the edge it leads with, and not at
+    all where it was the only thing telling the camera's move."""
+    from retro_ai_lab.observation.tracking import ObjectTracker
+    from retro_ai_lab.training.vision import LOOK_SHIFT
+
+    watch = ScreenWatch(hero_with_colours((86, 200)))
+    into_a_walker(watch)
+    assert watch.seen_me == watch.looks == 30
+    assert watch.lives_lost == 1 and watch.lives_after_touch == 1 and watch.lives_after_fall == 0
+    (role,) = watch.roles()
+    assert role.tag is SpriteTag.ENEMY and role.touches == 1  # it hurts, and it moves
+    assert role.confidence is Confidence.LOW
+    # A second time and the guess is firmer; the summary says so.
+    into_a_walker(watch)
+    (role,) = watch.roles()
+    assert role.tag is SpriteTag.ENEMY and role.confidence is Confidence.MEDIUM
+    assert watch.lives_after_touch == 2
+    assert "2 lives lost, 2 of them soon after touching something" in watch.describe()
+    assert "1 kinds found to hurt" in watch.describe()
+    # The brain is given where the nearest thing that hurts is: just ahead, level with it.
+    watch.begin_go()
+    for i in range(25):
+        camera, at = 16 * i, 590 - 4 * i
+        things = [*HELD, (at - camera, 194, WALKER)] if 0 <= at - camera <= 242 else list(HELD)
+        watch.look(flat(camera, things))
+    parts = dict(watch.parts())
+    assert parts["screen:hurts dx"] == 1 and parts["screen:hurts dy"] == 0
+    # The same go seen the old way: nothing is put down to the walker.
+    old = ScreenWatch(hero_with_colours((86, 200)))
+    old._tracker = ObjectTracker(max_shift=LOOK_SHIFT, whole=False)
+    into_a_walker(old)
+    assert old.lives_lost == 1 and old.lives_after_touch == 0 and old.roles() == ()

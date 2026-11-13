@@ -61,6 +61,8 @@ class ScreenObject:
     scenery: bool  # too big to be a thing: part of the level
     kind: str | None = None  # set by an ObjectCatalogue; None for scenery
     cut_out: bool = False  # found by its motion against the scenery, not on a still screen
+    # The colours (packed) a cut-out was filled out by, when it could be (T-1016).
+    colours: tuple[int, ...] = ()
 
     @property
     def centre(self) -> tuple[int, int]:

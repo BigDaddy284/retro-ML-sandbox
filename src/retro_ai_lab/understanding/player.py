@@ -162,7 +162,9 @@ def _outcomes(frames: Sequence[Frame], catalogue: ObjectCatalogue) -> list[_Outc
     """
     if not frames:
         raise ConfigurationError("A run must give back at least one frame.")
-    tracker = ObjectTracker(catalogue)
+    # Not filled out by their colours (T-1016): a thing half off the screen's edge would
+    # be a patch that grows or shrinks there, and its path is what the runs are compared by.
+    tracker = ObjectTracker(catalogue, whole=False)
     paths: dict[int, dict[int, tuple[int, int]]] = {}
     edges: dict[int, dict[int, tuple[int, int, int, int]]] = {}
     screen: dict[int, dict[int, tuple[int, int]]] = {}

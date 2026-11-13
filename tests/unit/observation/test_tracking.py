@@ -668,3 +668,215 @@ def test_what_the_move_leaves_unexplained() -> None:
     assert tracker.scroll == (0, 0) and 0.0 < tracker.unexplained < 0.5
     tracker.reset()
     assert tracker.unexplained == 0.0
+
+
+# ------------------------------------------------------------ T-1016: seen whole
+
+GREY = (188, 188, 188)
+PURPLE = (148, 0, 132)
+FEET = (40, 0, 0)
+
+
+def block(colour: tuple[int, int, int] = PURPLE, feet: tuple[int, int, int] = FEET) -> np.ndarray:
+    """A walker drawn in flat colour, 14 by 14, with a strip of feet: between two looks
+    only the edge it leads with looks any different."""
+    s = np.zeros((14, 14, 3), np.uint8)
+    s[:] = colour
+    s[11:] = feet
+    return s
+
+
+def open_ground(width: int = 1024) -> np.ndarray:
+    """Plain ground from y=208 with a strip of grass, and one post near the start:
+    past the post nothing tells one place from another."""
+    a = np.zeros((240, width, 3), np.uint8)
+    a[:] = SKY
+    a[208:] = BROWN
+    a[208:212] = GREEN
+    a[128:208, 150:166] = GREY
+    return a
+
+
+def boxes(tracker: ObjectTracker) -> set[tuple[int, int, int, int]]:
+    """The boxes of the things seen at the last look that have a kind."""
+    return {
+        (t.x, t.y, t.width, t.height)
+        for t in tracker.tracks()
+        if t.missing == 0 and t.kind is not None
+    }
+
+
+def test_a_flat_coloured_walker_on_the_ground_is_seen_whole() -> None:
+    """On the practice game the walker was a sliver beside the player, or nothing, at
+    the look in which it took a life: none of those lives was put down to it."""
+    w = open_ground()
+    tracker, old = ObjectTracker(), ObjectTracker(whole=False)
+    ids = set()
+    for i in range(7):
+        frame = view(w, 0, [(200 - 4 * i, 194, block())], i)
+        tracker.update(frame)
+        old.update(frame)
+        if i == 0:
+            continue
+        whole = (200 - 4 * i, 194, 14, 14)
+        mine = [t for t in tracker.tracks() if (t.x, t.y, t.width, t.height) == whole]
+        assert len(mine) == 1 and mine[0].missing == 0
+        assert mine[0].kind is not None and mine[0].cut_out and mine[0].colours
+        ids.add(mine[0].id)
+        # Nothing else with a kind is made of it (its other edge, a second copy).
+        assert boxes(tracker) == {whole}
+        # The old way: only the edge it leads with, four pixels wide.
+        assert whole not in boxes(old) and all(b[2] <= 4 for b in boxes(old))
+    assert len(ids) == 1  # one track from the first look it moved in
+    (t,) = [t for t in tracker.tracks() if t.id in ids]
+    assert t.moves and t.velocity[0] == pytest.approx(-4.0, abs=0.5)
+    assert len(tracker.catalogue.kinds()) == 1  # one kind, whole or edge
+
+
+def test_it_is_still_seen_when_it_stops() -> None:
+    w = open_ground()
+    tracker, old = ObjectTracker(), ObjectTracker(whole=False)
+    for i in range(4):
+        frame = view(w, 0, [(200 - 4 * i, 194, block())], i)
+        tracker.update(frame)
+        old.update(frame)
+    (walker_id,) = [t.id for t in tracker.tracks() if t.colours]
+    for i in range(4, 14):  # ten looks standing still: longer than a track survives unseen
+        frame = view(w, 0, [(188, 194, block())], i)
+        tracker.update(frame)
+        old.update(frame)
+        (t,) = [t for t in tracker.tracks() if t.id == walker_id]
+        assert t.missing == 0 and (t.x, t.y, t.width, t.height) == (188, 194, 14, 14)
+    assert t.velocity[0] == pytest.approx(0.0, abs=0.1)
+    assert not [t for t in old.tracks() if t.kind is not None]  # the old way: lost
+    # It walks on, and is the same track still.
+    tracker.update(view(w, 0, [(184, 194, block())], 14))
+    (t,) = [t for t in tracker.tracks() if t.id == walker_id]
+    assert t.missing == 0 and (t.x, t.y) == (184, 194)
+
+
+def test_another_of_its_kind_is_known_the_moment_it_is_in_view(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What a walker looks like is learnt from the first one seen to move. Any other,
+    walking or not, is then seen for what it is at once: also in the next go."""
+    from retro_ai_lab.observation import tracking
+
+    w = open_ground()
+    tracker = ObjectTracker()
+    assert tracker.movers == ()
+    for i in range(3):
+        tracker.update(view(w, 0, [(200 - 4 * i, 194, block())], i))
+    (kind,) = tracker.movers
+    # A second walker that has never moved, and the first one gone.
+    tracker.update(view(w, 0, [(60, 194, block())], 3))
+    (other,) = [t for t in tracker.tracks() if t.missing == 0 and t.kind is not None]
+    assert (other.x, other.y, other.width, other.height) == (60, 194, 14, 14)
+    assert other.kind == kind and not other.moves
+    # A new go: nothing followed is kept, what a walker looks like is. At the very
+    # first look two of them are seen, standing still.
+    tracker.reset()
+    assert tracker.tracks() == () and tracker.movers == (kind,)
+    tracker.update(view(w, 0, [(60, 194, block()), (120, 194, block())], 4))
+    assert boxes(tracker) == {(60, 194, 14, 14), (120, 194, 14, 14)}
+    assert {t.kind for t in tracker.tracks()} == {kind}
+    # Something else in other colours is not one of them until it is seen to move.
+    # (Turning up is a change, and is cut out as one, as it always was; standing
+    # there afterwards it is part of the ground again.)
+    green = block((0, 88, 0), (0, 40, 0))
+    tracker.update(view(w, 0, [(60, 194, block()), (180, 194, green)], 5))
+    tracker.update(view(w, 0, [(60, 194, block()), (180, 194, green)], 5))
+    assert boxes(tracker) == {(60, 194, 14, 14)}
+    # No more kinds are known this way than the tracker may keep; one over is still
+    # filled out in each look it moves in, and lost when it stops.
+    monkeypatch.setattr(tracking, "MOST_MOVERS", 1)
+    for i in range(1, 4):
+        tracker.update(view(w, 0, [(60, 194, block()), (180 - 4 * i, 194, green)], 5 + i))
+        assert boxes(tracker) == {(60, 194, 14, 14), (180 - 4 * i, 194, 14, 14)}
+    assert tracker.movers == (kind,)
+    for i in range(4, 12):
+        tracker.update(view(w, 0, [(60, 194, block()), (168, 194, green)], 5 + i))
+    assert boxes(tracker) == {(60, 194, 14, 14)}
+
+
+def test_it_is_still_seen_where_only_it_tells_the_cameras_move() -> None:
+    """Past the post the walker is all that changes on the screen as the camera moves.
+    The camera's measure takes the walker's move for the camera's own (that is the
+    next task's); the walker is seen where it is all the same."""
+    w = open_ground()
+    tracker, old = ObjectTracker(max_shift=32), ObjectTracker(max_shift=32, whole=False)
+    walker_id = None
+    wrong, unseen = 0, 0
+    for i in range(18):
+        camera, at = 16 * i, 420 - 4 * i  # they meet: 20 pixels a look on the screen
+        frame = view(w, camera, [(at, 194, block())], i)
+        tracker.update(frame)
+        old.update(frame)
+        x = at - camera
+        if i < 12:  # coming into view, and found, while the post is in view too
+            continue
+        if walker_id is None:
+            (walker_id,) = [t.id for t in tracker.tracks() if t.colours]
+        assert x >= 0 and x + 14 <= 256 and camera > 166  # whole on the screen, post gone
+        (t,) = [t for t in tracker.tracks() if t.id == walker_id]
+        assert t.missing == 0 and (t.x, t.y, t.width, t.height) == (x, 194, 14, 14)
+        wrong += tracker.scroll != (16, 0)
+        unseen += (x, 194, 14, 14) not in boxes(old) and not any(
+            b[0] >= x - 4 and b[0] + b[2] <= x + 18 for b in boxes(old)
+        )
+    assert wrong >= 4  # the scenario is the one meant: the camera's move is misjudged
+    assert unseen >= 4  # ... and the old way saw nothing of the walker in those looks
+
+
+def test_scenery_walked_in_front_of_is_not_the_mover() -> None:
+    """The strip of hill a walker uncovers is drawn in the hill's colours and joined to
+    the whole hill; the hill did not move, so it is not taken for the thing."""
+    w = level()
+    tracker = ObjectTracker()
+    for i in range(8):  # in front of the hill at 291 to 321, the camera moving
+        tracker.update(view(w, 100 + 2 * i, [(330 - 2 * i, 194, block())], i))
+        if i == 0:
+            continue
+        x = 330 - 2 * i - (100 + 2 * i)
+        assert (x, 194, 14, 14) in boxes(tracker)
+        assert all(t.width <= 14 and t.height <= 14 for t in tracker.tracks())
+    assert tracker.scroll == (2, 0)
+
+
+def test_colours_that_run_on_into_the_scenery_are_not_filled_out() -> None:
+    """A walker in its ground's own colours cannot be told from the ground by them:
+    it is cut out by its motion exactly as before."""
+    w = open_ground()
+    tracker, old = ObjectTracker(), ObjectTracker(whole=False)
+    for i in range(7):
+        frame = view(w, 0, [(200 - 4 * i, 194, block(BROWN, GREEN))], i)
+        tracker.update(frame)
+        old.update(frame)
+
+        def seen(which: ObjectTracker) -> list[tuple[int | str | None, ...]]:
+            return [(t.id, t.kind, t.x, t.y, t.width, t.height, t.missing) for t in which.tracks()]
+
+        assert seen(tracker) == seen(old)
+        assert not any(t.colours for t in tracker.tracks())
+    assert seen(tracker)  # something was cut out: the edge that moved
+
+
+def test_what_is_hidden_is_no_part_of_it() -> None:
+    w = open_ground()
+    tracker = ObjectTracker()
+    hide = (80, 190, 14, 18)  # the player's box, as the watch hides it: to x = 94
+    for i in range(6):
+        x = 120 - 6 * i  # the walker walks up to it and half behind it
+        tracker.update(view(w, 0, [(x, 194, block())], i), hide=hide)
+        if i == 0:
+            continue
+        left = max(x, 94)
+        assert boxes(tracker) == {(left, 194, x + 14 - left, 14)}
+    (t,) = [t for t in tracker.tracks() if t.kind is not None]
+    assert t.missing == 0 and t.x == 94 and t.width == 10  # the part that shows
+
+
+def test_whole_must_be_true_or_false() -> None:
+    for nonsense in (None, 1, "yes"):
+        with pytest.raises(ConfigurationError, match="whole"):
+            ObjectTracker(whole=nonsense)  # type: ignore[arg-type]

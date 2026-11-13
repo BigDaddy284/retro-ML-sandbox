@@ -485,7 +485,16 @@ game saved before the AI could do this is looked at once more at the next
 Start. Every other step of a go it then looks at the screen, follows the
 other things on it, and sets what it touched against the lives it lost and
 the points it gained, to learn which kinds of thing hurt and which are worth
-picking up. At every look the brain is told what is around it, read off the
+picking up. A thing that stands on the ground cannot be told from the ground
+on a still screen, so the AI first notices it when it moves; it then fills
+the part that moved out to the whole thing by its colours, checks that this
+patch really stood somewhere else a look ago (a hill an enemy walks in front
+of did not), and remembers what that kind looks like. From then on it sees
+every thing of that kind the moment it is on the screen, walking or standing
+still, so an enemy it walks into is there to be blamed. (A thing that never
+moves and stands on the ground, spikes for one, is still not seen, and
+neither is an enemy drawn in the colours of the ground under it beyond the
+edge that moves.) At every look the brain is told what is around it, read off the
 picture next to where it sees itself: how much floor there is to its right
 and to its left before a drop, how far the way is clear at its own height on
 each side, and whether it stands on something, has something below it or has

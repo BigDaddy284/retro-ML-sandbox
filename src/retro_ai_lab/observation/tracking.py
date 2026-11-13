@@ -20,6 +20,13 @@ as walking.
 
 Since T-992 the tracker's camera is measured at the pace the AI looks, and
 only by what can tell: see :meth:`ObjectTracker.update`.
+
+Since T-1016 a thing cut out of the scenery by its motion is filled out by its
+colours to the whole thing (what differs between two screens is only the edge
+a flat-coloured thing leads with), taken only if it stood elsewhere a look
+ago, and its kind is known by those colours from then on: every thing of the
+kind is seen at every look, moving or not. ``ObjectTracker(whole=False)`` is
+the tracker without that.
 """
 
 from __future__ import annotations
@@ -35,6 +42,7 @@ from retro_ai_lab.core import ConfigurationError, Frame
 from retro_ai_lab.observation.objects import (
     DEFAULT_MAX_SIZE,
     DEFAULT_MIN_PIXELS,
+    PALETTE_SHARE,
     ObjectCatalogue,
     ScreenObject,
     _dilate,
@@ -52,6 +60,8 @@ GLASS_AFTER = 2  # camera moves a row stood still through before it counts as gl
 GLASS_MOST = 4  # ... and the most that are counted, so a row can be unlearnt again
 SCREEN_SHARE = 4  # the camera's reach is at most a quarter of the screen either way
 EXPLAINS = 0.5  # a move must leave at most this share of what differed still differing
+MOST_MOVERS = 16  # kinds known by their colours at most: each costs a pass over the screen
+FITS_MOST = 4_000_000  # pixels compared at most to see whether a patch stood elsewhere (T-1016)
 DEFAULT_MAX_JUMP = 24  # farthest a thing may be from where it was expected to be
 DEFAULT_MAX_MISSING = 5  # frames a track survives without being seen
 HISTORY = 30  # positions kept per track
@@ -250,6 +260,9 @@ class Track:
     merged: bool = False  # this frame it was part of a patch with another thing (touching)
     glass: bool = False  # drawn on the glass (a life counter): it stays put on the screen
     cut_out: bool = False  # last seen cut out of the scenery by its motion (T-977)
+    # The colours (packed) it was filled out by when it was cut out of the scenery
+    # (T-1016): by these it is seen whole, and seen while it stands still.
+    colours: tuple[int, ...] = ()
 
     @property
     def centre(self) -> tuple[int, int]:
@@ -289,7 +302,10 @@ class ObjectTracker:
         max_missing: int = DEFAULT_MAX_MISSING,
         min_pixels: int = DEFAULT_MIN_PIXELS,
         max_size: int = DEFAULT_MAX_SIZE,
+        whole: bool = True,
     ) -> None:
+        if not isinstance(whole, bool):
+            raise ConfigurationError("whole must be true or false.")
         for value, what in (
             (max_shift, "max_shift"),
             (max_jump, "max_jump"),
@@ -307,6 +323,12 @@ class ObjectTracker:
         self._max_missing = max_missing
         self._min_pixels = min_pixels
         self._max_size = max_size
+        # Whether a thing cut out of the scenery by its motion is filled out by its
+        # colours and found again by them (T-1016).
+        self._whole = whole
+        # The colours of each kind seen to move, and the kind. Kept over a reset, like
+        # the kinds: what an enemy looks like is the same every go.
+        self._movers: dict[tuple[int, ...], str] = {}
         self._previous: Frame | None = None
         self._tracks: dict[int, Track] = {}
         self._next_id = 1
@@ -341,6 +363,12 @@ class ObjectTracker:
         if self._stuck is None:
             return ()
         return tuple(int(y) for y in np.flatnonzero(self._stuck >= GLASS_AFTER))
+
+    @property
+    def movers(self) -> tuple[str, ...]:
+        """The kinds seen to move and known by their colours since (T-1016): things of
+        these kinds are seen whether or not they move."""
+        return tuple(dict.fromkeys(self._movers.values()))
 
     @property
     def searches(self) -> int:
@@ -403,6 +431,8 @@ class ObjectTracker:
             self._stuck = None
             prev = None
         objects = [o for o in self._catalogue.observe(frame, hide=hide) if not o.scenery]
+        if self._whole:
+            objects.extend(self._known_by_their_colours(frame, objects, hide))
         if prev is not None:
             self._scroll = self._camera_move(prev, frame, hide)
             self._camera = (self._camera[0] + self._scroll[0], self._camera[1] + self._scroll[1])
@@ -520,6 +550,165 @@ class ObjectTracker:
         rows = self._stuck[max(0, y) : max(0, y + height)]
         return bool(rows.size) and bool((rows >= GLASS_AFTER).all())
 
+    def _same_colours(
+        self,
+        packed: NDArray[np.int32],
+        colours: tuple[int, ...],
+        window: tuple[int, int, int, int],
+        hide: tuple[int, int, int, int] | None,
+    ) -> list[tuple[tuple[int, int, int, int], NDArray[np.bool_]]]:
+        """The patches drawn in ``colours`` within ``window`` (x0, y0, x1, y1): the box
+        of each on the screen and its own pixels in that box. Parts a pixel apart are
+        one patch; what the caller hides is in none; specks are left out."""
+        x0, y0, x1, y1 = window
+        same = np.isin(packed[y0:y1, x0:x1], np.array(colours, np.int32))
+        if hide is not None:
+            hx, hy, hw, hh = hide
+            same[max(0, hy - y0) : max(0, hy + hh - y0), max(0, hx - x0) : max(0, hx + hw - x0)] = (
+                False
+            )
+        labels, count = _label(_dilate(same))
+        out: list[tuple[tuple[int, int, int, int], NDArray[np.bool_]]] = []
+        for i in range(1, count + 1):
+            patch = (labels == i) & same
+            ys, xs = np.nonzero(patch)
+            if len(ys) < self._min_pixels:
+                continue
+            bx, by = int(np.min(xs)), int(np.min(ys))
+            w, h = int(np.max(xs)) - bx + 1, int(np.max(ys)) - by + 1
+            out.append(((x0 + bx, y0 + by, w, h), patch[by : by + h, bx : bx + w]))
+        return out
+
+    @staticmethod
+    def _window(
+        box: tuple[int, int, int, int], reach: int, frame: Frame
+    ) -> tuple[int, int, int, int]:
+        """``box`` grown by ``reach`` each way, as far as the screen goes."""
+        x, y, w, h = box
+        return (
+            max(0, x - reach),
+            max(0, y - reach),
+            min(frame.width, x + w + reach),
+            min(frame.height, y + h + reach),
+        )
+
+    def _filled_out(
+        self,
+        packed: NDArray[np.int32],
+        own: NDArray[np.bool_],
+        frame: Frame,
+        hide: tuple[int, int, int, int] | None,
+    ) -> tuple[tuple[int, int, int, int], NDArray[np.bool_], tuple[int, ...]] | None:
+        """A moving patch filled out by its colours (T-1016): its box, its own pixels
+        in that box, and the colours.
+
+        What changed between two screens is only the part of a mover that does not
+        look the same where it was: of a thing drawn in flat colour, the edge it leads
+        with. ``own`` are that part's own pixels (the backdrop left out). The whole
+        thing is what is drawn in the same colours and joined to them. None when that
+        is bigger than a thing may be: its colours run on into the scenery, and the
+        part that moved is all that can be told apart.
+        """
+        values, counts = np.unique(packed[own], return_counts=True)
+        keep = values[(counts >= 2) & (counts >= PALETTE_SHARE * int(counts.sum()))]
+        if keep.size == 0:
+            return None
+        colours = tuple(int(v) for v in keep)
+        ys, xs = np.nonzero(own)
+        x, y = int(np.min(xs)), int(np.min(ys))
+        seed = (x, y, int(np.max(xs)) - x + 1, int(np.max(ys)) - y + 1)
+        window = self._window(seed, self._max_size, frame)
+        x0, y0, x1, y1 = x, y, x + seed[2], y + seed[3]
+        joined = False
+        for (bx, by, w, h), patch in self._same_colours(packed, colours, window, hide):
+            # The patches the part that moved is in become one thing.
+            sy0, sy1, sx0, sx1 = max(by, y), min(by + h, y1), max(bx, x), min(bx + w, x1)
+            if sy0 >= sy1 or sx0 >= sx1:
+                continue
+            if not (own[sy0:sy1, sx0:sx1] & patch[sy0 - by : sy1 - by, sx0 - bx : sx1 - bx]).any():
+                continue
+            x0, y0, x1, y1 = min(x0, bx), min(y0, by), max(x1, bx + w), max(y1, by + h)
+            joined = True
+        if not joined or x1 - x0 > self._max_size or y1 - y0 > self._max_size:
+            return None
+        body = np.isin(packed[y0:y1, x0:x1], np.array(colours, np.int32))
+        return (x0, y0, x1 - x0, y1 - y0), body, colours
+
+    def _was_elsewhere(
+        self,
+        a: NDArray[np.int32],
+        b: NDArray[np.int32],
+        box: tuple[int, int, int, int],
+        body: NDArray[np.bool_],
+    ) -> bool:
+        """Whether the patch ``body`` at ``box`` on the new screen ``a`` stood somewhere
+        else on the old one ``b`` (T-1016): laid over the old screen, with the camera's
+        move allowed for, it fits better a little way off than where it is now, and that
+        explains most of what differed (:data:`EXPLAINS`). Scenery that something walked
+        in front of fits best where it is. Where the old screen cannot say (off its
+        edge, or what the caller hid on it) nothing counts either way, and a place where
+        it can say for less than half the patch is no answer.
+        """
+        sx, sy = self._scroll
+        x, y, w, h = box
+        # As far as a thing may jump, or less for a big patch: the cost is the patch
+        # times the places tried.
+        reach = self._max_jump
+        while reach > 1 and (2 * reach + 1) ** 2 * w * h > FITS_MOST:
+            reach -= 1
+        unknown = np.iinfo(np.int64).min
+        under = np.full((h + 2 * reach, w + 2 * reach), unknown, np.int64)
+        ox, oy = x - reach + sx, y - reach + sy  # the old screen's pixel under its corner
+        x0, y0 = max(0, ox), max(0, oy)
+        x1, y1 = min(b.shape[1], ox + under.shape[1]), min(b.shape[0], oy + under.shape[0])
+        if x0 >= x1 or y0 >= y1:
+            return False
+        old = b[y0:y1, x0:x1].astype(np.int64)
+        if self._hidden is not None:
+            hx, hy, hw, hh = self._hidden
+            old[max(0, hy - y0) : max(0, hy + hh - y0), max(0, hx - x0) : max(0, hx + hw - x0)] = (
+                unknown
+            )
+        under[y0 - oy : y1 - oy, x0 - ox : x1 - ox] = old
+        places = np.lib.stride_tricks.sliding_window_view(under, (h, w))
+        known = (places != unknown) & body
+        seen = known.sum(axis=(2, 3))
+        differ = ((places != a[y : y + h, x : x + w]) & known).sum(axis=(2, 3))
+        share = np.where(
+            2 * seen >= int(np.count_nonzero(body)), differ / np.maximum(seen, 1), np.inf
+        )
+        here = float(share[reach, reach])
+        share[reach, reach] = np.inf
+        there = float(share.min())
+        return bool(np.isfinite(here)) and here > 0 and there <= EXPLAINS * here
+
+    def _known_by_their_colours(
+        self,
+        frame: Frame,
+        things: list[ScreenObject],
+        hide: tuple[int, int, int, int] | None,
+    ) -> list[ScreenObject]:
+        """Every patch on the screen drawn in the colours of a kind once seen to move
+        (T-1016), whether or not it moves now: a mover that stops is still there, so
+        is one whose move the camera's measure took for the camera's own, and another
+        of its kind is known the moment it comes into view. Not what is a thing on the
+        still screen already, nor a patch bigger than a thing may be."""
+        if not self._movers:
+            return []
+        packed = _packed(frame)
+        screen = (0, 0, frame.width, frame.height)
+        found: list[ScreenObject] = []
+        for colours, kind in self._movers.items():
+            for (x, y, w, h), patch in self._same_colours(packed, colours, screen, hide):
+                if w > self._max_size or h > self._max_size:
+                    continue
+                cx, cy = x + w // 2, y + h // 2
+                if any(o.x <= cx < o.x + o.width and o.y <= cy < o.y + o.height for o in things):
+                    continue  # clear of the scenery it is a thing on the still screen already
+                pixels = int(np.count_nonzero(patch))
+                found.append(ScreenObject(x, y, w, h, pixels, False, kind, True, colours))
+        return found
+
     def _movers_in_scenery(
         self,
         prev: Frame,
@@ -540,7 +729,7 @@ class ObjectTracker:
         boxes += [
             (t.x - sx, t.y - sy, t.width, t.height)
             for t in self._tracks.values()
-            if t.kind is not None and not t.cut_out
+            if t.kind is not None and (not t.cut_out or t.colours)
         ]
         # What the caller hides is no thing, here or where it was a frame ago.
         if hide is not None:
@@ -554,6 +743,7 @@ class ObjectTracker:
             return []
         labels, count = _label(_dilate(moved))
         arr = to_array(frame)
+        packed, before = _packed(frame), _packed(prev)
         bg = self._catalogue.background
         found: list[ScreenObject] = []
         for i in range(1, count + 1):
@@ -571,8 +761,24 @@ class ObjectTracker:
             mask = region[y0 : y0 + h, x0 : x0 + w].copy()
             if bg is not None:
                 mask &= (crop != np.array(bg, np.uint8)).any(axis=2)
-            kind = self._catalogue.classify(crop, mask)
-            found.append(ScreenObject(x0, y0, w, h, len(ys), False, kind, cut_out=True))
+            whole = None
+            if self._whole and mask.any():
+                own = np.zeros(region.shape, np.bool_)
+                own[y0 : y0 + h, x0 : x0 + w] = mask
+                whole = self._filled_out(packed, own, frame, hide)
+            if whole is None or not self._was_elsewhere(packed, before, whole[0], whole[1]):
+                kind = self._catalogue.classify(crop, mask)
+                found.append(ScreenObject(x0, y0, w, h, len(ys), False, kind, cut_out=True))
+                continue
+            (bx, by, bw, bh), body, colours = whole
+            kind = self._catalogue.classify(arr[by : by + bh, bx : bx + bw], body)
+            if kind is not None and len(self._movers) < MOST_MOVERS:
+                self._movers.setdefault(colours, kind)  # from now on known by its colours
+            thing = ScreenObject(
+                bx, by, bw, bh, int(np.count_nonzero(body)), False, kind, True, colours
+            )
+            if thing not in found:  # both edges of one thing fill out to the same thing
+                found.append(thing)
         return found
 
     def _match(self, objects: list[ScreenObject], number: int) -> None:
@@ -635,6 +841,7 @@ class ObjectTracker:
             t.x, t.y, t.width, t.height = o.x, o.y, o.width, o.height
             t.kind = o.kind if o.kind is not None and not (o.cut_out and t.kind) else t.kind
             t.cut_out = o.cut_out
+            t.colours = o.colours or t.colours
             t.last_frame = number
             t.missing = 0
             t.seen += 1
@@ -678,6 +885,7 @@ class ObjectTracker:
                 continue
             t = Track(self._next_id, o.kind, o.x, o.y, o.width, o.height, number, number)
             t.cut_out = o.cut_out
+            t.colours = o.colours
             t.glass = self._on_glass(o.y, o.height)
             if t.glass:
                 t.history.append((number, *o.centre))
