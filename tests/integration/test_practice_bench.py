@@ -8,13 +8,28 @@ from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.tools import practice_bench
 from retro_ai_lab.tools.practice_bench import Report, main, run
 
-SHORT = dict(seed=0, algorithm="q_table", max_steps=80, play_frames=2000)
+# The short run most of these tests share: five goes of 80 steps on the first screens
+# of level 0, without going back where a go stands still (T-1018). With that on, the
+# same five goes get over the first wall (1,004 where they got to 421) and past the
+# first walker, where the camera's measure is known to be wrong (T-1017; it reads 82%
+# right there): these tests are about the first screens of the level, and
+# stay on the goes they were written for.
+SHORT = dict(seed=0, algorithm="q_table", max_steps=80, play_frames=2000, stand=False)
 # The run the eyes were measured on in T-988, T-992 and T-993: level 3, on which the
 # simple table runs and falls, without the way it remembers (T-1015). With it the same
 # brain gets to the end of the level, past walkers, where the eyes have gaps that are
 # known and written down (TASK_TRACKER.md, T-1015): these three tests are about the
 # first screens of the level, and stay on the goes they were written for.
-NEAR = dict(goes=12, seed=3, algorithm="q_table", max_steps=200, play_frames=2000, remember=False)
+# (T-1018: nor with going back where it stands still, which gets it as far.)
+NEAR = dict(
+    goes=12,
+    seed=3,
+    algorithm="q_table",
+    max_steps=200,
+    play_frames=2000,
+    remember=False,
+    stand=False,
+)
 
 
 @pytest.fixture(scope="module")
@@ -52,7 +67,11 @@ def test_the_bench_is_repeatable(report: Report) -> None:
 def test_the_report_reads_in_words(report: Report) -> None:
     lines = report.lines()
     assert len(lines) == 8
-    assert lines[0] == "Practice bench: Toy Hopper level 0, 5 goes of up to 80 steps, Simple table."
+    # (T-1018: the short run is made without going back at a standstill, and says so.)
+    assert lines[0] == (
+        "Practice bench: Toy Hopper level 0, 5 goes of up to 80 steps, Simple table, "
+        "without going back where it stands still."
+    )
     assert lines[1].startswith(
         f"Eyes: {report.looks:,} looks; followed what it takes for itself in "
     )
@@ -77,6 +96,21 @@ def test_the_report_reads_in_words(report: Report) -> None:
     assert "target 80%" in lines[4]
     assert f"the eyes put {report.fell} down to a fall and {report.blamed} to touching" in lines[4]
     assert ("% explained" in lines[4]) == bool(report.deaths)
+    # T-1018: a death that had only begun when its go ended cost no life, and is said
+    # apart from the deaths the eyes had to explain.
+    assert (" more that had begun when a go ended" in lines[4]) == bool(report.unfinished)
+    some = Report(seed=1, goes=1, max_steps=10, algorithm="dqn", furthest=[40], lost=[0])
+    some.finished = [0]
+    some.falls, some.walkers, some.fell, some.blamed = 3, 1, 3, 0
+    assert some.lines()[4].startswith(
+        "Deaths: 4 (3 falls, 1 walkers); the eyes put 3 down to a fall and 0 to touching "
+        "something (75% explained, "
+    )
+    some.unfinished = 2
+    assert some.deaths == 4 and some.lines()[4].startswith(
+        "Deaths: 4 (3 falls, 1 walkers), and 2 more that had begun when a go ended, with no "
+        "life gone; the eyes put 3 down to a fall and 0 to touching something (75% explained, "
+    )
     assert lines[5].startswith(f"Memory: measures distances from {report.own_position} (")
     assert "lives found" in lines[5]
     assert lines[6].startswith("Brain: furthest reached ") and "of 2,496 to the flag" in lines[6]
@@ -121,6 +155,15 @@ def test_the_command_line(capsys: pytest.CaptureFixture[str]) -> None:
         "Practice bench: Toy Hopper level 0, 1 goes of up to 20 steps, Neural network, "
         "without the way it remembers."
     )
+    # T-1018: without going back where it stands still, said there too.
+    with pytest.raises(ConfigurationError, match="stand"):
+        run(1, stand=0)  # type: ignore[arg-type]
+    code = main(["--goes", "1", "--steps", "20", "--play-frames", "600", "--no-standstill"])
+    out = capsys.readouterr().out.splitlines()
+    assert code == 0 and out[0] == (
+        "Practice bench: Toy Hopper level 0, 1 goes of up to 20 steps, Neural network, "
+        "without going back where it stands still."
+    )
     assert practice_bench.FOLLOWED_TARGET == 95 and practice_bench.EXPLAINED_TARGET == 80
     assert practice_bench.FLOOR_TARGET == 95 and practice_bench.CAMERA_TARGET == 90
     assert practice_bench.GROUND_TARGET == 90
@@ -134,11 +177,18 @@ def test_the_bench_reports_the_ways_past() -> None:
     first = run(8, seed=0, algorithm="dqn", max_steps=200, play_frames=2000)
     assert first.deaths >= 3
     assert 1 <= first.ways_found <= first.ways_sought <= 3 * 8  # at most three a go
-    assert first.ways_sought <= first.deaths  # one search a life lost at most
+    # One search a life lost at most; those made where it stood still with no life
+    # lost (T-1018) are counted apart.
+    after_a_loss = first.ways_sought - first.ways_stood
+    assert 0 <= first.ways_stood <= first.ways_sought and after_a_loss <= first.deaths
     share = round(100 * first.ways_found / first.ways_sought)
+    times = f"{first.ways_sought:,} time{'' if first.ways_sought == 1 else 's'}"
     assert first.lines()[7] == (
-        f"Ways past: after losing a life it went back {first.ways_sought:,} "
-        f"time{'' if first.ways_sought == 1 else 's'} and found a way past in "
+        f"Ways past: it went back {times}, {after_a_loss:,} after losing a life and "
+        f"{first.ways_stood:,} where it stood still with none lost, and found a way past in "
+        f"{first.ways_found:,} ({share}%)."
+        if first.ways_stood
+        else f"Ways past: after losing a life it went back {times} and found a way past in "
         f"{first.ways_found:,} ({share}%)."
     )
     # A run in which it never went back says so, and one search is not "1 times".
@@ -148,6 +198,37 @@ def test_the_bench_reports_the_ways_past() -> None:
     none.ways_sought, none.ways_found = 1, 1
     assert none.lines()[7] == (
         "Ways past: after losing a life it went back 1 time and found a way past in 1 (100%)."
+    )
+    # T-1018: searches made where it stood still, with no life lost, are said apart.
+    none.ways_sought, none.ways_found, none.ways_stood = 5, 4, 2
+    assert none.lines()[7] == (
+        "Ways past: it went back 5 times, 3 after losing a life and 2 where it stood still "
+        "with none lost, and found a way past in 4 (80%)."
+    )
+    none.ways_sought, none.ways_found, none.ways_stood = 1, 0, 1
+    assert none.lines()[7] == (
+        "Ways past: it went back 1 time, 0 after losing a life and 1 where it stood still "
+        "with none lost, and found a way past in 0 (0%)."
+    )
+
+
+@pytest.mark.slow
+def test_a_go_that_stands_still_goes_back_for_a_way_on(report: Report) -> None:
+    """T-1018: the short run as the app plays it. The simple table stands about a
+    lot; where it does, it goes back and looks for a way on, and gets further."""
+    assert report.ways_stood == 0 and not report.stand
+    assert report.lines()[0].endswith(", without going back where it stands still.")
+    on = run(5, **{**SHORT, "stand": True})  # type: ignore[arg-type]
+    assert on.stand and on.lines()[0].endswith("5 goes of up to 80 steps, Simple table.")
+    assert 1 <= on.ways_stood <= on.ways_sought <= 3 * 5
+    assert on.ways_found >= on.ways_stood - 1  # it finds the way on, all but once at most
+    # Further in every go, and to the first wall of the level by the fifth.
+    assert all(far > before for far, before in zip(on.furthest, report.furthest, strict=True))
+    assert max(on.furthest) >= 56 * 16 - 12 > 2 * max(report.furthest)
+    assert on.lines()[7].startswith(
+        f"Ways past: it went back {on.ways_sought} times, "
+        f"{on.ways_sought - on.ways_stood} after losing a life and {on.ways_stood} where it "
+        "stood still with none lost, and found a way past in "
     )
 
 
@@ -188,6 +269,14 @@ def test_lives_lost_to_a_walker_are_put_down_to_it() -> None:
     # Each to its own cause. (The last death's pause can outlast the run.)
     assert report.walkers - 1 <= report.blamed <= report.walkers
     assert report.falls - 1 <= report.fell <= report.falls
+    # T-1018: a go that ends in the dying pause is put back to its start with the life
+    # not gone. Such a death is no life for the eyes to explain, and the bench counts
+    # it apart: one a go at most. (This run has them: a way found over a wall is
+    # played to its end, and can end in the next gap.) Of the lives that did go,
+    # every one is put down to its cause.
+    assert 1 <= report.unfinished <= 3
+    assert report.blamed == report.walkers and report.fell == report.falls
+    assert f"), and {report.unfinished} more that had begun when a go ended" in report.lines()[4]
     assert report.hurts == 1 and report.kinds <= 6
     assert report.right == report.followed  # and what it follows is still the player
 

@@ -142,7 +142,10 @@ steps is too short to reach the end of a level: `--steps 700` gives it the
 time, and the "Brain" line then says in how many goes the level was
 finished and in how many of those before any life was lost. `--no-memory`
 trains without the way the AI remembers (see "When the AI loses a life"),
-for comparing.
+and `--no-standstill` without going back where a go stands still, for
+comparing. A death that had only begun when its go ended costs no life (the
+next go starts from its save): the "Deaths" line counts those apart, and
+not among the deaths the eyes are asked to explain.
 
 The app's own log does the same every five seconds while it runs: next to the
 emulator link's line, an "App work" line counts the stalls of the window's
@@ -268,6 +271,30 @@ steps, it holds the button that has paid it best so far for 16 steps
 would have done. If that costs a life, going back looks for the way past,
 and the go carries on from there. Each go's line in the log ends with how
 often it pressed on.
+
+A wall costs no life, so nothing above would ever get the AI over one: it
+would walk up to it and stand there until the go ran out. So it also goes
+back where it gets no further. When a go that has got somewhere stays about
+one spot (within 64 pixels either way) for 60 steps without losing a life,
+or the screen stops changing altogether, it loads a moment from before it
+came to that spot and looks for a way on in the same manner: the plain way
+with one small change at a time, a jump as it arrives. The earliest change
+that works is the one it takes, so the way has no waiting in it, and a way
+on is only one that ends out of the spot: a small hop and standing again
+does not count. It judges all this by where it sees itself on the screen
+and how far the screen has scrolled, not by what it is paid, because
+something nearly always pays a little while it stands. A spot where it
+found nothing is not searched again, and after eight such searches in a row
+that find nothing it stops looking at standstills for that session (the
+same count as for the searches after a life lost, kept apart from theirs).
+These searches are among the three a go may make. The log says "Stayed about one spot for 60 steps, with no life lost.
+Went back 64 steps and found a way on at try 3...", and the go's line says
+how many of its searches were made where it stood still.
+
+A way that a search finds is always played to its end, even if the go's
+length runs out part of the way through it. Otherwise the go would end on
+ground it had already covered, nothing of the way would be remembered, and
+the next go would stand at the same wall and search again.
 
 What it finds is not lost when the go ends. Where the AI can go back, it
 remembers the best go it has played from the spot the goes start from: its

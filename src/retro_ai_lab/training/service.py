@@ -65,6 +65,7 @@ from retro_ai_lab.training.episode import (
     DEFAULT_MAX_STEPS,
     DEFAULT_UNSTICK_AFTER,
     LOOKAHEAD_STEPS,
+    STAND_AFTER,
     EpisodeResult,
     EpisodeRunner,
     describe_earned,
@@ -206,12 +207,15 @@ class TrainingService:
         ways_per_go: int = WAYS_PER_GO,
         way_seconds: float | None = WAY_SECONDS,
         remember: bool = True,
+        stand_after: int = STAND_AFTER,
     ) -> None:
         _check_algorithm(algorithm)
         if not isinstance(remember, bool):
             raise ConfigurationError("remember must be True or False.")
         if isinstance(ways_per_go, bool) or not isinstance(ways_per_go, int) or ways_per_go < 0:
             raise ConfigurationError("ways_per_go must be a whole number, 0 or more.")
+        if isinstance(stand_after, bool) or not isinstance(stand_after, int) or stand_after < 0:
+            raise ConfigurationError("stand_after must be a whole number, 0 or more.")
         if way_seconds is not None and (
             isinstance(way_seconds, bool)
             or not isinstance(way_seconds, (int, float))
@@ -238,6 +242,8 @@ class TrainingService:
         self._ways_per_go = ways_per_go  # going back for a way past a life lost (T-1009)
         self._way_seconds = way_seconds
         self._remember = remember  # begin each go with the best way played (T-1015)
+        # Going back where a go stays about one spot with no life lost (T-1018); 0 never.
+        self._stand_after = stand_after
         self._can_save = False  # the console has save states
         self._back_said = False  # the log has said the AI will go back, for this game
         # The best go played from the spot goes start from (T-1015): one for the
@@ -1119,6 +1125,13 @@ class TrainingService:
                         "start from, by the rewards you set, and begins each go by playing "
                         "that way again."
                     )
+                if self._stand_after:
+                    log.info(
+                        "It also goes back where it stays about one spot for %d steps "
+                        "without losing a life (at a wall none is lost), to look for a "
+                        "way on.",
+                        self._stand_after,
+                    )
             self._runner = EpisodeRunner(
                 self._connection,
                 self._observation,
@@ -1140,6 +1153,7 @@ class TrainingService:
                 way_seconds=self._way_seconds,
                 give_up_after=GIVE_UP_AFTER,
                 press_after=PRESS_AFTER if goes_back else 0,
+                stand_after=self._stand_after if goes_back else 0,
                 flat_out=self._flat_out,
             )
         self._busy = True

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from retro_ai_lab.core import Button, ConfigurationError, EmulatorError, StepResult
 from retro_ai_lab.learning.actions import ActionSpace
@@ -35,6 +35,12 @@ class Outcome:
     steps: int  # steps played: all of them, or up to the one a value went down in
     lost: bool  # a life or health value went down
     ground: int  # steps of new ground the watch counted (0 without a watch)
+    # The screen after the last move, where it was asked for and every move was played
+    # (T-1018). Not part of what a try came to: two tries are compared without it.
+    screen: bytes | None = field(default=None, compare=False)
+    # Where the watch last had the AI in the level (:attr:`ScreenWatch.spot`, T-1018);
+    # None without a watch. Not part of what a try came to either.
+    spot: tuple[int, int] | None = field(default=None, compare=False)
 
     @property
     def past(self) -> bool:
@@ -58,14 +64,18 @@ def play(
     lives: Sequence[Variable],
     watch: ScreenWatch | None = None,
     look_every: int = DEFAULT_LOOK_EVERY,
+    end: bool = False,
 ) -> Outcome:
     """Load the save in ``slot`` and play ``moves``, one step of ``frames_per_step``
     frames each, until they are done or one of the ``lives`` values goes down.
 
     ``watch`` (a :meth:`ScreenWatch.trial`) is shown a screenshot every
     ``look_every`` steps, on the steps a go would look, and its count of new ground
-    is the outcome's. The pad is let go at the end. The game is left where the try
-    ended: putting it back is the caller's. An emulator error comes out as it is.
+    is the outcome's, with the spot it last had the AI at. With ``end`` the screen
+    after the last move is the outcome's ``screen`` (T-1018): what a try without a
+    watch can be told apart by. The pad is let go at the end. The game is left where
+    the try ended: putting it back is the caller's. An emulator error comes out as
+    it is.
     """
     if not slot or not isinstance(slot, str):
         raise ConfigurationError("A try needs the name of the save to start from.")
@@ -96,23 +106,31 @@ def play(
         )
 
     steps, lost = 0, False
+    screen: bytes | None = None
     try:
         connection.call(lambda a: a.load_state(slot))
         was = values(connection.call(lambda a: a.read_many(reads))) if reads else []
         for pressed in held:
-            result = step(pressed, watch is not None and steps % look_every == 0)
+            looks = watch is not None and steps % look_every == 0
+            last = end and steps == len(held) - 1
+            result = step(pressed, looks or last)
             steps += 1
-            if watch is not None and result.frame is not None:
+            if watch is not None and looks and result.frame is not None:
                 watch.look(result.frame)
+            if last and result.frame is not None:
+                screen = result.frame.pixels
             now = values(result.reads) if reads else []
             if any(n < w for n, w in zip(now, was, strict=True)):
                 lost = True
+                screen = None
                 break
             was = now
     finally:
         with contextlib.suppress(EmulatorError):
             connection.call(lambda a: a.set_input(()))
-    return Outcome(steps, lost, watch.take_new_ground() if watch is not None else 0)
+    if watch is None:
+        return Outcome(steps, lost, 0, screen)
+    return Outcome(steps, lost, watch.take_new_ground(), screen, watch.spot)
 
 
 __all__ = ["PAST", "Outcome", "play"]

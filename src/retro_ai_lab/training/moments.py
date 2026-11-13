@@ -140,6 +140,22 @@ class Moments:
                 return moment, tuple(self._moves[moment.step - self._kept[0].step :])
         return None
 
+    def since(self, step: int) -> tuple[Moment, tuple[int, ...]] | None:
+        """The moment to go back to for something that began at ``step`` of the story,
+        and the moves made since it (T-1018).
+
+        The newest moment at or before that step; where every moment kept is later,
+        the oldest. ``None`` when none is kept.
+        """
+        _whole(step, "The step it began at", 0)
+        if not self._kept:
+            return None
+        found = self._kept[0]
+        for moment in self._kept:
+            if moment.step <= step:
+                found = moment
+        return found, tuple(self._moves[found.step - self._kept[0].step :])
+
     def went_back(self, moment: Moment) -> None:
         """The game is at ``moment`` again: what came after it is no longer the story."""
         at = next((i for i, kept in enumerate(self._kept) if kept is moment), None)

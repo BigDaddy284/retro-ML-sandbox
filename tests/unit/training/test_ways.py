@@ -81,6 +81,75 @@ def test_changes_come_shortest_first_from_the_end_back() -> None:
     assert [(c.at, c.hold) for c in wide] == [(8, 2), (8, 2), (4, 2), (4, 2), (0, 2), (0, 2)]
 
 
+def test_early_goes_from_the_start_forwards() -> None:
+    # T-1018: for a trace that ends in standing still. The same changes, the same
+    # places, the shortest hold first; within a hold from the first place forwards.
+    for length in (9, 10, 1):
+        trace = [RIGHT] * length
+        late, early = list(changes(trace, PAD)), list(changes(trace, PAD, early=True))
+        assert [c.hold for c in early] == sorted(c.hold for c in early)
+        # Every place the usual list has, and no other. (Not always every change: a
+        # hold cut off by the trace's end comes to the same moves as a shorter one,
+        # and which of the two is met first depends on the way round.)
+        assert {c.at for c in early} == {c.at for c in late}
+        assert {c.apply(trace) for c in early} == {c.apply(trace) for c in late}
+        first = [c for c in early if c.hold == 4]
+        assert [c.at for c in first] == sorted(c.at for c in first)
+        assert [c.at for c in late if c.hold == 4] == sorted((c.at for c in first), reverse=True)
+    first = [c for c in changes([RIGHT] * 9, PAD, early=True) if c.hold == 4]
+    assert [c.at for c in first] == [0, 0, 2, 2, 4, 4, 6, 6, 8, 8]
+    assert [c.move for c in first[:2]] == [JUMP, DASH]
+    assert [c.at for c in changes([RIGHT] * 10, PAD, early=True, holds=(4,))][::2] == [
+        1,
+        3,
+        5,
+        7,
+        9,
+    ]
+    assert (
+        list(changes([RIGHT] * 40, PAD, early=True, most=7))
+        == list(changes([RIGHT] * 40, PAD, early=True))[:7]
+    )
+    for bad in (None, 1, "yes"):
+        with pytest.raises(ConfigurationError, match="early"):
+            list(changes([RIGHT] * 4, PAD, early=bad))  # type: ignore[arg-type]
+
+
+def test_whole_plays_a_hold_out_past_the_end() -> None:
+    # T-1018: a trace that ends where it came to stand has no room for a long hold.
+    trace = [RIGHT, RIGHT, LEFT, RIGHT, RIGHT, LEFT]
+    change = Change(at=4, move=JUMP, hold=5)
+    assert change.apply(trace, 2) == (RIGHT, RIGHT, LEFT, RIGHT, JUMP, JUMP, RIGHT, RIGHT)
+    assert change.apply(trace, 2, whole=True) == (
+        *(RIGHT, RIGHT, LEFT, RIGHT),
+        *(JUMP,) * 5,
+        *(RIGHT, RIGHT),  # then it carries on with what it mostly did
+    )
+    # A hold that fits is played the same either way.
+    fits = Change(at=1, move=JUMP, hold=5)
+    assert fits.apply(trace, 2, whole=True) == fits.apply(trace, 2)
+    assert Change(at=5, move=JUMP, hold=1).apply(trace, whole=True) == (*trace[:5], JUMP)
+    # Listed that way, a long hold near the end is a change of its own: every place
+    # has every hold, where the usual list drops those the end makes the same.
+    short = [RIGHT] * 5
+    usual = list(changes(short, PAD, early=True))
+    whole = list(changes(short, PAD, early=True, whole=True))
+    assert Counter(c.hold for c in whole) == dict.fromkeys(HOLDS, 6)  # 3 places, 2 moves
+    assert Counter(c.hold for c in usual) == {4: 6, 8: 2}  # only where 8 is not cut to 4
+    assert whole[: len([c for c in usual if c.hold == 4])] == [c for c in usual if c.hold == 4]
+    played = [c.apply(short, 3, whole=True) for c in whole]
+    assert len(set(played)) == len(played) and max(map(len, played)) == 4 + 16 + 3
+    # The order is the same as without it, late or early.
+    late = list(changes(short, PAD, whole=True))
+    assert [c.at for c in late if c.hold == 4] == [4, 4, 2, 2, 0, 0]
+    assert [c.at for c in whole if c.hold == 16] == [0, 0, 2, 2, 4, 4]
+    for bad in (None, 1, "yes"):
+        with pytest.raises(ConfigurationError, match="whole"):
+            list(changes(short, PAD, whole=bad))  # type: ignore[arg-type]
+        with pytest.raises(ConfigurationError, match="whole"):
+            change.apply(trace, whole=bad)  # type: ignore[arg-type]
+
+
 def test_only_moves_near_the_one_made() -> None:
     trace = [RIGHT, STILL, JUMP, LEFT, STILL, RIGHT]
     for change in changes(trace, PAD, stride=1):
