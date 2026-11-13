@@ -121,7 +121,12 @@ def test_a_go_that_stands_at_a_wall_goes_back_and_gets_over(
             assert lab.game.state.x == AT_WALL and r.times_back == 0
             before = moments.steps
             assert r.step() and before - came <= STAND_AFTER
-        assert before - came > STAND_AFTER - STAND_WITHIN // 8  # a few steps to walk up to it
+        # The sixty steps count from the last look at which it was more than 64 pixels on
+        # from the look that last counted: at 8 pixels a step that is up to 8 steps before
+        # the wall, and the step that looks is the sixtieth, so 51 to 59 steps at the wall.
+        # (Corrected in T-1020 with Boss's word, 13 Nov: "more than 52" held only while the
+        # camera was misread on the way to the wall.)
+        assert before - came >= STAND_AFTER - 1 - STAND_WITHIN // 8
     # ...and then, in one step, it has looked and gone back: to a moment from before
     # it came to the wall, so none of the standing is left in the story.
     back = before - (moments.steps - 1)  # the step that looked also played the way's first move

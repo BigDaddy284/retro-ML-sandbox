@@ -31,10 +31,13 @@ reward service pays it.
 
 from __future__ import annotations
 
+import logging
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from retro_ai_lab.core import ConfigurationError, Frame
+from retro_ai_lab.observation.camera_memory import CameraMemory
 from retro_ai_lab.observation.ground import Ground, Kept
 from retro_ai_lab.observation.objects import ObjectCatalogue
 from retro_ai_lab.observation.signature import Box
@@ -43,6 +46,8 @@ from retro_ai_lab.observation.surroundings import NOTHING_BELOW, Surroundings, r
 from retro_ai_lab.observation.tracking import ObjectTracker, Track
 from retro_ai_lab.understanding.player import PlayerFinding
 from retro_ai_lab.understanding.roles import Happening, Role, RoleLearner, within
+
+log = logging.getLogger(__name__)
 
 DEFAULT_LOOK_EVERY = 2  # steps between two looks (a look costs a screenshot and ~15 ms)
 SOON_LOOKS = 30  # looks after a touch in which a life lost is put down to it (~4 s)
@@ -126,6 +131,30 @@ class ScreenWatch:
         # Looks in which the camera moved: True where the move was measured, False
         # where it was not (a jolt). Kept from go to go: it is about the game.
         self._measured: deque[bool] = deque(maxlen=FOLLOWED_OVER)
+        # The game's own count of where its camera is, found from the looks (T-1020):
+        # which bytes of the memory handed over with each screen move as the screen
+        # slides. Kept from go to go, like the above.
+        self._camera = CameraMemory()
+        self._layout: tuple[tuple[str, int], ...] = ()  # the regions handed over, and their sizes
+        self._memory: bytes | None = None  # the memory at the last look, if the next can use it
+        self._said: set[tuple[int, int]] = set()  # the bytes found that the log has named
+
+    @property
+    def camera_bytes(self) -> tuple[tuple[str, int] | None, tuple[str, int] | None]:
+        """Where the game keeps count of its camera, as far as the looks have shown
+        (T-1020): the memory region and the byte in it that moves as the screen slides
+        across, and the one for up and down; None for a way no byte has proved itself."""
+        across, down = self._camera.found
+        return (self._where(across), self._where(down))
+
+    def _where(self, byte: int | None) -> tuple[str, int] | None:
+        if byte is None:
+            return None
+        for name, size in self._layout:
+            if byte < size:
+                return (name, byte)
+            byte -= size
+        return None
 
     @property
     def player(self) -> PlayerFinding:
@@ -210,6 +239,7 @@ class ScreenWatch:
     def begin_go(self) -> None:
         """A go starts from the checkpoint: new tracks, the player looked for afresh."""
         self._tracker.reset()
+        self._memory = None  # the game was put to its start: no move to read across that
         self._ground.begin()
         self._new_ground = 0
         self._jolt_at = None
@@ -243,6 +273,7 @@ class ScreenWatch:
         if not isinstance(mark, Mark):
             raise ConfigurationError("Only a moment this watch marked can be gone back to.")
         self._tracker.reset()
+        self._memory = None  # nor across this
         self._ground.put_back(mark.ground)
         self._learner.let_go()
         self._jolt_at = None
@@ -274,7 +305,26 @@ class ScreenWatch:
         other._measured = deque(self._measured, maxlen=self._measured.maxlen)
         return other
 
-    def look(self, frame: Frame, *, lost: int = 0, scored: int = 0) -> None:
+    def look(
+        self,
+        frame: Frame,
+        *,
+        lost: int = 0,
+        scored: int = 0,
+        memory: Mapping[str, bytes] | None = None,
+    ) -> None:
+        """Look at a screen. ``memory`` is the game's memory as it was read with this
+        screen, region by region (T-1020): from it and the last look's the watch
+        learns which byte moves as the camera does, and once one has proved itself
+        tells the tracker what the camera's move was, for it to take where the picture
+        cannot say. Without ``memory`` the picture is all there is, as before. So it
+        is at a look in which a life went: the game may have put the player back, and
+        a count that jumped is no move for the tracker to try."""
+        now = self._memory_now(memory)
+        was, self._memory = self._memory, now
+        expect = None
+        if was is not None and now is not None and not lost:
+            expect = self._camera.expect(was, now)
         self._prior_box = self._last_box
         if self._sign is not None:
             # By its colours: nearest where it was last seen, or at the start of a go
@@ -287,9 +337,9 @@ class ScreenWatch:
             if self._box is not None:
                 x, y, w, h = self._box
                 hide = (x - HIDE_MARGIN, y - HIDE_MARGIN, w + 2 * HIDE_MARGIN, h + 2 * HIDE_MARGIN)
-            tracks = self._tracker.update(frame, hide=hide)
+            tracks = self._tracker.update(frame, hide=hide, expect=expect)
         else:
-            tracks = self._tracker.update(frame)
+            tracks = self._tracker.update(frame, expect=expect)
             self._me = self._find_me(tracks)
             me = next((t for t in tracks if t.id == self._me), None)
             if me is not None and me.missing == 0:
@@ -298,6 +348,8 @@ class ScreenWatch:
                     self._my_kind = me.kind
             else:
                 self._box = None
+        if was is not None and now is not None:
+            self._learn_camera(was, now)
         if self._box is None and self._sign is not None and self._was_seen and self._falling():
             self._fell_at = self._looks
         happened: list[Happening] = []
@@ -325,6 +377,62 @@ class ScreenWatch:
         )
         self._looks += 1
         self._looks_this_go += 1
+
+    def _memory_now(self, memory: Mapping[str, bytes] | None) -> bytes | None:
+        """The memory handed over with a screen as one run of bytes, region by region
+        in the order of their names. Other regions or sizes than before is another
+        game, or this one read another way: what was learnt of the camera is void."""
+        if memory is None:
+            return None
+        if (
+            not isinstance(memory, Mapping)
+            or not memory
+            or any(
+                not isinstance(k, str) or not isinstance(v, (bytes, bytearray)) or not v
+                for k, v in memory.items()
+            )
+        ):
+            raise ConfigurationError(
+                "memory must be the game's memory by region: a name and its bytes each."
+            )
+        names = sorted(memory)
+        layout = tuple((name, len(memory[name])) for name in names)
+        if layout != self._layout:
+            self._layout = layout
+            self._camera = CameraMemory()
+            self._said.clear()
+            self._memory = None
+        return b"".join(bytes(memory[name]) for name in names)
+
+    def _learn_camera(self, was: bytes, now: bytes) -> None:
+        """What this look says about where the game keeps its camera (T-1020): the move
+        as the picture alone had it, against every byte's change. Not from a look the
+        picture could not measure (a jolt), and never from what memory itself said:
+        a look in which the tracker took the byte's word is one the picture could not
+        tell, and says nothing for the byte or against it. (Counted against it, the
+        byte would be dropped just where it is needed: beside a walker on bare ground
+        the picture is wrong more often than right.)"""
+        if self._tracker.scroll == (0, 0) and self._tracker.unexplained >= JOLT:
+            return
+        if self._tracker.scroll != self._tracker.sighted:
+            return
+        self._camera.note(was, now, self._tracker.sighted)
+        for way, byte in enumerate(self._camera.found):
+            if byte is None or (way, byte) in self._said:
+                continue
+            self._said.add((way, byte))
+            where, agreed = self._where(byte), self._camera.agreed(way)
+            assert where is not None and agreed is not None
+            log.info(
+                "The AI found where the game keeps count of its camera: %s[%d] moves as the "
+                "screen slides %s (in %d of the %d looks it has compared). It goes by that "
+                "where the screen cannot tell how far it slid.",
+                where[0],
+                where[1],
+                "up and down" if way else "across",
+                agreed[0],
+                agreed[1],
+            )
 
     def _cover_ground(self, lost: int) -> None:
         """Count the new ground of this look (T-993).

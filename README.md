@@ -545,7 +545,13 @@ which the camera holds still on the screen, has no say, and neither have the
 rows it has found to be painted on the glass (a strip of lives and score
 stands still while everything else slides, so after two camera moves it is
 left out); and one small thing changing on a still screen is not taken for
-the camera moving. From the camera's travel (on a screen that never scrolls,
+the camera moving. Where the scenery cannot tell how far the screen slid
+(bare ground with one enemy walking on it, a blank stretch, a pattern that
+repeats), it goes by the game's own count of where its camera is. Nobody
+tells it where that is kept: it finds by itself which number in the game's
+memory moves as the screen slides, says so in the log ("The AI found where
+the game keeps count of its camera"), and takes that number's word only
+where the picture fits it as well as it fits the picture's own answer. From the camera's travel (on a screen that never scrolls,
 from where it stands) it counts the new ground of each go, which the reward "Getting
 somewhere new" pays (see Reading the rewards). It hears of every life lost, also those lost
 between two looks. A life lost after it went out of sight coming down, with

@@ -681,7 +681,7 @@ class _SpyWatch:
     def take_new_ground(self) -> int:
         return self.ground.get(self.looks, 0)
 
-    def look(self, frame: object, *, lost: int = 0, scored: int = 0) -> None:
+    def look(self, frame: object, *, lost: int = 0, scored: int = 0, memory: object = None) -> None:
         assert frame is not None
         self.looks += 1
         self.calls.append(("look", lost, scored))
