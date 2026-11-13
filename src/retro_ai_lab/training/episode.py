@@ -357,11 +357,18 @@ class EpisodeRunner:
         moments: Moments | None = None,
         ways_per_go: int = 0,
         way_tries: int = BUDGET,
+        way_seconds: float | None = None,
         flat_out: Callable[[], AbstractContextManager[None]] | None = None,
     ) -> None:
         for value, what, least in ((ways_per_go, "ways_per_go", 0), (way_tries, "way_tries", 1)):
             if isinstance(value, bool) or not isinstance(value, int) or value < least:
                 raise ConfigurationError(f"{what} must be a whole number, {least} or more.")
+        if way_seconds is not None and (
+            isinstance(way_seconds, bool)
+            or not isinstance(way_seconds, (int, float))
+            or not way_seconds > 0
+        ):
+            raise ConfigurationError("way_seconds must be a number above 0 (or None).")
         if moments is not None and NOW_SLOT in moments.slots:
             raise ConfigurationError(
                 f"The slot {NOW_SLOT!r} is where the present is kept during a search: "
@@ -409,6 +416,7 @@ class EpisodeRunner:
         # At a life lost, go back and look for a way past (T-1007).
         self._ways_per_go = ways_per_go
         self._way_tries = way_tries
+        self._way_seconds = way_seconds
         self._flat_out = flat_out
         self._ways_left = 0
         self._ways_sought = 0
@@ -751,6 +759,7 @@ class EpisodeRunner:
                     watch=lambda: watch.trial(mark),
                     budget=self._way_tries,
                     look_every=self._look_every,
+                    seconds=self._way_seconds,
                 )
                 if search.way is None:
                     self._connection.call(lambda a: a.load_state(NOW_SLOT))
@@ -765,21 +774,25 @@ class EpisodeRunner:
         if way is None:
             moments.forget()
             log.info(
-                "Lost a life at step %d. Went back %s and made %d tries: none got past.",
+                "Lost a life at step %d. Went back %s and made %d tries in %.1f s%s: "
+                "none got past.",
                 at,
                 back,
                 search.tries,
+                search.seconds,
+                ", all the time a search may take" if search.out_of_time else "",
             )
             return True
         self._ways_found += 1
         change = way.change
         before = len(trace) - change.at
         log.info(
-            "Lost a life at step %d. Went back %s and found a way past on try %d: "
+            "Lost a life at step %d. Went back %s and found a way past on try %d, after %.1f s: "
             "%s for %d step%s, starting %d step%s before the life went.",
             at,
             back,
             way.tries,
+            search.seconds,
             space[change.move].label,
             change.hold,
             "" if change.hold == 1 else "s",
