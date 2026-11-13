@@ -246,6 +246,15 @@ life at step 152. Went back 49 steps and found a way past on try 68..."),
 and each go's line ends with how often it went back and what it found.
 Nothing is saved while you play yourself.
 
+A brain that has lost lives at a spot can turn timid: it stops short and
+waits, loses nothing, and so never finds the way past. Where the AI can go
+back, it does not let that stand. When a go has been paid nothing for 24
+steps, it holds the button that has paid it best so far for 16 steps
+(in a game that scrolls to the right, that is Right), whatever the brain
+would have done. If that costs a life, going back looks for the way past,
+and the go carries on from there. Each go's line in the log ends with how
+often it pressed on.
+
 ## Reading the rewards
 
 The AI keeps every guess it makes about the game's memory, but the Rewards
