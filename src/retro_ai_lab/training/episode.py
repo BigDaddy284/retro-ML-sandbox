@@ -358,6 +358,7 @@ class EpisodeRunner:
         ways_per_go: int = 0,
         way_tries: int = BUDGET,
         way_seconds: float | None = None,
+        give_up_after: int | None = None,
         flat_out: Callable[[], AbstractContextManager[None]] | None = None,
     ) -> None:
         for value, what, least in ((ways_per_go, "ways_per_go", 0), (way_tries, "way_tries", 1)):
@@ -369,6 +370,12 @@ class EpisodeRunner:
             or not way_seconds > 0
         ):
             raise ConfigurationError("way_seconds must be a number above 0 (or None).")
+        if give_up_after is not None and (
+            isinstance(give_up_after, bool)
+            or not isinstance(give_up_after, int)
+            or give_up_after < 1
+        ):
+            raise ConfigurationError("give_up_after must be a whole number, 1 or more (or None).")
         if moments is not None and NOW_SLOT in moments.slots:
             raise ConfigurationError(
                 f"The slot {NOW_SLOT!r} is where the present is kept during a search: "
@@ -417,6 +424,11 @@ class EpisodeRunner:
         self._ways_per_go = ways_per_go
         self._way_tries = way_tries
         self._way_seconds = way_seconds
+        # Searches in a row that found nothing, across goes; at give_up_after the
+        # runner stops going back for good: in this game it only costs time (T-1009).
+        self._give_up_after = give_up_after
+        self._missed = 0
+        self._gave_up = False
         self._flat_out = flat_out
         self._ways_left = 0
         self._ways_sought = 0
@@ -559,6 +571,11 @@ class EpisodeRunner:
         return self._ways_found
 
     @property
+    def gave_up(self) -> bool:
+        """Its searches kept finding nothing, so it no longer goes back (T-1009)."""
+        return self._gave_up
+
+    @property
     def unsticks(self) -> int:
         """Times Start was pressed because nothing was changing (a game-over screen)."""
         return self._unsticks
@@ -586,7 +603,7 @@ class EpisodeRunner:
         self._pending.clear()
         self._forced.clear()
         self._times_back = 0
-        self._ways_left = self._ways_per_go
+        self._ways_left = 0 if self._gave_up else self._ways_per_go
         self._ways_sought = 0
         self._ways_found = 0
         if self._moments is not None:
@@ -782,7 +799,18 @@ class EpisodeRunner:
                 search.seconds,
                 ", all the time a search may take" if search.out_of_time else "",
             )
+            self._missed += 1
+            if self._give_up_after is not None and self._missed >= self._give_up_after:
+                self._gave_up = True
+                self._ways_left = 0
+                log.info(
+                    "Going back found no way past %d time%s in a row, so the AI stops going "
+                    "back in this game: here it only costs time.",
+                    self._missed,
+                    "" if self._missed == 1 else "s",
+                )
             return True
+        self._missed = 0
         self._ways_found += 1
         change = way.change
         before = len(trace) - change.at
