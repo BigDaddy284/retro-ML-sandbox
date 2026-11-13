@@ -880,3 +880,73 @@ def test_whole_must_be_true_or_false() -> None:
     for nonsense in (None, 1, "yes"):
         with pytest.raises(ConfigurationError, match="whole"):
             ObjectTracker(whole=nonsense)  # type: ignore[arg-type]
+
+
+# ------------------------------------------------------------ T-1017: the camera near a mover
+#
+# Leaving the things known to move out of the camera's vote was tried and measured
+# worse (see TASK_TRACKER.md, T-1017). These hold what the measure does today, so a
+# later change to it is made knowingly.
+
+
+def gapped(gap: int = 520) -> np.ndarray:
+    """Open ground with one gap two tiles wide, far from the post."""
+    a = open_ground()
+    a[208:, gap : gap + 32] = SKY
+    return a
+
+
+def walk_past(world: np.ndarray, tracker: ObjectTracker, looks: range) -> list[tuple[int, int]]:
+    """The camera moves 16 pixels a look and a walker comes the other way at 4; the
+    camera's move as the tracker measured it at each of ``looks``."""
+    measured = []
+    for i in range(looks.stop):
+        tracker.update(view(world, 16 * i, [(640 - 4 * i, 194, block())], i))
+        if i in looks:
+            measured.append(tracker.scroll)
+    return measured
+
+
+def test_a_gap_in_view_outvotes_a_walker() -> None:
+    """The two edges of a gap in the ground are worth more pixels than a walker's two
+    edges: with both in view the camera's move is measured right."""
+    looks = range(21, 26)  # the post long gone; the gap (520) and the walker in view
+    assert all(16 * i > 166 and 16 * i + 32 < 520 < 16 * i + 224 for i in looks)
+    assert walk_past(gapped(), ObjectTracker(max_shift=32), looks) == [(16, 0)] * len(looks)
+
+
+def test_where_only_a_walker_tells_its_move_is_taken_for_the_cameras() -> None:
+    """One thing seen moving against nothing is one number for two unknowns. The
+    measure takes the walker for scenery: 20 where the camera moved 16. Seeing things
+    whole (T-1016) changes nothing in the measure."""
+    looks = range(21, 26)  # past the post, nothing but the walker in view
+    measured = walk_past(open_ground(), ObjectTracker(max_shift=32), looks)
+    old = walk_past(open_ground(), ObjectTracker(max_shift=32, whole=False), looks)
+    assert measured == old == [(20, 0)] * len(looks)
+
+
+def test_a_walker_on_a_still_screen_is_no_camera_move() -> None:
+    w = gapped(100)
+    tracker = ObjectTracker(max_shift=32)
+    for i in range(8):  # 12 pixels a look: more than "one small thing changing" covers
+        tracker.update(view(w, 0, [(220 - 12 * i, 194, block())], i))
+        assert tracker.scroll == (0, 0)
+        if i:
+            assert (220 - 12 * i, 194, 14, 14) in boxes(tracker)
+    assert tracker.camera == (0, 0)
+
+
+def test_a_known_kind_standing_still_tells_when_nothing_else_does() -> None:
+    """A thing of a kind known to move that is standing still is all there is to go
+    by on plain ground: the camera's move is measured by it."""
+    w = open_ground()
+    tracker = ObjectTracker(max_shift=32)
+    for i in range(3):  # its kind is learnt
+        tracker.update(view(w, 0, [(200 - 4 * i, 194, block())], i))
+    assert tracker.movers
+    tracker.reset()
+    for i in range(8):  # past the post, one of the kind stands at 600 and never moves
+        tracker.update(view(w, 400 + 20 * i, [(600, 194, block())], 3 + i))
+        if i:
+            assert tracker.scroll == (20, 0)
+    assert tracker.camera == (140, 0)
