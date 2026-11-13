@@ -39,7 +39,7 @@ from retro_ai_lab.services.rewards import GoStarted, RewardEarned
 from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.training.moments import LEAD, Moment, Moments
 from retro_ai_lab.training.route import Route
-from retro_ai_lab.training.search import BUDGET, find_way
+from retro_ai_lab.training.search import BUDGET, END_SLOT, find_way
 from retro_ai_lab.training.trial import Outcome
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, Mark, ScreenWatch
 from retro_ai_lab.understanding.events import EventKind
@@ -406,6 +406,7 @@ class EpisodeRunner:
         press_for: int = PRESS_FOR,
         route: Route | None = None,
         stand_after: int = 0,
+        way_outlast: int = 0,
     ) -> None:
         if route is not None and not isinstance(route, Route):
             raise ConfigurationError("route must be a Route (or None).")
@@ -414,6 +415,7 @@ class EpisodeRunner:
             (way_tries, "way_tries", 1),
             (press_after, "press_after", 0),
             (stand_after, "stand_after", 0),
+            (way_outlast, "way_outlast", 0),
             (press_for, "press_for", 1),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value < least:
@@ -430,6 +432,11 @@ class EpisodeRunner:
             or give_up_after < 1
         ):
             raise ConfigurationError("give_up_after must be a whole number, 1 or more (or None).")
+        if moments is not None and END_SLOT in moments.slots:
+            raise ConfigurationError(
+                f"The slot {END_SLOT!r} is where the end of a try is kept during a search: "
+                "saved moments need other names."
+            )
         if moments is not None and NOW_SLOT in moments.slots:
             raise ConfigurationError(
                 f"The slot {NOW_SLOT!r} is where the present is kept during a search: "
@@ -478,6 +485,8 @@ class EpisodeRunner:
         self._ways_per_go = ways_per_go
         self._way_tries = way_tries
         self._way_seconds = way_seconds
+        # Steps past its end a way must be able to live through (T-1019); 0: not asked.
+        self._way_outlast = way_outlast
         # Searches in a row that found nothing, across goes; at give_up_after the
         # runner stops going back for good: in this game it only costs time (T-1009).
         self._give_up_after = give_up_after
@@ -666,6 +675,12 @@ class EpisodeRunner:
         """Of :attr:`ways_sought`, those made where it stood still with no life lost
         (T-1018)."""
         return self._ways_stood
+
+    @property
+    def way_outlast(self) -> int:
+        """Steps past its end a way a search finds must be able to live through
+        (T-1019); 0 when that is not asked."""
+        return self._way_outlast
 
     @property
     def stand_after(self) -> int:
@@ -1190,6 +1205,7 @@ class EpisodeRunner:
                     plain=paid[0][1] if paid else None,
                     stood=stood,
                     enough=self._left_the_spot if stood else None,
+                    outlast=self._way_outlast,
                 )
                 if search.way is None:
                     self._connection.call(lambda a: a.load_state(NOW_SLOT))
@@ -1202,6 +1218,14 @@ class EpisodeRunner:
             return False
         back = f"{gone} step{'' if gone == 1 else 's'}"
         way = search.way
+        if search.doomed:
+            log.info(
+                "%d of the tries got past and could not be lived on from: the life went "
+                "just after %s whatever was pressed, so %s not taken for a way.",
+                search.doomed,
+                "it" if search.doomed == 1 else "them",
+                "it was" if search.doomed == 1 else "they were",
+            )
         if way is None and stood:
             log.info(
                 "Stayed about one spot for %d steps, with no life lost. Went back %s and "
@@ -1281,6 +1305,14 @@ class EpisodeRunner:
                     "before that would lose the life."
                 )
         log.info("%s%s", lead, how)
+        if way.cut:
+            log.info(
+                "The last %d step%s of that try %s left out: with them it ran on into the "
+                "next danger, and where it now stops the AI has room to save itself.",
+                way.cut,
+                "" if way.cut == 1 else "s",
+                "was" if way.cut == 1 else "were",
+            )
         return True
 
     def go_back(self, moment: Moment, then: Sequence[int] = ()) -> State:

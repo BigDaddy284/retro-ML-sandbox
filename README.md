@@ -291,6 +291,18 @@ These searches are among the three a go may make. The log says "Stayed about one
 Went back 64 steps and found a way on at try 3...", and the go's line says
 how many of its searches were made where it stood still.
 
+A way past is only worth having if the AI can carry on from where it ends.
+A try that gets past a gap and then runs on into the next one is alive when
+it ends and loses the life a moment later, whatever is pressed: on the
+practice game more than half the ways found were like that. So when a try
+gets past, the AI asks a question at its end: with each of its moves held
+for 30 steps from there, how many keep the life? If at least half do, the
+try is the way. If not, it stops the way earlier, at the last place where
+at least half of its moves are safe, as long as it has got past by then.
+The log says "The last 12 steps of that try were left out: with them it ran
+on into the next danger...". A try that leaves no place to stop is not
+taken, and the search goes on.
+
 A way that a search finds is always played to its end, even if the go's
 length runs out part of the way through it. Otherwise the go would end on
 ground it had already covered, nothing of the way would be remembered, and

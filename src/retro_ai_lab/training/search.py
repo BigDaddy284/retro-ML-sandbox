@@ -35,7 +35,7 @@ from __future__ import annotations
 import hashlib
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning.actions import ActionSpace
@@ -48,6 +48,15 @@ from retro_ai_lab.understanding.knowledge import Variable
 BUDGET = 120  # plays a search may make
 CARRY_ON = 20  # steps a try runs on past where the life went
 PLAIN_SHARE = 0.5  # of the budget: the most the plain way may use (T-1012)
+# Steps past its end a way must be able to live through (T-1019): as far before a life
+# lost as the app looks for its cause (``moments.LEAD``).
+OUTLAST = 30
+END_SLOT = "back_end"  # where the end of a try is saved while it is asked about (T-1019)
+CUT_BY = 4  # steps: a way that ends badly is tried this much shorter each time
+CUT_WITHIN = 40  # steps from its end: no further back is a place to stop it looked for
+# The room the AI has at the end of a try (T-1019): how many of its moves, held on,
+# keep the life.
+NONE, TIGHT, ROOMY = 0, 1, 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +74,9 @@ class Way:
     # way where holding it stood still too.
     plain: int | None = None
     lost_at: int | None = None
+    # Steps left off the end of the try it came from (T-1019): after them the life
+    # went whatever was held, and after these moves it does not.
+    cut: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +89,10 @@ class Search:
     # find the same in the same tries are the same search.
     seconds: float = field(default=0.0, compare=False)
     out_of_time: bool = False  # it stopped because its time was up, not its tries
+    # Tries that got past and were turned down all the same (T-1019): the life went
+    # just after them whatever was held, and no part of them that it could live on
+    # from got past.
+    doomed: int = 0
 
 
 def _whole(value: object, what: str, least: int) -> int:
@@ -102,6 +118,7 @@ def find_way(
     plain: int | None = None,
     stood: bool = False,
     enough: Callable[[Outcome], bool] | None = None,
+    outlast: int = 0,
 ) -> Search:
     """Look for a small change to ``trace``, played from the save in ``slot``, that
     stays alive and reaches new ground.
@@ -140,6 +157,25 @@ def find_way(
     False says it is no way all the same. After a life lost nobody asks: past the
     place is enough. At a standstill the caller asks that the try ended out of the
     spot it stood about: a hop of two steps and standing again is no way on.
+
+    With ``outlast`` above 0 a way must be one the AI can live on from (T-1019). A
+    try is alive while its life has not gone, and in many games the life goes a
+    while after the fall or the touch that costs it: on the practice game more
+    than half the ways found ended inside that while, mostly because the try,
+    past the place, carried on into the next one. So a try that got past is asked
+    a question at its end: each move the controls have, held for ``outlast`` steps
+    from there ("do nothing" first), does it keep the life? At least half do
+    (``ROOMY``), and the try is the way. Fewer (``TIGHT``: one wrong move and the
+    life goes) or none (``NONE``), and the try has usually carried on into the next
+    place: the way is then the try up to the last place, going back from its end
+    ``CUT_BY`` steps at a time and at most ``CUT_WITHIN``, that leaves the AI room,
+    if the try has got past by then under the watch. Where no part does both, a
+    try that can be lived on from at all is the way as it is, and one that cannot
+    is cut to its longest part that can, if that got past. ``Way.cut`` is what was left
+    off. No such part, and the try is turned down (``Search.doomed``) and the
+    search goes on. The end of a try is kept in the save ``END_SLOT`` while it is
+    asked about.
+    A question is one try of the budget, however many moves it takes.
     """
     if not slot or not isinstance(slot, str):
         raise ConfigurationError("A search needs the name of the save to start from.")
@@ -169,8 +205,11 @@ def find_way(
         space[move]  # refuses a move the controls don't have, before anything is played
     if plain is not None:
         space[plain]
+    _whole(outlast, "outlast", 0)
     began = clock()
-    tries, late = 0, False
+    tries, late, doomed = 0, False, 0
+    # The moves the question is put with: "do nothing" first, where there is one.
+    every = sorted(range(len(space)), key=lambda move: bool(space.buttons_for(move)))
 
     def taken() -> float:
         return max(0.0, clock() - began)
@@ -196,9 +235,112 @@ def find_way(
             return None
         return hashlib.blake2b(outcome.screen, digest_size=16).digest()
 
-    def seek(base: Sequence[int], limit: int) -> tuple[Change, tuple[int, ...], int] | None:
-        """The first small change to ``base`` that gets past, with its moves and the
-        new ground counted, while the tries stay under ``limit``."""
+    def room() -> int | None:
+        """From where the game now is, each move held for ``outlast`` steps: ``ROOMY``
+        where at least half of them keep the life, ``TIGHT`` where fewer do, ``NONE``
+        where none does. None where the tries or the time ran out before it was asked."""
+        nonlocal tries
+        if not may_play():
+            return None
+        tries += 1
+        connection.call(lambda a: a.save_state(END_SLOT))
+        enough_keep = (len(every) + 1) // 2
+        kept = 0
+        for asked, move in enumerate(every, start=1):
+            after = play(
+                connection,
+                END_SLOT,
+                (move,) * outlast,
+                space,
+                frames_per_step=frames_per_step,
+                lives=lives,
+            )
+            kept += not after.lost
+            if kept >= enough_keep:
+                return ROOMY
+            if kept and kept + len(every) - asked < enough_keep:
+                return TIGHT  # some keep it, and too few are left to make it half
+        return TIGHT if kept else NONE
+
+    def room_after(moves: tuple[int, ...]) -> int | None:
+        """Play ``moves`` blind and ask at their end."""
+        nonlocal tries
+        if not may_play():
+            return None
+        tries += 1
+        there = play(connection, slot, moves, space, frames_per_step=frames_per_step, lives=lives)
+        return NONE if there.lost else room()
+
+    def settled(
+        moves: tuple[int, ...], seen: Outcome, least: int
+    ) -> tuple[tuple[int, ...], int] | None:
+        """A try that got past, with the game at its end: the moves of it that are the
+        way and the new ground along them, or None where it is no way (turned down, or
+        the search ran out before it was known). ``least`` is the fewest moves a part
+        of it may have and still be this try."""
+        nonlocal tries, doomed
+
+        def part(upto: int) -> tuple[tuple[int, ...], int] | None:
+            """That many of its moves, if they still get past under the watch."""
+            nonlocal tries
+            tries += 1
+            cut = play(
+                connection,
+                slot,
+                moves[:upto],
+                space,
+                frames_per_step=frames_per_step,
+                lives=lives,
+                watch=watch(),
+                look_every=look_every,
+            )
+            return (moves[:upto], cut.ground) if got_on(cut) else None
+
+        if not outlast:
+            return moves, seen.ground
+        whole = room()
+        if whole is None:
+            return None  # the tries or the time ran out: not known, so not a way
+        if whole == ROOMY:
+            return moves, seen.ground
+        # At its end the AI is in a tight spot, or past saving: usually the try, past
+        # the place, has carried on into the next one. Back from its end, the first
+        # place that leaves it room is where the way stops, if the try has got past
+        # by then. (Not the first place it can be lived on from at all: that is the
+        # very edge of the next danger.)
+        tight = len(moves) if whole == TIGHT else 0  # its longest part that can be lived on from
+        for upto in range(len(moves) - CUT_BY, max(least, len(moves) - CUT_WITHIN) - 1, -CUT_BY):
+            has = room_after(moves[:upto])
+            if has is None:
+                return None
+            if has == ROOMY:
+                if not may_play():
+                    return None
+                kept = part(upto)
+                if kept is not None:
+                    return kept
+                break  # room, and not past yet: further back it is no further on
+            if has == TIGHT and not tight:
+                tight = upto
+        # No part leaves it room and has got past: as it is where it can be lived on
+        # from, else its longest part that can be, if that got past.
+        if whole == TIGHT:
+            return moves, seen.ground
+        if tight:
+            if not may_play():
+                return None
+            kept = part(tight)
+            if kept is not None:
+                return kept
+        doomed += 1
+        return None
+
+    def found(way: Way | None) -> Search:
+        return Search(way, tries, taken(), late and way is None, doomed)
+
+    def seek(base: Sequence[int], limit: int) -> Way | None:
+        """The first small change to ``base`` that gets past, as a way (the plain way's
+        part is the caller's to add), while the tries stay under ``limit``."""
         nonlocal tries
         # At a standstill the earliest change that gets on is tried first: it is the
         # one with the least standing in it (T-1018). And a hold is played out whole:
@@ -237,7 +379,10 @@ def find_way(
                 look_every=look_every,
             )
             if got_on(seen):
-                return change, moves, seen.ground
+                kept = settled(moves, seen, change.at + 1)
+                if kept is not None:
+                    return Way(kept[0], change, tries, kept[1], cut=len(moves) - len(kept[0]))
+                continue  # it got past and cannot be lived on from: not "nowhere"
             end = ended_on(blind)
             if end is not None:
                 nowhere.add(end)
@@ -260,9 +405,7 @@ def find_way(
             base = (plain,) * first.steps
             got = seek(base, share)
             if got is not None:
-                change, moves, ground = got
-                way = Way(moves, change, tries, ground, plain=plain, lost_at=first.steps)
-                return Search(way, tries, taken())
+                return found(replace(got, plain=plain, lost_at=first.steps))
         elif tries < share and may_play():
             tries += 1
             seen = play(
@@ -275,10 +418,14 @@ def find_way(
                 watch=watch(),
                 look_every=look_every,
             )
-            if got_on(seen):
-                way = Way(held, Change(0, plain, len(trace)), tries, seen.ground, plain=plain)
-                return Search(way, tries, taken())
-            if stood:
+            past = got_on(seen)
+            kept = settled(held, seen, 1) if past else None
+            if kept is not None:
+                moves, ground = kept
+                change = Change(0, plain, len(trace))
+                cut = len(held) - len(moves)
+                return found(Way(moves, change, tries, ground, plain=plain, cut=cut))
+            if stood and not past:
                 # It stood still and holding the plain move stands still too (a wall):
                 # the small changes to the plain way, a jump at some step of it. The
                 # screen this ended on is what getting nowhere looks like.
@@ -288,13 +435,22 @@ def find_way(
                     nowhere.add(end)
                 got = seek((plain,) * len(trace), share)
                 if got is not None:
-                    change, moves, ground = got
-                    return Search(Way(moves, change, tries, ground, plain=plain), tries, taken())
-    got = None if late else seek(trace, budget)
-    if got is not None:
-        change, moves, ground = got
-        return Search(Way(moves, change, tries, ground), tries, taken())
-    return Search(None, tries, taken(), late)
+                    return found(replace(got, plain=plain))
+    return found(None if late else seek(trace, budget))
 
 
-__all__ = ["BUDGET", "CARRY_ON", "PLAIN_SHARE", "Search", "Way", "find_way"]
+__all__ = [
+    "BUDGET",
+    "CARRY_ON",
+    "CUT_BY",
+    "CUT_WITHIN",
+    "END_SLOT",
+    "NONE",
+    "OUTLAST",
+    "PLAIN_SHARE",
+    "ROOMY",
+    "TIGHT",
+    "Search",
+    "Way",
+    "find_way",
+]

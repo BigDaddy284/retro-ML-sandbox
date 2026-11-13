@@ -80,6 +80,7 @@ from retro_ai_lab.training.insights import (
 from retro_ai_lab.training.moments import Moments
 from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
 from retro_ai_lab.training.route import Route
+from retro_ai_lab.training.search import OUTLAST
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, ScreenWatch
 from retro_ai_lab.understanding.knowledge import Confidence, Variable, VariableKind
 from retro_ai_lab.understanding.player import find_player_in_game
@@ -1154,6 +1155,7 @@ class TrainingService:
                 give_up_after=GIVE_UP_AFTER,
                 press_after=PRESS_AFTER if goes_back else 0,
                 stand_after=self._stand_after if goes_back else 0,
+                way_outlast=OUTLAST if goes_back else 0,
                 flat_out=self._flat_out,
             )
         self._busy = True
