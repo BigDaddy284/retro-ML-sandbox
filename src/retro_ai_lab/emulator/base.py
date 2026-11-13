@@ -52,8 +52,17 @@ class EmulatorAdapter(ABC):
         # thread, the GUI thread (play clock, training) and the link watchdog
         # all go through here, and a socket cannot interleave two requests.
         self._lock = threading.RLock()
+        self._states_loaded = 0
 
     # ------------------------------------------------------------ lifecycle
+
+    @final
+    @property
+    def states_loaded(self) -> int:
+        """How many saved states have been loaded through this adapter (T-1021). A
+        snapshot read after one is the app's doing, whoever loaded it, and whoever
+        reads the game's memory can tell by this count having moved."""
+        return self._states_loaded
 
     @final
     @property
@@ -304,6 +313,7 @@ class EmulatorAdapter(ABC):
             self._require("save_states")
             _check_slot(slot)
             self._do_load_state(slot)
+            self._states_loaded += 1
 
     # -------------------------------------------------------------- helpers
 
