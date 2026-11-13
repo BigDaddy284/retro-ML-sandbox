@@ -16,6 +16,18 @@ search always ends.
 
 The prototype found a way in 9 to 142 tries where there was one, all of them a
 move one button from the one made, held 4 to 16 steps.
+
+What it did is not always worth changing (T-1012). A learner that wandered
+about before the life went (back a little, a jump too early, a button that
+does nothing) leaves a list no single small change gets across with: a third
+of the searches on the practice game found nothing, nearly all of them that
+way. So a search that is given a plain move, the one that has paid best,
+tries the plain way first: that move held from the save, and where that loses
+the life, the same small changes to it. Measured on 179 searches it finds a
+way in 86% against 70% and sooner (median try 19 and 43 against 42 and 54);
+the two together find one in 97%. The plain way has half the tries at most,
+and what it did has the rest: it is what gets past where an earlier jump has
+to stay in, and where the plain way only walks into a wall.
 """
 
 from __future__ import annotations
@@ -34,6 +46,7 @@ from retro_ai_lab.understanding.knowledge import Variable
 
 BUDGET = 120  # plays a search may make
 CARRY_ON = 20  # steps a try runs on past where the life went
+PLAIN_SHARE = 0.5  # of the budget: the most the plain way may use (T-1012)
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +57,11 @@ class Way:
     change: Change
     tries: int  # plays the search had made when it was found, its own two included
     ground: int  # steps of new ground the watch counted along it
+    # The plain way (T-1012): the move held all the way, when the change is to that and
+    # not to what it did, and the step holding it lost the life at. With no life lost
+    # there is nothing to change: the change is then that move, held from the start.
+    plain: int | None = None
+    lost_at: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +96,7 @@ def find_way(
     look_every: int = DEFAULT_LOOK_EVERY,
     seconds: float | None = None,
     clock: Callable[[], float] = time.monotonic,
+    plain: int | None = None,
 ) -> Search:
     """Look for a small change to ``trace``, played from the save in ``slot``, that
     stays alive and reaches new ground.
@@ -91,6 +110,13 @@ def find_way(
     On a real emulator a try costs real time. With ``seconds``, no play is started
     once that long has passed on ``clock`` since the search began (T-1008); a play
     in flight is finished.
+
+    With ``plain``, a move, the plain way is tried first (T-1012): that move held
+    for as long as the trace and the carry-on. Alive and on new ground, it is the
+    way. Where it loses a life, the small changes are tried on the plain moves up
+    to that step, with at most ``PLAIN_SHARE`` of the budget; after that, and at
+    once where the plain way stays alive and gets nowhere new, the changes to
+    ``trace``. Moves played once are not played again and cost no try.
     """
     if not slot or not isinstance(slot, str):
         raise ConfigurationError("A search needs the name of the save to start from.")
@@ -112,6 +138,10 @@ def find_way(
         raise ConfigurationError("The time a search may take must be a number above 0.")
     if not callable(clock):
         raise ConfigurationError("clock must give the time when called.")
+    for move in trace:
+        space[move]  # refuses a move the controls don't have, before anything is played
+    if plain is not None:
+        space[plain]
     began = clock()
     tries, late = 0, False
 
@@ -126,30 +156,75 @@ def find_way(
         late = seconds is not None and taken() >= seconds
         return not late
 
-    for change in changes(trace, space):  # refuses a move the controls don't have
-        if not may_play():
-            break
-        moves = change.apply(trace, carry_on)
+    played: set[tuple[int, ...]] = set()
+
+    def seek(base: Sequence[int], limit: int) -> tuple[Change, tuple[int, ...], int] | None:
+        """The first small change to ``base`` that gets past, with its moves and the
+        new ground counted, while the tries stay under ``limit``."""
+        nonlocal tries
+        for change in changes(base, space):
+            moves = change.apply(base, carry_on)
+            if moves in played:
+                continue  # the other part of the search has been here
+            if tries >= limit or not may_play():
+                break
+            tries += 1
+            blind = play(
+                connection, slot, moves, space, frames_per_step=frames_per_step, lives=lives
+            )
+            if blind.lost:
+                played.add(moves)
+                continue
+            if tries >= limit or not may_play():
+                break  # alive and not looked at yet: not settled, so not marked as played
+            played.add(moves)
+            tries += 1
+            seen = play(
+                connection,
+                slot,
+                moves,
+                space,
+                frames_per_step=frames_per_step,
+                lives=lives,
+                watch=watch(),
+                look_every=look_every,
+            )
+            if seen.past:
+                return change, moves, seen.ground
+        return None
+
+    share = int(budget * PLAIN_SHARE)
+    if plain is not None and share >= 1 and may_play():
+        held = (plain,) * (len(trace) + carry_on)
         tries += 1
-        blind = play(connection, slot, moves, space, frames_per_step=frames_per_step, lives=lives)
-        if blind.lost:
-            continue
-        if not may_play():
-            break
-        tries += 1
-        seen = play(
-            connection,
-            slot,
-            moves,
-            space,
-            frames_per_step=frames_per_step,
-            lives=lives,
-            watch=watch(),
-            look_every=look_every,
-        )
-        if seen.past:
-            return Search(Way(moves, change, tries, seen.ground), tries, taken())
+        first = play(connection, slot, held, space, frames_per_step=frames_per_step, lives=lives)
+        if first.lost:
+            base = (plain,) * first.steps
+            got = seek(base, share)
+            if got is not None:
+                change, moves, ground = got
+                way = Way(moves, change, tries, ground, plain=plain, lost_at=first.steps)
+                return Search(way, tries, taken())
+        elif tries < share and may_play():
+            tries += 1
+            seen = play(
+                connection,
+                slot,
+                held,
+                space,
+                frames_per_step=frames_per_step,
+                lives=lives,
+                watch=watch(),
+                look_every=look_every,
+            )
+            if seen.past:
+                way = Way(held, Change(0, plain, len(trace)), tries, seen.ground, plain=plain)
+                return Search(way, tries, taken())
+    got = None if late else seek(trace, budget)
+    if got is not None:
+        change, moves, ground = got
+        return Search(Way(moves, change, tries, ground), tries, taken())
     return Search(None, tries, taken(), late)
 
 
-__all__ = ["BUDGET", "CARRY_ON", "Search", "Way", "find_way"]
+__all__ = ["BUDGET", "CARRY_ON", "PLAIN_SHARE", "Search", "Way", "find_way"]

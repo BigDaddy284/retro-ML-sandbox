@@ -25,8 +25,14 @@ from tests.unit.training.test_going_back import DIED_AT, SLOTS, Lab, steps
 lab = going_back.lab  # the practice game behind the real services (pytest fixture)
 
 GAP_ENDS = 240  # the far edge of the first gap on this level
-FOUND_ON = 18  # the play the search finds the way on, its own two included
-WAY = "right + a for 4 steps, starting 17 steps before the life went"
+# The play the search finds the way on, its own two included. Since T-1012 the first
+# play is the plain way, "right" held, which here is what the go did: one play more
+# than the 18 it took before, and the same change found.
+FOUND_ON = 19
+WAY = (
+    "holding right instead of what it did, with right + a for 4 steps, starting 17 steps "
+    "before that would lose the life"
+)
 
 
 def searching(lab: Lab, **kw: object) -> tuple[EpisodeRunner, Moments]:
