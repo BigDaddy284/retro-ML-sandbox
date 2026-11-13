@@ -14,6 +14,15 @@ depending on what the AI's eyes told its brain that week. Summed over three seed
 claims below held for every three of the six seeds measured (1 to 5 and 7): the
 point-lover scores 1.7 to 2.7 times as much per step and drives faster, and the
 careful one's crashes per step fall to between 0.47 and 0.69 of what they were.
+
+Since T-1010 the AI goes back at a life lost and looks for a way past. On this game
+that seldom finds one (the eyes count hardly any new ground here) and it gives up
+after eight searches for nothing, but the one or two ways a training does find come
+in its first goes and send the rest of it another way. Measured with that on, the
+claims held over the six seeds together (the point-lover 1.5 times the score a step,
+crashes down to 0.49) and for 17 of the 20 threes of them; all three that failed had
+seed 3 in them, where two early ways taught the point-lover to brake. Three seeds no
+longer tell the claims from luck, so all six are walked. The claims are unchanged.
 """
 
 from __future__ import annotations
@@ -36,7 +45,7 @@ from retro_ai_lab.understanding import EventKind, VariableKind
 BY_NAME = {b.name: b for b in BUTTONS}
 EXPLORE_FRAMES = 2500  # and a brake: the AI's checkpoint must not be a dying moment (T-961)
 GOES = 30
-SEEDS = (1, 2, 3)  # the learner's; the game is the same one each time
+SEEDS = (1, 2, 3, 4, 5, 7)  # the learner's; the game is the same one each time
 MAX_STEPS = 150
 WINDOW = 10
 

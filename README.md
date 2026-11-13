@@ -134,7 +134,8 @@ It runs the whole app on Toy Hopper, the built-in practice platform game
 (gaps that need a held jump, walkers, coins), with nobody watching, and
 prints how well the AI sees (how often it follows itself on the screen and
 whether that really is the player), what killed it against what it thought
-killed it, what it reads from memory, and how far it gets. The practice game
+killed it, what it reads from memory, how far it gets, and how often going
+back after a life lost found a way past. The practice game
 knows the truth, so each number has it beside it. `--seed` picks another
 level, `--algorithm q_table` the simple table.
 
@@ -224,6 +225,26 @@ second and the Discovery and Rewards panels refresh once every two seconds
 instead of several times a second, since every refresh takes time from the
 AI's steps and nobody is watching. They catch up the moment you pause, stop
 or switch back to "Watch it play".
+
+## When the AI loses a life
+
+On an emulator that can save and load the game's state (BizHawk and mGBA
+both can), the AI does not just carry on after losing a life. While it
+plays it quietly keeps a few saved moments in slots of its own (`back0` to
+`back5`; your own save slots are not touched). When a life goes, it loads
+a moment from a little before, plays those last seconds again with one
+small change at a time (a jump here, a button held longer there), and
+looks for a change that gets it past the place with the life still there.
+If it finds one it plays on from there, so the go continues beyond the
+spot that killed it, and the brain learns from the way that worked.
+
+A search runs at the emulator's top speed and is over within 15 seconds;
+a go searches at most three times. In a game where eight searches in a row
+find nothing, the AI stops going back for the rest of that session, because
+there it only costs time. The log says what happened each time ("Lost a
+life at step 152. Went back 49 steps and found a way past on try 68..."),
+and each go's line ends with how often it went back and what it found.
+Nothing is saved while you play yourself.
 
 ## Reading the rewards
 

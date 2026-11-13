@@ -76,6 +76,7 @@ from retro_ai_lab.training.insights import (
     policy_of,
     suggest_experiments,
 )
+from retro_ai_lab.training.moments import Moments
 from retro_ai_lab.training.records import EpisodeRecord, Mode, Speed, Status
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, ScreenWatch
 from retro_ai_lab.understanding.knowledge import Confidence, Variable, VariableKind
@@ -121,6 +122,13 @@ NOT_LISTENING = (
 )
 FAST_SPEED = 64.0  # EmuHawk's client.speedmode tops out at 6400% (T-836)
 PRACTISE_SLOT = "practise"  # the save-state slot of the spot the child pinned (T-508)
+# At a life lost the AI goes back to a moment saved a little earlier and tries small
+# changes to what it did until one gets past (T-1009). The moments of a go are kept
+# in these slots; the numbers are the prototype's.
+BACK_SLOTS = ("back0", "back1", "back2", "back3", "back4", "back5")
+WAYS_PER_GO = 3  # searches a go may make
+WAY_SECONDS = 15.0  # the longest a search may hold a step up, on any machine
+GIVE_UP_AFTER = 8  # searches in a row for nothing before it stops going back in a game
 DEFAULT_HISTORY = 200
 DEFAULT_PROMOTE_AT = 1000  # known situations before an "auto" brain moves to a network
 
@@ -191,8 +199,18 @@ class TrainingService:
         goals: GoalService | None = None,
         lookahead: int = LOOKAHEAD_STEPS,
         rewards: RewardService | None = None,
+        ways_per_go: int = WAYS_PER_GO,
+        way_seconds: float | None = WAY_SECONDS,
     ) -> None:
         _check_algorithm(algorithm)
+        if isinstance(ways_per_go, bool) or not isinstance(ways_per_go, int) or ways_per_go < 0:
+            raise ConfigurationError("ways_per_go must be a whole number, 0 or more.")
+        if way_seconds is not None and (
+            isinstance(way_seconds, bool)
+            or not isinstance(way_seconds, (int, float))
+            or not way_seconds > 0
+        ):
+            raise ConfigurationError("way_seconds must be a number above 0 (or None).")
         if lookahead < 1:
             raise ConfigurationError("lookahead must be at least 1.")
         if promote_at < 1:
@@ -210,6 +228,10 @@ class TrainingService:
         self._frames_per_step = frames_per_step
         self._max_steps = max_steps
         self._lookahead = lookahead  # steps a return spans when the AI learns (T-963)
+        self._ways_per_go = ways_per_go  # going back for a way past a life lost (T-1009)
+        self._way_seconds = way_seconds
+        self._can_save = False  # the console has save states
+        self._back_said = False  # the log has said the AI will go back, for this game
         self._default_max_steps = max_steps  # a game with no choice of its own uses these (T-873)
         self._default_unstick_after = unstick_after
         self._use_checkpoint = checkpoint
@@ -956,6 +978,8 @@ class TrainingService:
             else None
         )
         self._wake_button = knowledge.wake_button
+        self._can_save = caps.save_states
+        self._back_said = False
         self._watch = None  # a new game: things on its screen are looked at afresh (T-976)
         self._can_see = caps.screen_capture
         self._needs_wake = False
@@ -975,6 +999,7 @@ class TrainingService:
             self.save()
         self._enabled = False
         self._harness = None
+        self._can_save = False
         self._fast_applied = False  # the script puts the speed back itself
         self._spot_pinned = False  # save states don't outlive the link
         self._status = Status.IDLE
@@ -1061,6 +1086,15 @@ class TrainingService:
         if self._agent is None or self._encoder is None or not self._connection.is_connected:
             return None
         if self._runner is None:
+            goes_back = self._can_save and self._ways_per_go > 0
+            if goes_back and not self._back_said:
+                self._back_said = True
+                log.info(
+                    "When the AI loses a life it goes back a little and tries small changes "
+                    "to find a way past, up to %d time%s a go.",
+                    self._ways_per_go,
+                    "" if self._ways_per_go == 1 else "s",
+                )
             self._runner = EpisodeRunner(
                 self._connection,
                 self._observation,
@@ -1076,6 +1110,11 @@ class TrainingService:
                 lookahead=self._lookahead,
                 watched_setbacks=self._penalised,
                 deaths=self._deaths,
+                moments=Moments(BACK_SLOTS) if goes_back else None,
+                ways_per_go=self._ways_per_go if goes_back else 0,
+                way_seconds=self._way_seconds,
+                give_up_after=GIVE_UP_AFTER,
+                flat_out=self._flat_out,
             )
         self._busy = True
         try:
@@ -1346,7 +1385,7 @@ class TrainingService:
         why = self._runner.last_reset if self._runner is not None else ""
         earners = describe_earned(result.earned, most=None)  # the whole breakdown (T-877)
         log.info(
-            "Go %d ended by %s after %d steps (%d frames), %+.1f points%s%s%s",
+            "Go %d ended by %s after %d steps (%d frames), %+.1f points%s%s%s%s",
             self._episodes,
             result.ended_by,
             result.steps,
@@ -1354,6 +1393,7 @@ class TrainingService:
             result.reward,
             f", from {earners}" if earners else "",
             result.describe_losses(),  # survival in the log (T-934)
+            result.describe_ways(),  # and what going back came to (T-1009)
             f": {why}" if result.ended_by == "reset" and why else "",
         )
         if self._agent is not None and self._encoder is not None:
@@ -1620,10 +1660,14 @@ def _goes(n: int) -> str:
 
 
 __all__ = [
+    "BACK_SLOTS",
     "CHECKPOINT_SLOT",
+    "GIVE_UP_AFTER",
     "IDENTICAL_GO_STEPS",
     "RESET_SUSPECT_GOES",
     "RESET_SUSPECT_STEPS",
+    "WAYS_PER_GO",
+    "WAY_SECONDS",
     "EpisodeFinished",
     "TrainingService",
     "TrainingStateChanged",

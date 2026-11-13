@@ -100,6 +100,9 @@ class Report:
     furthest: list[int] = field(default_factory=list)
     lost: list[int] = field(default_factory=list)
     finished: list[int] = field(default_factory=list)
+    # Going back at a life lost to look for a way past (T-1009), over the run.
+    ways_sought: int = 0
+    ways_found: int = 0
 
     @property
     def deaths(self) -> int:
@@ -174,6 +177,14 @@ class Report:
                 f"{statistics.fmean(self.lost[-WINDOW:]):.2f}; levels finished "
                 f"{sum(self.finished)}."
             )
+        if self.ways_sought:
+            out.append(
+                f"Ways past: after losing a life it went back {self.ways_sought:,} "
+                f"time{'' if self.ways_sought == 1 else 's'} and found a way past in "
+                f"{self.ways_found:,} ({_share(self.ways_found, self.ways_sought)}%)."
+            )
+        else:
+            out.append("Ways past: it never went back to look for one.")
         return out
 
 
@@ -237,6 +248,7 @@ def run(
             seed=seed,
             goals=goals,
             rewards=rewards,
+            way_seconds=None,  # a search cut short by the clock would not be repeatable
         )
         training.set_algorithm(algorithm)
         connection.connect("fake", game="hopper", seed=seed)
@@ -268,8 +280,15 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
         stood = 0  # where the player was at the go's first look
         fresh = not scrolled  # the go began before the camera had ever moved
         got, counted, steps = 0, 0, 0  # furthest at a look: the game's, the watch's; its steps
+        back = 0  # times the go has gone back to an earlier moment (T-1009)
         while training.episodes == go:
             training.step()
+            runner = training.episode
+            if runner is not None and runner.times_back != back:
+                # The game was put back: where the camera is now against where it was
+                # is the app's own jump, not a move for the watch to have measured.
+                back = runner.times_back
+                camera = None
             now = game.state
             furthest = max(furthest, now.x)
             if now.mode == toy_hopper.DYING and before.mode != toy_hopper.DYING:
@@ -302,6 +321,9 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
                     report.floor_right += floor == _floor_either_side(game)
         report.furthest.append(furthest)
         report.lost.append(lost)
+        result = training.history[-1].result
+        report.ways_sought += result.ways_sought
+        report.ways_found += result.ways_found
         if began is not None and training.watch is not None:
             report.ground_goes += 1
             report.ground_before += fresh
