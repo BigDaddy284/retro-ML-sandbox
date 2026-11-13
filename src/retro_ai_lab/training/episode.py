@@ -41,7 +41,7 @@ from retro_ai_lab.training.moments import Moment, Moments
 from retro_ai_lab.training.search import BUDGET, find_way
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, Mark, ScreenWatch
 from retro_ai_lab.understanding.events import EventKind
-from retro_ai_lab.understanding.knowledge import Knowledge, VariableKind
+from retro_ai_lab.understanding.knowledge import Knowledge, Variable, VariableKind
 
 log = logging.getLogger(__name__)
 
@@ -460,6 +460,8 @@ class EpisodeRunner:
         self._press_next = 0  # which of the paid buttons the next press holds, best first
         self._pressing = False  # the moves being played are a press
         self._pressed_stuck = False  # this standstill has had its press
+        self._held_reset = False  # a restart with a life lost is waiting for its search
+        self._held_said = False
         self._pressed_on = 0
         self._press_said = False
         self._restored = False
@@ -647,6 +649,7 @@ class EpisodeRunner:
         self._pending.clear()
         self._forced.clear()
         self._times_back = 0
+        self._held_reset = False
         self._ways_left = 0 if self._gave_up else self._ways_per_go
         self._unpaid = 0
         self._press_next = 0
@@ -751,7 +754,21 @@ class EpisodeRunner:
         if self._setbacks > lost_before:
             self._forced.clear()  # whatever way was being played did not get past
             self._pressing = False  # a press that cost a life is not one that got nothing
-            return self._seek()
+            waiting, self._held_reset = self._held_reset, False
+            back = self._times_back
+            if not self._seek():
+                return False
+            if waiting and self._times_back == back:
+                self._ended_by = "reset"  # no way past: the restart stands (T-1013)
+                self._signals.stop()
+                return False
+            if waiting:
+                log.log(
+                    logging.DEBUG if self._held_said else logging.INFO,
+                    "The game put the player back to the start when that life went, which "
+                    "used to end the go. The AI has gone back to before it and carries on.",
+                )
+                self._held_said = True
         return True
 
     def _paid_moves(self) -> list[tuple[str, int]]:
@@ -841,6 +858,19 @@ class EpisodeRunner:
         moments.saved(self._watch.mark() if self._watch is not None else None)
         return True
 
+    def _way_back(self) -> tuple[Moment, tuple[int, ...], list[Variable]] | None:
+        """Where a search for a way past a life lost now would start: the moment, what
+        was done since, and the life values to watch. None where none can be made."""
+        moments = self._moments
+        if moments is None or not self._ways_left or self._watch is None:
+            return None
+        found = moments.before_loss()
+        if found is None or not isinstance(found[0].mark, Mark):
+            return None
+        knowledge = self._encoder.knowledge
+        lives = [knowledge.get(i) for i in sorted(self._signals.watched or ()) if i in knowledge]
+        return (*found, lives) if lives else None
+
     def _seek(self) -> bool:
         """A life just went: go back and look for a way past (T-1007). False if the link dropped.
 
@@ -856,22 +886,14 @@ class EpisodeRunner:
         moments = self._moments
         if moments is None or not self._ways_per_go:
             return True  # nothing here searches: the moments are the caller's (T-1005)
-        watch = self._watch
-        found = moments.before_loss()
-        knowledge = self._encoder.knowledge
-        lives = [knowledge.get(i) for i in sorted(self._signals.watched or ()) if i in knowledge]
-        if (
-            not self._ways_left
-            or watch is None
-            or found is None
-            or not isinstance(found[0].mark, Mark)
-            or not lives
-        ):
+        start = self._way_back()
+        if start is None:
             moments.forget()
             return True
-        moment, trace = found
+        moment, trace, lives = start
+        watch = self._watch
         mark = moment.mark
-        assert isinstance(mark, Mark)
+        assert watch is not None and isinstance(mark, Mark)
         self._ways_left -= 1
         self._ways_sought += 1
         space = self._agent.space
@@ -1092,7 +1114,18 @@ class EpisodeRunner:
         self._state = next_state
         self._states.add(next_state.key)
         if done:
-            self._ended_by = "reset"
+            # A life lost that also reads as the game starting over (it put the player
+            # back at the start) ended the go before it could go back (T-1013). Where a
+            # search can follow, the end waits for it: step() ends the go if none is found.
+            if (
+                lost
+                and source == "ai"
+                and self._steps < self._max_steps
+                and self._way_back() is not None
+            ):
+                self._held_reset = True
+            else:
+                self._ended_by = "reset"
         elif self._steps >= self._max_steps:
             self._ended_by = "max_steps"
         if self._ended_by is not None:
