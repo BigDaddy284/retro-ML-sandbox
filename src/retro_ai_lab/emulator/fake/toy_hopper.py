@@ -225,7 +225,26 @@ class ToyHopper:
         self._hole = frozenset(hole)
         self._wall: frozenset[int] = frozenset(self._walls)
         self._noise = 0
+        self._dying_frames: int = DYING_FRAMES
         self.reset()
+
+    @property
+    def dying_frames(self) -> int:
+        """Frames from the fatal touch to the life going: the dying pause (T-1030).
+
+        It is the cartridge's, not the state of a game: a reset leaves it, and a
+        pause already running runs out as it began. A real game can take some two
+        hundred frames over it; ``DYING_FRAMES`` is what this one takes unless told.
+        """
+        return self._dying_frames
+
+    @dying_frames.setter
+    def dying_frames(self, frames: int) -> None:
+        if isinstance(frames, bool) or not isinstance(frames, int) or not 1 <= frames <= 0xFF:
+            raise ConfigurationError(
+                "Toy Hopper's dying pause must be a whole number of frames from 1 to 255."
+            )
+        self._dying_frames = frames
 
     # --------------------------------------------------------------- setup
 
@@ -443,7 +462,7 @@ class ToyHopper:
         self._write_walkers()
 
         if py >= SCREEN_HEIGHT or self._touching_a_walker(px, py):
-            ram[LAYOUT.mode], ram[LAYOUT.dying] = DYING, DYING_FRAMES
+            ram[LAYOUT.mode], ram[LAYOUT.dying] = DYING, self._dying_frames
             ram[LAYOUT.vx] = ram[LAYOUT.vy] = 0
             return
         self._collect_coins(px, py)
