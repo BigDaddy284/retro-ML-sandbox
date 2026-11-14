@@ -217,7 +217,9 @@ two such checks, drops any "score" or "progress" guess among them. The same
 goes for the value just above a clock that counts how many times the clock has
 gone round (the minutes over the seconds): it changes too rarely to be caught
 in the act, so the AI goes by the clock under it, and no longer takes time
-passing for progress. It also drops a "progress" guess that turns out to go
+passing for progress. That one it looks at again at the start of every go,
+going by what its checks have seen move: the clock has to have gone round a
+few times before it can be told, which is later than the first check. It also drops a "progress" guess that turns out to go
 up whenever a life is lost and hardly ever otherwise (the game's own "dying"
 or "game over" marker): what goes up when you lose is not progress. If you
 confirmed such a guess yourself it is kept, and the Learning panel asks you
