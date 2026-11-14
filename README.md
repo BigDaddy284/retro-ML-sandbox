@@ -140,7 +140,9 @@ knows the truth, so each number has it beside it. `--seed` picks another
 level, `--algorithm q_table` the simple table. A go of the default 300
 steps is too short to reach the end of a level: `--steps 700` gives it the
 time, and the "Brain" line then says in how many goes the level was
-finished and in how many of those before any life was lost. `--no-memory`
+finished and in how many of those before any life was lost. A level
+finished, undone when the go was put back to a moment before its flag, and
+finished again is one level, and its ground is counted once. `--no-memory`
 trains without the way the AI remembers (see "When the AI loses a life"),
 and `--no-standstill` without going back where a go stands still, for
 comparing. A death that had only begun when its go ended costs no life (the
