@@ -40,6 +40,11 @@ def test_changes_are_placed_before_the_step_given() -> None:
         [1] * len(near) + [3] * len(near) + [5] * len(near)
     )
     assert {change.at for change in early} == {1, 3, 5, 7, 9, 11}
+    # The same places as from the end backwards, whichever of the two the trace's own
+    # last step would give: before step 11 they are the even ones, either way round.
+    even = list(changes(TRACE, PAD, upto=11, early=True))
+    assert [change.at for change in even[:: len(near)][:6]] == [0, 2, 4, 6, 8, 10]
+    assert {change.at for change in even} == {c.at for c in changes(TRACE, PAD, upto=11)}
     # One step given: the first step is the only place.
     assert {change.at for change in changes(TRACE, PAD, upto=1)} == {0}
     assert {change.at for change in changes(TRACE, PAD, upto=2)} == {1}

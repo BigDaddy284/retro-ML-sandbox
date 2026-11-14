@@ -110,6 +110,18 @@ def test_every_other_move_is_asked_the_near_ones_first(monkeypatch: pytest.Monke
             assert asked == [*near, *rest][: len(asked)] and asked[-1] == BACK
             assert asked.count(BACK) == 1
     assert got.plays == len(game.calls) == 1 + sum(len(asked) for asked in by_step.values())
+    # Whichever the one move is, the first of the pad, the last or any between.
+    for move in others:
+        monkeypatch.setattr(chance, "play", Game(until(30, move)))
+        found = ask()
+        assert found is not None and found.live == 30, move
+    # And whatever move it made itself: here the pad's last is not near it.
+    last = len(PAD) - 1
+    assert last not in PAD.near(BACK) and last in near
+    for move in (0, last):
+        monkeypatch.setattr(chance, "play", Game(until(30, move)))
+        found = ask([BACK] * LENGTH)
+        assert found is not None and found.live == 30, move
     # With the near move saving it, a step that is not too late costs one play.
     game = Game(until(30, near[0]))
     monkeypatch.setattr(chance, "play", game)
