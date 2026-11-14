@@ -343,6 +343,10 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
         fresh = not scrolled  # the go began before the camera had ever moved
         got, counted, steps = 0, 0, 0  # furthest at a look: the game's, the watch's; its steps
         carried = 0  # the camera's travel in the levels this go has finished (T-1015)
+        # What that was when each level of the go began, and whether the go's first
+        # finish came before any life was lost: both go back when the game does (T-1024).
+        carried_at = {before.level: 0}
+        clean = False
         back = 0  # times the go has gone back to an earlier moment (T-1009)
         dying = ""  # the death now under way: "fall", "walker", or "" for none
         while training.episodes == go:
@@ -366,11 +370,25 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
                 dying = ""  # the pause is over and the life gone, or the game was put back
             lost += max(0, before.lives - now.lives)
             if now.level > before.level:
-                report.clean += finished == 0 and lost == 0
+                if finished == 0:
+                    clean = lost == 0
                 finished += now.level - before.level
                 # The next level starts with the camera back at 0: what it travelled
                 # in this one is ground the go has been over all the same.
                 carried += before.scroll
+                carried_at[now.level] = carried
+            elif now.level < before.level:
+                # The game is at an earlier level than a step ago. Its ground is what
+                # the go had been over when that level began: finished again, it is
+                # the same ground, not a level's length more (T-1024; the network's
+                # goes were held a level out for it, with the watch right).
+                carried = carried_at.get(now.level, 0)
+                if went_back:
+                    # Put back across a flag: those levels are not finished in the
+                    # go as it now stands. The game starting over by itself takes
+                    # nothing off: what it had finished, it finished.
+                    finished -= before.level - now.level
+                    clean = clean and finished > 0
             before = now
             watch = training.watch
             if watch is not None and watch.looks != looks:
@@ -421,6 +439,7 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
             step = training.watch.ground.unit or toy_hopper.PLAYER_H
             report.ground_right += abs(counted - got) <= step
         report.finished.append(finished)
+        report.clean += clean
     watch = training.watch
     if watch is None:
         return

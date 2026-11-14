@@ -140,7 +140,9 @@ knows the truth, so each number has it beside it. `--seed` picks another
 level, `--algorithm q_table` the simple table. A go of the default 300
 steps is too short to reach the end of a level: `--steps 700` gives it the
 time, and the "Brain" line then says in how many goes the level was
-finished and in how many of those before any life was lost. `--no-memory`
+finished and in how many of those before any life was lost. A level
+finished, undone when the go was put back to a moment before its flag, and
+finished again is one level, and its ground is counted once. `--no-memory`
 trains without the way the AI remembers (see "When the AI loses a life"),
 and `--no-standstill` without going back where a go stands still, for
 comparing. A death that had only begun when its go ended costs no life (the
@@ -327,7 +329,20 @@ best go, and nothing is remembered. If a life goes while the way is being
 played (a game does not always do the same thing twice), the way is cut
 back to before that place. The same happens when a life goes within a few
 steps of the way's end and the AI finds no way past: the next go then
-arrives a little earlier, with room to do something else. The steps played
+arrives a little earlier, with room to do something else. And a way is
+worth what it is paid now, not what it was paid when it was found: when
+something stops paying (the AI drops a guess one of your rewards went by,
+or a goal is reached once and for all) and the way, played again, is paid
+less than it was remembered for, the AI takes the new figures, and keeps
+the way only up to the step at which it was paid the most this time. A way
+that is paid nothing any more is forgotten. Otherwise no later go could
+ever be paid as much as the old figure, and every go would begin with a
+way that leads nowhere. The AI also keeps, for every step of the way,
+which of the rewards paid for it. So when a reward goes for good (the AI
+drops the guess it went by), the points it had paid are taken out of the
+way at once, to the point, and nothing has to be played again to find out:
+the way is worth what the rewards that are left paid for it, and where that
+is the most at an earlier step, the way ends there. The steps played
 from memory do not count towards "Each go lasts": every go has its full
 length of its own play after them. The log says when the way grows or is
 cut and each go's line says how many steps it began with. The way is kept while training runs: pressing Start again makes
@@ -563,7 +578,10 @@ memory moves as the screen slides, says so in the log ("The AI found where
 the game keeps count of its camera"), and takes that number's word only
 where the picture fits it as well as it fits the picture's own answer. From the camera's travel (on a screen that never scrolls,
 from where it stands) it counts the new ground of each go, which the reward "Getting
-somewhere new" pays (see Reading the rewards). It hears of every life lost, also those lost
+somewhere new" pays (see Reading the rewards). When a go is put back to a saved
+moment to look for a way past, the AI's eyes pick up from the screen of that
+moment, so the slide of the screen in the step after is counted like any other
+(it used to be lost, a step of ground short every time a go went back). It hears of every life lost, also those lost
 between two looks. A life lost after it went out of sight coming down, with
 nothing under it but the backdrop, is a fall, and is not blamed on whatever
 it touched or stood on before; coming down through the floor is not a fall

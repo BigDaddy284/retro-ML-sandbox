@@ -35,7 +35,7 @@ from retro_ai_lab.services.discovery import DiscoveryUpdated
 from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.goals import ObjectiveCompleted, ObjectiveSetback
 from retro_ai_lab.services.observer import ButtonsHeld, GroundCovered, ObservationService
-from retro_ai_lab.services.rewards import GoStarted, RewardEarned
+from retro_ai_lab.services.rewards import GoStarted, RewardEarned, RewardProfileChanged
 from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.training.moments import LEAD, Moment, Moments
 from retro_ai_lab.training.route import Route
@@ -126,7 +126,14 @@ class EpisodeSignals:
         self._watched: frozenset[str] | None = None  # whose setbacks count (T-940)
         self._score_ids: frozenset[str] = frozenset()  # whose rises are "score up" (T-976)
         self._scores = 0
+        # What the reward of one step is made of, row by row (T-1027): gathered as the
+        # payments come in, and handed over with the reward at each take().
+        self._pending: dict[str, float] = {}
+        self._parts: tuple[tuple[str, float], ...] = ()
+        self._names: dict[str, str] = {}  # each row's name as it was last paid under
+        self._gone: set[str] = set()  # rows removed from the rewards since last asked
         bus.subscribe(RewardEarned, self._on_reward)
+        bus.subscribe(RewardProfileChanged, self._on_profile)
         bus.subscribe(ObjectiveCompleted, self._on_completed)
         bus.subscribe(ObjectiveSetback, self._on_setback)
         bus.subscribe(DiscoveryUpdated, self._on_discovery)
@@ -155,7 +162,31 @@ class EpisodeSignals:
         """What paid since :meth:`start`, biggest amount first (T-857)."""
         return tuple(sorted(self._earned.values(), key=lambda e: (-abs(e.amount), e.id)))
 
+    @property
+    def parts(self) -> tuple[tuple[str, float], ...]:
+        """What the reward last taken was made of (T-1027): each reward row's id (a
+        goal step's is ``step:`` and its id, a setback's penalty with it) and what it
+        gave, in the ids' order."""
+        return self._parts
+
+    def name_of(self, key: str) -> str:
+        """The name a row was last paid under; its id while it has never paid."""
+        return self._names.get(key, key)
+
+    def take_gone(self) -> frozenset[str]:
+        """The rows removed from the rewards since the last call, whether a go was
+        running or not (T-1027); clears them."""
+        out = frozenset(self._gone)
+        self._gone.clear()
+        return out
+
+    def _on_profile(self, event: RewardProfileChanged) -> None:
+        self._gone.update(event.removed)
+
     def _credit(self, key: str, name: str, amount: float) -> None:
+        self._pending[key] = self._pending.get(key, 0.0) + amount
+        if name != key or key not in self._names:  # a payment sent with no name keeps the old
+            self._names[key] = name
         had = self._earned.get(key)
         if had is None:
             self._earned[key] = Earning(key, name, 1, amount)
@@ -171,16 +202,21 @@ class EpisodeSignals:
         self._last_reset_ids = ()
         self._setbacks = 0
         self._scores = 0
+        self._pending = {}
+        self._parts = ()
         self._listening = True
 
     def stop(self) -> None:
         self._listening = False
 
     def take(self) -> tuple[float, int]:
-        """(reward, resets) since the last take; clears both."""
+        """(reward, resets) since the last take; clears both. What the reward was made
+        of is in :attr:`parts` until the next take."""
         out = (self._reward, self._resets)
         self._reward = 0.0
         self._resets = 0
+        self._parts = tuple(sorted(self._pending.items()))
+        self._pending = {}
         return out
 
     def watch_scores(self, ids: frozenset[str]) -> None:
@@ -810,6 +846,50 @@ class EpisodeRunner:
             )
         route.lost(LEAD)
 
+    def _rows_gone(self) -> None:
+        """Reward rows have gone since this was last asked (the AI dropped the guess
+        one went by, a person removed one): what they paid is taken out of the way the
+        AI remembers and of this go's own account (T-1027), so that the way is not
+        held to be worth points nothing pays any more."""
+        rows = self._signals.take_gone()
+        route = self._route
+        if not rows or route is None:
+            return
+        had, worth = len(route.moves), route.paid
+        found = route.gone(rows)
+        if not found:
+            return
+        names = ", ".join(sorted(self._signals.name_of(row) for row in found))
+        left = len(route.moves)
+        if not left:
+            log.info(
+                "Gone from the rewards: %s. Nothing else had paid for the way the AI "
+                "remembers (%.1f points), so it forgets that way, and its next go begins "
+                "without one.",
+                names,
+                worth,
+            )
+        elif left < had:
+            log.info(
+                "Gone from the rewards: %s. What that paid is taken out of the way the AI "
+                "remembers: it is worth %.1f points now, not %.1f, and the AI remembers "
+                "%d step%s of it instead of %d, up to where it is paid the most.",
+                names,
+                route.paid,
+                worth,
+                left,
+                "" if left == 1 else "s",
+                had,
+            )
+        else:
+            log.info(
+                "Gone from the rewards: %s. What that paid is taken out of the way the AI "
+                "remembers: it is worth %.1f points now, not %.1f.",
+                names,
+                route.paid,
+                worth,
+            )
+
     def _begin_route(self) -> None:
         """Queue the way remembered from this go's start, if there is one (T-1014).
 
@@ -823,6 +903,7 @@ class EpisodeRunner:
         route = self._route
         if route is None:
             return
+        self._rows_gone()  # a row that went between goes: before the way is played
         start = None
         if self._restored and self._watch is not None and self._harness is not None:
             start = (self._harness.slot, self._harness.taken)
@@ -1433,7 +1514,12 @@ class EpisodeRunner:
         if self._route is not None:
             # What the story has been paid so far (T-1015): the person's rewards, so
             # the way remembered is the best go by what they pay for.
-            self._route.did(action if source == "ai" else None, self._route.counted + reward)
+            self._rows_gone()
+            self._route.did(
+                action if source == "ai" else None,
+                self._route.counted + reward,
+                self._signals.parts,  # what paid this step (T-1027)
+            )
         if action is not None:
             self._actions_seen.add(action)
         if len(self._fingerprint) < FINGERPRINT_STEPS:
@@ -1556,12 +1642,34 @@ class EpisodeRunner:
             self._flush(self._state, done=False)
         self._agent.end_episode(self._reward)  # exploring follows results (T-932)
         self._last_buttons = frozenset()
-        if self._route is not None and self._route.end():
-            log.info(
-                "The AI did better than the way it remembered: it now remembers %d steps "
-                "from the start, and its next go begins by playing them again.",
-                len(self._route.moves),
-            )
+        if self._route is not None:
+            self._rows_gone()
+            had, worth = len(self._route.moves), self._route.paid
+            if self._route.end():
+                log.info(
+                    "The AI did better than the way it remembered: it now remembers %d steps "
+                    "from the start, and its next go begins by playing them again.",
+                    len(self._route.moves),
+                )
+            elif self._route.shortened and self._route.moves:
+                log.info(
+                    "Played again, the way the AI remembers was paid less than the %.1f "
+                    "points it was remembered for: something that paid for it then pays no "
+                    "longer. It now remembers %d step%s of it instead of %d, up to where it "
+                    "was paid the most this time (%.1f points).",
+                    worth,
+                    len(self._route.moves),
+                    "" if len(self._route.moves) == 1 else "s",
+                    had,
+                    self._route.paid,
+                )
+            elif self._route.shortened:
+                log.info(
+                    "Played again, the way the AI remembers was paid nothing (it was "
+                    "remembered for %.1f points): what paid for it then pays no longer. "
+                    "The AI forgets that way, and its next go begins without one.",
+                    worth,
+                )
         result = EpisodeResult(
             self._steps,
             self._frames,

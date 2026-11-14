@@ -340,6 +340,19 @@ def test_new_ground_is_paid_as_the_game_has_it(report: Report) -> None:
 
 
 @pytest.mark.slow
+def test_the_ground_holds_through_going_back() -> None:
+    """T-1023: longer goes on the same level, with everything a go does switched on:
+    it goes back to a saved moment dozens of times, after a life lost and where it
+    stands still. Each time the tracker used to start afresh and the look after read
+    as no move, so up to a step of the camera's travel dropped out of the count, and
+    in these twelve goes the furthest ground counted matched the game's own in three.
+    The tracker now starts from the screen of the moment gone back to."""
+    far = run(goes=12, seed=3, algorithm="q_table", max_steps=300)
+    assert far.ways_sought >= 30  # it goes back often
+    assert far.ground_goes == 12 and far.ground_right >= 11
+
+
+@pytest.mark.slow
 def test_every_go_that_finishes_a_level_is_counted(monkeypatch: pytest.MonkeyPatch) -> None:
     """T-1015: the flag is brought to just beyond the first gap, so short goes finish levels."""
     from retro_ai_lab.emulator.fake import toy_hopper
