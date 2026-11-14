@@ -288,6 +288,23 @@ holding right instead of what it did, with right + a for 4 steps..."),
 and each go's line ends with how often it went back and what it found.
 Nothing is saved while you play yourself.
 
+A game does not take the life the moment the mistake is made. The player
+falls, or the game plays the dying out, and only then does the counter drop:
+on Super Mario Bros. about 50 steps later. Nothing pressed in that time
+changes anything, and going back 30 steps from the counter lands in the
+middle of it. So before it searches, the AI finds out where that time began.
+It plays what it did again from a saved moment with another button held from
+some step on, and narrows down the first step from which the life goes on the
+very same step whatever is pressed. Then it goes back to a saved moment before
+that step, as far back as its six saved moments reach (100 to 119 steps), and
+tries its changes before that step only. The log says what it found ("Lost a
+life at step 74. That was settled 53 steps before: nothing pressed from then
+on changes it (87 plays, 0.1 s to find out). The AI goes back 74 steps, not
+34, and tries its changes before then."). That line is from the practice
+game; on a real game the plays take some seconds. Finding this out may take
+as long as one search, so a life lost can hold the game up for 30 seconds at
+the most, where it was 15.
+
 A brain that has lost lives at a spot can turn timid: it stops short and
 waits, loses nothing, and so never finds the way past. Where the AI can go
 back, it does not let that stand. When a go has been paid nothing for 24
