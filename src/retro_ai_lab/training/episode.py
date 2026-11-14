@@ -36,10 +36,12 @@ from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.goals import ObjectiveCompleted, ObjectiveSetback
 from retro_ai_lab.services.observer import ButtonsHeld, GroundCovered, ObservationService
 from retro_ai_lab.services.rewards import (
-    KEPT_KINDS,
     GoStarted,
+    MomentSaved,
+    PaidAgain,
     RewardEarned,
     RewardProfileChanged,
+    WentBack,
 )
 from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.training.moments import LEAD, Moment, Moments
@@ -116,6 +118,18 @@ def describe_earned(earned: Iterable[Earning], most: int | None = 3) -> str:
     return ", ".join(words)
 
 
+def _with(
+    parts: tuple[tuple[str, float], ...], more: tuple[tuple[str, float], ...]
+) -> tuple[tuple[str, float], ...]:
+    """``parts`` and ``more`` as one list, a row in both as one figure, in the ids' order."""
+    if not more:
+        return parts
+    both = dict(parts)
+    for row, amount in more:
+        both[row] = both.get(row, 0.0) + amount
+    return tuple(sorted(both.items()))
+
+
 class EpisodeSignals:
     """Adds up the points announced on the bus and notices game restarts."""
 
@@ -135,10 +149,12 @@ class EpisodeSignals:
         # payments come in, and handed over with the reward at each take().
         self._pending: dict[str, float] = {}
         self._parts: tuple[tuple[str, float], ...] = ()
+        self._pending_again: dict[str, float] = {}  # what a straight go would be paid too
+        self._again: tuple[tuple[str, float], ...] = ()
         self._names: dict[str, str] = {}  # each row's name as it was last paid under
         self._gone: set[str] = set()  # rows removed from the rewards since last asked
-        self._kept: set[str] = set()  # rows whose count stays when the game is put back
         bus.subscribe(RewardEarned, self._on_reward)
+        bus.subscribe(PaidAgain, self._on_again)
         bus.subscribe(RewardProfileChanged, self._on_profile)
         bus.subscribe(ObjectiveCompleted, self._on_completed)
         bus.subscribe(ObjectiveSetback, self._on_setback)
@@ -176,11 +192,12 @@ class EpisodeSignals:
         return self._parts
 
     @property
-    def kept(self) -> frozenset[str]:
-        """The reward rows seen to pay for something whose count stays with the go
-        when the game is put back to a saved moment: new ground, a progress number,
-        the score (T-1028). They pay only past the go's best."""
-        return frozenset(self._kept)
+    def again(self) -> tuple[tuple[str, float], ...]:
+        """What a go played straight through would have been paid on top of the reward
+        last taken (T-1028), by reward row: after the game was put back to a saved
+        moment the go gets again what it was paid for before, and is paid nothing.
+        Empty in a go that never went back."""
+        return self._again
 
     def name_of(self, key: str) -> str:
         """The name a row was last paid under; its id while it has never paid."""
@@ -217,6 +234,8 @@ class EpisodeSignals:
         self._scores = 0
         self._pending = {}
         self._parts = ()
+        self._pending_again = {}
+        self._again = ()
         self._listening = True
 
     def stop(self) -> None:
@@ -224,12 +243,15 @@ class EpisodeSignals:
 
     def take(self) -> tuple[float, int]:
         """(reward, resets) since the last take; clears both. What the reward was made
-        of is in :attr:`parts` until the next take."""
+        of is in :attr:`parts` until the next take, and what a go played straight would
+        have been paid on top of it in :attr:`again`."""
         out = (self._reward, self._resets)
         self._reward = 0.0
         self._resets = 0
         self._parts = tuple(sorted(self._pending.items()))
         self._pending = {}
+        self._again = tuple(sorted(self._pending_again.items()))
+        self._pending_again = {}
         return out
 
     def watch_scores(self, ids: frozenset[str]) -> None:
@@ -267,13 +289,21 @@ class EpisodeSignals:
             return
         self._reward += event.amount
         ids = event.behaviour_ids
-        if event.event.kind in KEPT_KINDS:
-            self._kept.update(ids)
         shares = event.shares if len(event.shares) == len(ids) else ()
         names = event.names if len(event.names) == len(ids) else ()
         for i, bid in enumerate(ids):
             share = shares[i] if shares else event.amount / len(ids)
             self._credit(bid, names[i] if names else bid, share)
+
+    def _on_again(self, event: PaidAgain) -> None:
+        """Not pay: what the same moves played straight would be paid here (T-1028)."""
+        if not self._listening:
+            return
+        ids = event.behaviour_ids
+        shares = event.shares if len(event.shares) == len(ids) else ()
+        for i, bid in enumerate(ids):
+            share = shares[i] if shares else event.amount / len(ids)
+            self._pending_again[bid] = self._pending_again.get(bid, 0.0) + share
 
     def _on_completed(self, event: ObjectiveCompleted) -> None:
         if self._listening:
@@ -1203,6 +1233,8 @@ class EpisodeRunner:
             self._signals.stop()
             return False
         moments.saved(self._watch.mark() if self._watch is not None else None)
+        # The counts that pay are kept with the moment too (T-1028).
+        self._bus.publish(MomentSaved(moments.kept[-1].step))
         return True
 
     def _way_back(
@@ -1420,7 +1452,9 @@ class EpisodeRunner:
                 self._watch.back_to(moment.mark)
         self._unseen_lost = self._unseen_scored = 0
         if self._route is not None:
-            self._route.went_back(moments.steps - moment.step, self._signals.kept)
+            self._route.went_back(moments.steps - moment.step)
+        # The story's own counts go back with the game; the go's stay (T-1028).
+        self._bus.publish(WentBack(moment.step))
         moments.went_back(moment)
         self._stood_at = None  # wherever it stood, the game is somewhere else now (T-1018)
         self._stood_for = 0
@@ -1490,8 +1524,9 @@ class EpisodeRunner:
                 # New ground the look found is paid before this step's reward is
                 # collected, so it lands in the step that got there (T-993).
                 steps = self._watch.take_new_ground()
-                if steps:
-                    self._bus.publish(GroundCovered(self._observation.frame, steps))
+                again = self._watch.take_ground_again()  # walked before a going back
+                if steps or again:
+                    self._bus.publish(GroundCovered(self._observation.frame, steps, again))
                 if self._stand_after and self._moments is not None and self._ways_per_go:
                     self._note_place(steps)
         self._stood_for += 1
@@ -1530,10 +1565,14 @@ class EpisodeRunner:
             # What the story has been paid so far (T-1015): the person's rewards, so
             # the way remembered is the best go by what they pay for.
             self._rows_gone()
+            # After a going back the go is paid nothing for what it gets a second
+            # time; the same moves played straight would be, and that is what the
+            # story is held to be worth (T-1028).
+            told = self._signals.again
             self._route.did(
                 action if source == "ai" else None,
-                self._route.counted + reward,
-                self._signals.parts,  # what paid this step (T-1027)
+                self._route.counted + reward + sum(amount for _, amount in told),
+                _with(self._signals.parts, told),  # what paid this step (T-1027)
             )
         if action is not None:
             self._actions_seen.add(action)

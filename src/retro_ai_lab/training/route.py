@@ -83,22 +83,6 @@ def _parts(value: object) -> Parts:
     return tuple(out)
 
 
-def _rows(value: object, what: str) -> frozenset[str]:
-    if isinstance(value, str) or not isinstance(value, Iterable):
-        raise ConfigurationError(f"{what} are a list of their ids.")
-    rows = frozenset(value)
-    if any(not isinstance(row, str) for row in rows):
-        raise ConfigurationError("A reward row's id is text.")
-    return rows
-
-
-def _added(parts: Parts, more: dict[str, float]) -> Parts:
-    """``parts`` with ``more`` added row by row; a row not among them comes after."""
-    left = dict(more)
-    out = [(row, amount + left.pop(row, 0.0)) for row, amount in parts]
-    return (*out, *sorted(left.items()))
-
-
 def _take_out(paid: list[float], by: list[Parts], rows: frozenset[str]) -> set[str]:
     """Take what ``rows`` paid out of ``paid`` (a running total, step by step) and out
     of ``by`` (what paid each step). Returns the rows that had paid for something."""
@@ -129,9 +113,6 @@ class Route:
         # it has played nothing but the way (T-1026).
         self._again: list[float] = []
         self._again_by: list[Parts] = []
-        # What rows that keep their count paid for the steps gone back over and not
-        # yet walked again, a step to come each, in the order they were played (T-1028).
-        self._owed: list[Parts] = []
         self._on_way = False
         self._shortened = 0
 
@@ -190,7 +171,6 @@ class Route:
         go is remembered. A way remembered from another start is forgotten.
         """
         self._cut_story(0)
-        self._owed.clear()
         self._live = start is not None
         self._playing = 0
         self._again.clear()
@@ -220,12 +200,7 @@ class Route:
         if move is None:
             self._live = False
             return
-        whole = _whole(move, "A move")
-        if self._owed:
-            back = self._back(parts)
-            paid += sum(back.values())
-            parts = _added(parts, back)
-        self._story.append(whole)
+        self._story.append(_whole(move, "A move"))
         self._story_paid.append(paid)
         self._story_by.append(parts)
         at = len(self._story) - 1
@@ -240,51 +215,14 @@ class Route:
         else:
             self._on_way = False  # it has played something else: no longer the way's pay
 
-    def went_back(self, steps: int, kept: Iterable[str] = ()) -> None:
-        """The game was put back ``steps`` steps: they are no longer the story.
-
-        ``kept`` are the reward rows whose count stays with the go when the game is
-        put back (new ground, a progress number, the score: they pay only past the
-        go's best). What they paid for the steps gone back over will not be paid
-        again, though a go playing the story straight through would be paid it. It
-        is owed to the story (T-1028) and comes back step for step as the story
-        goes on, each step with what the step gone back over in its place had been
-        paid: the story is taken to cover the same ground again at the pace it did.
-        A row that pays by itself brings all that is still owed for it, because the
-        go is then past its best in that row again, and from there the story has
-        exactly what the same moves played straight would be paid.
-        """
+    def went_back(self, steps: int) -> None:
+        """The game was put back ``steps`` steps: they are no longer the story."""
         _whole(steps, "The steps gone back")
-        rows = _rows(kept, "The rows that keep their count")
         if not self._live:
             return
         if steps > len(self._story):
             raise ConfigurationError("The story is not that long.")
-        keep = len(self._story) - steps
-        self._owed[:0] = [
-            tuple(part for part in parts if part[0] in rows) for parts in self._story_by[keep:]
-        ]
-        if not any(self._owed):
-            self._owed.clear()
-        self._cut_story(keep)
-
-    def _back(self, parts: Parts) -> dict[str, float]:
-        """What the story is owed that comes back with the step being played, by row:
-        what the step gone back over that this one stands for had been paid, and, for
-        a row that pays this step by itself, all that is still owed for it (the go is
-        past its best in it again)."""
-        back: dict[str, float] = {}
-        for row, amount in self._owed.pop(0):
-            back[row] = back.get(row, 0.0) + amount
-        for row in {row for row, _ in parts}:
-            for at, entry in enumerate(self._owed):
-                if any(name == row for name, _ in entry):
-                    rest = sum(amount for name, amount in entry if name == row)
-                    back[row] = back.get(row, 0.0) + rest
-                    self._owed[at] = tuple(part for part in entry if part[0] != row)
-        if not any(self._owed):
-            self._owed.clear()
-        return back
+        self._cut_story(len(self._story) - steps)
 
     def lost(self, lead: int) -> None:
         """A life was lost and the loss stands: the story ends ``lead`` steps before
@@ -322,11 +260,11 @@ class Route:
         and is no way with nothing above zero. Returns the rows that had paid for
         something in the way: none, and the way is as it was.
         """
-        rows = _rows(ids, "The rows that went")
-        # Nor is anything owed for them (T-1028).
-        self._owed = [tuple(part for part in entry if part[0] not in rows) for entry in self._owed]
-        if not any(self._owed):
-            self._owed.clear()
+        if isinstance(ids, str) or not isinstance(ids, Iterable):
+            raise ConfigurationError("The rows that went are a list of their ids.")
+        rows = frozenset(ids)
+        if any(not isinstance(row, str) for row in rows):
+            raise ConfigurationError("A reward row's id is text.")
         _take_out(self._story_paid, self._story_by, rows)
         _take_out(self._again, self._again_by, rows)
         found = frozenset(_take_out(self._paid, self._by, rows))

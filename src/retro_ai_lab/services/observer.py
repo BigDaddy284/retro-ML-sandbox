@@ -70,10 +70,15 @@ class GroundCovered:
 
     Published by the episode runner after a look and before the step's reward is
     collected, so the pay lands in the step that got there.
+
+    ``again`` are steps the go had been paid for before it was put back to a saved
+    moment and is covering a second time (T-1028): nothing is paid for them, and a
+    go played straight through would be paid them here.
     """
 
     frame: int
     steps: int
+    again: int = 0
 
 
 class ObservationService:
