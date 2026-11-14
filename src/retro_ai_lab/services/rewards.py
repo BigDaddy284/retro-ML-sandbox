@@ -64,6 +64,10 @@ PAST_BEST_KINDS = frozenset({EventKind.PROGRESS, EventKind.SCORE_GAIN})
 # first time: paid at every flip, the two flags a jump button flips earned about 80
 # points a go on the practice game, for jumping on the spot.
 ONCE_A_GO_KINDS = frozenset({EventKind.FLAG_ON, EventKind.FLAG_OFF})
+# Events whose count stays with the go when the game is put back to a saved moment
+# (T-1028): the go's best is not put back, nor is the ground it has reached (T-1000),
+# so what these paid for the steps gone back over is not paid a second time.
+KEPT_KINDS = PAST_BEST_KINDS | {EventKind.NEW_GROUND}
 
 
 @dataclass(frozen=True, slots=True)

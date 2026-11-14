@@ -35,7 +35,12 @@ from retro_ai_lab.services.discovery import DiscoveryUpdated
 from retro_ai_lab.services.experiments import ExperimentHarness
 from retro_ai_lab.services.goals import ObjectiveCompleted, ObjectiveSetback
 from retro_ai_lab.services.observer import ButtonsHeld, GroundCovered, ObservationService
-from retro_ai_lab.services.rewards import GoStarted, RewardEarned, RewardProfileChanged
+from retro_ai_lab.services.rewards import (
+    KEPT_KINDS,
+    GoStarted,
+    RewardEarned,
+    RewardProfileChanged,
+)
 from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.training.moments import LEAD, Moment, Moments
 from retro_ai_lab.training.route import Route
@@ -132,6 +137,7 @@ class EpisodeSignals:
         self._parts: tuple[tuple[str, float], ...] = ()
         self._names: dict[str, str] = {}  # each row's name as it was last paid under
         self._gone: set[str] = set()  # rows removed from the rewards since last asked
+        self._kept: set[str] = set()  # rows whose count stays when the game is put back
         bus.subscribe(RewardEarned, self._on_reward)
         bus.subscribe(RewardProfileChanged, self._on_profile)
         bus.subscribe(ObjectiveCompleted, self._on_completed)
@@ -168,6 +174,13 @@ class EpisodeSignals:
         goal step's is ``step:`` and its id, a setback's penalty with it) and what it
         gave, in the ids' order."""
         return self._parts
+
+    @property
+    def kept(self) -> frozenset[str]:
+        """The reward rows seen to pay for something whose count stays with the go
+        when the game is put back to a saved moment: new ground, a progress number,
+        the score (T-1028). They pay only past the go's best."""
+        return frozenset(self._kept)
 
     def name_of(self, key: str) -> str:
         """The name a row was last paid under; its id while it has never paid."""
@@ -254,6 +267,8 @@ class EpisodeSignals:
             return
         self._reward += event.amount
         ids = event.behaviour_ids
+        if event.event.kind in KEPT_KINDS:
+            self._kept.update(ids)
         shares = event.shares if len(event.shares) == len(ids) else ()
         names = event.names if len(event.names) == len(ids) else ()
         for i, bid in enumerate(ids):
@@ -1405,7 +1420,7 @@ class EpisodeRunner:
                 self._watch.back_to(moment.mark)
         self._unseen_lost = self._unseen_scored = 0
         if self._route is not None:
-            self._route.went_back(moments.steps - moment.step)
+            self._route.went_back(moments.steps - moment.step, self._signals.kept)
         moments.went_back(moment)
         self._stood_at = None  # wherever it stood, the game is somewhere else now (T-1018)
         self._stood_for = 0

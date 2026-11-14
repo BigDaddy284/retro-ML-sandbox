@@ -83,6 +83,15 @@ def _parts(value: object) -> Parts:
     return tuple(out)
 
 
+def _rows(value: object, what: str) -> frozenset[str]:
+    if isinstance(value, str) or not isinstance(value, Iterable):
+        raise ConfigurationError(f"{what} are a list of their ids.")
+    rows = frozenset(value)
+    if any(not isinstance(row, str) for row in rows):
+        raise ConfigurationError("A reward row's id is text.")
+    return rows
+
+
 def _take_out(paid: list[float], by: list[Parts], rows: frozenset[str]) -> set[str]:
     """Take what ``rows`` paid out of ``paid`` (a running total, step by step) and out
     of ``by`` (what paid each step). Returns the rows that had paid for something."""
@@ -113,6 +122,9 @@ class Route:
         # it has played nothing but the way (T-1026).
         self._again: list[float] = []
         self._again_by: list[Parts] = []
+        # What rows that keep their count were paid for steps gone back over, and
+        # have not been paid again since (T-1028).
+        self._owed: dict[str, float] = {}
         self._on_way = False
         self._shortened = 0
 
@@ -171,6 +183,7 @@ class Route:
         go is remembered. A way remembered from another start is forgotten.
         """
         self._cut_story(0)
+        self._owed.clear()
         self._live = start is not None
         self._playing = 0
         self._again.clear()
@@ -200,7 +213,17 @@ class Route:
         if move is None:
             self._live = False
             return
-        self._story.append(_whole(move, "A move"))
+        whole = _whole(move, "A move")
+        if any(row in self._owed for row, _ in parts):
+            # A row pays again that is owed something for steps gone back over.
+            back, more = 0.0, []
+            for row, amount in parts:
+                due = self._owed.pop(row, 0.0)
+                back += due
+                more.append((row, amount + due))
+            paid += back
+            parts = tuple(more)
+        self._story.append(whole)
         self._story_paid.append(paid)
         self._story_by.append(parts)
         at = len(self._story) - 1
@@ -215,14 +238,28 @@ class Route:
         else:
             self._on_way = False  # it has played something else: no longer the way's pay
 
-    def went_back(self, steps: int) -> None:
-        """The game was put back ``steps`` steps: they are no longer the story."""
+    def went_back(self, steps: int, kept: Iterable[str] = ()) -> None:
+        """The game was put back ``steps`` steps: they are no longer the story.
+
+        ``kept`` are the reward rows whose count stays with the go when the game is
+        put back (new ground, a progress number, the score: they pay only past the
+        go's best). What they paid for the steps gone back over will not be paid
+        again, though a go playing the story straight through would be paid it: it
+        is owed to the story, and comes back with the step at which the row next
+        pays, which is the go getting past its best again (T-1028).
+        """
         _whole(steps, "The steps gone back")
+        rows = _rows(kept, "The rows that keep their count")
         if not self._live:
             return
         if steps > len(self._story):
             raise ConfigurationError("The story is not that long.")
-        self._cut_story(len(self._story) - steps)
+        keep = len(self._story) - steps
+        for parts in self._story_by[keep:]:
+            for row, amount in parts:
+                if row in rows:
+                    self._owed[row] = self._owed.get(row, 0.0) + amount
+        self._cut_story(keep)
 
     def lost(self, lead: int) -> None:
         """A life was lost and the loss stands: the story ends ``lead`` steps before
@@ -260,11 +297,9 @@ class Route:
         and is no way with nothing above zero. Returns the rows that had paid for
         something in the way: none, and the way is as it was.
         """
-        if isinstance(ids, str) or not isinstance(ids, Iterable):
-            raise ConfigurationError("The rows that went are a list of their ids.")
-        rows = frozenset(ids)
-        if any(not isinstance(row, str) for row in rows):
-            raise ConfigurationError("A reward row's id is text.")
+        rows = _rows(ids, "The rows that went")
+        for row in rows:
+            self._owed.pop(row, None)  # nor is anything owed for it (T-1028)
         _take_out(self._story_paid, self._story_by, rows)
         _take_out(self._again, self._again_by, rows)
         found = frozenset(_take_out(self._paid, self._by, rows))
