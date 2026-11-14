@@ -52,13 +52,12 @@ def test_a_go_that_went_back_is_counted_like_one_played_straight(lab: Lab) -> No
     r.go_back(moment)
     assert route.counted == straight[9] and len(route.story) == 10
     again = walked(STEPS - 10)
-    # Until it is past where it had been, the ground it walks pays nothing ...
-    past = next(at for at in range(20, STEPS) if straight[at] > straight[19])
-    assert again[: past - 10] == [straight[9]] * (past - 10)
-    # ... and from the first step of new ground on, the story is paid what the walk
-    # played straight is paid: the ground gone back over is in it again.
-    assert again[past - 10 :] == straight[past:]
-    assert past < STEPS - 1 and again[-1] == straight[-1]
+    # The ground it walks a second time pays the go nothing: it has been there.
+    assert r.reward == straight[-1]
+    # The story is paid for it, step for step what the walk played straight is paid,
+    # and goes on from there as that one does.
+    assert again == straight[10:]
+    assert straight[-1] > straight[19]  # it got past where it had been
     assert lab.game.state.lives == 3 and r.times_back == 1
     # It becomes the way with that figure, every point of it new ground's.
     r.finish()
