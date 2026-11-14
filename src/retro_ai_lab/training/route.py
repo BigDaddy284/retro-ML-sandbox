@@ -27,6 +27,18 @@ button is named here.
 
 Only moves the AI made itself can be played again. A step somebody else drove,
 or a button pressed to get a stuck game going, ends the story where it is.
+
+A way is worth what it is paid now (T-1026). What a go is paid changes under it:
+the AI drops a guess a reward went by, a goal is reached once and for all. A way
+remembered with such pay in it kept the old figure, and no later go could match
+it: on one practice level nine goes in a row got further than the way and were
+turned down. So while a go plays the way it began with, the route notes what the
+go has been paid after each step of it, and a go that played all of it and was
+paid less for it than the way was remembered for makes the way again: that go's
+figures, up to the step at which it had been paid the most. A way paid as much
+at its end as it was remembered for, or more, is left as it is: played again a
+way is often paid more (the go that found it went back, and ground walked again
+is not paid twice), and that says nothing against it.
 """
 
 from __future__ import annotations
@@ -60,6 +72,11 @@ class Route:
         self._story_paid: list[float] = []
         self._live = False  # the story can still be added to
         self._playing = 0  # steps of the way this go began with
+        # What this go had been paid after each step of the way, noted for as long as
+        # it has played nothing but the way (T-1026).
+        self._again: list[float] = []
+        self._on_way = False
+        self._shortened = 0
 
     # ------------------------------------------------------------ what is remembered
 
@@ -88,6 +105,12 @@ class Route:
         """How many steps of the remembered way this go began with."""
         return self._playing
 
+    @property
+    def shortened(self) -> int:
+        """How many steps the way lost when the last go ended, because played again
+        they were paid nothing more (T-1026). 0 from the next go's beginning."""
+        return self._shortened
+
     def forget(self) -> None:
         """Drop the remembered way: it no longer leads anywhere."""
         self._moves.clear()
@@ -108,6 +131,9 @@ class Route:
         self._story_paid.clear()
         self._live = start is not None
         self._playing = 0
+        self._again.clear()
+        self._on_way = True
+        self._shortened = 0
         if start is None:
             return ()
         if start != self._start:
@@ -130,6 +156,16 @@ class Route:
             return
         self._story.append(_whole(move, "A move"))
         self._story_paid.append(paid)
+        at = len(self._story) - 1
+        if (
+            self._on_way
+            and at == len(self._again)  # no step has been gone back over
+            and at < len(self._moves)
+            and self._moves[at] == move
+        ):
+            self._again.append(paid)
+        else:
+            self._on_way = False  # it has played something else: no longer the way's pay
 
     def went_back(self, steps: int) -> None:
         """The game was put back ``steps`` steps: they are no longer the story."""
@@ -182,9 +218,14 @@ class Route:
         was paid in this go, not in the go it came from: a reward paid once only (a
         goal reached for the first time) would otherwise leave a way no later go can
         match.
+
+        Before that, a way this go played whole and was paid less for than it was
+        remembered for is made again from this go (T-1026, :meth:`_paid_now`).
         """
         story, paid = self._story, self._story_paid
         self._live = False
+        again, self._again = self._again, []  # a second end() has nothing to go by
+        self._paid_now(again)
         if not paid or self._start is None:
             return False
         best = max(paid)
@@ -197,7 +238,30 @@ class Route:
             return False
         self._moves = story[:upto]
         self._paid = paid[:upto]
+        self._shortened = 0  # whatever was dropped above, this is another way
         return True
+
+    def _paid_now(self, again: list[float]) -> None:
+        """The go is over, and ``again`` is what it had been paid after each step of the
+        way while it played nothing else. If that is the whole way the go began with
+        (a way cut for a lost life in this go ends where the loss says, and is left)
+        and the go was paid less at its end than the way was remembered for, the way
+        becomes what this go says of it: its moves up to the first step at which the
+        go had been paid the most, with this go's figures. With nothing paid above
+        zero there is no way.
+
+        A way paid as much at its end, or more, is left as it is remembered.
+        """
+        was = len(self._moves)
+        if not was or len(again) != was or was != self._playing:
+            return
+        if again[-1] >= self._paid[-1]:
+            return
+        most = max(again)
+        keep = again.index(most) + 1 if most > 0 else 0
+        self._shortened = was - keep
+        self._moves = self._moves[:keep]
+        self._paid = again[:keep]
 
 
 __all__ = ["Route"]

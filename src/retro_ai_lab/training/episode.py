@@ -1556,12 +1556,32 @@ class EpisodeRunner:
             self._flush(self._state, done=False)
         self._agent.end_episode(self._reward)  # exploring follows results (T-932)
         self._last_buttons = frozenset()
-        if self._route is not None and self._route.end():
-            log.info(
-                "The AI did better than the way it remembered: it now remembers %d steps "
-                "from the start, and its next go begins by playing them again.",
-                len(self._route.moves),
-            )
+        if self._route is not None:
+            had, worth = len(self._route.moves), self._route.paid
+            if self._route.end():
+                log.info(
+                    "The AI did better than the way it remembered: it now remembers %d steps "
+                    "from the start, and its next go begins by playing them again.",
+                    len(self._route.moves),
+                )
+            elif self._route.shortened and self._route.moves:
+                log.info(
+                    "Played again, the way the AI remembers was paid less than the %.1f "
+                    "points it was remembered for: something that paid for it then pays no "
+                    "longer. It now remembers %d steps of it instead of %d, up to where it "
+                    "was paid the most this time (%.1f points).",
+                    worth,
+                    len(self._route.moves),
+                    had,
+                    self._route.paid,
+                )
+            elif self._route.shortened:
+                log.info(
+                    "Played again, the way the AI remembers was paid nothing (it was "
+                    "remembered for %.1f points): what paid for it then pays no longer. "
+                    "The AI forgets that way, and its next go begins without one.",
+                    worth,
+                )
         result = EpisodeResult(
             self._steps,
             self._frames,
