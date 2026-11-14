@@ -72,7 +72,7 @@ def test_no_change_is_tried_after_the_last_chance(
     out = look_for(hopper, trace, object, live=6, plain=right, budget=6)
     assert out == Search(None, 6)
     assert [moves for moves, _ in script.calls] == (
-        [(right,) * (10 + CARRY_ON)] + applied(plain, 8)[:2] + applied(trace, 6)[:3]
+        [(right,) * (10 + CARRY_ON), *applied(plain, 8)[:2], *applied(trace, 6)[:3]]
     )
     assert PLAIN_SHARE == 0.5
 
