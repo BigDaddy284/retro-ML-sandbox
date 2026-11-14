@@ -30,9 +30,12 @@ from retro_ai_lab.services.observer import (
 from retro_ai_lab.services.rewards import (
     ExploitSuspected,
     GoStarted,
+    MomentSaved,
+    PaidAgain,
     RewardEarned,
     RewardProfileChanged,
     RewardService,
+    WentBack,
 )
 
 __all__ = [
@@ -56,9 +59,11 @@ __all__ = [
     "GroundCovered",
     "InputRecorded",
     "MemoryObserved",
+    "MomentSaved",
     "ObjectiveCompleted",
     "ObjectiveSetback",
     "ObservationService",
+    "PaidAgain",
     "RewardEarned",
     "RewardProfileChanged",
     "RewardService",
@@ -66,5 +71,6 @@ __all__ = [
     "Session",
     "Trial",
     "TriggerOption",
+    "WentBack",
     "constant_plan",
 ]

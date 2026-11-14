@@ -127,6 +127,7 @@ class ScreenWatch:
         # The new ground the go covers (T-993).
         self._ground = Ground()
         self._new_ground = 0  # steps found since the last take
+        self._ground_again = 0  # steps the story covered again since the last take (T-1028)
         self._jolt_at: int | None = None  # the last jolt that found it somewhere else
         self._prior_box: Box | None = None  # its last sighting before this look
         self._lost_at: int | None = None  # the last look that heard of a life lost
@@ -241,6 +242,13 @@ class ScreenWatch:
         new, self._new_ground = self._new_ground, 0
         return new
 
+    def take_ground_again(self) -> int:
+        """The steps found since the last call that the go had been paid for before it
+        was put back to a saved moment (T-1028): a go played straight would be paid
+        them here. Given once; nothing in a go that never went back."""
+        again, self._ground_again = self._ground_again, 0
+        return again
+
     def begin_go(self) -> None:
         """A go starts from the checkpoint: new tracks, the player looked for afresh."""
         self._tracker.reset()
@@ -248,6 +256,7 @@ class ScreenWatch:
         self._memory = None  # the game was put to its start: no move to read across that
         self._ground.begin()
         self._new_ground = 0
+        self._ground_again = 0
         self._jolt_at = None
         self._prior_box = None
         self._lost_at = None
@@ -499,6 +508,7 @@ class ScreenWatch:
             new = self._ground.look(moved, (x + w // 2, y + h // 2), max(w, h))
         if self.follows_camera:
             self._new_ground += new  # otherwise counted and not paid, now or later
+            self._ground_again += self._ground.again
 
     def _elsewhere(self) -> bool:
         """It is seen further than its own size from where it was last seen."""

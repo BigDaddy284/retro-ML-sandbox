@@ -51,6 +51,36 @@ class RewardEarned:
 
 
 @dataclass(frozen=True, slots=True)
+class PaidAgain:
+    """What a go played straight through would be paid here and this go is not
+    (T-1028): it was put back to a saved moment and is getting again what it was paid
+    for before (ground, a progress number or the score up to the go's best, a switch
+    flipped the first time). Nobody is paid. It is for whoever keeps the story of
+    the go, so that a go that went back can be held against one that did not."""
+
+    frame: int
+    amount: float
+    behaviour_ids: tuple[str, ...]
+    shares: tuple[float, ...] = ()  # what each behaviour would give, same order
+
+
+@dataclass(frozen=True, slots=True)
+class MomentSaved:
+    """The runner saved the game to go back to (T-1028). ``step`` is how many steps of
+    the go's story had been played, and names the moment."""
+
+    step: int
+
+
+@dataclass(frozen=True, slots=True)
+class WentBack:
+    """The runner put the game back to the moment saved at ``step`` (T-1028): the
+    story of the go is what had been played by then."""
+
+    step: int
+
+
+@dataclass(frozen=True, slots=True)
 class GoStarted:
     """A go began (T-878): progress and score start earning from scratch."""
 
@@ -113,6 +143,15 @@ class RewardService:
         self._held: frozenset[str] = frozenset()  # the step before's buttons (T-874)
         self._best: dict[str, int] = {}  # per go: the best each progress/score reached
         self._happened: set[tuple[EventKind, str | None]] = set()  # per go: switches paid
+        # The same two for the story of the go (T-1028): they go back with the game
+        # when it is put back to a saved moment, where the go's own stay. What they
+        # were at each saved moment is kept by the moment's step.
+        self._story_best: dict[str, int] = {}
+        self._story_happened: set[tuple[EventKind, str | None]] = set()
+        self._moments: dict[int, tuple[dict[str, int], frozenset[tuple[EventKind, str | None]]]]
+        self._moments = {}
+        bus.subscribe(MomentSaved, self._on_moment_saved)
+        bus.subscribe(WentBack, self._on_went_back)
         bus.subscribe(EmulatorConnected, self._on_connected)
         bus.subscribe(EmulatorDisconnected, self._on_disconnected)
         bus.subscribe(ButtonsHeld, self._on_buttons_held)
@@ -340,6 +379,7 @@ class RewardService:
         self._tally.reset()
         self._best.clear()
         self._happened.clear()
+        self._forget_story()
         self._enabled = event.capabilities.memory_read
         if not self._enabled:
             self._profile = None
@@ -393,41 +433,78 @@ class RewardService:
     def _on_go_started(self, event: GoStarted) -> None:
         self._best.clear()
         self._happened.clear()
+        self._forget_story()
         # A go starts from its checkpoint with nothing held the step before: its first
         # step is not a repeat of the last go's last buttons (T-983 turned this up).
         self._held = frozenset()
 
-    def _beats_best(self, game_event: GameEvent) -> bool:
-        """Remember the value and say whether it is the go's best so far (T-878)."""
+    def _forget_story(self) -> None:
+        self._story_best.clear()
+        self._story_happened.clear()
+        self._moments.clear()
+
+    def _on_moment_saved(self, event: MomentSaved) -> None:
+        self._moments[event.step] = (dict(self._story_best), frozenset(self._story_happened))
+
+    def _on_went_back(self, event: WentBack) -> None:
+        """The story's counts are what they were at the moment gone back to (T-1028);
+        the go's stay. Moments saved after it are no longer the story. A moment nobody
+        named changes nothing: the story then earns nothing the go does not."""
+        kept = self._moments.get(event.step)
+        if kept is None:
+            return
+        self._story_best, self._story_happened = dict(kept[0]), set(kept[1])
+        for step in [step for step in self._moments if step > event.step]:
+            del self._moments[step]
+
+    @staticmethod
+    def _beats_best(best: dict[str, int], game_event: GameEvent) -> bool:
+        """Remember the value and say whether it is the best so far (T-878)."""
         key, value = game_event.variable_id, game_event.after
         if key is None or value is None:
             return True
-        best = self._best.get(key)
-        if best is None or value > best:
-            self._best[key] = value
+        had = best.get(key)
+        if had is None or value > had:
+            best[key] = value
             return True
         return False
 
-    def _first_time(self, game_event: GameEvent) -> bool:
-        """Remember the switch and say whether it went this way before in the go (T-994)."""
+    @staticmethod
+    def _first_time(happened: set[tuple[EventKind, str | None]], game_event: GameEvent) -> bool:
+        """Remember the switch and say whether it went this way before (T-994)."""
         key = (game_event.kind, game_event.variable_id)
-        if key in self._happened:
+        if key in happened:
             return False
-        self._happened.add(key)
+        happened.add(key)
         return True
 
-    def _score(self, game_event: GameEvent) -> None:
+    def _score(self, game_event: GameEvent, *, again: bool = False) -> None:
+        """Pay for ``game_event``. ``again``: the go has been paid for it before it was
+        put back, and only its story has it coming (T-1028): announced, not paid."""
         assert self._profile is not None
-        if game_event.kind in PAST_BEST_KINDS and not self._beats_best(game_event):
-            return
-        if game_event.kind in ONCE_A_GO_KINDS and not self._first_time(game_event):
-            return
+        if game_event.kind in PAST_BEST_KINDS:
+            # Both counts see every event; the story's is never ahead of the go's.
+            told = self._beats_best(self._story_best, game_event)
+            if not self._beats_best(self._best, game_event):
+                if not told:
+                    return
+                again = True
+        if game_event.kind in ONCE_A_GO_KINDS:
+            told = self._first_time(self._story_happened, game_event)
+            if not self._first_time(self._happened, game_event):
+                if not told:
+                    return
+                again = True
         matched = self._profile.matching(game_event)
         if not matched:
             return
         amount = float(sum(b.value for b in matched))
         ids = tuple(b.id for b in matched)
         shares = tuple(float(b.value) for b in matched)
+        if again:
+            if amount != 0.0:
+                self._bus.publish(PaidAgain(game_event.frame, amount, ids, shares))
+            return
         self._tally.record(game_event.frame, amount, ids, shares=shares)
         if amount != 0.0:
             names = tuple(b.name for b in matched)
@@ -453,9 +530,10 @@ class RewardService:
     def _on_ground_covered(self, event: GroundCovered) -> None:
         """Pay each step of new ground the AI's look at the screen found (T-993). The
         row is added the first time there is ground to pay for, unless a person removed
-        it; from then on it is theirs to change like any other."""
+        it; from then on it is theirs to change like any other. Steps covered again
+        after the game was put back are announced and not paid (T-1028)."""
         profile = self._profile
-        if not self._enabled or profile is None or event.steps < 1:
+        if not self._enabled or profile is None or (event.steps < 1 and event.again < 1):
             return
         if ensure_ground_row(profile):
             self._announce(RewardProfileChanged((GROUND_ID,), (), (), "suggestions"))
@@ -464,6 +542,8 @@ class RewardService:
             return
         for _ in range(event.steps):
             self._score(step)
+        for _ in range(event.again):
+            self._score(step, again=True)
 
     def _watch_for_exploits(self, now: int) -> None:
         if self._detector is None:
@@ -501,4 +581,12 @@ class RewardService:
         self._bus.publish(change)
 
 
-__all__ = ["ExploitSuspected", "RewardEarned", "RewardProfileChanged", "RewardService"]
+__all__ = [
+    "ExploitSuspected",
+    "MomentSaved",
+    "PaidAgain",
+    "RewardEarned",
+    "RewardProfileChanged",
+    "RewardService",
+    "WentBack",
+]

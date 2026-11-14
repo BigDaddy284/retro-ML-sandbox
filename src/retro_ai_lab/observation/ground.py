@@ -22,6 +22,13 @@ caller says so with :meth:`Ground.back`, and the place is taken to be where the
 go began: the furthest reached is kept, so ground walked again pays nothing,
 and a new room pays only once it is as far from its door as the go's furthest.
 That under-pays a new room and never pays the same ground twice.
+
+The furthest reached and the steps counted are kept twice (T-1028): for the go,
+which is what pays, and for the story of the go, which goes back with the game
+when it is put back to a saved moment. A go that was put back walks ground it
+has been paid for, and is paid nothing; the same moves played straight from the
+start would be paid there. :attr:`Ground.again` says how many steps that is at
+each look, for whoever compares the go with one played straight.
 """
 
 from __future__ import annotations
@@ -51,11 +58,14 @@ def _pair(value: object, what: str) -> tuple[int, int]:
 class Kept:
     """Where a :class:`Ground` was at one moment (T-1000), to be put back there when
     the game is: the camera's travel, where on the screen the player was first seen,
-    and where it stood from there."""
+    and where it stood from there; and how far the story of the go had got by then
+    and what it had counted (T-1028), in pixels and steps: right, left, down, up."""
 
     camera: tuple[int, int]
     first: tuple[int, int] | None
     offset: tuple[int, int]
+    reach: tuple[int, int, int, int] = (0, 0, 0, 0)
+    counted: tuple[int, int, int, int] = (0, 0, 0, 0)
 
 
 class Ground:
@@ -73,6 +83,10 @@ class Ground:
         self._offset = (0, 0)  # where it stands on the screen, from there
         self._reach = [0, 0, 0, 0]  # pixels: right, left, down, up
         self._paid = [0, 0, 0, 0]  # steps of each already counted
+        # The same two for the story of the go, which goes back with the game (T-1028).
+        self._story_reach = [0, 0, 0, 0]
+        self._story_paid = [0, 0, 0, 0]
+        self._again = 0
 
     @property
     def unit(self) -> int | None:
@@ -100,12 +114,22 @@ class Ground:
         """Steps of new ground counted this go."""
         return sum(self._paid)
 
+    @property
+    def again(self) -> int:
+        """Steps of the last look that the go had counted before it was put back and
+        its story had not (T-1028): a go played straight would be paid them here.
+        Nothing while the go has never been put back."""
+        return self._again
+
     def begin(self) -> None:
         """A go starts: nothing reached, nothing counted. The step's size is kept, and
         so is whether the screen scrolls."""
         self.back()
         self._reach = [0, 0, 0, 0]
         self._paid = [0, 0, 0, 0]
+        self._story_reach = [0, 0, 0, 0]
+        self._story_paid = [0, 0, 0, 0]
+        self._again = 0
 
     def back(self) -> None:
         """It is back where the go began (the screen jumped to another place). What
@@ -116,15 +140,31 @@ class Ground:
 
     def keep(self) -> Kept:
         """Where it is now, to be put back to (T-1000)."""
-        return Kept(self._camera, self._first, self._offset)
+        reach, counted = self._story_reach, self._story_paid
+        return Kept(
+            self._camera,
+            self._first,
+            self._offset,
+            (reach[RIGHT], reach[LEFT], reach[DOWN], reach[UP]),
+            (counted[RIGHT], counted[LEFT], counted[DOWN], counted[UP]),
+        )
 
     def put_back(self, kept: Kept) -> None:
         """The game was put back to the moment ``kept`` was taken: that is the place
         again. What was reached stays reached and what was counted stays counted, so
-        ground walked again pays nothing and the first step past the furthest does."""
+        ground walked again pays nothing and the first step past the furthest does.
+        The story's reach and count go back to what they were then (T-1028)."""
         if not isinstance(kept, Kept):
             raise ConfigurationError("Only a place this kept can be put back.")
         self._camera, self._first, self._offset = kept.camera, kept.first, kept.offset
+        # Never ahead of the go's own (a place kept in another go would be).
+        self._story_reach = [
+            min(far, mine) for far, mine in zip(kept.reach, self._reach, strict=True)
+        ]
+        self._story_paid = [
+            min(had, mine) for had, mine in zip(kept.counted, self._paid, strict=True)
+        ]
+        self._again = 0
 
     def copy(self) -> Ground:
         """Another count in the same state, for a try that must not change this one."""
@@ -132,6 +172,9 @@ class Ground:
         other._unit, other._scrolls = self._unit, self._scrolls
         other._camera, other._first, other._offset = self._camera, self._first, self._offset
         other._reach, other._paid = list(self._reach), list(self._paid)
+        other._story_reach = list(self._story_reach)
+        other._story_paid = list(self._story_paid)
+        other._again = self._again
         return other
 
     def look(
@@ -142,7 +185,8 @@ class Ground:
     ) -> int:
         """One look: the camera ``moved`` since the last one, and the player's middle
         is at ``me`` on the screen (None: not seen) and ``size`` pixels on its larger
-        side. Returns the steps of new ground, ``most`` at most."""
+        side. Returns the steps of new ground, ``most`` at most. :attr:`again` then
+        says how many more its story covered."""
         dx, dy = _pair(moved, "The camera's move")
         if me is not None:
             _pair(me, "Where the player is")
@@ -160,14 +204,21 @@ class Ground:
         x, y = self.place
         for way, far in ((RIGHT, x), (LEFT, -x), (DOWN, y), (UP, -y)):
             self._reach[way] = max(self._reach[way], far)
+            self._story_reach[way] = max(self._story_reach[way], far)
         if self._unit is None:
             return 0  # no step to count in yet; what is reached is counted when there is
-        new = 0
+        new = told = 0
         for way in (RIGHT, LEFT, DOWN, UP):
             steps = self._reach[way] // self._unit
             new += steps - self._paid[way]
             self._paid[way] = steps  # past the most, the rest is not owed
-        return min(new, self._most)
+            steps = self._story_reach[way] // self._unit
+            told += steps - self._story_paid[way]
+            self._story_paid[way] = steps
+        new = min(new, self._most)
+        # The story is never behind the go's own count, so this is never below zero.
+        self._again = min(told, self._most) - new
+        return new
 
 
 __all__ = [
