@@ -319,7 +319,15 @@ best go, and nothing is remembered. If a life goes while the way is being
 played (a game does not always do the same thing twice), the way is cut
 back to before that place. The same happens when a life goes within a few
 steps of the way's end and the AI finds no way past: the next go then
-arrives a little earlier, with room to do something else. The steps played
+arrives a little earlier, with room to do something else. And a way is
+worth what it is paid now, not what it was paid when it was found: when
+something stops paying (the AI drops a guess one of your rewards went by,
+or a goal is reached once and for all) and the way, played again, is paid
+less than it was remembered for, the AI takes the new figures, and keeps
+the way only up to the step at which it was paid the most this time. A way
+that is paid nothing any more is forgotten. Otherwise no later go could
+ever be paid as much as the old figure, and every go would begin with a
+way that leads nowhere. The steps played
 from memory do not count towards "Each go lasts": every go has its full
 length of its own play after them. The log says when the way grows or is
 cut and each go's line says how many steps it began with. The way is kept while training runs: pressing Start again makes

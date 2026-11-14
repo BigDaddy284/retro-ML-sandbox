@@ -118,7 +118,7 @@ def test_a_way_ends_where_it_is_still_paid_for() -> None:
     route.begin(HERE)
     played(route, [(A, 2.0), (A, 4.0), (B, 4.0), (B, 4.0), (C, 4.0), (C, 5.0), (C, 5.0)])
     assert route.end() is True
-    assert (route.moves, route.paid) == ((A, A, B, B, C, C), 5.0)
+    assert (route.moves, route.paid, route.shortened) == ((A, A, B, B, C, C), 5.0, 0)
 
     # Paid nothing above zero when played again: there is no way left.
     for nothing in ([0.0, 0.0, 0.0], [-1.0, -1.0, -2.0], [0.0, -1.0, 0.0]):

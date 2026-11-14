@@ -238,6 +238,7 @@ class Route:
             return False
         self._moves = story[:upto]
         self._paid = paid[:upto]
+        self._shortened = 0  # whatever was dropped above, this is another way
         return True
 
     def _paid_now(self, again: list[float]) -> None:
