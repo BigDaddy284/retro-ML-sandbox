@@ -327,7 +327,12 @@ less than it was remembered for, the AI takes the new figures, and keeps
 the way only up to the step at which it was paid the most this time. A way
 that is paid nothing any more is forgotten. Otherwise no later go could
 ever be paid as much as the old figure, and every go would begin with a
-way that leads nowhere. The steps played
+way that leads nowhere. The AI also keeps, for every step of the way,
+which of the rewards paid for it. So when a reward goes for good (the AI
+drops the guess it went by), the points it had paid are taken out of the
+way at once, to the point, and nothing has to be played again to find out:
+the way is worth what the rewards that are left paid for it, and where that
+is the most at an earlier step, the way ends there. The steps played
 from memory do not count towards "Each go lasts": every go has its full
 length of its own play after them. The log says when the way grows or is
 cut and each go's line says how many steps it began with. The way is kept while training runs: pressing Start again makes

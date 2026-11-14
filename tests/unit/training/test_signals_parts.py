@@ -24,7 +24,7 @@ def test_a_steps_reward_comes_with_what_it_was_made_of() -> None:
     signals.start()
     assert signals.take() == (0.0, 0) and signals.parts == ()
     # One step: two payments, a goal step, and a setback, which is that step's too.
-    bus.publish(RewardEarned(9, 12.0, ("a", "b"), EVENT, ("Alpha", "Beta"), (10.0, 2.0)))
+    bus.publish(RewardEarned(9, 12.0, ("b", "a"), EVENT, ("Beta", "Alpha"), (2.0, 10.0)))
     bus.publish(RewardEarned(9, 4.0, ("c", "a"), EVENT))  # no shares: split evenly
     bus.publish(ObjectiveCompleted(9, GOAL, 25.0))
     bus.publish(ObjectiveSetback(9, GOAL, -3.0))

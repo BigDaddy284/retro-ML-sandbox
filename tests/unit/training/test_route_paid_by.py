@@ -215,8 +215,11 @@ def test_the_parts_follow_every_change() -> None:
     assert (route.moves, route.paid) == ((A, A, B, B), 6.0)
     assert route.paid_by == ((("ground", 1.0),), (("ground", 1.0),), tuple(G2), tuple(G2))
 
-    # A way made again from a go that played it for less (T-1026) has that go's parts.
+    # A way made again from a go that played it for less (T-1026) has that go's parts,
+    # and nothing of a go before it that was never ended.
     route = remembering(WAY)
+    route.begin(HERE)
+    played(route, WAY[:2])
     route.begin(HERE)
     again: Sequence[Step] = [
         (A, 2.0, G2),
@@ -233,6 +236,20 @@ def test_the_parts_follow_every_change() -> None:
     assert route.gone({"clock"}) == frozenset()  # that go was paid nothing by it
     assert route.gone({"score"}) == frozenset({"score"})
     assert (route.moves, route.paid) == ((A, A), 4.0)
+
+    # A way cut for a lost life can have its highest figure inside it. A row that had
+    # paid nothing in it going does not cut it there.
+    hurt: Sequence[Step] = [
+        (A, 5.0, (("ground", 5.0),)),
+        (A, 2.0, (("hurt", -3.0),)),
+        (B, 6.0, (("ground", 4.0),)),
+    ]
+    route = remembering(hurt)
+    route.begin(HERE)
+    played(route, [*hurt, (C, 6.0, ())])
+    assert route.failed(2) is True and (route.moves, route.paid) == ((A, A), 2.0)
+    assert route.gone({"clock"}) == frozenset()
+    assert (route.moves, route.paid) == ((A, A), 2.0)
 
     # Forgotten, a way leaves no parts; nor does another spot's.
     route = remembering(WAY)
@@ -274,6 +291,7 @@ def test_without_parts_nothing_changes_and_nonsense_is_refused() -> None:
         [("clock", nan)],
         [("clock", inf)],
         ["clock"],
+        [["clock", 1.0]],
         5,
     ]
     for by in wrong:

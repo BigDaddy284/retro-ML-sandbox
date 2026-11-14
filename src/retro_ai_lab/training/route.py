@@ -73,7 +73,7 @@ Parts = tuple[Part, ...]
 
 def _parts(value: object) -> Parts:
     wrong = "What paid for a step is a list of (reward row, amount)."
-    if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+    if not isinstance(value, Iterable):
         raise ConfigurationError(wrong)
     out: list[Part] = []
     for part in value:
@@ -89,10 +89,9 @@ def _take_out(paid: list[float], by: list[Parts], rows: frozenset[str]) -> set[s
     found: set[str] = set()
     off = 0.0
     for at, parts in enumerate(by):
-        if any(row in rows for row, _ in parts):
-            off += sum(amount for row, amount in parts if row in rows)
-            found.update(row for row, _ in parts if row in rows)
-            by[at] = tuple(part for part in parts if part[0] not in rows)
+        off += sum(amount for row, amount in parts if row in rows)
+        found.update(row for row, _ in parts if row in rows)
+        by[at] = tuple(part for part in parts if part[0] not in rows)
         paid[at] -= off
     return found
 
@@ -261,7 +260,7 @@ class Route:
         and is no way with nothing above zero. Returns the rows that had paid for
         something in the way: none, and the way is as it was.
         """
-        if isinstance(ids, (str, bytes)) or not isinstance(ids, Iterable):
+        if isinstance(ids, str) or not isinstance(ids, Iterable):
             raise ConfigurationError("The rows that went are a list of their ids.")
         rows = frozenset(ids)
         if any(not isinstance(row, str) for row in rows):

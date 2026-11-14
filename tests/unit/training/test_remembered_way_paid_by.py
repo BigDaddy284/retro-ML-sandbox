@@ -45,7 +45,9 @@ def planted(route: Route, harness: ExperimentHarness, move: int, ground: int, cl
     assert route.paid == ground + 10.0 * clock
 
 
-def test_what_the_practice_game_pays_comes_with_its_row(lab: Lab) -> None:
+def test_what_the_practice_game_pays_comes_with_its_row(
+    lab: Lab, caplog: pytest.LogCaptureFixture
+) -> None:
     r, route, _ = remembering(lab, ways_per_go=0)
     walk = lab.move("right")
     lab.agent.script.extend([walk] * 14)
@@ -58,6 +60,17 @@ def test_what_the_practice_game_pays_comes_with_its_row(lab: Lab) -> None:
     parts = [part for step in route.paid_by for part in step]
     assert {row for row, _ in parts} == {GROUND_ID}
     assert sum(amount for _, amount in parts) == route.paid
+    # That row gone, the log calls it by the name it paid under.
+    paid = route.paid
+    gone(lab, GROUND_ID)
+    with caplog.at_level(logging.INFO, logger=EPISODE):
+        r.begin()
+    assert said(caplog) == [
+        "Gone from the rewards: Getting somewhere new. Nothing else had paid for the way "
+        f"the AI remembers ({paid:.1f} points), so it forgets that way, and its next go "
+        "begins without one."
+    ]
+    assert r.remembered == 0
 
 
 def test_the_way_is_valued_again_when_a_row_goes_and_the_log_says_so(
