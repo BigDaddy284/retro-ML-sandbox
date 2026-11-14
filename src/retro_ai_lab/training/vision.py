@@ -80,10 +80,13 @@ def side(apart: int, *, near: int | None = NEAR) -> int:
 @dataclass(frozen=True, slots=True)
 class Mark:
     """A moment of a go the watch can be put back to (T-1000): where the ground count
-    stood and where the player was last seen."""
+    stood and where the player was last seen; and the last screen the watch had
+    looked at, with the box it hid in it (T-1023), or None before a go's first look."""
 
     ground: Kept
     last_me: tuple[int, int] | None
+    screen: Frame | None = None
+    hide: tuple[int, int, int, int] | None = None
 
 
 class ScreenWatch:
@@ -137,6 +140,8 @@ class ScreenWatch:
         self._camera = CameraMemory()
         self._layout: tuple[tuple[str, int], ...] = ()  # the regions handed over, and their sizes
         self._memory: bytes | None = None  # the memory at the last look, if the next can use it
+        # The last screen looked at in this go and the box hidden in it (T-1023).
+        self._shown: tuple[Frame | None, tuple[int, int, int, int] | None] = (None, None)
         self._said: set[tuple[int, int]] = set()  # the bytes found that the log has named
 
     @property
@@ -239,6 +244,7 @@ class ScreenWatch:
     def begin_go(self) -> None:
         """A go starts from the checkpoint: new tracks, the player looked for afresh."""
         self._tracker.reset()
+        self._shown = (None, None)
         self._memory = None  # the game was put to its start: no move to read across that
         self._ground.begin()
         self._new_ground = 0
@@ -259,7 +265,7 @@ class ScreenWatch:
 
     def mark(self) -> Mark:
         """This moment, to be put back to if the game is (T-1000)."""
-        return Mark(self._ground.keep(), self._last_me)
+        return Mark(self._ground.keep(), self._last_me, *self._shown)
 
     def back_to(self, mark: Mark) -> None:
         """The game was put back to the moment ``mark`` was taken (a save loaded).
@@ -269,10 +275,23 @@ class ScreenWatch:
         looks is dropped: a jolt, a life lost (it would be read as a respawn at the
         start of the go), a fall, touches not yet blamed. The ground is put back:
         what was reached stays reached. The counts for the summary stay.
+
+        The tracker starts from the screen of the moment gone back to, where the mark
+        has it (T-1023): the next look is then measured against that screen like any
+        other. Started from nothing, that look read as no move at all, and up to a
+        step of the camera's travel dropped out of the ground counted every time a
+        go went back: most of what kept the count from matching the game's own.
+        Showing it the screen is no look: nothing is counted or learnt from it. The
+        game's memory is still not read across (T-1020): that look is the picture's
+        alone.
         """
         if not isinstance(mark, Mark):
             raise ConfigurationError("Only a moment this watch marked can be gone back to.")
-        self._tracker.reset()
+        if mark.screen is None:
+            self._tracker.reset()
+        else:
+            self._tracker.start_from(mark.screen, hide=mark.hide)
+        self._shown = (mark.screen, mark.hide)
         self._memory = None  # nor across this
         self._ground.put_back(mark.ground)
         self._learner.let_go()
@@ -338,8 +357,10 @@ class ScreenWatch:
                 x, y, w, h = self._box
                 hide = (x - HIDE_MARGIN, y - HIDE_MARGIN, w + 2 * HIDE_MARGIN, h + 2 * HIDE_MARGIN)
             tracks = self._tracker.update(frame, hide=hide, expect=expect)
+            self._shown = (frame, hide)
         else:
             tracks = self._tracker.update(frame, expect=expect)
+            self._shown = (frame, None)
             self._me = self._find_me(tracks)
             me = next((t for t in tracks if t.id == self._me), None)
             if me is not None and me.missing == 0:

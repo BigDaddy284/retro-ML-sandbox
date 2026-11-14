@@ -553,7 +553,10 @@ memory moves as the screen slides, says so in the log ("The AI found where
 the game keeps count of its camera"), and takes that number's word only
 where the picture fits it as well as it fits the picture's own answer. From the camera's travel (on a screen that never scrolls,
 from where it stands) it counts the new ground of each go, which the reward "Getting
-somewhere new" pays (see Reading the rewards). It hears of every life lost, also those lost
+somewhere new" pays (see Reading the rewards). When a go is put back to a saved
+moment to look for a way past, the AI's eyes pick up from the screen of that
+moment, so the slide of the screen in the step after is counted like any other
+(it used to be lost, a step of ground short every time a go went back). It hears of every life lost, also those lost
 between two looks. A life lost after it went out of sight coming down, with
 nothing under it but the backdrop, is a fall, and is not blamed on whatever
 it touched or stood on before; coming down through the floor is not a fall

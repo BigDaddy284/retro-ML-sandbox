@@ -294,6 +294,16 @@ def _inside(t: Track, o: ScreenObject, sx: int, sy: int, slack: int = 3) -> bool
     )
 
 
+def _check_hide(hide: tuple[int, int, int, int] | None) -> None:
+    if hide is not None and (
+        len(hide) != 4
+        or not all(isinstance(v, int) and not isinstance(v, bool) for v in hide)
+        or hide[2] < 1
+        or hide[3] < 1
+    ):
+        raise ConfigurationError("hide must be a box: x, y, width, height.")
+
+
 class ObjectTracker:
     """Gives each thing on the screen a track that lasts while it is on screen."""
 
@@ -453,13 +463,30 @@ class ObjectTracker:
             raise ConfigurationError(
                 "expect must be the camera's move across and down: each a whole number, or None."
             )
-        if hide is not None and (
-            len(hide) != 4
-            or not all(isinstance(v, int) and not isinstance(v, bool) for v in hide)
-            or hide[2] < 1
-            or hide[3] < 1
-        ):
-            raise ConfigurationError("hide must be a box: x, y, width, height.")
+        _check_hide(hide)
+        return self._follow(frame, hide, expect)
+
+    def start_from(
+        self, frame: Frame, *, hide: tuple[int, int, int, int] | None = None
+    ) -> tuple[Track, ...]:
+        """Forget everything followed, as :meth:`reset`, and begin from ``frame``: the
+        things on it are found and the next :meth:`update` measures the camera's move
+        against it (T-1023). For a game put back to an earlier moment whose screen the
+        caller kept: started afresh with nothing, the first look after would have no
+        screen to be measured against and the camera's move across it would be lost.
+        No move is measured here (:attr:`scroll` is nothing, as after a first look)."""
+        if not isinstance(frame, Frame):
+            raise ConfigurationError("start_from() needs a Frame.")
+        _check_hide(hide)
+        self.reset()
+        return self._follow(frame, hide, None)
+
+    def _follow(
+        self,
+        frame: Frame,
+        hide: tuple[int, int, int, int] | None,
+        expect: tuple[int | None, int | None] | None,
+    ) -> tuple[Track, ...]:
         prev = self._previous
         if prev is not None and (prev.width, prev.height, prev.channels) != (
             frame.width,
