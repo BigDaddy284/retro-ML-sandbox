@@ -215,11 +215,21 @@ def test_what_the_story_would_be_paid_after_going_back(
     go()
     bus.publish(WentBack(20))
     progress(120, 3)
-    assert told() == [(120, cp_worth, (cp,), (cp_worth,))]
+    switch(122, door.id)  # this go's first flip of it was after the moment, like the last's
+    switch(124, lamp.id)
+    assert told() == [(120, cp_worth, (cp,), (cp_worth,)), (122, 2.0, (on,), (2.0,))]
+    # A row worth nothing tells nothing, as it pays nothing.
+    rewards.set_value(cp, 0.0)
+    progress(126, 4)
+    assert told() == [] and paid() == []
+    rewards.set_value(cp, cp_worth)
     # So does a game connected afresh.
     connection.disconnect()
     connection.connect("fake", seed=3)
     teach(discovery, bus)
+    # (A row a person set is kept switched off until the game's memory is known
+    # again; the person switches it back on.)
+    rewards.set_enabled(cp, True)
     paid()
     progress(130, 5)
     bus.publish(WentBack(20))

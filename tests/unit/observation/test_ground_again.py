@@ -137,6 +137,15 @@ def test_the_storys_count_is_kept_copied_and_cleared() -> None:
     assert ground.again == 1 and ground.steps == 8
     assert looks(ground, STEP, 5) == [(0, 1)] * 4 + [(1, 0)]
 
+    # Before there is a step to count in, a copy has what was reached like the rest.
+    early = Ground()
+    early.begin()
+    early.look((32, 0))
+    early.look((-32, 0))
+    twin = early.copy()
+    assert (twin.look(STILL, ME, 16), twin.again) == (2, 0)
+    assert (early.look(STILL, ME, 16), early.again) == (2, 0)
+
     # A place kept the old way (no count with it) puts the story back to nothing.
     ground.put_back(Kept((0, 0), ME, (0, 0)))
     assert looks(ground, STEP, 2) == [(0, 1)] * 2

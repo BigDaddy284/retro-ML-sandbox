@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from retro_ai_lab.training.vision import ScreenWatch
 from tests.unit.training import test_trial as trial
 from tests.unit.training.test_trial import Hopper
@@ -69,4 +71,22 @@ def test_the_watch_hands_over_ground_walked_again(hopper: Hopper) -> None:
     watch.back_to(mark)
     on(hopper, watch, looks=2)
     watch.begin_go()
+    assert watch.take_ground_again() == 0 and watch.take_new_ground() == 0
+
+
+def test_nothing_is_handed_over_where_the_camera_cannot_be_followed(
+    hopper: Hopper, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Where new ground is counted and not paid (T-993), ground walked again is not
+    told either: there is nothing the go was paid for it."""
+    watch = walking(hopper)
+    mark = watch.mark()
+    hopper.adapter.save_state("here")
+    on(hopper, watch, looks=3)
+    watch.take_new_ground()
+    hopper.adapter.load_state("here")
+    watch.back_to(mark)
+    monkeypatch.setattr(ScreenWatch, "follows_camera", property(lambda self: False))
+    on(hopper, watch, looks=2)
+    assert watch.ground.again > 0  # the count itself saw it
     assert watch.take_ground_again() == 0 and watch.take_new_ground() == 0
