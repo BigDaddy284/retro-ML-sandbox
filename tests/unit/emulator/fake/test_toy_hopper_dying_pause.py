@@ -92,6 +92,14 @@ def test_the_setting_is_the_cartridges() -> None:
     fall_in(game)
     assert game.state.dying == 20
 
+    # A save state is the game's memory: it does not hold the setting.
+    plain, set_long = ToyHopper(0), ToyHopper(0)
+    set_long.dying_frames = 200
+    set_long.restore(plain.snapshot())
+    assert set_long.dying_frames == 200
+    fall_in(set_long)
+    assert set_long.state.dying == 200
+
     # The same seed, buttons and setting play the same game; another setting another.
     def played(pause: int | None) -> list[tuple[int, int, int, int]]:
         g = ToyHopper(3)

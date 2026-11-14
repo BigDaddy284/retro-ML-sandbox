@@ -145,7 +145,12 @@ finished, undone when the go was put back to a moment before its flag, and
 finished again is one level, and its ground is counted once. `--no-memory`
 trains without the way the AI remembers (see "When the AI loses a life"),
 and `--no-standstill` without going back where a go stands still, for
-comparing. A death that had only begun when its go ended costs no life (the
+comparing. `--dying-frames 200` makes the game take that many frames (1 to
+255; its own is 48) from the fatal touch to the life going. Real games can
+take about that long over their dying animation, and the life counter then
+moves long after the mistake: what works with a short pause need not work
+with a long one, so both are worth measuring. The report's first line says
+which pause it ran with. A death that had only begun when its go ended costs no life (the
 next go starts from its save): the "Deaths" line counts those apart, and
 not among the deaths the eyes are asked to explain.
 
