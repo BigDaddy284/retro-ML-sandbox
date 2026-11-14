@@ -875,12 +875,25 @@ class EpisodeRunner:
         ends ``LEAD`` steps before it (T-1014), and so does the way it began with, if
         the life went that close behind the way's end (T-1015): a way that ends within
         a few steps of a loss the AI finds no way past would bring every go to the
-        same end. The next go arrives earlier, with room to do something else."""
+        same end. The next go arrives earlier, with room to do something else.
+
+        Where a loss stood at about the same place in earlier goes, that room was not
+        enough: the route says how much further back to end both (T-1029)."""
         route = self._route
         if route is None:
             return
         had = len(route.moves)
-        if route.failed(LEAD):
+        lead = route.loss_stands(LEAD)
+        if lead > LEAD:
+            log.info(
+                "A life went at step %d with no way past, about where one went for good "
+                "in an earlier go: the AI ends what it remembers of this go %d steps "
+                "before the place instead of %d, to come at it from further back.",
+                self._steps,
+                lead,
+                LEAD,
+            )
+        if route.failed(lead):
             log.info(
                 "A life went at step %d, close behind the end of the way the AI remembers, "
                 "and it found no way past: it now remembers %d steps of that way instead "
@@ -889,7 +902,7 @@ class EpisodeRunner:
                 len(route.moves),
                 had,
             )
-        route.lost(LEAD)
+        route.lost(lead)
 
     def _rows_gone(self) -> None:
         """Reward rows have gone since this was last asked (the AI dropped the guess

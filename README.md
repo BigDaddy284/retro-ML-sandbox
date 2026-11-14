@@ -329,7 +329,13 @@ best go, and nothing is remembered. If a life goes while the way is being
 played (a game does not always do the same thing twice), the way is cut
 back to before that place. The same happens when a life goes within a few
 steps of the way's end and the AI finds no way past: the next go then
-arrives a little earlier, with room to do something else. And a way is
+arrives a little earlier, with room to do something else. Where that room
+was not enough, and a life goes for good at about the same place in a later
+go, the AI backs off twice as far, and twice as far again the time after
+(30 steps, then 60, 120 and at most 240): it comes at a place that keeps
+costing a life from further back each time, plays more of the stretch
+before it itself, and so arrives there differently. The log says so when it
+does. And a way is
 worth what it is paid now, not what it was paid when it was found: when
 something stops paying (the AI drops a guess one of your rewards went by,
 or a goal is reached once and for all) and the way, played again, is paid
