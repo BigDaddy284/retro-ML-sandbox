@@ -430,7 +430,9 @@ def test_what_a_restart_sends_home_stays_a_sign_of_one() -> None:
     d.observe(snap(1, 0, 0, 95, 2, 6))
     for frame in range(2, 12, 2):
         d.observe(snap(frame, 1, 0, 95, 2, 6))  # game over
-        assert not restarts(d.observe(snap(frame + 1, 0, 3, 0, 0, 0)))  # a new game
+        # A new game: called from the second on, once the values have been where it
+        # puts them (T-1022; until then this line asserted that none was called).
+        assert bool(restarts(d.observe(snap(frame + 1, 0, 3, 0, 0, 0)))) == (frame > 2)
         d.observe(snap(frame + 1, 0, 0, 95, 2, 6))  # ... played to its last life
     assert d.moved == 5
     assert d.homes("v1") == 0 and d.take_home_goers() == ()
