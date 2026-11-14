@@ -39,12 +39,18 @@ figures, up to the step at which it had been paid the most. A way paid as much
 at its end as it was remembered for, or more, is left as it is: played again a
 way is often paid more (the go that found it went back, and ground walked again
 is not paid twice), and that says nothing against it.
+
+For the same reason pay can go without a replay showing it, so each step's pay
+is kept by what paid it (T-1027): the reward rows it came from and each one's
+share. When a row goes (:meth:`Route.gone`), what it paid is taken out of the
+way's figures, of the story's and of the notes above, step by step, and a way
+that lost something ends where what is left pays the most.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Hashable
+from collections.abc import Hashable, Iterable
 
 from retro_ai_lab.core import ConfigurationError
 
@@ -61,6 +67,35 @@ def _amount(value: object, what: str) -> float:
     return float(value)
 
 
+Part = tuple[str, float]  # a reward row's id, and what it paid at one step
+Parts = tuple[Part, ...]
+
+
+def _parts(value: object) -> Parts:
+    wrong = "What paid for a step is a list of (reward row, amount)."
+    if not isinstance(value, Iterable):
+        raise ConfigurationError(wrong)
+    out: list[Part] = []
+    for part in value:
+        if not isinstance(part, tuple) or len(part) != 2 or not isinstance(part[0], str):
+            raise ConfigurationError(wrong)
+        out.append((part[0], _amount(part[1], "What a reward row paid")))
+    return tuple(out)
+
+
+def _take_out(paid: list[float], by: list[Parts], rows: frozenset[str]) -> set[str]:
+    """Take what ``rows`` paid out of ``paid`` (a running total, step by step) and out
+    of ``by`` (what paid each step). Returns the rows that had paid for something."""
+    found: set[str] = set()
+    off = 0.0
+    for at, parts in enumerate(by):
+        off += sum(amount for row, amount in parts if row in rows)
+        found.update(row for row, _ in parts if row in rows)
+        by[at] = tuple(part for part in parts if part[0] not in rows)
+        paid[at] -= off
+    return found
+
+
 class Route:
     """The remembered way, and the story of the go being played."""
 
@@ -68,13 +103,16 @@ class Route:
         self._start: Hashable | None = None  # where the remembered way starts from
         self._moves: list[int] = []
         self._paid: list[float] = []  # what the go had been paid after each move of the way
+        self._by: list[Parts] = []  # and what paid for each (T-1027)
         self._story: list[int] = []
         self._story_paid: list[float] = []
+        self._story_by: list[Parts] = []
         self._live = False  # the story can still be added to
         self._playing = 0  # steps of the way this go began with
         # What this go had been paid after each step of the way, noted for as long as
         # it has played nothing but the way (T-1026).
         self._again: list[float] = []
+        self._again_by: list[Parts] = []
         self._on_way = False
         self._shortened = 0
 
@@ -106,6 +144,12 @@ class Route:
         return self._playing
 
     @property
+    def paid_by(self) -> tuple[Parts, ...]:
+        """What paid for each step of the remembered way: the reward rows and what
+        each gave (T-1027). Pay nobody put a row's name to is in none of them."""
+        return tuple(self._by)
+
+    @property
     def shortened(self) -> int:
         """How many steps the way lost when the last go ended, because played again
         they were paid nothing more (T-1026). 0 from the next go's beginning."""
@@ -113,8 +157,7 @@ class Route:
 
     def forget(self) -> None:
         """Drop the remembered way: it no longer leads anywhere."""
-        self._moves.clear()
-        self._paid.clear()
+        self._cut_way(0)
         self._start = None
 
     # ------------------------------------------------------------ a go
@@ -127,11 +170,11 @@ class Route:
         played again from wherever the game happens to be, and nothing of such a
         go is remembered. A way remembered from another start is forgotten.
         """
-        self._story.clear()
-        self._story_paid.clear()
+        self._cut_story(0)
         self._live = start is not None
         self._playing = 0
         self._again.clear()
+        self._again_by.clear()
         self._on_way = True
         self._shortened = 0
         if start is None:
@@ -142,13 +185,16 @@ class Route:
         self._playing = len(self._moves)
         return tuple(self._moves)
 
-    def did(self, move: int | None, paid: float) -> None:
+    def did(self, move: int | None, paid: float, by: Iterable[Part] = ()) -> None:
         """One step of the go was played with ``move``; ``paid`` is what the story has
-        been paid so far, this step included (:attr:`counted` plus this step's pay).
+        been paid so far, this step included (:attr:`counted` plus this step's pay),
+        and ``by`` is what paid this step: each reward row's id and what it gave
+        (T-1027). Pay that comes with no row's name is nobody's and stays for good.
 
         ``None`` is a step that cannot be played again: the story ends before it.
         """
         paid = _amount(paid, "What the go has been paid")
+        parts = _parts(by)
         if not self._live:
             return
         if move is None:
@@ -156,6 +202,7 @@ class Route:
             return
         self._story.append(_whole(move, "A move"))
         self._story_paid.append(paid)
+        self._story_by.append(parts)
         at = len(self._story) - 1
         if (
             self._on_way
@@ -164,6 +211,7 @@ class Route:
             and self._moves[at] == move
         ):
             self._again.append(paid)
+            self._again_by.append(parts)
         else:
             self._on_way = False  # it has played something else: no longer the way's pay
 
@@ -174,9 +222,7 @@ class Route:
             return
         if steps > len(self._story):
             raise ConfigurationError("The story is not that long.")
-        keep = len(self._story) - steps
-        del self._story[keep:]
-        del self._story_paid[keep:]
+        self._cut_story(len(self._story) - steps)
 
     def lost(self, lead: int) -> None:
         """A life was lost and the loss stands: the story ends ``lead`` steps before
@@ -184,9 +230,7 @@ class Route:
         _whole(lead, "The lead")
         if not self._live:
             return
-        keep = max(0, len(self._story) - lead)
-        del self._story[keep:]
-        del self._story_paid[keep:]
+        self._cut_story(max(0, len(self._story) - lead))
         self._live = False
 
     def failed(self, lead: int) -> bool:
@@ -205,9 +249,39 @@ class Route:
         keep = max(0, len(self._story) - lead)
         if keep >= len(self._moves) or self._story[:keep] != self._moves[:keep]:
             return False
+        self._cut_way(keep)
+        return True
+
+    def gone(self, ids: Iterable[str]) -> frozenset[str]:
+        """The reward rows ``ids`` pay no longer (the AI dropped the guess one went by,
+        a person removed one): what they paid is taken out of the way's figures, of
+        the story's and of the notes of this go, step by step (T-1027). A way that
+        lost something ends at the first step at which what is left pays the most,
+        and is no way with nothing above zero. Returns the rows that had paid for
+        something in the way: none, and the way is as it was.
+        """
+        if isinstance(ids, str) or not isinstance(ids, Iterable):
+            raise ConfigurationError("The rows that went are a list of their ids.")
+        rows = frozenset(ids)
+        if any(not isinstance(row, str) for row in rows):
+            raise ConfigurationError("A reward row's id is text.")
+        _take_out(self._story_paid, self._story_by, rows)
+        _take_out(self._again, self._again_by, rows)
+        found = frozenset(_take_out(self._paid, self._by, rows))
+        if found:
+            most = max(self._paid)
+            self._cut_way(self._paid.index(most) + 1 if most > 0 else 0)
+        return found
+
+    def _cut_story(self, keep: int) -> None:
+        del self._story[keep:]
+        del self._story_paid[keep:]
+        del self._story_by[keep:]
+
+    def _cut_way(self, keep: int) -> None:
         del self._moves[keep:]
         del self._paid[keep:]
-        return True
+        del self._by[keep:]
 
     def end(self) -> bool:
         """The go is over. Its story, up to the step at which it had been paid the most,
@@ -224,8 +298,9 @@ class Route:
         """
         story, paid = self._story, self._story_paid
         self._live = False
-        again, self._again = self._again, []  # a second end() has nothing to go by
-        self._paid_now(again)
+        again, again_by = self._again, self._again_by
+        self._again, self._again_by = [], []  # a second end() has nothing to go by
+        self._paid_now(again, again_by)
         if not paid or self._start is None:
             return False
         best = max(paid)
@@ -238,10 +313,11 @@ class Route:
             return False
         self._moves = story[:upto]
         self._paid = paid[:upto]
+        self._by = self._story_by[:upto]
         self._shortened = 0  # whatever was dropped above, this is another way
         return True
 
-    def _paid_now(self, again: list[float]) -> None:
+    def _paid_now(self, again: list[float], again_by: list[Parts]) -> None:
         """The go is over, and ``again`` is what it had been paid after each step of the
         way while it played nothing else. If that is the whole way the go began with
         (a way cut for a lost life in this go ends where the loss says, and is left)
@@ -262,6 +338,7 @@ class Route:
         self._shortened = was - keep
         self._moves = self._moves[:keep]
         self._paid = again[:keep]
+        self._by = again_by[:keep]
 
 
-__all__ = ["Route"]
+__all__ = ["Part", "Parts", "Route"]
