@@ -91,6 +91,7 @@ def changes(
     most: int | None = None,
     early: bool = False,
     whole: bool = False,
+    upto: int | None = None,
 ) -> Iterator[Change]:
     """Every change worth trying, most promising first.
 
@@ -107,6 +108,12 @@ def changes(
     With ``whole`` the changes are told apart as :meth:`Change.apply` plays them
     with it: a long hold near the end of the trace is no longer the same as a
     shorter one, and is listed.
+
+    With ``upto`` the places stop before that step of the trace (T-1031): a game
+    plays a loss out for a while before its life counter drops, and nothing pressed
+    in that while changes anything. Only the places go by it. A hold runs on past it
+    and is cut and told apart by the whole trace, since the game listens again once
+    a change got past. A step at or past the trace's end is the whole list.
     """
     if not isinstance(early, bool):
         raise ConfigurationError("early must be true or false.")
@@ -119,12 +126,14 @@ def changes(
         _whole(hold, "A hold", 1)
     if most is not None:
         _whole(most, "most", 1)
+    if upto is not None:
+        _whole(upto, "upto", 1)
+    last = (len(trace) if upto is None else min(len(trace), upto)) - 1
     near = [space.near(move) for move in trace]  # refuses a move that is not there
     played: set[tuple[int, ...]] = set()
     given = 0
     for hold in holds:
-        last = len(trace) - 1
-        for back in range(0, len(trace), stride):
+        for back in range(0, last + 1, stride):
             # The same places either way: the last step, and every stride before it.
             at = last - back
             if early:
