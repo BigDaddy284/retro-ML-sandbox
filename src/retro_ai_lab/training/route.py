@@ -45,6 +45,18 @@ is kept by what paid it (T-1027): the reward rows it came from and each one's
 share. When a row goes (:meth:`Route.gone`), what it paid is taken out of the
 way's figures, of the story's and of the notes above, step by step, and a way
 that lost something ends where what is left pays the most.
+
+A place that keeps costing a life is come at from further back (T-1029). A go
+that loses a life and finds no way past ends its story a lead before the loss,
+and the way with it, so the next go arrives short of the place, alive. It
+arrives with as little room as the go before, though, and what failed there
+fails again: on one practice level eight goes in a row ended at the same place.
+So the route notes the step of the story at which each such loss stood
+(:meth:`Route.loss_stands`), and every earlier one at about the same place
+doubles the lead, three times at most: the AI's own play, and its searches,
+start from further back each time. A place is told by how many steps in it
+lies, which is all the route knows of it: that holds while the go arrives by
+the way it remembers.
 """
 
 from __future__ import annotations
@@ -66,6 +78,9 @@ def _amount(value: object, what: str) -> float:
         raise ConfigurationError(f"{what} must be a number.")
     return float(value)
 
+
+SAME_PLACE = 2  # leads either side of a loss within which another was at the same place
+DOUBLINGS = 3  # the most the lead is doubled: eight times as far at the fourth loss
 
 Part = tuple[str, float]  # a reward row's id, and what it paid at one step
 Parts = tuple[Part, ...]
@@ -115,6 +130,9 @@ class Route:
         self._again_by: list[Parts] = []
         self._on_way = False
         self._shortened = 0
+        # The steps of the story at which a loss stood, go after go from this start
+        # (T-1029).
+        self._stood: list[int] = []
 
     # ------------------------------------------------------------ what is remembered
 
@@ -156,9 +174,11 @@ class Route:
         return self._shortened
 
     def forget(self) -> None:
-        """Drop the remembered way: it no longer leads anywhere."""
+        """Drop the remembered way: it no longer leads anywhere. Nor do the places
+        noted along it, where a loss stood."""
         self._cut_way(0)
         self._start = None
+        self._stood.clear()
 
     # ------------------------------------------------------------ a go
 
@@ -232,6 +252,27 @@ class Route:
             return
         self._cut_story(max(0, len(self._story) - lead))
         self._live = False
+
+    def loss_stands(self, lead: int) -> int:
+        """A life was lost on the step just played and no way past was found: the loss
+        stands. Returns the lead to end the story and the way with (:meth:`failed`,
+        :meth:`lost`), and notes the place.
+
+        That is ``lead`` the first time at a place, and twice as far for each earlier
+        loss that stood at about the same place (within ``SAME_PLACE`` leads of this
+        one, counted in steps of the story), ``DOUBLINGS`` times at most (T-1029). The
+        notes last for as long as goes start from the same spot.
+
+        While the story is over it no longer says where the go is: the answer is
+        ``lead``, and nothing is noted.
+        """
+        _whole(lead, "The lead")
+        if not self._live:
+            return lead
+        at = len(self._story)
+        near = sum(1 for was in self._stood if abs(was - at) <= SAME_PLACE * lead)
+        self._stood.append(at)
+        return lead << min(near, DOUBLINGS)
 
     def failed(self, lead: int) -> bool:
         """A life was lost on the step just played (the last one of the story), and the
@@ -341,4 +382,4 @@ class Route:
         self._by = again_by[:keep]
 
 
-__all__ = ["Part", "Parts", "Route"]
+__all__ = ["DOUBLINGS", "SAME_PLACE", "Part", "Parts", "Route"]
