@@ -681,6 +681,9 @@ class _SpyWatch:
     def take_new_ground(self) -> int:
         return self.ground.get(self.looks, 0)
 
+    def take_ground_again(self) -> int:
+        return 0  # T-1028: the ScreenWatch has this now; none of these goes is put back
+
     def look(self, frame: object, *, lost: int = 0, scored: int = 0, memory: object = None) -> None:
         assert frame is not None
         self.looks += 1

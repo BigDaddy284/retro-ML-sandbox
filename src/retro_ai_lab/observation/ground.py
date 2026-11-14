@@ -205,7 +205,6 @@ class Ground:
         for way, far in ((RIGHT, x), (LEFT, -x), (DOWN, y), (UP, -y)):
             self._reach[way] = max(self._reach[way], far)
             self._story_reach[way] = max(self._story_reach[way], far)
-        self._again = 0
         if self._unit is None:
             return 0  # no step to count in yet; what is reached is counted when there is
         new = told = 0

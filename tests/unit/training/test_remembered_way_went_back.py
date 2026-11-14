@@ -1,10 +1,12 @@
 """T-1028: on the practice game, with the real runner, a go that was put back to a
 saved moment and walked on past where it had been is counted like the same moves
-played straight from the start."""
+played straight from the start, and the runner names each saved moment and each
+going back for whoever keeps a count that goes back with the game."""
 
 from __future__ import annotations
 
 from retro_ai_lab.rewards import GROUND_ID
+from retro_ai_lab.services import GroundCovered, MomentSaved, PaidAgain, WentBack
 from retro_ai_lab.training.moments import Moments
 from tests.unit.training import test_going_back as going_back
 from tests.unit.training.test_going_back import SLOTS, Lab
@@ -19,6 +21,12 @@ def test_a_go_that_went_back_is_counted_like_one_played_straight(lab: Lab) -> No
     moments = Moments(SLOTS, every=10, lead=12)
     r, route, _ = remembering(lab, ways_per_go=0, moments=moments)
     walk = lab.move("right")
+    said: list[object] = []
+    for kind in (MomentSaved, WentBack, PaidAgain, GroundCovered):
+        lab.bus.subscribe(kind, said.append)
+
+    def heard(kind: type) -> list[object]:
+        return [event for event in said if isinstance(event, kind)]
 
     def begin() -> None:
         lab.agent.script.clear()
@@ -43,13 +51,19 @@ def test_a_go_that_went_back_is_counted_like_one_played_straight(lab: Lab) -> No
     straight = walked(STEPS)
     r.finish()
     assert straight[-1] >= 6.0 and straight[19] > straight[9] > 0.0
+    # Moments were saved and named; nothing went back, so nothing was walked again.
+    assert heard(MomentSaved) and not heard(WentBack) and not heard(PaidAgain)
+    assert all(event.again == 0 for event in heard(GroundCovered))  # type: ignore[attr-defined]
+    said.clear()
 
     # The same walk, put back ten steps after twenty, and walked on.
     begin()
     assert walked(20) == straight[:20]
     moment = moments.kept[-1]
     assert moments.steps - moment.step == 10
+    assert heard(MomentSaved) == [MomentSaved(kept.step) for kept in moments.kept]
     r.go_back(moment)
+    assert heard(WentBack) == [WentBack(moment.step)]
     assert route.counted == straight[9] and len(route.story) == 10
     again = walked(STEPS - 10)
     # The ground it walks a second time pays the go nothing: it has been there.
@@ -58,6 +72,13 @@ def test_a_go_that_went_back_is_counted_like_one_played_straight(lab: Lab) -> No
     # and goes on from there as that one does.
     assert again == straight[10:]
     assert straight[-1] > straight[19]  # it got past where it had been
+    # What it walked again was announced, a point a step, and paid to nobody.
+    walked_again = sum(event.again for event in heard(GroundCovered))  # type: ignore[attr-defined]
+    assert walked_again == straight[19] - straight[9] > 0
+    assert heard(PaidAgain) == [
+        PaidAgain(event.frame, 1.0, (GROUND_ID,), (1.0,)) for event in heard(PaidAgain)
+    ]  # type: ignore[attr-defined]
+    assert len(heard(PaidAgain)) == walked_again
     assert lab.game.state.lives == 3 and r.times_back == 1
     # It becomes the way with that figure, every point of it new ground's.
     r.finish()

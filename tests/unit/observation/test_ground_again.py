@@ -153,3 +153,13 @@ def test_the_storys_count_is_kept_copied_and_cleared() -> None:
     ground.put_back(later)
     assert ground.place == (64, 0)
     assert looks(ground, STEP, 2) == [(2, 0), (1, 0)]
+    # Nor by a place whose story had been further than the place itself.
+    looks(ground, (-48, 0), 1)
+    far = ground.keep()
+    assert (far.camera, far.reach) == ((48, 0), (96, 0, 0, 0))
+    ground.begin()
+    ground.look(STILL, ME, 16)
+    assert looks(ground, STEP, 1) == [(1, 0)]
+    ground.put_back(far)
+    assert looks(ground, STILL, 1) == [(2, 0)]  # two steps on from where the go had got
+    assert looks(ground, STEP, 3) == [(1, 0)] * 3
