@@ -103,6 +103,13 @@ DOUBTED_KINDS = frozenset({VariableKind.SCORE, VariableKind.PROGRESS})
 # a third value, and then "progress".
 CLOCK_TOP = "clock-top"
 CLOCK_KINDS = frozenset({VariableKind.SCORE, VariableKind.PROGRESS, VariableKind.FLAG})
+_CLOCK_FIRST = (
+    "Counts the roll-overs of the value below it, which ticks by itself "
+    "at one pace: the top of a clock, not something the player earns. "
+    "Once is a doubt; twice and the AI drops it."
+)
+_CLOCK_AGAIN = "Still the top of a clock that ticks by itself; not something the player earns."
+_CLOCK_WHAT = "count the roll-overs of a clock"
 BOUNCES = "bounces"  # evidence kind: a "lives" byte going up nearly as often as down (T-864)
 BUSY = "busy"  # evidence kind: a "lives" byte changing more than once in ten steps (T-865)
 AT_LOSS = "at-loss"  # evidence kind: a "progress" byte that goes up as lives are lost (T-997)
@@ -180,6 +187,21 @@ def _names(variables: list[Variable], most: int = 5) -> str:
     return ", ".join(names) or "none"
 
 
+def _say_doubts(lists: tuple[list[Variable], list[Variable]], what: str) -> None:
+    """The log's line for guesses doubted and dropped for one reason, if there are any."""
+    doubted, dropped = lists
+    if doubted or dropped:
+        log.info(
+            "%d guesses %s: %d doubted (%s), %d dropped (%s).",
+            len(doubted) + len(dropped),
+            what,
+            len(doubted),
+            _names(doubted),
+            len(dropped),
+            _names(dropped),
+        )
+
+
 def game_id_for(system: str, title: str, rom_hash: str | None) -> str:
     """A stable id for a game: its hash when the emulator gives one."""
     return rom_hash or f"{system}:{title}"
@@ -251,6 +273,10 @@ class DiscoveryService:
         self._asked: frozenset[str] = frozenset()  # values a person rewards up/down (T-860)
         self._look: LongLook | None = None
         self._aftermath = Aftermath()  # T-997; a new one with each knowledge
+        # The bytes a probe has seen change with nothing pressed, and whether the tops
+        # of clocks above them have been judged since the last go began (T-1025).
+        self._moves_alone: frozenset[tuple[str, int]] = frozenset()
+        self._clocks_judged = False
         self._finder: RelationshipFinder | None = None
         self._events = EventLog()
         # Snapshots arrive from the play clock's worker and from the GUI thread
@@ -416,12 +442,18 @@ class DiscoveryService:
         above one of them when that byte is the top of a clock (T-996,
         :func:`clock_top`): it counts the roll-overs of something that ticks by
         itself. Returns the variables changed.
+
+        What moved is remembered for the game (T-1025): the probe that calls this
+        runs at few goes, and :meth:`begin_go` asks the clock's question of the same
+        bytes at every one.
         """
         moved = frozenset(locations)
         if not moved:
             return ()
         with self._lock:
             k = self._require()
+            self._moves_alone |= moved
+            self._clocks_judged = True
             tops = self._clock_tops(moved)
             alone: tuple[list[Variable], list[Variable]] = ([], [])  # doubted, dropped
             clocks: tuple[list[Variable], list[Variable]] = ([], [])
@@ -441,40 +473,57 @@ class DiscoveryService:
                     )
                 elif v.kind in CLOCK_KINDS and (v.region, v.offset) in tops:
                     kind, lists = CLOCK_TOP, clocks
-                    first = (
-                        "Counts the roll-overs of the value below it, which ticks by itself "
-                        "at one pace: the top of a clock, not something the player earns. "
-                        "Once is a doubt; twice and the AI drops it."
-                    )
-                    again = (
-                        "Still the top of a clock that ticks by itself; not something "
-                        "the player earns."
-                    )
+                    first, again = _CLOCK_FIRST, _CLOCK_AGAIN
                 else:
                     continue
-                if any(e.kind == kind for e in v.evidence):
-                    k.support(v.id, Evidence(kind, again, 0.0, frame))
-                    lists[1].append(k.reject(v.id, by=AI))
-                else:
-                    lists[0].append(k.support(v.id, Evidence(kind, first, 0.0, frame)))
+                self._doubt_or_drop(k, v, kind, first, again, frame, lists)
             changed = (*alone[0], *alone[1], *clocks[0], *clocks[1])
-            for (doubted, dropped), what in (
-                (alone, "changed while nobody pressed anything"),
-                (clocks, "count the roll-overs of a clock"),
-            ):
-                if doubted or dropped:
-                    log.info(
-                        "%d guesses %s: %d doubted (%s), %d dropped (%s).",
-                        len(doubted) + len(dropped),
-                        what,
-                        len(doubted),
-                        _names(doubted),
-                        len(dropped),
-                        _names(dropped),
-                    )
+            _say_doubts(alone, "changed while nobody pressed anything")
+            _say_doubts(clocks, _CLOCK_WHAT)
             if changed:
                 self._announce(DiscoveryUpdated((), changed, (), ()))
             return changed
+
+    @staticmethod
+    def _doubt_or_drop(
+        k: Knowledge,
+        v: Variable,
+        kind: str,
+        first: str,
+        again: str,
+        frame: int | None,
+        lists: tuple[list[Variable], list[Variable]],
+    ) -> None:
+        """Once is a doubt; with a doubt of this kind already, the AI drops the guess."""
+        if any(e.kind == kind for e in v.evidence):
+            k.support(v.id, Evidence(kind, again, 0.0, frame))
+            lists[1].append(k.reject(v.id, by=AI))
+        else:
+            lists[0].append(k.support(v.id, Evidence(kind, first, 0.0, frame)))
+
+    def _judge_clocks(self) -> None:
+        """A go starts: ask the clock's question of every byte a probe has seen move by
+        itself (T-1025). The rule needs the upper byte to have changed three times,
+        which no first probe has seen, and after that probe one comes only when a go
+        ends stuck or by a reset: on most of the practice levels the top of the
+        level's clock stayed "progress" for most of a session or all of it, 10 points
+        every 256 frames for standing still. Exactly as at a probe: a doubt the first
+        time, dropped the second, a person's word left alone."""
+        k = self._knowledge
+        if k is None or not self._moves_alone:
+            return
+        tops = self._clock_tops(self._moves_alone)
+        clocks: tuple[list[Variable], list[Variable]] = ([], [])
+        frame = self._observation.frame
+        for v in k:
+            if v.confirmed or v.rejected or v.kind not in CLOCK_KINDS:
+                continue
+            if (v.region, v.offset) in tops:
+                self._doubt_or_drop(k, v, CLOCK_TOP, _CLOCK_FIRST, _CLOCK_AGAIN, frame, clocks)
+        _say_doubts(clocks, _CLOCK_WHAT)
+        changed = (*clocks[0], *clocks[1])
+        if changed:
+            self._announce(DiscoveryUpdated((), changed, (), ()))
 
     def _clock_tops(self, moved: frozenset[tuple[str, int]]) -> set[tuple[str, int]]:
         """The bytes just above ``moved`` ones that are the tops of clocks (T-996)."""
@@ -602,12 +651,18 @@ class DiscoveryService:
             return changed
 
     def begin_go(self) -> None:
-        """A go starts: remember how often every byte had changed so far (T-870)."""
+        """A go starts: remember how often every byte had changed so far (T-870), and
+        drop a guess that has turned out to be the top of a clock (T-1025)."""
         with self._lock:
             tracker = self._observation.tracker
             self._aftermath.begin()  # nothing is matched across the game being put back
             self._go_changes = {loc: st.changes for loc, st in tracker.all_stats().items()}
             self._go_transitions = tracker.transitions
+            # The tops of clocks, unless this go's probe has just asked (T-1025): a
+            # probe and the go it starts are one look at the same numbers.
+            judged, self._clocks_judged = self._clocks_judged, False
+            if not judged:
+                self._judge_clocks()
 
     def credit_played(self, *, frame: int | None = None) -> tuple[Variable, ...]:
         """The go is over: credit every guess whose bytes moved during it (T-870).
@@ -1125,6 +1180,7 @@ class DiscoveryService:
             self._finder = RelationshipFinder(knowledge, window=self._event_window)
             self._look = LongLook(knowledge)
             self._aftermath = Aftermath()
+            self._moves_alone = frozenset()  # another game: nothing seen to move yet
 
     def review(self) -> DiscoveryUpdated:
         """Turn the statistics gathered so far into proposals, right now."""
