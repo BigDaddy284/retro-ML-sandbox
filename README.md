@@ -342,7 +342,14 @@ which of the rewards paid for it. So when a reward goes for good (the AI
 drops the guess it went by), the points it had paid are taken out of the
 way at once, to the point, and nothing has to be played again to find out:
 the way is worth what the rewards that are left paid for it, and where that
-is the most at an earlier step, the way ends there. The steps played
+is the most at an earlier step, the way ends there. And when the AI goes
+back to a moment before a place to get past it, the ground it then walks a
+second time pays it nothing, because it has been there. Its count of that
+go used to run short by that much, and a go that got further could look
+worse than the way it began with, so the next go began at the same place
+and did the same. That ground is now counted back in as it is walked
+again: a go is worth what the same moves would be paid played straight
+through. The steps played
 from memory do not count towards "Each go lasts": every go has its full
 length of its own play after them. The log says when the way grows or is
 cut and each go's line says how many steps it began with. The way is kept while training runs: pressing Start again makes
