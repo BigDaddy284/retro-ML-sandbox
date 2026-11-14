@@ -13,6 +13,7 @@ from retro_ai_lab.training.chance import Chance
 from retro_ai_lab.training.episode import NOW_SLOT, ROOM
 from retro_ai_lab.training.moments import LEAD, Moments
 from retro_ai_lab.training.search import Search
+from retro_ai_lab.training.vision import ScreenWatch
 from retro_ai_lab.understanding import VariableKind
 from tests.unit.training import test_going_back as going_back
 from tests.unit.training import test_going_back_in_training as in_training
@@ -82,9 +83,10 @@ def test_a_go_goes_back_to_before_the_last_chance_and_gets_across(
     assert moments.steps == 0 and moments.kept == (start,)
     # It says so, in steps.
     settled, found = said(caplog)
+    plays = lab.loaded.count(third.slot) + lab.loaded.count(second.slot)
     assert settled.startswith(
         "Lost a life at step 74. That was settled 53 steps before: nothing pressed from "
-        "then on changes it ("
+        f"then on changes it ({plays} plays, "
     )
     assert settled.endswith(
         " to find out). The AI goes back 74 steps, not 34, and tries its changes before then."
@@ -156,32 +158,72 @@ def test_an_older_moment_where_the_first_leaves_no_room(
 
     # What it is told is what it goes by: the first moment said to leave 5 steps, each
     # older one has the 20 steps more that lie between them, and nothing more is asked.
-    caplog.clear()
     asked: list[tuple[str, int, object]] = []
+    answer = [Chance(5, 9)]
 
     def told(connection: object, slot: str, trace: tuple[int, ...], *a: object, **kw: object):  # type: ignore[no-untyped-def]
         asked.append((slot, len(trace), kw["seconds"]))
-        return Chance(5, 9)
+        return answer[0]
 
     monkeypatch.setattr(episode, "last_chance", told)
     searches = Asked(monkeypatch)
-    lives: list[object] = []
-    monkeypatch.setattr(searches, "enough", lives)  # (the stand-in notes "enough" there)
-    r, moments = going(lab, LONG, last_chance=True)
-    r.begin()
-    steps(r, LONG_DIED - 1)
-    start, second, third, _ = moments.kept
-    with caplog.at_level(logging.INFO, logger=LOG):
-        assert r.step()
-    assert asked == [(third.slot, 34, None)]
-    assert searches.calls == [(second.slot, (lab.move("right"),) * 54, False)]
-    settled, _ = said(caplog)
+    walk = lab.move("right")
+
+    def loses(**kw: object) -> tuple[tuple[str, ...], str]:
+        """The go of the first test up to its search: the slots of its moments, oldest
+        first, and what it said about the loss."""
+        caplog.clear()
+        asked.clear()
+        searches.calls.clear()
+        r, moments = going(lab, LONG, last_chance=True, **kw)
+        r.begin()
+        steps(r, LONG_DIED - 1)
+        slots = tuple(m.slot for m in moments.kept)
+        with caplog.at_level(logging.INFO, logger=LOG):
+            assert r.step()
+        r.finish()
+        return slots, said(caplog)[0]
+
+    (start, second, third, _), settled = loses()
+    assert asked == [(third, 34, None)]
+    assert searches.calls == [(second, (walk,) * 54, False)]
     assert settled == (
         "Lost a life at step 74. That was settled 29 steps before: nothing pressed from "
         "then on changes it (9 plays, 0.0 s to find out). The AI goes back 54 steps, not "
         "34, and tries its changes before then."
     )
-    r.finish()
+    # Fifteen steps are room enough, fourteen are not.
+    answer[0] = Chance(ROOM, 9)
+    loses()
+    assert len(asked) == 1 and searches.calls == [(third, (walk,) * 34, False)]
+    answer[0] = Chance(ROOM - 1, 9)
+    loses()
+    assert len(asked) == 1 and searches.calls == [(second, (walk,) * 54, False)]
+    # A moment with no step before it was settled says nothing of the one before: that
+    # one is asked too, with the time that is left of what one search may take.
+    answer[0] = Chance(0, 2)
+    _, settled = loses(way_seconds=1000.0)
+    assert [(slot, length) for slot, length, _ in asked] == [(third, 34), (second, 54), (start, 74)]
+    first, then, last = (seconds for *_, seconds in asked)
+    assert isinstance(first, float) and isinstance(then, float) and isinstance(last, float)
+    assert 1000.0 >= first > then > last > 990.0
+    assert searches.calls == [(start, (walk,) * 74, False)]
+    assert settled.startswith(
+        "Lost a life at step 74. That was settled before the earliest moment the AI can "
+        "go back to, 74 steps before: nothing pressed since changes it (6 plays, "
+    )
+    # A moment saved with no look at the screen cannot be searched from: it stops there.
+    real = ScreenWatch.mark
+    marks: list[object] = []
+
+    def marking(self: ScreenWatch) -> object:
+        marks.append(real(self))
+        return None if len(marks) == 1 else marks[-1]
+
+    monkeypatch.setattr(ScreenWatch, "mark", marking)
+    (start, second, third, _), _ = loses()
+    assert [(slot, length) for slot, length, _ in asked] == [(third, 34), (second, 54)]
+    assert searches.calls == [(second, (walk,) * 54, False)]
 
 
 def test_the_search_is_told_and_time_is_kept(
@@ -229,7 +271,7 @@ def test_the_search_is_told_and_time_is_kept(
     given.clear()
     caplog.clear()
     monkeypatch.setattr(episode, "last_chance", lambda *a, **kw: None)
-    r, _ = going(lab, LONG, last_chance=True, way_tries=3)
+    r, _ = going(lab, LONG, last_chance=True, way_tries=3, way_seconds=1000.0)
     r.begin()
     steps(r, LONG_DIED - 1)
     with caplog.at_level(logging.INFO, logger=LOG):
