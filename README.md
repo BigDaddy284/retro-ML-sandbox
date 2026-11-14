@@ -264,6 +264,16 @@ that going back by themselves are no longer taken for the game starting
 over. When a game really starts over nearly everything changes at once, so
 the life count and the score are never counted that way.
 
+Where a value starts is something the AI has to work out as well, because
+it first sees most values in the middle of a game. It goes by which way a
+number runs: what it takes for a score or for progress starts at the lowest
+it has been seen at, and what it takes for lives or health at the most. Once
+it has seen a value there, the value coming back there counts as going back
+to its start, so the very first time a game starts over under its eyes may
+pass unnoticed and the later ones do not. A life count going down is a lost
+life and never the game starting over, even where the game puts you back at
+the start of the level for it, which used to be taken for a restart.
+
 A search runs at the emulator's top speed and is over within 15 seconds;
 a go searches at most three times. In a game where eight searches in a row
 find nothing, the AI stops going back for the rest of that session, because
