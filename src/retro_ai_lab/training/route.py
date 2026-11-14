@@ -50,13 +50,14 @@ A place that keeps costing a life is come at from further back (T-1029). A go
 that loses a life and finds no way past ends its story a lead before the loss,
 and the way with it, so the next go arrives short of the place, alive. It
 arrives with as little room as the go before, though, and what failed there
-fails again: on one practice level eight goes in a row ended at the same place.
+fails again: on one practice level the way stayed within twenty steps of the
+same length for eight goes.
 So the route notes the step of the story at which each such loss stood
 (:meth:`Route.loss_stands`), and every earlier one at about the same place
-doubles the lead, three times at most: the AI's own play, and its searches,
-start from further back each time. A place is told by how many steps in it
-lies, which is all the route knows of it: that holds while the go arrives by
-the way it remembers.
+doubles the lead, three times at most: the AI's own play starts from further
+back each time, and arrives at the place differently. A place is told by how
+many steps in it lies, which is all the route knows of it: that holds while
+the go arrives by the way it remembers.
 """
 
 from __future__ import annotations
