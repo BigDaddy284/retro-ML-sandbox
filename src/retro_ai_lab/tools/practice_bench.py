@@ -66,6 +66,8 @@ class Report:
     algorithm: str
     remember: bool = True  # goes began with the best way played (T-1015)
     stand: bool = True  # a go that stood still went back to look for a way on (T-1018)
+    # Frames the game's dying pause was set to; None is the game's own (T-1030).
+    dying_frames: int | None = None
     # Eyes.
     looks: int = 0
     followed: int = 0  # looks in which the watch had what it calls itself in sight
@@ -128,6 +130,13 @@ class Report:
             "life was lost"
         )
 
+    def _describe_pause(self) -> str:
+        """ ", with a dying pause of 200 frames", or "" with the game's own (T-1030)."""
+        if self.dying_frames is None:
+            return ""
+        frames = self.dying_frames
+        return f", with a dying pause of {frames} frame{'' if frames == 1 else 's'}"
+
     def lines(self) -> list[str]:
         """The report as the lines the tool prints."""
         label = describe_algorithm(self.algorithm)[0]
@@ -135,7 +144,8 @@ class Report:
             f"Practice bench: Toy Hopper level {self.seed}, {self.goes} goes of up to "
             f"{self.max_steps} steps, {label}"
             f"{'' if self.remember else ', without the way it remembers'}"
-            f"{'' if self.stand else ', without going back where it stands still'}."
+            f"{'' if self.stand else ', without going back where it stands still'}"
+            f"{self._describe_pause()}."
         ]
         if self.looks:
             out.append(
@@ -258,6 +268,7 @@ def run(
     play_frames: int = DEFAULT_PLAY_FRAMES,
     remember: bool = True,
     stand: bool = True,
+    dying_frames: int | None = None,
 ) -> Report:
     """Run the bench and return what it measured. Seeded: the same arguments, the same report.
 
@@ -265,11 +276,22 @@ def run(
     is the brain's own from its first step, as all goes were before.
     ``stand=False`` trains without going back where a go stays about one spot with no
     life lost (T-1018): it goes back after a life lost only, as before.
+    ``dying_frames`` sets the game's dying pause, the frames from the fatal touch to
+    the life going (T-1030), before anything is played: a real game can take some
+    two hundred over it, and the life counter then moves long after the mistake.
     """
     if not isinstance(remember, bool):
         raise ConfigurationError("The bench needs remember to be True or False.")
     if not isinstance(stand, bool):
         raise ConfigurationError("The bench needs stand to be True or False.")
+    if dying_frames is not None and (
+        isinstance(dying_frames, bool)
+        or not isinstance(dying_frames, int)
+        or not 1 <= dying_frames <= 0xFF
+    ):
+        raise ConfigurationError(
+            "The bench needs the dying pause as a whole number of frames from 1 to 255."
+        )
     for value, what in ((goes, "goes"), (max_steps, "steps"), (play_frames, "play frames")):
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ConfigurationError(f"The bench needs a whole number of {what}, 1 or more.")
@@ -284,6 +306,7 @@ def run(
         algorithm=algorithm,
         remember=remember,
         stand=stand,
+        dying_frames=dying_frames,
     )
     with tempfile.TemporaryDirectory() as scratch:
         data = Path(scratch)
@@ -311,11 +334,13 @@ def run(
         training.set_algorithm(algorithm)
         connection.connect("fake", game="hopper", seed=seed)
         try:
-            first_go(connection, observation, play_frames)
             adapter = connection.adapter
             assert isinstance(adapter, FakeEmulatorAdapter)
             game = adapter.game
             assert isinstance(game, ToyHopper)
+            if dying_frames is not None:
+                game.dying_frames = dying_frames  # before anything is learned (T-1030)
+            first_go(connection, observation, play_frames)
             game.reset()  # the AI's goes start from the level's start, three lives in hand
             _train(training, game, report)
             _read_memory(training, discovery, report)
@@ -546,6 +571,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not go back to look for a way on where a go stands still with no life lost",
     )
+    parser.add_argument(
+        "--dying-frames",
+        type=_pause,
+        default=None,
+        help="frames from the fatal touch to the life going, 1 to 255 (the game's own: "
+        f"{toy_hopper.DYING_FRAMES})",
+    )
     return parser
 
 
@@ -556,6 +588,16 @@ def _whole(text: str) -> int:
         raise argparse.ArgumentTypeError(f"'{text}' is not a whole number.") from exc
     if number < 1:
         raise argparse.ArgumentTypeError("must be 1 or more.")
+    return number
+
+
+def _pause(text: str) -> int:
+    try:
+        number = int(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"'{text}' is not a whole number.") from exc
+    if not 1 <= number <= 0xFF:
+        raise argparse.ArgumentTypeError("must be from 1 to 255.")
     return number
 
 
@@ -579,6 +621,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         play_frames=args.play_frames,
         remember=not args.no_memory,
         stand=not args.no_standstill,
+        dying_frames=args.dying_frames,
     )
     for line in report.lines():
         print(line)
