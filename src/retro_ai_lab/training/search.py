@@ -102,6 +102,7 @@ def find_way(
     plain: int | None = None,
     stood: bool = False,
     enough: Callable[[Outcome], bool] | None = None,
+    live: int | None = None,
 ) -> Search:
     """Look for a small change to ``trace``, played from the save in ``slot``, that
     stays alive and reaches new ground.
@@ -140,6 +141,15 @@ def find_way(
     False says it is no way all the same. After a life lost nobody asks: past the
     place is enough. At a standstill the caller asks that the try ended out of the
     spot it stood about: a hop of two steps and standing again is no way on.
+
+    ``live`` is how many steps of ``trace`` come before the loss was settled
+    (:func:`retro_ai_lab.training.chance.last_chance`, T-1031): a game plays a loss
+    out for a while before its counter drops, and nothing pressed in that while
+    changes anything. The changes to ``trace`` are then placed before that step
+    only, and the changes to the plain way as many steps before the step it loses
+    the life at as that step lies before the end of ``trace``: the game takes as
+    long over that loss. With 0 there is nothing of what it did to change, and the
+    plain way is played the once.
     """
     if not slot or not isinstance(slot, str):
         raise ConfigurationError("A search needs the name of the save to start from.")
@@ -165,6 +175,15 @@ def find_way(
         raise ConfigurationError("stood must be true or false.")
     if enough is not None and not callable(enough):
         raise ConfigurationError("enough must say of a try whether it is a way, when called.")
+    if live is not None:
+        if isinstance(live, bool) or not isinstance(live, int) or not 0 <= live <= len(trace):
+            raise ConfigurationError(
+                "live must be a whole number from 0 to the number of steps it did."
+            )
+        if stood:
+            raise ConfigurationError(
+                "live is for a search after a life lost: at a standstill none was."
+            )
     for move in trace:
         space[move]  # refuses a move the controls don't have, before anything is played
     if plain is not None:
@@ -196,14 +215,19 @@ def find_way(
             return None
         return hashlib.blake2b(outcome.screen, digest_size=16).digest()
 
-    def seek(base: Sequence[int], limit: int) -> tuple[Change, tuple[int, ...], int] | None:
+    def seek(
+        base: Sequence[int], limit: int, upto: int | None = None
+    ) -> tuple[Change, tuple[int, ...], int] | None:
         """The first small change to ``base`` that gets past, with its moves and the
-        new ground counted, while the tries stay under ``limit``."""
+        new ground counted, while the tries stay under ``limit``. With ``upto`` the
+        changes are placed before that step of ``base`` only (T-1031)."""
         nonlocal tries
+        if upto is not None and upto < 1:
+            return None  # the loss was settled before the first step: nothing to change
         # At a standstill the earliest change that gets on is tried first: it is the
         # one with the least standing in it (T-1018). And a hold is played out whole:
         # the trace ends where it came to stand, with no room in it for a long one.
-        for change in changes(base, space, early=stood, whole=stood):
+        for change in changes(base, space, early=stood, whole=stood, upto=upto):
             moves = change.apply(base, carry_on, whole=stood)
             if moves in played:
                 continue  # the other part of the search has been here
@@ -258,7 +282,8 @@ def find_way(
         )
         if first.lost:
             base = (plain,) * first.steps
-            got = seek(base, share)
+            # Its loss takes as long to play out as the one at the end of the trace.
+            got = seek(base, share, None if live is None else first.steps - (len(trace) - live))
             if got is not None:
                 change, moves, ground = got
                 way = Way(moves, change, tries, ground, plain=plain, lost_at=first.steps)
@@ -290,7 +315,7 @@ def find_way(
                 if got is not None:
                     change, moves, ground = got
                     return Search(Way(moves, change, tries, ground, plain=plain), tries, taken())
-    got = None if late else seek(trace, budget)
+    got = None if late else seek(trace, budget, live)
     if got is not None:
         change, moves, ground = got
         return Search(Way(moves, change, tries, ground), tries, taken())
