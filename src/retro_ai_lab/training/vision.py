@@ -40,6 +40,7 @@ from retro_ai_lab.core import ConfigurationError, Frame
 from retro_ai_lab.observation.camera_memory import CameraMemory
 from retro_ai_lab.observation.ground import Ground, Kept
 from retro_ai_lab.observation.objects import ObjectCatalogue
+from retro_ai_lab.observation.places import same_view
 from retro_ai_lab.observation.signature import Box
 from retro_ai_lab.observation.sprites import SpriteTag
 from retro_ai_lab.observation.surroundings import NOTHING_BELOW, Surroundings, read
@@ -60,9 +61,14 @@ LOOK_SHIFT = 32  # pixels the camera may move between two looks, either way (T-9
 CUT = 0.25  # share of the screen no camera move explains: a cut to another place (T-993)
 JOLT = 0.02  # ... and the share that, with a life lost about then, is a respawn
 BACK_LOOKS = 4  # looks between the life lost and the jolt for the two to be one event
+# A cut this many looks or fewer after a life was lost is the game putting the player
+# back (a card, a fade, the level drawn again), however many screens it takes (T-1038).
+RESPAWN_LOOKS = 60
+MOST_PLACES = 16  # places a go is taken to pass through at most; each keeps two screens
 FOLLOWED_OVER = 200  # looks with the camera moving that its measure is judged over
 LOST_LEAST = 20  # ... of which this many unmeasured, and more than the share below,
 LOST_SHARE = 0.2  # mean the camera cannot be followed here: no ground is counted
+_ENDINGS = {1: "st", 2: "nd", 3: "rd"}
 
 
 def side(apart: int, *, near: int | None = NEAR) -> int:
@@ -132,6 +138,16 @@ class ScreenWatch:
         self._prior_box: Box | None = None  # its last sighting before this look
         self._lost_at: int | None = None  # the last look that heard of a life lost
         self._was_jolt = False  # the look before was a jolt too
+        # The places the go has been in (T-1038), by their number in the ground's
+        # count: the screen at the door of each, and the screen it last left each by.
+        self._doors: list[Frame | None] = [None]
+        self._lefts: list[Frame | None] = [None]
+        self._arriving = False  # the screen jumped, and where it is has not been settled
+        self._last_frame: Frame | None = None  # the screen of the look before
+        self._life_at: int | None = None  # the last look that heard of a life lost
+        # The look it was taken to be in another place at, and the place before.
+        self._came: tuple[int, int] | None = None
+        self._quiet = False  # a try's watch says nothing of the places it comes to
         # Looks in which the camera moved: True where the move was measured, False
         # where it was not (a jolt). Kept from go to go: it is about the game.
         self._measured: deque[bool] = deque(maxlen=FOLLOWED_OVER)
@@ -261,6 +277,11 @@ class ScreenWatch:
         self._prior_box = None
         self._lost_at = None
         self._was_jolt = False
+        self._doors, self._lefts = [None], [None]
+        self._arriving = False
+        self._last_frame = None
+        self._life_at = None
+        self._came = None
         self._around = None
         self._me = None
         self._box = None
@@ -283,7 +304,8 @@ class ScreenWatch:
         camera or taken for a cut to another place. What was waiting from the last
         looks is dropped: a jolt, a life lost (it would be read as a respawn at the
         start of the go), a fall, touches not yet blamed. The ground is put back:
-        what was reached stays reached. The counts for the summary stay.
+        what was reached stays reached, and it is in the place it was in then
+        (T-1038). The counts for the summary stay.
 
         The tracker starts from the screen of the moment gone back to, where the mark
         has it (T-1023): the next look is then measured against that screen like any
@@ -308,6 +330,12 @@ class ScreenWatch:
         self._prior_box = None
         self._lost_at = None
         self._was_jolt = False
+        # The places it has been in stay known; a jump not yet settled, a life lost
+        # and a place just taken up belong to what was undone (T-1038).
+        self._arriving = False
+        self._last_frame = mark.screen
+        self._life_at = None
+        self._came = None
         self._around = None
         self._me = None
         self._box = None
@@ -329,6 +357,11 @@ class ScreenWatch:
         other._my_kind = None  # a kind is a name in this watch's own catalogue
         other._ground = self._ground.copy()
         other._ground.put_back(mark.ground)
+        # It knows the places the go has been in, and settles a jump as the go would
+        # (T-1038); what it comes to is its own, and it says nothing of it.
+        other._doors, other._lefts = list(self._doors), list(self._lefts)
+        other._last_frame = mark.screen
+        other._quiet = True
         other._last_me = mark.last_me
         other._measured = deque(self._measured, maxlen=self._measured.maxlen)
         return other
@@ -399,7 +432,8 @@ class ScreenWatch:
             )
             self._fell_at = None  # in sight again: it did not fall out of the screen
         self._was_seen = self._box is not None
-        self._cover_ground(lost)
+        self._cover_ground(lost, frame)
+        self._last_frame = frame
         if scored:
             happened.append(Happening.SCORE_UP)
         self._learner.observe(
@@ -464,7 +498,7 @@ class ScreenWatch:
                 agreed[1],
             )
 
-    def _cover_ground(self, lost: int) -> None:
+    def _cover_ground(self, lost: int, frame: Frame) -> None:
         """Count the new ground of this look (T-993).
 
         A jolt is a look in which the screen changed and no camera move explains it.
@@ -472,9 +506,14 @@ class ScreenWatch:
         after dying can change far less of a plain level: that is a jolt that comes
         after a look that could be measured, finds the player somewhere else on the
         screen than it was last seen (further than its own size), and has a life lost
-        within a few looks of it. Either way it is taken to be back where the go
-        began, so ground it walks again pays nothing. A life lost without all that (a
-        hit that costs health, a crash that leaves it where it was) changes nothing.
+        within a few looks of it. Either way it is taken to be at the door of the
+        place it is in, so ground it walks again pays nothing. A life lost without all
+        that (a hit that costs health, a crash that leaves it where it was) changes
+        nothing.
+
+        After a cut, which place it is in is settled at the first look that can be
+        measured against the one before (:meth:`_arrive`, T-1038): a card or a fade
+        between two places is cuts in a row, and none of them is anywhere.
 
         Every other jolt is a move that could not be measured, and nothing is counted
         for it. Where those are common the count would pay for moving slowly enough to
@@ -483,23 +522,38 @@ class ScreenWatch:
         """
         moved, share = self._tracker.scroll, self._tracker.unexplained
         jolt = moved == (0, 0) and share >= JOLT
+        cut = jolt and share >= CUT
+        if self._looks_this_go == 0 and self._doors[0] is None:
+            self._doors[0] = frame  # where the go began is the door of its first place
         if jolt and not self._was_jolt and self._elsewhere():
             self._jolt_at = self._looks
         if lost:
-            self._lost_at = self._looks
+            self._lost_at = self._life_at = self._looks
+            came, self._came = self._came, None
+            if came is not None and self._looks - came[0] <= BACK_LOOKS:
+                # The place it was just taken to be in was the game putting it back.
+                self._ground.go_to(came[1])
         respawn = (
             self._jolt_at is not None
             and self._lost_at is not None
             and abs(self._jolt_at - self._lost_at) <= BACK_LOOKS
         )
-        if respawn or (jolt and share >= CUT):
+        if respawn:
             self._ground.back()
-            if respawn:
-                self._jolt_at = self._lost_at = None
+            self._arriving = False
+            self._jolt_at = self._lost_at = None
+        elif cut:
+            if not self._arriving:
+                self._arriving = True
+                self._leave()
+            self._ground.back()
         elif jolt:
             self._measured.append(False)
         elif moved != (0, 0):
             self._measured.append(True)
+        if self._arriving and not cut:
+            self._arriving = False
+            self._arrive(frame)
         self._was_jolt = jolt
         if self._box is None:
             new = self._ground.look(moved)
@@ -509,6 +563,69 @@ class ScreenWatch:
         if self.follows_camera:
             self._new_ground += new  # otherwise counted and not paid, now or later
             self._ground_again += self._ground.again
+
+    def _leave(self) -> None:
+        """The screen has jumped: the screen before it is where the place it is in was
+        last left, and it is known again by that (T-1038)."""
+        here = self._ground.place_number
+        while len(self._lefts) <= here:
+            self._lefts.append(None)
+        if self._last_frame is not None:
+            self._lefts[here] = self._last_frame
+
+    def _arrive(self, frame: Frame) -> None:
+        """Settle which place it is in after a cut, now that the screen can be measured
+        again (T-1038). The ground has it at the door of the place it was in.
+
+        With a life lost in the last ``RESPAWN_LOOKS`` looks, the game put it back:
+        that place still. Otherwise the screen says: the view at the door of a place
+        the go has been in, or the view such a place was last left by, is that place
+        again, at its door; what it reached there stays reached, so going in and out
+        of a door pays each side once. Anything else is somewhere new, whose ground
+        is new from here, and this screen is kept as its door. Past ``MOST_PLACES``
+        nothing more is taken for new: it stays at the door of the place it was in,
+        as every cut did before.
+        """
+        if self._life_at is not None and self._looks - self._life_at <= RESPAWN_LOOKS:
+            return
+        here = self._ground.place_number
+        known = min(self._ground.places, len(self._doors))
+        for number in (here, *(n for n in range(known) if n != here)):
+            views = (
+                self._doors[number] if number < len(self._doors) else None,
+                self._lefts[number] if number < len(self._lefts) else None,
+            )
+            if any(view is not None and self._same(view, frame) for view in views):
+                if number != here:
+                    self._ground.go_to(number)
+                    self._came = (self._looks, here)
+                return
+        if self._ground.places >= MOST_PLACES:
+            return
+        number = self._ground.new_place()
+        while len(self._doors) <= number:
+            self._doors.append(None)
+        self._doors[number] = frame
+        self._came = (self._looks, here)
+        if not self._quiet:
+            log.info(
+                "The screen changed altogether with no life lost, and it shows nowhere "
+                "this go has been: the AI takes it for a new place (the go's %d%s). "
+                "Ground there is new from where it came in.",
+                number + 1,
+                "th" if 10 <= (number + 1) % 100 <= 20 else _ENDINGS.get((number + 1) % 10, "th"),
+            )
+
+    @staticmethod
+    def _same(view: Frame, frame: Frame) -> bool:
+        """The two screens show one spot; screens of another size never do."""
+        if (view.width, view.height, view.channels) != (
+            frame.width,
+            frame.height,
+            frame.channels,
+        ):
+            return False
+        return same_view(view, frame)
 
     def _elsewhere(self) -> bool:
         """It is seen further than its own size from where it was last seen."""

@@ -717,7 +717,11 @@ def test_walking_across_a_still_screen_pays(colours: bool) -> None:
     assert watch.ground.reach[0] == 72
 
 
-def test_a_cut_puts_it_back_where_the_go_began() -> None:
+def test_a_cut_to_somewhere_new_pays_from_its_door() -> None:
+    """Until T-1038 this was ``test_a_cut_puts_it_back_where_the_go_began``, and the
+    room paid nothing until it was further from its door than the go's furthest:
+    ``[0, 0, 0, 0, 1, 1]``. On a real game that was every level after the first.
+    Changed with the user's word (15 Nov): somewhere new is new ground from its door."""
     watch = ScreenWatch(hero_with_colours((86, 200)))
     watch.begin_go()
     for i in range(5):
@@ -728,13 +732,15 @@ def test_a_cut_puts_it_back_where_the_go_began() -> None:
     assert watch.tracker.unexplained >= 0.25
     assert watch.ground.place == (0, 0) and watch.ground.reach == (64, 0, 0, 0)
     assert watch.take_new_ground() == 0
-    # On through the room: nothing until it is further from the door than the go's
-    # furthest (the fifth move makes 80 pixels: the fifth step).
+    # On through the room: with no life lost and a screen that is nowhere the go has
+    # been, it is a new place, and every 15 pixels from its door are a step.
     walk = []
     for i in range(1, 7):
         watch.look(indoors(400 + 16 * i, HELD))
         walk.append(watch.take_new_ground())
-    assert walk == [0, 0, 0, 0, 1, 1]
+    assert walk == [1, 1, 1, 1, 1, 1]
+    assert watch.ground.place_number == 1 and watch.ground.reach == (96, 0, 0, 0)
+    assert watch.ground.steps == 4 + 6
 
 
 START = [(32, 192, HERO)]  # where the game puts it back: not where the camera holds it
