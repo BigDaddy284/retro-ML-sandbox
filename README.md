@@ -327,6 +327,27 @@ is more than 8 steps shorter (then it was another kind of loss). It is kept
 while training runs with the same settings, and not from one session to the
 next: the first life lost after you start is asked about in full.
 
+Some of what a game counts goes up whatever you do: a clock, a count of
+frames. Taken for progress, it pays the AI for standing still and staying
+alive. So where the AI is paid for a value going up, it asks the game whether
+that was earned. It goes back to a saved moment eight steps or more before,
+plays those steps again with each other move held instead, and looks whether
+the value still ends as high. If one other move leaves it lower, the rise was
+earned. If it goes up just the same with every move, that counts against the
+value. After two such answers, where they are at least half of the answers
+about that value, the AI doubts the guess at its next review and drops it at
+the one after, and it is paid nothing more. The log says what it asked and
+what it found ("Progress at ram[22] went up at step 64 and was paid. The AI
+asked the game: played again from 24 steps before with each other move held,
+it went up just the same (15 plays). What goes up whatever is pressed is not
+progress, so that counts against it."). It asks about one value six times at
+most, then puts the game back exactly where it was; none of those plays is
+learned from or counted. A value you confirmed yourself is never dropped: the
+AI asks you about it instead. It asks only where the console can save the
+game and the AI goes back for lost lives. On the practice game with a long
+dying pause, the four levels where the clock was paid as progress and none
+was ever finished are now finished 9, 9, 3 and 3 times in 12 goes.
+
 A brain that has lost lives at a spot can turn timid: it stops short and
 waits, loses nothing, and so never finds the way past. Where the AI can go
 back, it does not let that stand. When a go has been paid nothing for 24
