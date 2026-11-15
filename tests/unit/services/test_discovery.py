@@ -30,6 +30,7 @@ from retro_ai_lab.services.discovery import (
     BUSY,
     CLOCK_TOP,
     MOVES_ALONE,
+    ON_ITS_OWN,
     PLAYED,
     game_id_for,
 )
@@ -1518,6 +1519,172 @@ def test_progress_that_rises_as_a_life_is_lost_is_doubted_then_dropped(
     connection.disconnect()
     connection.connect("fake", seed=5)
     assert discovery.aftermath.counts(mode.id) == (0, 0, 0, 0)
+
+
+# ------------------------------------------- T-1035: what rises whatever is pressed
+
+
+def test_which_rises_are_worth_asking_about(
+    discovery: DiscoveryService, connection: ConnectionService
+) -> None:
+    # Nothing connected: nothing to ask about, and nowhere to put an answer.
+    assert not discovery.rise_worth_asking("v1")
+    with pytest.raises(UnsupportedCapabilityError):
+        discovery.rise_answered("v1", True)
+    connection.connect("fake", seed=5)
+    k = discovery.knowledge
+    assert k is not None
+    sure = [Evidence("test", "Planted.", 6.0)]
+    clock = k.propose("ram", 1, kind=VariableKind.PROGRESS, name="Clock", evidence=sure)
+    page = k.propose("ram", 2, kind=VariableKind.PROGRESS, name="Page", evidence=sure)
+    sworn = k.propose("ram", 3, kind=VariableKind.PROGRESS, name="Sworn", evidence=sure)
+    lives = k.propose("ram", 4, kind=VariableKind.LIVES, name="Lives", evidence=sure)
+    gone = k.propose("ram", 5, kind=VariableKind.PROGRESS, name="Gone", evidence=sure)
+    k.confirm(sworn.id)
+    k.reject(gone.id)
+    # What the AI reads as progress, its own guess or a person's; nothing else.
+    assert discovery.rise_worth_asking(clock.id) and discovery.rise_worth_asking(page.id)
+    assert discovery.rise_worth_asking(sworn.id)
+    assert not discovery.rise_worth_asking(lives.id)
+    assert not discovery.rise_worth_asking(gone.id)
+    assert not discovery.rise_worth_asking("nobody")
+    assert not discovery.rise_worth_asking(None)  # type: ignore[arg-type]
+    # Answers are counted, each value apart.
+    assert discovery.unearned.counts(clock.id) == (0, 0)
+    discovery.rise_answered(clock.id, True)
+    discovery.rise_answered(page.id, False)
+    assert discovery.rise_worth_asking(clock.id)
+    discovery.rise_answered(clock.id, True)
+    assert discovery.unearned.counts(clock.id) == (2, 2)
+    assert discovery.unearned.counts(page.id) == (1, 0)
+    # With a verdict nothing more is asked; nor after six answers without one.
+    assert not discovery.rise_worth_asking(clock.id)
+    for _ in range(5):
+        assert discovery.rise_worth_asking(page.id)
+        discovery.rise_answered(page.id, False)
+    assert not discovery.rise_worth_asking(page.id)
+    # An answer about nothing the AI knows is refused, and so is nonsense.
+    with pytest.raises(ConfigurationError):
+        discovery.rise_answered("nobody", True)
+    with pytest.raises(ConfigurationError):
+        discovery.rise_answered(sworn.id, 1)  # type: ignore[arg-type]
+    assert discovery.unearned.counts(sworn.id) == (0, 0)
+    # A game connected afresh starts counting afresh.
+    connection.disconnect()
+    connection.connect("fake", seed=5)
+    assert discovery.unearned.counts(clock.id) == (0, 0)
+
+
+def test_progress_that_rises_whatever_is_pressed_is_doubted_then_dropped(
+    discovery: DiscoveryService,
+    connection: ConnectionService,
+    bus: EventBus,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """T-1035: with a long dying pause the top byte of the practice game's clock was
+    "progress": 10 points every 256 frames, and standing still paid best."""
+    connection.connect("fake", seed=5)
+    k = discovery.knowledge
+    assert k is not None
+    sure = [Evidence("test", "Planted.", 6.0)]
+    clock = k.propose("ram", 1, kind=VariableKind.PROGRESS, name="Clock", evidence=sure)
+    page = k.propose("ram", 2, kind=VariableKind.PROGRESS, name="Page", evidence=sure)
+    once = k.propose("ram", 3, kind=VariableKind.PROGRESS, name="Once", evidence=sure)
+    sworn = k.propose("ram", 4, kind=VariableKind.PROGRESS, name="Sworn", evidence=sure)
+    lives = k.propose("ram", 5, kind=VariableKind.LIVES, name="Lives", evidence=sure)
+    k.confirm(sworn.id)
+    # The game was asked: the clock rose anyway at two rises of three, the person's
+    # value at two of two, the page at none of three, and one value was asked about once.
+    # (And of a life count, which is no progress to doubt whatever was said of it.)
+    for var, answers in (
+        (clock, (True, False, True)),
+        (page, (False, False, False)),
+        (once, (True,)),
+        (sworn, (True, True)),
+        (lives, (True, True)),
+    ):
+        for anyway in answers:
+            discovery.rise_answered(var.id, anyway)
+    seen: list[DiscoveryUpdated] = []
+    bus.subscribe(DiscoveryUpdated, seen.append)
+    caplog.set_level(logging.INFO, logger="retro_ai_lab.services.discovery")
+    changed = discovery.doubt_bouncing(frame=7)
+    assert [v.id for v in changed] == [clock.id] and not k.get(clock.id).rejected
+    last = k.get(clock.id).evidence[-1]
+    assert last.kind == ON_ITS_OWN and last.frame == 7
+    assert last.detail == (
+        "Went up whatever was pressed 2 of the 3 times the AI asked the game; what goes "
+        "up by itself is not progress. Once is a doubt; twice and the AI drops it."
+    )
+    # It is announced, with the person's value that is asked about.
+    (update,) = seen
+    assert {v.id for v in update.changed} == {clock.id, sworn.id}
+    # The person's word is kept, and asked about.
+    (question,) = discovery.questions
+    assert question.var_id == sworn.id and question.reason == ON_ITS_OWN
+    assert question.text.startswith(
+        'You confirmed "Sworn", but it went up whatever was pressed 2 of the 2 times the AI '
+        "asked the game; what goes up by itself is not progress. The AI keeps your word;"
+    )
+    assert question.text in caplog.text
+    # The next review drops the AI's own guess, and then there is nothing left to say.
+    changed = discovery.doubt_bouncing()
+    assert [v.id for v in changed] == [clock.id] and k.get(clock.id).rejected
+    said = [e.detail for e in k.get(clock.id).evidence if e.kind == ON_ITS_OWN]
+    assert len(said) == 2 and said[1] == (
+        "Still went up whatever was pressed 2 of the 3 times the AI asked the game; what "
+        "goes up by itself is not progress."
+    )
+    assert discovery.doubt_bouncing() == ()
+    for other in (page, once, sworn, lives):
+        assert not k.get(other.id).rejected
+        assert not any(e.kind == ON_ITS_OWN for e in k.get(other.id).evidence)
+    assert k.get(sworn.id).confirmed
+    # What is dropped is not asked about again; the person's value still has its verdict.
+    assert not discovery.rise_worth_asking(clock.id)
+    assert not discovery.rise_worth_asking(sworn.id)
+    # One more rise that came anyway is the second for "Once": doubted at the next review.
+    discovery.rise_answered(once.id, True)
+    changed = discovery.doubt_bouncing()
+    assert [v.id for v in changed] == [once.id] and not k.get(once.id).rejected
+    assert "2 of the 2 times" in k.get(once.id).evidence[-1].detail
+
+
+def test_a_guess_with_another_doubt_keeps_that_reason(
+    discovery: DiscoveryService, connection: ConnectionService, bus: EventBus
+) -> None:
+    # The mode value of T-997 rises as each life is lost. If the game also said that
+    # it rises whatever is pressed, the doubt it has already is the one that is said.
+    connection.connect("fake", seed=5)
+    k = discovery.knowledge
+    assert k is not None
+    sure = [Evidence("test", "Planted.", 6.0)]
+    k.propose("ram", 0, kind=VariableKind.LIVES, name="Lives", evidence=sure)
+    mode = k.propose("ram", 1, kind=VariableKind.PROGRESS, name="Mode", evidence=sure)
+    frame = 0
+
+    def see(*ram: int) -> None:
+        nonlocal frame
+        frame += 20
+        bus.publish(MemoryObserved(MemorySnapshot(frame, {"ram": bytes(ram)}), None))
+
+    left = 9
+    see(left, 0)
+    for _ in range(6):
+        for _ in range(30):
+            see(left, 0)
+        see(left, 1)  # the dying pause begins: mode goes up
+        left -= 1
+        see(left, 0)  # the life goes, play goes on
+    assert discovery.aftermath.verdict(mode.id)
+    discovery.rise_answered(mode.id, True)
+    discovery.rise_answered(mode.id, True)
+    assert discovery.unearned.verdict(mode.id)
+    (doubted,) = discovery.doubt_bouncing()
+    assert doubted.id == mode.id and doubted.evidence[-1].kind == AT_LOSS
+    assert "as a life was lost" in doubted.evidence[-1].detail
+    (dropped,) = discovery.doubt_bouncing()
+    assert dropped.rejected and not any(e.kind == ON_ITS_OWN for e in dropped.evidence)
 
 
 # ---------------------------------------------------------- T-1004: a jump back

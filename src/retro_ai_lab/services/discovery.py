@@ -73,6 +73,7 @@ from retro_ai_lab.understanding.moments import (
 )
 from retro_ai_lab.understanding.player import PlayerFinding
 from retro_ai_lab.understanding.relationships import RelationshipFinder
+from retro_ai_lab.understanding.unearned import Unearned
 from retro_ai_lab.understanding.variables import (
     RARE_RATE,
     clock_top,
@@ -106,7 +107,10 @@ CLOCK_KINDS = frozenset({VariableKind.SCORE, VariableKind.PROGRESS, VariableKind
 BOUNCES = "bounces"  # evidence kind: a "lives" byte going up nearly as often as down (T-864)
 BUSY = "busy"  # evidence kind: a "lives" byte changing more than once in ten steps (T-865)
 AT_LOSS = "at-loss"  # evidence kind: a "progress" byte that goes up as lives are lost (T-997)
-NOT_LIVES = frozenset({BOUNCES, BUSY, AT_LOSS})
+# Evidence kind: a "progress" value that goes up whatever is pressed, by what the game
+# said when it was asked (T-1035).
+ON_ITS_OWN = "on-its-own"
+NOT_LIVES = frozenset({BOUNCES, BUSY, AT_LOSS, ON_ITS_OWN})
 # Kinds a game has one of: confirming one sets the AI's other guesses of it aside (T-939).
 ONE_PER_GAME = frozenset({VariableKind.LIVES, VariableKind.HEALTH, VariableKind.SCORE})
 # Kinds re-checked at every review against the byte's fresh statistics (T-864 to T-866, T-869):
@@ -139,7 +143,7 @@ class Question:
 
     var_id: str
     name: str
-    reason: str  # BOUNCES or BUSY
+    reason: str  # BOUNCES, BUSY, AT_LOSS or ON_ITS_OWN
     text: str
 
 
@@ -251,6 +255,7 @@ class DiscoveryService:
         self._asked: frozenset[str] = frozenset()  # values a person rewards up/down (T-860)
         self._look: LongLook | None = None
         self._aftermath = Aftermath()  # T-997; a new one with each knowledge
+        self._unearned = Unearned()  # T-1035; likewise
         self._finder: RelationshipFinder | None = None
         self._events = EventLog()
         # Snapshots arrive from the play clock's worker and from the GUI thread
@@ -495,6 +500,35 @@ class DiscoveryService:
         return self._aftermath
 
     @property
+    def unearned(self) -> Unearned:
+        """Which values rise whatever is pressed (T-1035); a new one with each game."""
+        return self._unearned
+
+    def rise_worth_asking(self, var_id: str) -> bool:
+        """Whether the game should be asked if a rise of this value was earned (T-1035).
+
+        Only of what the AI reads as progress and has not set aside, a person's
+        confirmed guess included (it is never dropped, but it is questioned), and
+        only while another answer would still tell something.
+        """
+        with self._lock:
+            k = self._knowledge
+            if k is None or not isinstance(var_id, str) or var_id not in k:
+                return False
+            v = k.get(var_id)
+            if v.rejected or v.kind is not VariableKind.PROGRESS:
+                return False
+            return self._unearned.wants(var_id)
+
+    def rise_answered(self, var_id: str, anyway: bool) -> None:
+        """What the game said of one rise of this value: whether it came whatever was
+        pressed. Counted; the next review doubts a guess that mostly did."""
+        with self._lock:
+            k = self._require()
+            k.get(var_id)  # refuses a value that is not in the knowledge
+            self._unearned.note(var_id, anyway)
+
+    @property
     def questions(self) -> tuple[Question, ...]:
         """Confirmed guesses whose bytes behave unlike their kind, for the person (T-895)."""
         with self._lock:
@@ -532,9 +566,18 @@ class DiscoveryService:
                 rises_at_loss = v.kind is VariableKind.PROGRESS and self._aftermath.verdict(v.id)
                 if reason is None and rises_at_loss:
                     reason = AT_LOSS  # T-997
-                if reason is None or (reason != AT_LOSS and stats is None):
+                rises_anyway = v.kind is VariableKind.PROGRESS and self._unearned.verdict(v.id)
+                if reason is None and rises_anyway:
+                    reason = ON_ITS_OWN  # T-1035
+                if reason is None or (reason not in (AT_LOSS, ON_ITS_OWN) and stats is None):
                     continue
-                if reason == AT_LOSS:
+                if reason == ON_ITS_OWN:
+                    asked, anyway = self._unearned.counts(v.id)
+                    what = (
+                        f"went up whatever was pressed {anyway} of the {asked} times the AI "
+                        "asked the game; what goes up by itself is not progress"
+                    )
+                elif reason == AT_LOSS:
                     rises, met, _, _ = self._aftermath.counts(v.id)
                     what = (
                         f"went up {rises} times, {met} of them as a life was lost; "
@@ -1125,6 +1168,7 @@ class DiscoveryService:
             self._finder = RelationshipFinder(knowledge, window=self._event_window)
             self._look = LongLook(knowledge)
             self._aftermath = Aftermath()
+            self._unearned = Unearned()
 
     def review(self) -> DiscoveryUpdated:
         """Turn the statistics gathered so far into proposals, right now."""
