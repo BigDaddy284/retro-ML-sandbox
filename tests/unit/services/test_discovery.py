@@ -1591,14 +1591,17 @@ def test_progress_that_rises_whatever_is_pressed_is_doubted_then_dropped(
     page = k.propose("ram", 2, kind=VariableKind.PROGRESS, name="Page", evidence=sure)
     once = k.propose("ram", 3, kind=VariableKind.PROGRESS, name="Once", evidence=sure)
     sworn = k.propose("ram", 4, kind=VariableKind.PROGRESS, name="Sworn", evidence=sure)
+    lives = k.propose("ram", 5, kind=VariableKind.LIVES, name="Lives", evidence=sure)
     k.confirm(sworn.id)
     # The game was asked: the clock rose anyway at two rises of three, the person's
     # value at two of two, the page at none of three, and one value was asked about once.
+    # (And of a life count, which is no progress to doubt whatever was said of it.)
     for var, answers in (
         (clock, (True, False, True)),
         (page, (False, False, False)),
         (once, (True,)),
         (sworn, (True, True)),
+        (lives, (True, True)),
     ):
         for anyway in answers:
             discovery.rise_answered(var.id, anyway)
@@ -1633,7 +1636,7 @@ def test_progress_that_rises_whatever_is_pressed_is_doubted_then_dropped(
         "goes up by itself is not progress."
     )
     assert discovery.doubt_bouncing() == ()
-    for other in (page, once, sworn):
+    for other in (page, once, sworn, lives):
         assert not k.get(other.id).rejected
         assert not any(e.kind == ON_ITS_OWN for e in k.get(other.id).evidence)
     assert k.get(sworn.id).confirmed
@@ -1645,6 +1648,43 @@ def test_progress_that_rises_whatever_is_pressed_is_doubted_then_dropped(
     changed = discovery.doubt_bouncing()
     assert [v.id for v in changed] == [once.id] and not k.get(once.id).rejected
     assert "2 of the 2 times" in k.get(once.id).evidence[-1].detail
+
+
+def test_a_guess_with_another_doubt_keeps_that_reason(
+    discovery: DiscoveryService, connection: ConnectionService, bus: EventBus
+) -> None:
+    # The mode value of T-997 rises as each life is lost. If the game also said that
+    # it rises whatever is pressed, the doubt it has already is the one that is said.
+    connection.connect("fake", seed=5)
+    k = discovery.knowledge
+    assert k is not None
+    sure = [Evidence("test", "Planted.", 6.0)]
+    k.propose("ram", 0, kind=VariableKind.LIVES, name="Lives", evidence=sure)
+    mode = k.propose("ram", 1, kind=VariableKind.PROGRESS, name="Mode", evidence=sure)
+    frame = 0
+
+    def see(*ram: int) -> None:
+        nonlocal frame
+        frame += 20
+        bus.publish(MemoryObserved(MemorySnapshot(frame, {"ram": bytes(ram)}), None))
+
+    left = 9
+    see(left, 0)
+    for _ in range(6):
+        for _ in range(30):
+            see(left, 0)
+        see(left, 1)  # the dying pause begins: mode goes up
+        left -= 1
+        see(left, 0)  # the life goes, play goes on
+    assert discovery.aftermath.verdict(mode.id)
+    discovery.rise_answered(mode.id, True)
+    discovery.rise_answered(mode.id, True)
+    assert discovery.unearned.verdict(mode.id)
+    (doubted,) = discovery.doubt_bouncing()
+    assert doubted.id == mode.id and doubted.evidence[-1].kind == AT_LOSS
+    assert "as a life was lost" in doubted.evidence[-1].detail
+    (dropped,) = discovery.doubt_bouncing()
+    assert dropped.rejected and not any(e.kind == ON_ITS_OWN for e in dropped.evidence)
 
 
 # ---------------------------------------------------------- T-1004: a jump back
