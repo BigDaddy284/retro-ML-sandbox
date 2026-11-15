@@ -20,6 +20,14 @@ The halving takes it that once a loss is settled it stays settled. Every other
 move is asked before a step is called too late, the ones a button away from the
 move made first: asking only a few put the step too early in the try-outs, and
 the steps just before it are where most ways past begin.
+
+A step that is too late costs a play for every other move, and one that is not
+costs one or two. A caller that knows about where the step lies (a game takes
+nearly the same time over every loss) gives a ``guess`` (T-1033): a step it takes
+to be in time still. The asking walks on from it a step at a time until one is too
+late, and has paid for one such step where the halving pays for three or four. A
+guess is never taken at its word: where it is wrong the halving goes on between
+what is known by then.
 """
 
 from __future__ import annotations
@@ -33,6 +41,10 @@ from retro_ai_lab.learning.actions import ActionSpace
 from retro_ai_lab.services.connection import ConnectionService
 from retro_ai_lab.training.trial import play
 from retro_ai_lab.understanding.knowledge import Variable
+
+# Steps the asking walks on from a guess that was in time before it halves the rest:
+# a guess further off than that is no guide.
+WALK = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +77,7 @@ def last_chance(
     clock: Callable[[], float] = time.monotonic,
     shut: int | None = None,
     partial: bool = False,
+    guess: int | None = None,
 ) -> Chance | None:
     """How many steps of ``trace``, played from the save in ``slot``, come before the
     loss of the life at its end was settled.
@@ -87,6 +100,13 @@ def last_chance(
     of the trace on at the latest (a later save was too late from its first step,
     and lies that many steps on). The halving then starts from there, not from the
     end, and no step from there on is asked.
+
+    ``guess`` is a step the caller expects to be the last that still changes the
+    loss (T-1033). It is asked first; where it does change the loss the steps after
+    it are asked one at a time, ``WALK`` of them at most, and the first that is too
+    late is the answer. Where none of them is, or the guess is too late itself, the
+    halving goes on between what is known by then: the answer is the one given
+    without a guess, at more or fewer plays.
     """
     if not slot or not isinstance(slot, str):
         raise ConfigurationError("The last chance needs the name of the save to start from.")
@@ -117,6 +137,13 @@ def last_chance(
         raise ConfigurationError(
             "shut must be a whole number from 1 to the number of steps it did."
         )
+    known = length if shut is None else shut
+    if guess is not None and (
+        isinstance(guess, bool) or not isinstance(guess, int) or not 1 <= guess < known
+    ):
+        raise ConfigurationError(
+            "guess must be a whole number from 1 to below the step known to be too late."
+        )
     began = clock()
     plays = 0
 
@@ -138,15 +165,27 @@ def last_chance(
 
     # Settled from here on, as far as is known: the end says nothing (past the last
     # step there is nothing to change).
-    shut_at = length if shut is None else shut
+    shut_at = known
     again = False  # what it did was played again, and lost the life on its last step
     try:
         if not same(trace):
             return None
         again = True
-        if settled(0):
-            return Chance(0, plays)
-        open_at = 0  # not settled at this step
+        open_at: int | None = None  # not settled at this step
+        if guess is not None:
+            if settled(guess):
+                shut_at = guess
+            else:
+                open_at = guess
+                for step in range(guess + 1, min(guess + WALK, shut_at - 1) + 1):
+                    if settled(step):
+                        shut_at = step
+                        break
+                    open_at = step
+        if open_at is None:
+            if settled(0):
+                return Chance(0, plays)
+            open_at = 0
         while shut_at - open_at > 1:
             middle = (open_at + shut_at) // 2
             if settled(middle):
@@ -160,4 +199,4 @@ def last_chance(
         return None
 
 
-__all__ = ["Chance", "last_chance"]
+__all__ = ["WALK", "Chance", "last_chance"]
