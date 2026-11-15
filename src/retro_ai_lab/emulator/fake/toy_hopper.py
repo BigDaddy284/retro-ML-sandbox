@@ -26,7 +26,7 @@ from __future__ import annotations
 import struct
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -73,6 +73,7 @@ COIN_SCORE: Final = 10
 FLAG_SCORE: Final = 100
 MAX_SCORE: Final = 0xFFFF
 MAX_COINS: Final = 16
+MOST_LEVELS: Final = 8  # the most levels a cartridge holds (T-1040)
 WALKER_SLOTS: Final = 4
 RAM_SIZE: Final = 64
 
@@ -106,6 +107,24 @@ WALKER_FEET: Final[Colour] = (40, 0, 0)
 PLAYER: Final[Colour] = (228, 0, 88)
 PLAYER_HEAD: Final[Colour] = (252, 188, 176)
 HUD: Final[Colour] = (0, 0, 0)
+
+
+class Palette(NamedTuple):
+    """The colours a level is drawn in: its backdrop, its ground, the ground's top and
+    its walls. What moves and what is collected keep their colours on every level."""
+
+    sky: Colour
+    ground: Colour
+    grass: Colour
+    wall: Colour
+
+
+# A cartridge's levels take these in turn (T-1040): by day, in a cave, at dusk.
+PALETTES: Final = (
+    Palette(SKY, GROUND, GRASS, WALL),
+    Palette((36, 28, 72), (96, 100, 132), (0, 120, 148), (220, 132, 60)),
+    Palette((240, 144, 96), (112, 44, 76), (176, 200, 64), (60, 60, 148)),
+)
 
 
 @dataclass(frozen=True)
@@ -218,15 +237,48 @@ class ToyHopper:
             raise ConfigurationError("Toy Hopper seed must be a whole number from 0 to 65535.")
         self._seed = seed
         self._ram = bytearray(RAM_SIZE)
-        self._gaps, self._walls, self._walkers, self._coins = _level(seed)
+        self._levels = 1
+        self._noise = 0
+        self._dying_frames: int = DYING_FRAMES
+        self.reset()
+
+    @property
+    def levels(self) -> int:
+        """How many levels the cartridge holds (T-1040): 1 unless told, and then the
+        flag starts the same level again, as it always did.
+
+        With more, the flag leads to the next level and the last to the first again:
+        the level played is the level counter modulo this. Level n is laid out as
+        the practice level of seed + n and drawn in ``PALETTES[n % 3]``, so it looks
+        and plays like another level, as a real game's next level does. Like the
+        dying pause it is the cartridge's: a reset keeps it. It is meant to be said
+        before a game starts.
+        """
+        return self._levels
+
+    @levels.setter
+    def levels(self, levels: int) -> None:
+        if (
+            isinstance(levels, bool)
+            or not isinstance(levels, int)
+            or not 1 <= levels <= MOST_LEVELS
+        ):
+            raise ConfigurationError(
+                f"Toy Hopper holds a whole number of levels from 1 to {MOST_LEVELS}."
+            )
+        self._levels = levels
+        self._enter()
+
+    def _enter(self) -> None:
+        """Take up the level the counter in memory says: its layout and its colours."""
+        number = self._ram[LAYOUT.level] % self._levels
+        self._gaps, self._walls, self._walkers, self._coins = _level(self._seed + number)
         hole: set[int] = set()
         for first, wide in self._gaps:
             hole.update(range(first, first + wide))
         self._hole = frozenset(hole)
         self._wall: frozenset[int] = frozenset(self._walls)
-        self._noise = 0
-        self._dying_frames: int = DYING_FRAMES
-        self.reset()
+        self._palette = PALETTES[number % len(PALETTES)]
 
     @property
     def dying_frames(self) -> int:
@@ -260,7 +312,9 @@ class ToyHopper:
         self._write_noise()
 
     def _to_start(self) -> None:
-        """The player back at the level's start, its coins back and its walkers too."""
+        """The player at the start of the level the counter says, its coins back and
+        its walkers too."""
+        self._enter()
         ram = self._ram
         ram[LAYOUT.x_low], ram[LAYOUT.x_page], ram[LAYOUT.x_sub] = START_X, 0, 0
         ram[LAYOUT.y], ram[LAYOUT.y_sub] = GROUND_Y - PLAYER_H, 0
@@ -345,6 +399,7 @@ class ToyHopper:
             raise ConfigurationError("That Toy Hopper snapshot is from another level.")
         self._ram[:] = snapshot[:RAM_SIZE]
         (self._noise,) = struct.unpack("<I", snapshot[RAM_SIZE:])
+        self._enter()  # the level it was made on
 
     # --------------------------------------------------------------- step
 
@@ -518,7 +573,8 @@ class ToyHopper:
         """Draw the current state: the level side on, scrolled to the player."""
         st = self.state
         px: NDArray[np.uint8] = np.empty((SCREEN_HEIGHT, SCREEN_WIDTH, 3), dtype=np.uint8)
-        px[:] = SKY
+        sky, ground, grass, wall = self._palette
+        px[:] = sky
 
         def box(x: int, y: int, w: int, h: int, colour: Colour) -> None:
             x0, y0 = max(0, x), max(0, y)
@@ -530,10 +586,10 @@ class ToyHopper:
         for col in range(scroll // TILE, (scroll + SCREEN_WIDTH - 1) // TILE + 1):
             sx = col * TILE - scroll
             if col not in self._hole:
-                box(sx, GROUND_Y, TILE, SCREEN_HEIGHT - GROUND_Y, GROUND)
-                box(sx, GROUND_Y, TILE, 4, GRASS)
+                box(sx, GROUND_Y, TILE, SCREEN_HEIGHT - GROUND_Y, ground)
+                box(sx, GROUND_Y, TILE, 4, grass)
             if col in self._wall:
-                box(sx, WALL_ROW * TILE, TILE, TILE, WALL)
+                box(sx, WALL_ROW * TILE, TILE, TILE, wall)
             if col == FLAG_COL:
                 box(sx, GROUND_Y - 6 * TILE, 4, 6 * TILE, FLAG)
                 box(sx + 4, GROUND_Y - 6 * TILE, 12, 10, FLAG)
@@ -589,6 +645,8 @@ __all__ = [
     "LEVEL_TILES",
     "LEVEL_WIDTH",
     "MAX_SPEED",
+    "MOST_LEVELS",
+    "PALETTES",
     "PLAYER_H",
     "PLAYER_W",
     "PLAYING",
@@ -604,5 +662,6 @@ __all__ = [
     "WALKER_Y",
     "WIDEST_GAP",
     "HopperState",
+    "Palette",
     "ToyHopper",
 ]
