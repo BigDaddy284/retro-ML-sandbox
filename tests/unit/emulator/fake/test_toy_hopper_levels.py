@@ -229,11 +229,18 @@ def test_after_the_last_level_comes_the_first() -> None:
     assert len({one, two, three}) == 3
     # The most a cartridge holds: eight, each the practice level of the next seed, and
     # the colours come round again after three.
+    # At the very frame the flag is passed the memory's walkers are the new level's.
     game = cartridge(3, 8)
+    slots = slice(LAYOUT.walkers, LAYOUT.walkers + 3 * th.WALKER_SLOTS)
+    at_start = set()
     for n in range(9):
-        assert layout(game) == layout(ToyHopper(3 + n % 8)), n
+        fresh = ToyHopper(3 + n % 8)
+        assert layout(game) == layout(fresh), n
+        assert game.ram[slots] == fresh.ram[slots], n
+        at_start.add(any(fresh.ram[slots]))
         assert pixel(game.render(), 4, 100) == PALETTES[n % 8 % 3].sky, n
         to_the_flag(game)
+    assert at_start == {False, True}  # levels with and without a walker in sight at once
 
 
 def test_a_life_lost_starts_the_level_it_was_lost_on() -> None:
