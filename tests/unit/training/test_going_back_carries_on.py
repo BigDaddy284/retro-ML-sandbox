@@ -6,6 +6,7 @@ import logging
 
 import pytest
 
+from retro_ai_lab.emulator.fake import toy_hopper
 from retro_ai_lab.training import EpisodeRunner, episode
 from retro_ai_lab.training.episode import MOST_SOUGHT, EpisodeResult
 from retro_ai_lab.training.search import TOP, Search, Spot
@@ -186,7 +187,8 @@ def test_about_here_is_the_same_place_of_the_go_within_half_a_screen(
         nothing((2, 2), (2, 2)),
         nothing((2, 4), (2, 4)),
     )
-    more = [nothing((1, 0), (1, 0)), nothing((1, 8), (1, 8)), nothing((0, 6), (0, 6)), a]
+    d = nothing((1, 10), (2, 10))
+    more = [nothing((1, 0), (1, 0)), nothing((1, 8), (1, 8)), nothing((0, 6), (0, 6)), a, d, d, d]
     asked = Asked(monkeypatch, [a, b, a2, c, c2, *more])
     r, _ = searching(lab, ways_per_go=3, give_up_after=None, max_steps=400)
     # Where each life is seen lost, as the watch would say it: the place of the go,
@@ -201,9 +203,12 @@ def test_about_here_is_the_same_place_of_the_go_within_half_a_screen(
         None,  # the watch has not looked at a screen yet
         (0, (100, 0), 128),
         (1, (100, 0), 128),
+        (2, (50, 50), 128),
+        (2, (140, 140), 128),  # 90 across and 90 down: the further of the two counts
+        (2, (0, 0), 64),  # 50 back and 50 up, with a smaller screen
     ]
     monkeypatch.setattr(r, "_lost_where", lambda: wheres.pop(0))
-    for _ in range(3):
+    for _ in range(4):
         a_go(lab, r)
     assert asked.begun == [
         TOP,
@@ -215,8 +220,84 @@ def test_about_here_is_the_same_place_of_the_go_within_half_a_screen(
         TOP,
         a2.stopped_at,
         b.stopped_at,
+        TOP,
+        d.stopped_at,
+        d.stopped_at,
     ]
     assert wheres == [] and asked.answers == []
+
+
+def test_where_the_life_went_is_where_the_watch_was(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked = Asked(monkeypatch, [nothing((0, 2), (0, 2))] * 3 + [REAL] * 3)
+    r, _ = searching(lab, ways_per_go=3, give_up_after=None, max_steps=400)
+    wheres: list[object] = []
+    real = r._lost_where
+
+    def noting() -> object:
+        wheres.append(real())
+        return wheres[-1]
+
+    lab.game.reset()
+    r.begin()
+    # Before the watch has looked at a screen there is nowhere to remember.
+    assert real() is None
+    monkeypatch.setattr(r, "_lost_where", noting)
+    while r.step():
+        pass
+    r.finish()
+    # Three lives at the first gap. The practice game's screen is 256 by 240: half
+    # its longer side is 128. The camera had travelled 136 pixels, in the place the
+    # go began in.
+    assert (toy_hopper.SCREEN_WIDTH, toy_hopper.SCREEN_HEIGHT) == (256, 240)
+    assert wheres == [(0, (136, 0), 128), (0, (137, 0), 128), (0, (137, 0), 128)]
+    # Over the gap, the next two places a life goes at.
+    a_go(lab, r)
+    assert wheres[3:] == [(0, (137, 0), 128), (0, (329, 0), 128), (0, (553, 0), 128)]
+    assert asked.found == [False] * 3 + [True] * 3
+
+
+def test_a_search_that_stopped_at_the_top_is_begun_there_and_nothing_is_said(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # A search that went through both its lists for nothing, or had nothing it could
+    # change, stopped where it began.
+    asked = Asked(monkeypatch, [nothing(*TOP), nothing(*TOP), nothing((0, 2), (0, 6))] * 2)
+    r, _ = searching(lab, ways_per_go=3, give_up_after=None, max_steps=400)
+    with caplog.at_level(logging.INFO, logger="retro_ai_lab.training.episode"):
+        a_go(lab, r)
+        assert asked.begun == [TOP, TOP, TOP] and carrying(caplog) == []
+        # The searches there are counted all the same.
+        a_go(lab, r)
+        assert asked.begun[3:] == [((0, 2), (0, 6)), TOP, TOP]
+    assert carrying(caplog) == ["3 times"]
+
+
+def test_the_place_not_searched_for_longest_is_the_one_forgotten(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(episode, "MOST_SOUGHT", 2)
+    gap, gap_again = nothing((0, 4), (1, 6)), nothing((0, 6), (0, 8))
+    further, third = nothing((0, 4), (1, 6)), nothing((1, 0), (1, 0))
+    asked = Asked(
+        monkeypatch,
+        [gap, gap, REAL, REAL, further, gap_again, REAL, REAL, third, REAL, REAL, third],
+    )
+    r, _ = searching(lab, ways_per_go=3, give_up_after=None, max_steps=400)
+    # The gap twice for nothing and then over it; the next go the place further on
+    # for nothing, and then the gap for nothing again, a life down.
+    a_go(lab, r)
+    a_go(lab, r)
+    assert asked.begun == [TOP, gap.stopped_at, gap.stopped_at, gap.stopped_at, TOP, gap.stopped_at]
+    # A third place for nothing: of the two remembered, the gap was searched last, so
+    # the place further on is the one forgotten.
+    a_go(lab, r)
+    assert asked.begun[6:] == [gap_again.stopped_at, further.stopped_at, TOP]
+    assert asked.found[6:] == [True, True, False]
+    a_go(lab, r)
+    assert asked.begun[9:] == [gap_again.stopped_at, TOP, third.stopped_at]
+    assert asked.found[9:] == [True, True, False] and asked.answers == []
 
 
 def test_a_standstill_begins_at_the_top_and_remembers_nothing(
