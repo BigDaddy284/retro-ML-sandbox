@@ -1504,9 +1504,10 @@ class EpisodeRunner:
             else:
                 # Where the last chance lies if this loss takes the time the others took.
                 expected = None if dying is None else len(since[1]) - dying
+                # (Only the first moment asked can be passed over: one asked after a
+                # moment that was too late has more steps than that one had.)
                 if (
-                    live is None
-                    and expected is not None
+                    expected is not None
                     and expected < ROOM
                     and number + 1 < len(kept)
                     and isinstance(kept[number + 1].mark, Mark)
