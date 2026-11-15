@@ -54,6 +54,7 @@ FLOOR_TARGET = 95  # the floor either side read as the game's level has it (T-98
 CAMERA_TARGET = 90  # the camera's move between two looks measured right (T-992)
 MOST_CAMERA = 32  # further than this between two looks is a cut to another place
 GROUND_TARGET = 90  # goes whose counted ground is the game's own furthest, to a step (T-993)
+MOST_DICE = 0xFFFF  # the highest number the learner's other dice can have (T-1037)
 
 
 @dataclass
@@ -68,6 +69,8 @@ class Report:
     stand: bool = True  # a go that stood still went back to look for a way on (T-1018)
     # Frames the game's dying pause was set to; None is the game's own (T-1030).
     dying_frames: int | None = None
+    # Added to the level's number to seed the learner's dice; 0 is the usual dice (T-1037).
+    dice: int = 0
     # Eyes.
     looks: int = 0
     followed: int = 0  # looks in which the watch had what it calls itself in sight
@@ -137,6 +140,10 @@ class Report:
         frames = self.dying_frames
         return f", with a dying pause of {frames} frame{'' if frames == 1 else 's'}"
 
+    def _describe_dice(self) -> str:
+        """ ", with other dice (1000)", or "" with the usual ones (T-1037)."""
+        return f", with other dice ({self.dice})" if self.dice else ""
+
     def lines(self) -> list[str]:
         """The report as the lines the tool prints."""
         label = describe_algorithm(self.algorithm)[0]
@@ -145,7 +152,7 @@ class Report:
             f"{self.max_steps} steps, {label}"
             f"{'' if self.remember else ', without the way it remembers'}"
             f"{'' if self.stand else ', without going back where it stands still'}"
-            f"{self._describe_pause()}."
+            f"{self._describe_pause()}{self._describe_dice()}."
         ]
         if self.looks:
             out.append(
@@ -269,6 +276,7 @@ def run(
     remember: bool = True,
     stand: bool = True,
     dying_frames: int | None = None,
+    dice: int = 0,
 ) -> Report:
     """Run the bench and return what it measured. Seeded: the same arguments, the same report.
 
@@ -279,6 +287,10 @@ def run(
     ``dying_frames`` sets the game's dying pause, the frames from the fatal touch to
     the life going (T-1030), before anything is played: a real game can take some
     two hundred over it, and the life counter then moves long after the mistake.
+    ``dice`` gives the learner other dice on the same level (T-1037): it is seeded with
+    ``seed + dice``, while the level, the game's noise and the scripted first go stay
+    those of ``seed``. How well a build plays one level depends a good deal on its
+    dice, so a build is measured on several.
     """
     if not isinstance(remember, bool):
         raise ConfigurationError("The bench needs remember to be True or False.")
@@ -291,6 +303,10 @@ def run(
     ):
         raise ConfigurationError(
             "The bench needs the dying pause as a whole number of frames from 1 to 255."
+        )
+    if isinstance(dice, bool) or not isinstance(dice, int) or not 0 <= dice <= MOST_DICE:
+        raise ConfigurationError(
+            f"The bench needs the dice as a whole number from 0 to {MOST_DICE}."
         )
     for value, what in ((goes, "goes"), (max_steps, "steps"), (play_frames, "play frames")):
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -307,6 +323,7 @@ def run(
         remember=remember,
         stand=stand,
         dying_frames=dying_frames,
+        dice=dice,
     )
     with tempfile.TemporaryDirectory() as scratch:
         data = Path(scratch)
@@ -324,7 +341,7 @@ def run(
             discovery,
             bus,
             max_steps=max_steps,
-            seed=seed,
+            seed=seed + dice,  # the learner's dice; the level below has its own number
             goals=goals,
             rewards=rewards,
             way_seconds=None,  # a search cut short by the clock would not be repeatable
@@ -578,6 +595,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="frames from the fatal touch to the life going, 1 to 255 (the game's own: "
         f"{toy_hopper.DYING_FRAMES})",
     )
+    parser.add_argument(
+        "--dice",
+        type=_level,
+        default=0,
+        help=f"other dice for the learner on the same level (0 to {MOST_DICE}; 0 is the usual)",
+    )
     return parser
 
 
@@ -622,6 +645,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         remember=not args.no_memory,
         stand=not args.no_standstill,
         dying_frames=args.dying_frames,
+        dice=args.dice,
     )
     for line in report.lines():
         print(line)
@@ -641,6 +665,7 @@ __all__ = [
     "EXPLAINED_TARGET",
     "FLOOR_TARGET",
     "FOLLOWED_TARGET",
+    "MOST_DICE",
     "MOST_KINDS",
     "ON_PLAYER",
     "Report",

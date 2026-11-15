@@ -150,7 +150,13 @@ comparing. `--dying-frames 200` makes the game take that many frames (1 to
 take about that long over their dying animation, and the life counter then
 moves long after the mistake: what works with a short pause need not work
 with a long one, so both are worth measuring. The report's first line says
-which pause it ran with. A death that had only begun when its go ended costs no life (the
+which pause it ran with. `--dice 1000` gives the AI other dice on the same
+level (0 to 65535; 0 is the usual): the level and the scripted first go are
+the same, and what the AI happens to try is not. How a build does on one
+level depends a good deal on its dice (over the 48 practice levels the same
+build finished a level 423 times with one set and 332 times with another),
+so a change is only called better where it is better on several sets. The first line says
+which dice too. A death that had only begun when its go ended costs no life (the
 next go starts from its save): the "Deaths" line counts those apart, and
 not among the deaths the eyes are asked to explain.
 
