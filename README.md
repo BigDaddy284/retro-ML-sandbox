@@ -312,6 +312,21 @@ of those are then tried at steps that were too late as well, which costs
 tries and nothing else. The log says "settled at least 34 steps before" in
 that case, and that the time ran out.
 
+A game takes nearly the same time over every lost life, so the AI remembers
+it: how many steps lay between the last one that could still change the loss
+and the one the counter dropped at. At the next life lost it goes straight to
+a saved moment that leaves room before that step by what it remembers, and
+asks about that step first and then the next, one at a time, until one is too
+late. On the practice game with a long dying pause the first life lost costs
+73 plays to find the step, the second 19 and the third 16. What it remembers
+is a guess and decides nothing: where a loss takes longer or shorter than
+remembered, the asking goes on as it did and finds the same step at more
+plays, and the AI goes back to the same saved moment as it would without
+remembering. It keeps the longest time it has found, or the newest one where that
+is more than 8 steps shorter (then it was another kind of loss). It is kept
+while training runs with the same settings, and not from one session to the
+next: the first life lost after you start is asked about in full.
+
 A brain that has lost lives at a spot can turn timid: it stops short and
 waits, loses nothing, and so never finds the way past. Where the AI can go
 back, it does not let that stand. When a go has been paid nothing for 24

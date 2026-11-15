@@ -44,7 +44,7 @@ from retro_ai_lab.services.rewards import (
     RewardProfileChanged,
     WentBack,
 )
-from retro_ai_lab.training.chance import last_chance
+from retro_ai_lab.training.chance import WALK, last_chance
 from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.training.moments import LEAD, Moment, Moments
 from retro_ai_lab.training.route import Route
@@ -604,6 +604,7 @@ class EpisodeRunner:
         # Before a search after a life lost, find from when on the loss was settled, and
         # go back to before that (T-1031).
         self._last_chance = last_chance
+        self._dying: int | None = None  # steps this game takes over a lost life (T-1033)
         self._stood_at: tuple[int, int] | None = None
         self._stood_for = 0
         self._stood_from = 0  # the step of the story at which it came to that spot
@@ -743,6 +744,13 @@ class EpisodeRunner:
     def times_back(self) -> int:
         """How often this go was put back to one of its saved moments."""
         return self._times_back
+
+    @property
+    def dying_steps(self) -> int | None:
+        """Steps this game takes over a lost life, from the last step that could
+        change it to the step the count drops (T-1033): what the losses so far
+        showed, kept from go to go. None until one showed it."""
+        return self._dying
 
     @property
     def ways_sought(self) -> int:
@@ -1463,6 +1471,14 @@ class EpisodeRunner:
         short gives the latest step it knows to be too late. That count is used
         like a sure one, but is no room to rely on: the moment before is taken where
         there is one, which has the steps between them for certain.
+
+        A game takes nearly the same time over every loss, and the runner remembers
+        it (T-1033, :attr:`dying_steps`). By that time the moments that would leave
+        no room are passed over unasked, as long as an older one is there, and the
+        first one asked is given the step the time puts the last chance at as its
+        guess. A guess costs a few plays where it is wrong and decides nothing: the
+        step found is the same, and where a moment passed over turns out to have
+        room after all, the search is from that one, as without the memory.
         """
         moments = self._moments
         assert moments is not None
@@ -1474,9 +1490,11 @@ class EpisodeRunner:
         room = 0  # steps before the settled step that are there for certain
         sure = True
         late = False
-        for older in reversed(moments.kept):
-            if older.step > moment.step:
-                continue
+        tried = first  # steps of what it did that the last asking played again
+        dying = self._dying
+        kept = [older for older in reversed(moments.kept) if older.step <= moment.step]
+        passed: list[tuple[Moment, tuple[int, ...]]] = []  # not asked, the newest first
+        for number, older in enumerate(kept):
             if not isinstance(older.mark, Mark):
                 break
             since = moments.since(older.step)
@@ -1487,6 +1505,25 @@ class EpisodeRunner:
                 live += between
                 room += between
             else:
+                # Where the last chance lies if this loss takes the time the others took.
+                expected = None if dying is None else len(since[1]) - dying
+                # (Only the first moment asked can be passed over: one asked after a
+                # moment that was too late has more steps than that one had.)
+                if (
+                    expected is not None
+                    and expected < ROOM
+                    and number + 1 < len(kept)
+                    and isinstance(kept[number + 1].mark, Mark)
+                ):
+                    # No room here by that time, and an older moment is there.
+                    passed.append((older, since[1]))
+                    continue
+                # No guess once a moment was too late from its first step: the time
+                # remembered was wrong for this loss.
+                guess = (
+                    expected - 1 if expected is not None and live is None and expected > 1 else None
+                )
+                tried = len(since[1])
                 left = None if allowed is None else allowed - (time.monotonic() - began)
                 found = (
                     None
@@ -1502,6 +1539,7 @@ class EpisodeRunner:
                         # The newer moment was too late from its first step.
                         shut=between if live == 0 else None,
                         partial=True,
+                        guess=guess,
                     )
                 )
                 if found is None:
@@ -1509,12 +1547,28 @@ class EpisodeRunner:
                     break
                 plays += found.plays
                 live, sure = found.live, found.sure
+                did = since[1]
+                if sure:
+                    # A loss that took less time than remembered: a moment passed over
+                    # has room after all. The newest that has is the one to search
+                    # from, as it would be had each been asked.
+                    for newer, less in passed:
+                        ahead = len(did) - len(less)
+                        if live - ahead >= ROOM:
+                            older, since, live = newer, (newer, less), live - ahead
+                            break
                 room = live if sure else 0
             moment, trace = older, since[1]
             if room >= ROOM:
                 break
         took = time.monotonic() - began
         gone = moments.steps - moment.step
+        if live and sure:
+            # The longest so far, unless this one is shorter by more than a walk from
+            # it would cover: then what was remembered was another kind of loss.
+            lasted = len(trace) - live
+            if dying is None or lasted > dying or lasted < dying - WALK:
+                self._dying = lasted
         if live is None and late:
             log.info(
                 "Lost a life at step %d. Finding from when on that was settled took longer "
@@ -1528,7 +1582,7 @@ class EpisodeRunner:
                 "did not lose the life on the same step, so the AI cannot tell from when on "
                 "that was settled, and looks for a way past as it did before.",
                 at,
-                first,
+                tried,
             )
         elif live == 0 and late:
             log.info(
