@@ -501,9 +501,16 @@ camera has travelled since the go began, so jumping on the spot and falling
 into a pit are not somewhere new; on a screen that never scrolls it is where
 the AI stands. The row appears the first time there is ground to pay for;
 change its points, switch it off or remove it like any other. The same
-ground never pays twice in a go: when the screen jumps to another place (a
-life lost and put back, a door), the AI is taken to be back where the go
-began. Up, down, left and right all count. Where the picture scrolls too fast
+ground never pays twice in a go. When the screen jumps altogether, the AI
+works out where it is. Just after a life was lost the game has put it back,
+and the ground it walks again pays nothing. With no life lost it is
+somewhere else: the next level, a room behind a door, a bonus room. Then
+the first steps there pay, because that ground is new (before, a new level
+paid nothing until the AI was further into it than it had got in the level
+before). The AI knows a place again by its screen, so going in and out of
+the same door pays each side once, and a flash of the whole screen starts
+nothing new. The log says so the first time it comes to each new place in a
+go ("the AI takes it for a new place"). Up, down, left and right all count. Where the picture scrolls too fast
 for the AI to follow (on a very small screen, or a very fast game), it says
 so in the log ("It cannot follow the camera here") and counts no new ground
 at all, rather than pay for the slow stretches it can measure.
