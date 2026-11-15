@@ -294,7 +294,11 @@ something about the place and not the game: the AI leaves going back alone
 for the next 4 goes and then goes back again (the log says "the AI leaves
 going back alone for the next 4 goes and then goes back again"). If that
 comes to nothing again it leaves it for 8 goes, then 16, and never more
-than 32; a way found makes the next rest 4 goes again. The log says what happened each time ("Lost a
+than 32; a way found makes the next rest 4 goes again. A search has time for part of its
+list of changes only, so one that found nothing is not made again from
+the top: the next search at that place carries on with the changes the
+last one did not get to (the log says "This search carries on with the
+changes the last one did not get to"). The log says what happened each time ("Lost a
 life at step 152. Went back 49 steps and found a way past on try 19...
 holding right instead of what it did, with right + a for 4 steps..."),
 and each go's line ends with how often it went back and what it found.
