@@ -56,6 +56,8 @@ def test_another_room_is_another_view() -> None:
     # How much may differ is the caller's to say.
     assert same_view(level(100, HELD), flat(0, HELD), most=0.99)
     assert not same_view(level(100, []), level(100, HELD), most=0.0)
+    assert same_view(level(100, HELD), level(100, HELD), most=0.0)
+    assert same_view(level(100, []), level(116, []), most=0.0)  # the strip brought in has no say
 
 
 def test_nonsense_is_refused() -> None:

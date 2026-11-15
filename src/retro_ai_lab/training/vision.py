@@ -68,7 +68,6 @@ MOST_PLACES = 16  # places a go is taken to pass through at most; each keeps two
 FOLLOWED_OVER = 200  # looks with the camera moving that its measure is judged over
 LOST_LEAST = 20  # ... of which this many unmeasured, and more than the share below,
 LOST_SHARE = 0.2  # mean the camera cannot be followed here: no ground is counted
-_ENDINGS = {1: "st", 2: "nd", 3: "rd"}
 
 
 def side(apart: int, *, near: int | None = NEAR) -> int:
@@ -279,7 +278,6 @@ class ScreenWatch:
         self._was_jolt = False
         self._doors, self._lefts = [None], [None]
         self._arriving = False
-        self._last_frame = None
         self._life_at = None
         self._came = None
         self._around = None
@@ -360,7 +358,6 @@ class ScreenWatch:
         # It knows the places the go has been in, and settles a jump as the go would
         # (T-1038); what it comes to is its own, and it says nothing of it.
         other._doors, other._lefts = list(self._doors), list(self._lefts)
-        other._last_frame = mark.screen
         other._quiet = True
         other._last_me = mark.last_me
         other._measured = deque(self._measured, maxlen=self._measured.maxlen)
@@ -523,7 +520,7 @@ class ScreenWatch:
         moved, share = self._tracker.scroll, self._tracker.unexplained
         jolt = moved == (0, 0) and share >= JOLT
         cut = jolt and share >= CUT
-        if self._looks_this_go == 0 and self._doors[0] is None:
+        if self._doors[0] is None:
             self._doors[0] = frame  # where the go began is the door of its first place
         if jolt and not self._was_jolt and self._elsewhere():
             self._jolt_at = self._looks
@@ -540,7 +537,6 @@ class ScreenWatch:
         )
         if respawn:
             self._ground.back()
-            self._arriving = False
             self._jolt_at = self._lost_at = None
         elif cut:
             if not self._arriving:
@@ -570,8 +566,7 @@ class ScreenWatch:
         here = self._ground.place_number
         while len(self._lefts) <= here:
             self._lefts.append(None)
-        if self._last_frame is not None:
-            self._lefts[here] = self._last_frame
+        self._lefts[here] = self._last_frame  # a cut is measured against a look before it
 
     def _arrive(self, frame: Frame) -> None:
         """Settle which place it is in after a cut, now that the screen can be measured
@@ -589,12 +584,10 @@ class ScreenWatch:
         if self._life_at is not None and self._looks - self._life_at <= RESPAWN_LOOKS:
             return
         here = self._ground.place_number
-        known = min(self._ground.places, len(self._doors))
-        for number in (here, *(n for n in range(known) if n != here)):
-            views = (
-                self._doors[number] if number < len(self._doors) else None,
-                self._lefts[number] if number < len(self._lefts) else None,
-            )
+        for number in (here, *(n for n in range(self._ground.places) if n != here)):
+            # (A slice, since a place may have neither screen: one never left, or one
+            # the ground made for a moment kept in another go.)
+            views = (*self._doors[number : number + 1], *self._lefts[number : number + 1])
             if any(view is not None and self._same(view, frame) for view in views):
                 if number != here:
                     self._ground.go_to(number)
@@ -610,10 +603,9 @@ class ScreenWatch:
         if not self._quiet:
             log.info(
                 "The screen changed altogether with no life lost, and it shows nowhere "
-                "this go has been: the AI takes it for a new place (the go's %d%s). "
-                "Ground there is new from where it came in.",
+                "this go has been: the AI takes it for a new place (number %d of this "
+                "go). Ground there is new from where it came in.",
                 number + 1,
-                "th" if 10 <= (number + 1) % 100 <= 20 else _ENDINGS.get((number + 1) % 10, "th"),
             )
 
     @staticmethod

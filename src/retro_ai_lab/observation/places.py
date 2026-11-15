@@ -29,15 +29,13 @@ def _differing(a: Frame, b: Frame, shift: tuple[int, int]) -> float:
     ``a`` moved by ``shift``; 0.0 where both are the same plain backdrop all over."""
     after, before = _packed(b), _packed(a)
     aa, bb = _overlap(after, before, *shift)
-    if aa.size == 0:
-        return 1.0
     colours, counts = np.unique(aa, return_counts=True)
     backdrop = colours[int(np.argmax(counts))]
     drawn = (aa != backdrop) | (bb != backdrop)
     said = int(np.count_nonzero(drawn))
     if said == 0:
         return 0.0
-    return float(np.count_nonzero((aa != bb) & drawn)) / said
+    return float(np.count_nonzero(aa != bb)) / said  # what differs is drawn on one at least
 
 
 def same_view(a: Frame, b: Frame, *, reach: int = SAME_REACH, most: float = SAME_MOST) -> bool:
@@ -52,12 +50,9 @@ def same_view(a: Frame, b: Frame, *, reach: int = SAME_REACH, most: float = SAME
         raise ConfigurationError("reach must be a whole number of pixels, 0 or more.")
     if isinstance(most, bool) or not isinstance(most, (int, float)) or not 0 <= most < 1:
         raise ConfigurationError("most must be a share from 0 to less than 1.")
-    if a.pixels == b.pixels or _differing(a, b, (0, 0)) <= most:
+    if _differing(a, b, (0, 0)) <= most:
         return True
-    if reach == 0:
-        return False
-    shift = estimate_scroll(a, b, max_dx=reach, max_dy=reach)
-    return shift != (0, 0) and _differing(a, b, shift) <= most
+    return _differing(a, b, estimate_scroll(a, b, max_dx=reach, max_dy=reach)) <= most
 
 
 __all__ = ["SAME_MOST", "SAME_REACH", "same_view"]
