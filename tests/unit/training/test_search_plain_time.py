@@ -25,10 +25,13 @@ def lost_at(step: int) -> Outcome:
 
 
 class Timed:
-    """The plays scripted, on a clock that moves a second with every play."""
+    """The plays scripted, on a clock that moves a second with every play (or ``pace``)."""
 
-    def __init__(self, monkeypatch: pytest.MonkeyPatch, outcomes: Sequence[Outcome]) -> None:
+    def __init__(
+        self, monkeypatch: pytest.MonkeyPatch, outcomes: Sequence[Outcome], pace: float = 1.0
+    ) -> None:
         self.script = Script(outcomes)
+        self.pace = pace
         monkeypatch.setattr(search, "play", self.script)
 
     @property
@@ -36,7 +39,7 @@ class Timed:
         return self.script.calls
 
     def __call__(self) -> float:
-        return float(len(self.script.calls))
+        return self.pace * len(self.script.calls)
 
 
 class Setting:
@@ -104,6 +107,30 @@ def test_the_plain_way_has_half_the_time(hopper: Hopper, monkeypatch: pytest.Mon
         out = s.look(timed, seconds=seconds)
         assert out == Search(None, seconds, out_of_time=True)
         assert timed.calls == [s.held, *s.of_plain(s.plain[:of_plain]), *s.of_did(s.did[:of_did])]
+
+
+def test_the_half_is_of_the_time_not_of_the_plays(
+    hopper: Hopper, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s = Setting(hopper)
+    # Half a second a play, and five seconds: the plain way and four of its changes
+    # are started before two and a half have passed, and five changes to what it did
+    # in the rest.
+    timed = Timed(monkeypatch, [lost_at(6)] + [DEAD] * 30, pace=0.5)
+    out = s.look(timed, seconds=5)
+    assert out == Search(None, 10, out_of_time=True)
+    assert timed.calls == [s.held, *s.of_plain(s.plain[:4]), *s.of_did(s.did[:5])]
+    # Two seconds a play, and eight: the plain way and one change, and two to what it did.
+    timed = Timed(monkeypatch, [lost_at(6)] + [DEAD] * 30, pace=2.0)
+    out = s.look(timed, seconds=8)
+    assert out == Search(None, 4, out_of_time=True)
+    assert timed.calls == [s.held, *s.of_plain(s.plain[:1]), *s.of_did(s.did[:2])]
+    # A play that takes longer than the plain way's whole time: its list is not begun.
+    timed = Timed(monkeypatch, [lost_at(6)] + [DEAD] * 30, pace=5.0)
+    out = s.look(timed, seconds=8)
+    assert out == Search(None, 2, out_of_time=True)
+    assert timed.calls == [s.held, *s.of_did(s.did[:1])]
+    assert out.stopped_at == (TOP[0], spot_of(s.did[1], s.trace))
 
 
 def test_a_change_to_the_plain_way_is_not_looked_at_after_its_time(
