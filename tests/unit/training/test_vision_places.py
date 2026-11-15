@@ -411,7 +411,8 @@ def test_what_was_undone_is_forgotten() -> None:
     see(watch, *in_hall(1, 352), lost=1)
     assert watch.ground.place_number == 0 and watch.ground.place == (352, 0)
     # The first look after going back can be a cut: the place is left by the screen
-    # gone back to, and known again by it.
+    # gone back to, and known again by it, wherever it had walked on to since.
+    see(watch, *in_hall(1, *range(368, 496, 16)))
     watch.back_to(mark)
     assert see(watch, *in_hall(2, 0, 0)) == [0, 0]
     assert (watch.ground.place_number, watch.ground.places) == (2, 3)
@@ -439,6 +440,24 @@ def test_a_new_go_forgets_what_was_under_way() -> None:
     assert see(watch, *along(100, 116)) == [0, 1]
     see(watch, *along(132), lost=1)
     assert watch.ground.place_number == 0 and watch.ground.place == (32, 0)
+    # Where the go before began: this go begins somewhere else, and that is its door.
+    watch = in_the_hall(160)
+    watch.begin_go()
+    assert sum(see(watch, *in_hall(2, *range(0, 176, 16)))) == 160 // 15
+    assert see(watch, *inside(400, 400), *in_hall(2, 0, 0)) == [0, 0, 0, 0]
+    assert (watch.ground.place_number, watch.ground.places) == (0, 2)
+    # Where a place of the go before was left: no place of this go is known by that.
+    watch = in_the_hall(160)
+    see(watch, *in_hall(2, 0, 0, *range(16, 336, 16)), *inside(400, 400))
+    assert (watch.ground.place_number, watch.ground.places) == (2, 3)
+    watch.begin_go()
+    see(watch, *in_hall(1, *range(0, 176, 16)))
+    mark = watch.mark()
+    assert see(watch, *in_hall(2, 0, 0)) == [0, 0]
+    assert (watch.ground.place_number, watch.ground.places) == (1, 2)
+    watch.back_to(mark)
+    assert see(watch, *in_hall(2, 320, 320)) == [0, 0]
+    assert (watch.ground.place_number, watch.ground.places) == (2, 3)
 
 
 def test_a_try_keeps_what_it_learns_of_places_to_itself() -> None:
@@ -457,6 +476,11 @@ def test_a_try_keeps_what_it_learns_of_places_to_itself() -> None:
     assert paid[:4] == [0, 0, 0, 0] and sum(paid) == 320 // 15 - 64 // 15
     assert see(other, *in_hall(1, 160, 160)) == [0, 0]
     assert other.ground.place_number == 0
+    # Another try comes into the second hall where the go left it, not by its door:
+    # the place the go knows, by the screen the go left it by.
+    third = watch.trial(mark)
+    assert see(third, *in_hall(1, 160), *in_hall(2, 64, 64)) == [0, 0, 0]
+    assert (third.ground.place_number, third.ground.places) == (1, 2)
     # The try's watch knows the second hall by where *it* left it.
     assert see(other, *in_hall(2, 320, 320)) == [0, 0]
     assert (other.ground.place_number, other.ground.places) == (1, 2)
@@ -467,6 +491,18 @@ def test_a_try_keeps_what_it_learns_of_places_to_itself() -> None:
     assert see(watch, *in_hall(1, 160, 160)) == [0, 0]
     assert see(watch, *in_hall(2, 320, 320)) == [0, 0]
     assert (watch.ground.place_number, watch.ground.places) == (2, 3)
+
+
+def test_a_life_lost_just_after_a_place_known_again() -> None:
+    watch = outside()
+    assert see(watch, *inside(400, 416, 432), *along(164, 164, 180)) == [0, 1, 1, 0, 0, 0]
+    assert watch.ground.place_number == 0
+    # Into the room again, and the life is counted at the next look: it was the game
+    # putting it back, and it is in the place before, at its door.
+    assert see(watch, *inside(400, 400)) == [0, 0]
+    assert watch.ground.place_number == 1
+    assert see(watch, *inside(400), lost=1) == [0]
+    assert watch.ground.place_number == 0 and watch.ground.place == (0, 0)
 
 
 def test_an_undone_place_is_undone_once() -> None:

@@ -72,6 +72,6 @@ def test_nonsense_is_refused() -> None:
     for bad in (-1, 1.5, True, "8"):
         with pytest.raises(ConfigurationError, match="reach"):
             same_view(a, a, reach=bad)  # type: ignore[arg-type]
-    for bad in (-0.1, 1, 1.5, True, "0.2"):
+    for bad in (-0.1, 1, 1.5, True, False, "0.2"):
         with pytest.raises(ConfigurationError, match="most"):
             same_view(a, a, most=bad)  # type: ignore[arg-type]

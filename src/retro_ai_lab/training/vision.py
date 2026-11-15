@@ -276,8 +276,9 @@ class ScreenWatch:
         self._prior_box = None
         self._lost_at = None
         self._was_jolt = False
+        # (A cut not settled when the last go ended settles at this go's first look,
+        # as the place it begins in: that screen is its door.)
         self._doors, self._lefts = [None], [None]
-        self._arriving = False
         self._life_at = None
         self._came = None
         self._around = None

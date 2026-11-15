@@ -39,19 +39,16 @@ def _differing(a: Frame, b: Frame, shift: tuple[int, int]) -> float:
 
 
 def same_view(a: Frame, b: Frame, *, reach: int = SAME_REACH, most: float = SAME_MOST) -> bool:
-    """Whether screens ``a`` and ``b`` show the same spot: as they are, or with the
-    camera moved by up to ``reach`` pixels either way, no more than ``most`` of what
-    is drawn on either differs."""
+    """Whether screens ``a`` and ``b`` show the same spot: laid over each other as the
+    camera moved between them (by up to ``reach`` pixels either way, or not at all),
+    no more than ``most`` of what is drawn on either differs. Screens of two sizes
+    are refused."""
     if not isinstance(a, Frame) or not isinstance(b, Frame):
         raise ConfigurationError("Two screens are compared.")
-    if (a.width, a.height, a.channels) != (b.width, b.height, b.channels):
-        raise ConfigurationError("Both screens must have the same size and channels.")
     if isinstance(reach, bool) or not isinstance(reach, int) or reach < 0:
         raise ConfigurationError("reach must be a whole number of pixels, 0 or more.")
     if isinstance(most, bool) or not isinstance(most, (int, float)) or not 0 <= most < 1:
         raise ConfigurationError("most must be a share from 0 to less than 1.")
-    if _differing(a, b, (0, 0)) <= most:
-        return True
     return _differing(a, b, estimate_scroll(a, b, max_dx=reach, max_dy=reach)) <= most
 
 

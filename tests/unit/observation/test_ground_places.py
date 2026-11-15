@@ -171,6 +171,20 @@ def test_the_story_of_each_place_goes_back() -> None:
     assert other.look(RIGHT, ME, 16) == 4 and other.again == 0  # 64 from its door, at most 4
 
 
+def test_a_moment_written_by_hand() -> None:
+    """A kept moment made without the list of places (as before T-1038) is one place's:
+    its own reach and count are the story's there."""
+    ground = started()
+    assert walk(ground, RIGHT, 4) == [1] * 4
+    ground.put_back(Kept((32, 0), None, (0, 0), (32, 0, 0, 0), (2, 0, 0, 0)))
+    assert ground.place == (32, 0) and ground.place_number == 0
+    again = []
+    for _ in range(3):
+        last = ground.look(RIGHT, ME, 16)
+        again.append((last, ground.again))
+    assert again == [(0, 1), (0, 1), (1, 0)]
+
+
 def test_a_copy_keeps_its_places_to_itself() -> None:
     ground = started()
     assert walk(ground, RIGHT, 2) == [1, 1]
