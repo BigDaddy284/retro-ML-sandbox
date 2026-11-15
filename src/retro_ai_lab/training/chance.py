@@ -44,6 +44,9 @@ class Chance:
     # late; the whole length where the last step could still have saved the life.
     live: int
     plays: int  # plays it took to find out
+    # False where the time ran out first (T-1032): the loss was settled from that step
+    # on for certain, and maybe from an earlier one.
+    sure: bool = True
 
 
 class _TimeUpError(Exception):
@@ -60,6 +63,8 @@ def last_chance(
     lives: Sequence[Variable],
     seconds: float | None = None,
     clock: Callable[[], float] = time.monotonic,
+    shut: int | None = None,
+    partial: bool = False,
 ) -> Chance | None:
     """How many steps of ``trace``, played from the save in ``slot``, come before the
     loss of the life at its end was settled.
@@ -67,10 +72,21 @@ def last_chance(
     ``trace`` is what the AI did from the save to the step the life went, and
     ``lives`` the values whose going down is a life lost. None where the trace
     played again does not lose the life on its last step (then nothing can be told
-    by playing it), and where ``seconds`` have passed on ``clock`` before it was
-    found: no play is started after that, and a play in flight is finished. The
-    game is left wherever the last play ended: putting it back is the caller's, and
-    so is an emulator error.
+    by playing it). The game is left wherever the last play ended: putting it back
+    is the caller's, and so is an emulator error.
+
+    With ``seconds``, no play is started once that long has passed on ``clock``; a
+    play in flight is finished, and the answer is None. With ``partial`` as well
+    (T-1032), the answer where the time runs out is the latest step known by then
+    from which on the loss was settled, with ``sure`` False: the step asked for is
+    that one or an earlier one, and changes tried before it are tried at some steps
+    too many, which costs tries and nothing else. Still None where nothing is known:
+    before the trace was played again, or before any step was found too late.
+
+    ``shut`` is what the caller knows already: the loss was settled from that step
+    of the trace on at the latest (a later save was too late from its first step,
+    and lies that many steps on). The halving then starts from there, not from the
+    end, and no step from there on is asked.
     """
     if not slot or not isinstance(slot, str):
         raise ConfigurationError("The last chance needs the name of the save to start from.")
@@ -93,6 +109,14 @@ def last_chance(
     for move in trace:
         space[move]  # refuses a move the controls don't have, before anything is played
     length = len(trace)
+    if not isinstance(partial, bool):
+        raise ConfigurationError("partial must be true or false.")
+    if shut is not None and (
+        isinstance(shut, bool) or not isinstance(shut, int) or not 1 <= shut <= length
+    ):
+        raise ConfigurationError(
+            "shut must be a whole number from 1 to the number of steps it did."
+        )
     began = clock()
     plays = 0
 
@@ -112,12 +136,17 @@ def last_chance(
         others = (*near, *(m for m in range(len(space)) if m != made and m not in near))
         return all(same((*trace[:step], *([other] * (length - step)))) for other in others)
 
+    # Settled from here on, as far as is known: the end says nothing (past the last
+    # step there is nothing to change).
+    shut_at = length if shut is None else shut
+    again = False  # what it did was played again, and lost the life on its last step
     try:
         if not same(trace):
             return None
+        again = True
         if settled(0):
             return Chance(0, plays)
-        open_at, shut_at = 0, length  # not settled at the one, settled from the other
+        open_at = 0  # not settled at this step
         while shut_at - open_at > 1:
             middle = (open_at + shut_at) // 2
             if settled(middle):
@@ -126,6 +155,8 @@ def last_chance(
                 open_at = middle
         return Chance(shut_at, plays)
     except _TimeUpError:
+        if partial and again and shut_at < length:
+            return Chance(shut_at, plays, sure=False)
         return None
 
 

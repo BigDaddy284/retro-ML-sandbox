@@ -1456,6 +1456,13 @@ class EpisodeRunner:
         before the loss was settled, an older moment is taken, as far as there is one:
         it has as many steps more as lie between the two, and is asked only where
         the newer one had none at all. All of it has the time one search may take.
+
+        A moment that was too late from its first step says of the one before it
+        that it is too late from the steps between them on, at the latest: that one
+        is asked about the steps before only (T-1032). And an asking the time cuts
+        short gives the latest step it knows to be too late. That count is used
+        like a sure one, but is no room to rely on: the moment before is taken where
+        there is one, which has the steps between them for certain.
         """
         moments = self._moments
         assert moments is not None
@@ -1464,6 +1471,8 @@ class EpisodeRunner:
         began = time.monotonic()
         plays = 0
         live: int | None = None
+        room = 0  # steps before the settled step that are there for certain
+        sure = True
         late = False
         for older in reversed(moments.kept):
             if older.step > moment.step:
@@ -1472,9 +1481,11 @@ class EpisodeRunner:
                 break
             since = moments.since(older.step)
             assert since is not None
+            between = len(since[1]) - len(trace)
             if live:
                 # The step is known: an older moment only has more steps before it.
-                live += len(since[1]) - len(trace)
+                live += between
+                room += between
             else:
                 left = None if allowed is None else allowed - (time.monotonic() - began)
                 found = (
@@ -1488,15 +1499,19 @@ class EpisodeRunner:
                         frames_per_step=self._frames_per_step,
                         lives=lives,
                         seconds=left,
+                        # The newer moment was too late from its first step.
+                        shut=between if live == 0 else None,
+                        partial=True,
                     )
                 )
                 if found is None:
                     late = allowed is not None and time.monotonic() - began >= allowed
                     break
                 plays += found.plays
-                live = found.live
+                live, sure = found.live, found.sure
+                room = live if sure else 0
             moment, trace = older, since[1]
-            if live >= ROOM:
+            if room >= ROOM:
                 break
         took = time.monotonic() - began
         gone = moments.steps - moment.step
@@ -1534,6 +1549,19 @@ class EpisodeRunner:
                 gone,
                 plays,
                 took,
+            )
+        elif not sure:
+            log.info(
+                "Lost a life at step %d. That was settled at least %d steps before: nothing "
+                "pressed from then on changes it (%d plays, %.1f s; the time a search may "
+                "take ran out before the AI could find the step). The AI goes back %d "
+                "steps%s and tries its changes before then.",
+                at,
+                len(trace) - live,
+                plays,
+                took,
+                gone,
+                f", not {first}," if gone != first else "",
             )
         else:
             log.info(
