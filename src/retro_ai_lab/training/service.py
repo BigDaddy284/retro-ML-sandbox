@@ -1155,6 +1155,7 @@ class TrainingService:
                 press_after=PRESS_AFTER if goes_back else 0,
                 stand_after=self._stand_after if goes_back else 0,
                 flat_out=self._flat_out,
+                last_chance=goes_back,
             )
         self._busy = True
         try:

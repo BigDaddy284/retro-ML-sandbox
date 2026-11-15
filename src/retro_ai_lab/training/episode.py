@@ -11,6 +11,7 @@ episode can start from the same checkpoint (DESIGN.md §9).
 from __future__ import annotations
 
 import logging
+import time
 from collections import deque
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import AbstractContextManager, nullcontext
@@ -43,6 +44,7 @@ from retro_ai_lab.services.rewards import (
     RewardProfileChanged,
     WentBack,
 )
+from retro_ai_lab.training.chance import last_chance
 from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.training.moments import LEAD, Moment, Moments
 from retro_ai_lab.training.route import Route
@@ -67,6 +69,10 @@ FINGERPRINT_STEPS = 64  # state keys a go remembers, for spotting two identical 
 LOOKAHEAD_STEPS = 8
 DEFAULT_SETTLE_FRAMES = 5  # the understanding engine's event window
 NOW_SLOT = "back_now"  # where the present is saved while a search plays its tries (T-1007)
+# Steps a search wants before the step a loss was settled at (T-1031): what going back
+# ``LEAD`` steps from the counter leaves on the practice game, where the fall and the
+# pause take about half of them. With fewer it goes to an older moment.
+ROOM = LEAD // 2
 STAND_AFTER = 60  # steps about one spot, no life lost, before a way on is sought (T-1018)
 STAND_WITHIN = 64  # pixels either way that are still "about one spot": dithering, a jump
 # A search at a standstill may make this many times the plays of one after a life
@@ -487,7 +493,10 @@ class EpisodeRunner:
         press_for: int = PRESS_FOR,
         route: Route | None = None,
         stand_after: int = 0,
+        last_chance: bool = False,
     ) -> None:
+        if not isinstance(last_chance, bool):
+            raise ConfigurationError("last_chance must be true or false.")
         if route is not None and not isinstance(route, Route):
             raise ConfigurationError("route must be a Route (or None).")
         for value, what, least in (
@@ -592,6 +601,9 @@ class EpisodeRunner:
         # go back looks for a way on (T-1018). 0 is never; the training service passes
         # STAND_AFTER.
         self._stand_after = stand_after
+        # Before a search after a life lost, find from when on the loss was settled, and
+        # go back to before that (T-1031).
+        self._last_chance = last_chance
         self._stood_at: tuple[int, int] | None = None
         self._stood_for = 0
         self._stood_from = 0  # the step of the story at which it came to that spot
@@ -1302,8 +1314,8 @@ class EpisodeRunner:
             return True
         moment, trace, lives = start
         watch = self._watch
-        mark = moment.mark
-        assert watch is not None and isinstance(mark, Mark)
+        assert watch is not None
+        live: int | None = None
         self._ways_left -= 1
         self._ways_sought += 1
         if stood:
@@ -1317,6 +1329,11 @@ class EpisodeRunner:
             fast = self._flat_out() if self._flat_out is not None else nullcontext()
             with fast, app_work.timed("step: search"):
                 self._connection.call(lambda a: a.save_state(NOW_SLOT))
+                if self._last_chance and not stood:
+                    moment, trace, live = self._settled(moment, trace, lives)
+                    gone = moments.steps - moment.step
+                mark = moment.mark
+                assert isinstance(mark, Mark)
                 search = find_way(
                     self._connection,
                     moment.slot,
@@ -1331,6 +1348,7 @@ class EpisodeRunner:
                     plain=paid[0][1] if paid else None,
                     stood=stood,
                     enough=self._left_the_spot if stood else None,
+                    live=live,
                 )
                 if search.way is None:
                     self._connection.call(lambda a: a.load_state(NOW_SLOT))
@@ -1423,6 +1441,113 @@ class EpisodeRunner:
                 )
         log.info("%s%s", lead, how)
         return True
+
+    def _settled(
+        self, moment: Moment, trace: tuple[int, ...], lives: list[Variable]
+    ) -> tuple[Moment, tuple[int, ...], int | None]:
+        """From when on the life just lost could no longer be saved (T-1031): the moment
+        to search from, what was done since it, and how many of those steps come before
+        the loss was settled. None for that where it cannot be told; the moment is then
+        the one given.
+
+        A game plays a loss out before its counter drops, and the moment ``LEAD`` steps
+        before the counter can lie in that while: every try from it loses the life
+        again. :func:`last_chance` asks the game. Where fewer than ``ROOM`` steps come
+        before the loss was settled, an older moment is taken, as far as there is one:
+        it has as many steps more as lie between the two, and is asked only where
+        the newer one had none at all. All of it has the time one search may take.
+        """
+        moments = self._moments
+        assert moments is not None
+        at, first = self._steps, moments.steps - moment.step
+        allowed = self._way_seconds
+        began = time.monotonic()
+        plays = 0
+        live: int | None = None
+        late = False
+        for older in reversed(moments.kept):
+            if older.step > moment.step:
+                continue
+            if not isinstance(older.mark, Mark):
+                break
+            since = moments.since(older.step)
+            assert since is not None
+            if live:
+                # The step is known: an older moment only has more steps before it.
+                live += len(since[1]) - len(trace)
+            else:
+                left = None if allowed is None else allowed - (time.monotonic() - began)
+                found = (
+                    None
+                    if left is not None and left <= 0
+                    else last_chance(
+                        self._connection,
+                        older.slot,
+                        since[1],
+                        self._agent.space,
+                        frames_per_step=self._frames_per_step,
+                        lives=lives,
+                        seconds=left,
+                    )
+                )
+                if found is None:
+                    late = allowed is not None and time.monotonic() - began >= allowed
+                    break
+                plays += found.plays
+                live = found.live
+            moment, trace = older, since[1]
+            if live >= ROOM:
+                break
+        took = time.monotonic() - began
+        gone = moments.steps - moment.step
+        if live is None and late:
+            log.info(
+                "Lost a life at step %d. Finding from when on that was settled took longer "
+                "than the time a search may take, so the AI looks for a way past as it did "
+                "before.",
+                at,
+            )
+        elif live is None:
+            log.info(
+                "Lost a life at step %d. What it did in the %d steps before, played again, "
+                "did not lose the life on the same step, so the AI cannot tell from when on "
+                "that was settled, and looks for a way past as it did before.",
+                at,
+                first,
+            )
+        elif live == 0 and late:
+            log.info(
+                "Lost a life at step %d. That was settled before the moment %d steps back: "
+                "nothing pressed since changes it (%d plays, %.1f s to find out). The time a "
+                "search may take ran out before the AI could look further back.",
+                at,
+                gone,
+                plays,
+                took,
+            )
+        elif live == 0:
+            log.info(
+                "Lost a life at step %d. That was settled before the earliest moment the AI "
+                "can go back to, %d steps before: nothing pressed since changes it (%d "
+                "plays, %.1f s to find out).",
+                at,
+                gone,
+                plays,
+                took,
+            )
+        else:
+            log.info(
+                "Lost a life at step %d. That was settled %d steps before: nothing pressed "
+                "from then on changes it (%d plays, %.1f s to find out). The AI goes back "
+                "%d steps%s and tries its changes before then.",
+                at,
+                len(trace) - live,
+                plays,
+                took,
+                gone,
+                f", not {first}," if gone != first else "",
+            )
+        return moment, trace, live
 
     def go_back(self, moment: Moment, then: Sequence[int] = ()) -> State:
         """Put the game back to a saved moment of this go and carry on from there.
@@ -1770,6 +1895,7 @@ __all__ = [
     "LOOKAHEAD_STEPS",
     "NOW_SLOT",
     "PRESS_FOR",
+    "ROOM",
     "Earning",
     "EpisodeResult",
     "EpisodeRunner",
