@@ -87,6 +87,8 @@ STAND_WITHIN = 64  # pixels either way that are still "about one spot": ditherin
 STAND_TRIES = 2
 STAND_NEAR = 8  # pixels: it "came to the spot" at the first look this near where it now is
 STAND_REACH = 4  # steps past that look which the way tried from before it still covers
+REST_GOES = 4  # goes it leaves going back alone for, where going back has worked (T-1039)
+MOST_REST = 32  # and the most, however often its searches came to nothing again
 PRESS_FOR = 16  # steps a go that was paid nothing holds its best-paid button for (T-1011)
 
 
@@ -603,6 +605,12 @@ class EpisodeRunner:
         self._give_up_after = give_up_after
         self._missed = 0
         self._gave_up = False
+        # Where a search after a life lost has found a way in this game, that is a
+        # rest and not the end (T-1039): so many goes, and twice as many each time
+        # its searches come to nothing again with no way found between.
+        self._found_past = False
+        self._rest = 0  # goes still to be left alone
+        self._rest_next = REST_GOES
         self._flat_out = flat_out
         self._ways_left = 0
         self._ways_sought = 0
@@ -806,7 +814,8 @@ class EpisodeRunner:
 
     @property
     def gave_up(self) -> bool:
-        """Its searches kept finding nothing, so it no longer goes back (T-1009)."""
+        """Its searches kept finding nothing, so it does not go back (T-1009): for good
+        where none ever found a way, for some goes where one has (T-1039)."""
         return self._gave_up
 
     @property
@@ -875,6 +884,16 @@ class EpisodeRunner:
         self._forced.clear()
         self._times_back = 0
         self._held_reset = False
+        if self._gave_up and self._found_past:
+            if self._rest:
+                self._rest -= 1
+            else:
+                self._gave_up = False
+                self._missed = 0
+                log.info(
+                    "The AI left going back alone for a while, after its searches kept "
+                    "finding nothing. From this go on it goes back after a life lost again."
+                )
         self._ways_left = 0 if self._gave_up else self._ways_per_go
         self._unpaid = 0
         self._press_next = 0
@@ -1508,17 +1527,30 @@ class EpisodeRunner:
             if self._give_up_after is not None and self._missed >= self._give_up_after:
                 self._gave_up = True
                 self._ways_left = 0
-                log.info(
-                    "Going back found no way past %d time%s in a row, so the AI stops going "
-                    "back in this game: here it only costs time.",
-                    self._missed,
-                    "" if self._missed == 1 else "s",
-                )
+                times = f"{self._missed} time{'' if self._missed == 1 else 's'}"
+                if self._found_past:
+                    self._rest = self._rest_next
+                    self._rest_next = min(self._rest_next * 2, MOST_REST)
+                    log.info(
+                        "Going back found no way past %s in a row. It has found ways past "
+                        "before in this game, so the AI leaves going back alone for the "
+                        "next %d goes and then goes back again.",
+                        times,
+                        self._rest,
+                    )
+                else:
+                    log.info(
+                        "Going back found no way past %s in a row, so the AI stops going "
+                        "back in this game: here it only costs time.",
+                        times,
+                    )
             return True
         if stood:
             self._stood_missed = 0
         else:
             self._missed = 0
+            self._found_past = True
+            self._rest_next = REST_GOES
         self._ways_found += 1
         change = way.change
         lead = (
@@ -2077,8 +2109,10 @@ __all__ = [
     "DEFAULT_MAX_STEPS",
     "DEFAULT_SETTLE_FRAMES",
     "LOOKAHEAD_STEPS",
+    "MOST_REST",
     "NOW_SLOT",
     "PRESS_FOR",
+    "REST_GOES",
     "RISE_BACK",
     "RISE_MOST",
     "ROOM",
