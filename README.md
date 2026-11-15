@@ -321,7 +321,8 @@ late. On the practice game with a long dying pause the first life lost costs
 73 plays to find the step, the second 19 and the third 16. What it remembers
 is a guess and decides nothing: where a loss takes longer or shorter than
 remembered, the asking goes on as it did and finds the same step at more
-plays. It keeps the longest time it has found, or the newest one where that
+plays, and the AI goes back to the same saved moment as it would without
+remembering. It keeps the longest time it has found, or the newest one where that
 is more than 8 steps shorter (then it was another kind of loss). It is kept
 while training runs with the same settings, and not from one session to the
 next: the first life lost after you start is asked about in full.
