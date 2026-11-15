@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 
 import pytest
 
@@ -212,13 +213,28 @@ def test_several_values_share_one_save_and_one_load(
     page = learn(lab, "Page", LAYOUT.x_page)
     clock = learn(lab, "Clock", LAYOUT.clock + 1)
     keeper = Keeper()
-    asked = Asked(monkeypatch, lab, lambda value: ANYWAY if value.id == clock.id else EARNED)
+    speed: list[str] = []  # the game runs at top speed while it is asked (as a search does)
+
+    @contextmanager
+    def flat_out() -> Iterator[None]:
+        speed.append("fast")
+        try:
+            yield
+        finally:
+            speed.append("as it was")
+
+    def answer(value: Variable) -> Rise:
+        assert speed[-1] == "fast" and lab.saved[-1] == NOW_SLOT and NOW_SLOT not in lab.loaded
+        return ANYWAY if value.id == clock.id else EARNED
+
+    asked = Asked(monkeypatch, lab, answer)
     stand = lab.move()
     lab.agent.script.extend([stand] * 30)
-    r = go(lab, keeper)
+    r = go(lab, keeper, flat_out=flat_out)
     for _ in range(29):
         assert r.step()
     assert asked.calls == [] and keeper.asked == []  # nothing was paid for rising
+    assert speed == []
     lab.bus.publish(rise(clock.id))
     lab.bus.publish(rise(page.id))
     lab.bus.publish(rise(clock.id))
@@ -232,7 +248,7 @@ def test_several_values_share_one_save_and_one_load(
     assert {(call["slot"], call["trace"]) for call in asked.calls} == {(SIX[1], (stand,) * 10)}
     assert keeper.told == [(clock.id, True), (page.id, False)]
     assert lab.saved.count(NOW_SLOT) == 1 and lab.loaded == [NOW_SLOT]
-    assert lab.saved[-1] == NOW_SLOT  # saved after the step, before anything was played
+    assert speed == ["fast", "as it was"]  # once for both, and put back
     lines = [line for line in said(caplog) if "asked the game" in line]
     assert lines == [
         "Clock went up at step 30 and was paid. The AI asked the game: played again from "
@@ -414,8 +430,10 @@ def test_a_dropped_link_ends_the_go(lab: Lab, monkeypatch: pytest.MonkeyPatch) -
     for _ in range(9):
         assert r.step()
     lab.bus.publish(rise(page.id))
+    assert r.signals.listening
     assert not r.step()
     assert len(asked.calls) == 1 and keeper.told == []
+    assert not r.signals.listening
     assert not r.step()  # the go is over
     assert r.finish().ended_by == "disconnected"
 
