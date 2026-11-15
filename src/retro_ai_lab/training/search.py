@@ -42,12 +42,19 @@ from retro_ai_lab.learning.actions import ActionSpace
 from retro_ai_lab.services.connection import ConnectionService
 from retro_ai_lab.training.trial import Outcome, play
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, ScreenWatch
-from retro_ai_lab.training.ways import Change, changes
+from retro_ai_lab.training.ways import HOLDS, Change, changes
 from retro_ai_lab.understanding.knowledge import Variable
 
 BUDGET = 120  # plays a search may make
 CARRY_ON = 20  # steps a try runs on past where the life went
 PLAIN_SHARE = 0.5  # of the budget: the most the plain way may use (T-1012)
+
+# Where in one of its lists of changes a search begins, and where it stopped (T-1042):
+# the number of the hold in ``HOLDS``, and how many steps before the last step a change
+# may be placed at. The two mean the same in the list of another go, whose saved moment
+# lies elsewhere and whose trace is another length; a count of changes does not.
+Spot = tuple[int, int]
+TOP: tuple[Spot, Spot] = ((0, 0), (0, 0))  # both lists from their start
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,11 +84,34 @@ class Search:
     # find the same in the same tries are the same search.
     seconds: float = field(default=0.0, compare=False)
     out_of_time: bool = False  # it stopped because its time was up, not its tries
+    # Where it stopped in the plain way's list and in the list of changes to what it
+    # did (T-1042): the change it would have played next, or the one that got past. A
+    # list gone through whole, or not gone into, is where the search began in it. Like
+    # the time, not part of what was found.
+    stopped_at: tuple[Spot, Spot] = field(default=TOP, compare=False)
 
 
 def _whole(value: object, what: str, least: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < least:
         raise ConfigurationError(f"{what} must be a whole number, {least} or more.")
+    return value
+
+
+def _spots(value: object) -> tuple[Spot, Spot]:
+    def whole(number: object) -> bool:
+        return isinstance(number, int) and not isinstance(number, bool) and number >= 0
+
+    if (
+        not isinstance(value, tuple)
+        or len(value) != 2
+        or any(not isinstance(spot, tuple) or len(spot) != 2 for spot in value)
+        or any(not whole(number) for spot in value for number in spot)
+    ):
+        raise ConfigurationError(
+            "begin_at is two pairs, for the plain way's list and for the list of changes "
+            "to what it did: the number of the hold, and the steps before the last step "
+            "a change may be placed at, both whole numbers from 0."
+        )
     return value
 
 
@@ -103,6 +133,7 @@ def find_way(
     stood: bool = False,
     enough: Callable[[Outcome], bool] | None = None,
     live: int | None = None,
+    begin_at: tuple[Spot, Spot] = TOP,
 ) -> Search:
     """Look for a small change to ``trace``, played from the save in ``slot``, that
     stays alive and reaches new ground.
@@ -150,6 +181,13 @@ def find_way(
     the life at as that step lies before the end of ``trace``: the game takes as
     long over that loss. With 0 there is nothing of what it did to change, and the
     plain way is played the once.
+
+    A search has tries, and with ``seconds`` time, for part of its lists only, and
+    one that begins each list at the top makes the same tries at a place go after
+    go (T-1042). ``begin_at`` is where an earlier search for nothing at the place
+    stopped (its :attr:`Search.stopped_at`): each list is begun at the first
+    change at or past its spot, comes round to its start at its end, and stops
+    where it began. Not for a search at a standstill.
     """
     if not slot or not isinstance(slot, str):
         raise ConfigurationError("A search needs the name of the save to start from.")
@@ -184,6 +222,10 @@ def find_way(
             raise ConfigurationError(
                 "live is for a search after a life lost: at a standstill none was."
             )
+    if _spots(begin_at) != TOP and stood:
+        raise ConfigurationError(
+            "begin_at is for a search after a life lost: one at a standstill begins at the top."
+        )
     for move in trace:
         space[move]  # refuses a move the controls don't have, before anything is played
     if plain is not None:
@@ -216,23 +258,33 @@ def find_way(
         return hashlib.blake2b(outcome.screen, digest_size=16).digest()
 
     def seek(
-        base: Sequence[int], limit: int, upto: int | None = None
-    ) -> tuple[Change, tuple[int, ...], int] | None:
+        base: Sequence[int], limit: int, upto: int | None = None, begin: Spot = (0, 0)
+    ) -> tuple[tuple[Change, tuple[int, ...], int] | None, Spot]:
         """The first small change to ``base`` that gets past, with its moves and the
-        new ground counted, while the tries stay under ``limit``. With ``upto`` the
-        changes are placed before that step of ``base`` only (T-1031)."""
+        new ground counted, while the tries stay under ``limit``; and where in the
+        list it stopped. With ``upto`` the changes are placed before that step of
+        ``base`` only (T-1031). The list is begun at ``begin`` (T-1042)."""
         nonlocal tries
         if upto is not None and upto < 1:
-            return None  # the loss was settled before the first step: nothing to change
+            return None, begin  # the loss was settled before the first step: nothing to change
         # At a standstill the earliest change that gets on is tried first: it is the
         # one with the least standing in it (T-1018). And a hold is played out whole:
         # the trace ends where it came to stand, with no room in it for a long one.
-        for change in changes(base, space, early=stood, whole=stood, upto=upto):
+        listed = list(changes(base, space, early=stood, whole=stood, upto=upto))
+        last = (len(base) if upto is None else min(len(base), upto)) - 1
+
+        def spot(change: Change) -> Spot:
+            return HOLDS.index(change.hold), last - change.at
+
+        # The first change at or past where it is to begin; past the list's end is
+        # its start. Then round the list once.
+        start = next((i for i, change in enumerate(listed) if spot(change) >= begin), 0)
+        for change in listed[start:] + listed[:start]:
             moves = change.apply(base, carry_on, whole=stood)
             if moves in played:
                 continue  # the other part of the search has been here
             if tries >= limit or not may_play():
-                break
+                return None, spot(change)
             tries += 1
             blind = play(
                 connection,
@@ -247,7 +299,8 @@ def find_way(
                 played.add(moves)  # lost, or where getting nowhere ended up (T-1018)
                 continue
             if tries >= limit or not may_play():
-                break  # alive and not looked at yet: not settled, so not marked as played
+                # Alive and not looked at yet: not settled, so not marked as played.
+                return None, spot(change)
             played.add(moves)
             tries += 1
             seen = play(
@@ -261,13 +314,14 @@ def find_way(
                 look_every=look_every,
             )
             if got_on(seen):
-                return change, moves, seen.ground
+                return (change, moves, seen.ground), spot(change)
             end = ended_on(blind)
             if end is not None:
                 nowhere.add(end)
-        return None
+        return None, begin  # the whole list, for nothing: the next begins where this did
 
     share = int(budget * PLAIN_SHARE)
+    plain_at, trace_at = begin_at
     if plain is not None and share >= 1 and may_play():
         held = (plain,) * (len(trace) + carry_on)
         tries += 1
@@ -283,11 +337,12 @@ def find_way(
         if first.lost:
             base = (plain,) * first.steps
             # Its loss takes as long to play out as the one at the end of the trace.
-            got = seek(base, share, None if live is None else first.steps - (len(trace) - live))
+            upto = None if live is None else first.steps - (len(trace) - live)
+            got, plain_at = seek(base, share, upto, plain_at)
             if got is not None:
                 change, moves, ground = got
                 way = Way(moves, change, tries, ground, plain=plain, lost_at=first.steps)
-                return Search(way, tries, taken())
+                return Search(way, tries, taken(), stopped_at=(plain_at, trace_at))
         elif tries < share and may_play():
             tries += 1
             seen = play(
@@ -302,7 +357,7 @@ def find_way(
             )
             if got_on(seen):
                 way = Way(held, Change(0, plain, len(trace)), tries, seen.ground, plain=plain)
-                return Search(way, tries, taken())
+                return Search(way, tries, taken(), stopped_at=begin_at)
             if stood:
                 # It stood still and holding the plain move stands still too (a wall):
                 # the small changes to the plain way, a jump at some step of it. The
@@ -311,15 +366,17 @@ def find_way(
                 end = ended_on(first)
                 if end is not None:
                     nowhere.add(end)
-                got = seek((plain,) * len(trace), share)
+                got, _ = seek((plain,) * len(trace), share)
                 if got is not None:
                     change, moves, ground = got
                     return Search(Way(moves, change, tries, ground, plain=plain), tries, taken())
-    got = None if late else seek(trace, budget, live)
-    if got is not None:
-        change, moves, ground = got
-        return Search(Way(moves, change, tries, ground), tries, taken())
-    return Search(None, tries, taken(), late)
+    if not late:
+        got, trace_at = seek(trace, budget, live, trace_at)
+        if got is not None:
+            change, moves, ground = got
+            way = Way(moves, change, tries, ground)
+            return Search(way, tries, taken(), stopped_at=(plain_at, trace_at))
+    return Search(None, tries, taken(), late, (plain_at, trace_at))
 
 
-__all__ = ["BUDGET", "CARRY_ON", "PLAIN_SHARE", "Search", "Way", "find_way"]
+__all__ = ["BUDGET", "CARRY_ON", "PLAIN_SHARE", "TOP", "Search", "Spot", "Way", "find_way"]

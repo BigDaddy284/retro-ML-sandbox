@@ -49,7 +49,7 @@ from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.training.earned import rose_anyway
 from retro_ai_lab.training.moments import LEAD, Moment, Moments
 from retro_ai_lab.training.route import Route
-from retro_ai_lab.training.search import BUDGET, find_way
+from retro_ai_lab.training.search import BUDGET, TOP, Spot, find_way
 from retro_ai_lab.training.trial import Outcome
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, Mark, ScreenWatch
 from retro_ai_lab.understanding.events import EventKind
@@ -89,6 +89,7 @@ STAND_NEAR = 8  # pixels: it "came to the spot" at the first look this near wher
 STAND_REACH = 4  # steps past that look which the way tried from before it still covers
 REST_GOES = 4  # goes it leaves going back alone for, where going back has worked (T-1039)
 MOST_REST = 32  # and the most, however often its searches came to nothing again
+MOST_SOUGHT = 32  # places remembered where a search after a life lost found nothing (T-1042)
 PRESS_FOR = 16  # steps a go that was paid nothing holds its best-paid button for (T-1011)
 
 
@@ -371,6 +372,18 @@ class EpisodeSignals:
         self._setbacks += len(dropped)
 
 
+@dataclass(slots=True)
+class _Sought:
+    """A place where a search after a life lost found nothing (T-1042): which place of
+    the go the life was seen lost in and where in it, in pixels; where in its lists
+    the last search there stopped; and how many there have been."""
+
+    place: int
+    spot: tuple[int, int]
+    at: tuple[Spot, Spot]
+    times: int = 1
+
+
 @dataclass(frozen=True, slots=True)
 class EpisodeResult:
     steps: int
@@ -611,6 +624,10 @@ class EpisodeRunner:
         self._found_past = False
         self._rest = 0  # goes still to be left alone
         self._rest_next = REST_GOES
+        # Where searches after a life lost found nothing, and how far through their
+        # lists they got (T-1042): the next search at such a place carries on there.
+        # The one used last is last.
+        self._sought: list[_Sought] = []
         self._flat_out = flat_out
         self._ways_left = 0
         self._ways_sought = 0
@@ -1419,6 +1436,39 @@ class EpisodeRunner:
         lives = [knowledge.get(i) for i in sorted(self._signals.watched or ()) if i in knowledge]
         return (*found, lives) if lives else None
 
+    def _lost_where(self) -> tuple[int, tuple[int, int], int] | None:
+        """Where the go's watch is, asked when a life has just been seen lost and
+        before anything goes back (T-1042): the number of the place of the go, where
+        in it (the camera's travel there on a screen that scrolls, where it stands
+        on one that never has), and how near counts as about there: half the
+        screen's longer side. None before the watch has looked at a screen.
+
+        A game shows a loss on the screen it happened on before it puts the player
+        anywhere else, so this is where the life went. The saved moment a search
+        begins from would not do: it lies up to ``EVERY`` steps apart from one go to
+        the next, and after a life lost in a game that puts the player back at once
+        it is taken where the life went and not where the player then is."""
+        watch = self._watch
+        assert watch is not None
+        screen = watch.mark().screen
+        if screen is None:
+            return None
+        ground = watch.ground
+        return ground.place_number, ground.place, max(screen.width, screen.height) // 2
+
+    def _sought_about(self, where: tuple[int, tuple[int, int], int]) -> _Sought | None:
+        """What is remembered of searches for nothing about ``where`` (T-1042): in
+        the same place of the go and as near as it says, the nearest."""
+        place, (x, y), near = where
+        found: tuple[int, _Sought] | None = None
+        for sought in self._sought:
+            if sought.place != place:
+                continue
+            far = max(abs(sought.spot[0] - x), abs(sought.spot[1] - y))
+            if far <= near and (found is None or far < found[0]):
+                found = far, sought
+        return None if found is None else found[1]
+
     def _seek(self, *, stood: bool = False) -> bool:
         """A life just went: go back and look for a way past (T-1007). False if the link dropped.
 
@@ -1445,6 +1495,10 @@ class EpisodeRunner:
         watch = self._watch
         assert watch is not None
         live: int | None = None
+        # Where the life went, and what is remembered of searches for nothing about
+        # there (T-1042). A standstill is no such search.
+        where = None if stood else self._lost_where()
+        sought = None if where is None else self._sought_about(where)
         self._ways_left -= 1
         self._ways_sought += 1
         if stood:
@@ -1463,6 +1517,13 @@ class EpisodeRunner:
                     gone = moments.steps - moment.step
                 mark = moment.mark
                 assert isinstance(mark, Mark)
+                if sought is not None and sought.at != TOP:
+                    log.info(
+                        "The AI has looked for a way past about here %s and found none. "
+                        "This search carries on with the changes the last one did not get "
+                        "to, instead of making the same tries again.",
+                        "once before" if sought.times == 1 else f"{sought.times} times before",
+                    )
                 search = find_way(
                     self._connection,
                     moment.slot,
@@ -1478,6 +1539,7 @@ class EpisodeRunner:
                     stood=stood,
                     enough=self._left_the_spot if stood else None,
                     live=live,
+                    begin_at=TOP if sought is None else sought.at,
                 )
                 if search.way is None:
                     self._connection.call(lambda a: a.load_state(NOW_SLOT))
@@ -1514,6 +1576,16 @@ class EpisodeRunner:
             return True
         if way is None:
             moments.forget()
+            # The next search about here begins where this one stopped (T-1042).
+            if sought is not None:
+                self._sought.remove(sought)
+                sought.at = search.stopped_at
+                sought.times += 1
+            elif where is not None:
+                sought = _Sought(where[0], where[1], search.stopped_at)
+            if sought is not None:
+                self._sought.append(sought)
+                del self._sought[:-MOST_SOUGHT]
             log.info(
                 "Lost a life at step %d. Went back %s and made %d tries in %.1f s%s: "
                 "none got past.",
@@ -2110,6 +2182,7 @@ __all__ = [
     "DEFAULT_SETTLE_FRAMES",
     "LOOKAHEAD_STEPS",
     "MOST_REST",
+    "MOST_SOUGHT",
     "NOW_SLOT",
     "PRESS_FOR",
     "REST_GOES",
