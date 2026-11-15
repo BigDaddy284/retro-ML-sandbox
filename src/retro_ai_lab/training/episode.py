@@ -1128,8 +1128,8 @@ class EpisodeRunner:
                 self._loss_stands()  # the go ends with the loss: its story ends before it
         if not settled:
             return False
-        if self._setbacks > lost_before:
-            self._signals.take_rises()  # what rose as a life went is not asked about
+        rose = self._signals.take_rises()
+        if self._setbacks > lost_before:  # (what rose as the life went is not asked about)
             self._forced.clear()  # whatever way was being played did not get past
             self._route_left = 0
             self._pressing = False  # a press that cost a life is not one that got nothing
@@ -1150,13 +1150,13 @@ class EpisodeRunner:
                     "used to end the go. The AI has gone back to before it and carries on.",
                 )
                 self._held_said = True
-        elif not self._ask_rises():
+        elif not self._ask_rises(rose):
             return False
         return True
 
-    def _ask_rises(self) -> bool:
-        """Ask the game whether what this step was paid for rising was earned (T-1036).
-        False if the link dropped.
+    def _ask_rises(self, rose: tuple[str, ...]) -> bool:
+        """Ask the game whether what this step was paid for rising (``rose``, the
+        values' ids) was earned (T-1036). False if the link dropped.
 
         A clock goes up whatever is pressed, and read as progress it pays best for
         standing still. From the newest saved moment ``RISE_BACK`` steps or more
@@ -1164,10 +1164,9 @@ class EpisodeRunner:
         (:func:`rose_anyway`), off the record, and the answer is told to whoever
         keeps count; then the game is put back to where it was.
         """
-        rose = self._signals.take_rises()
         moments = self._moments
         worth, answered = self._rise_worth_asking, self._rise_answered
-        if not rose or moments is None or worth is None or answered is None:
+        if moments is None or worth is None or answered is None:
             return True
         knowledge = self._encoder.knowledge
         values = [knowledge.get(i) for i in rose if i in knowledge and worth(i)]
