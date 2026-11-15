@@ -1515,6 +1515,16 @@ class EpisodeRunner:
                 at,
                 first,
             )
+        elif live == 0 and late:
+            log.info(
+                "Lost a life at step %d. That was settled before the moment %d steps back: "
+                "nothing pressed since changes it (%d plays, %.1f s to find out). The time a "
+                "search may take ran out before the AI could look further back.",
+                at,
+                gone,
+                plays,
+                took,
+            )
         elif live == 0:
             log.info(
                 "Lost a life at step %d. That was settled before the earliest moment the AI "

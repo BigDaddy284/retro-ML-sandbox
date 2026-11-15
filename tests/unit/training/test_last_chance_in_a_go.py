@@ -50,6 +50,18 @@ def going(
     return lab.runner(moments=moments, watch=watch, **kw), moments
 
 
+class Ticking:
+    """Stands in for the clock the runner reads: a second passes each time it is read.
+    (The real one stands still for 15 ms at a time on Windows.)"""
+
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def monotonic(self) -> float:
+        self.now += 1.0
+        return self.now
+
+
 def said(caplog: pytest.LogCaptureFixture) -> list[str]:
     return [record.getMessage() for record in caplog.records if record.name == LOG]
 
@@ -166,6 +178,7 @@ def test_an_older_moment_where_the_first_leaves_no_room(
         return answer[0]
 
     monkeypatch.setattr(episode, "last_chance", told)
+    monkeypatch.setattr(episode, "time", Ticking())
     searches = Asked(monkeypatch)
     walk = lab.move("right")
 
@@ -189,7 +202,7 @@ def test_an_older_moment_where_the_first_leaves_no_room(
     assert searches.calls == [(second, (walk,) * 54, False)]
     assert settled == (
         "Lost a life at step 74. That was settled 29 steps before: nothing pressed from "
-        "then on changes it (9 plays, 0.0 s to find out). The AI goes back 54 steps, not "
+        "then on changes it (9 plays, 1.0 s to find out). The AI goes back 54 steps, not "
         "34, and tries its changes before then."
     )
     # Fifteen steps are room enough, fourteen are not.
@@ -204,13 +217,23 @@ def test_an_older_moment_where_the_first_leaves_no_room(
     answer[0] = Chance(0, 2)
     _, settled = loses(way_seconds=1000.0)
     assert [(slot, length) for slot, length, _ in asked] == [(third, 34), (second, 54), (start, 74)]
-    first, then, last = (seconds for *_, seconds in asked)
-    assert isinstance(first, float) and isinstance(then, float) and isinstance(last, float)
-    assert 1000.0 >= first > then > last > 990.0
+    # (The clock is read once to begin with, once before each asking and once at the end.)
+    assert [seconds for *_, seconds in asked] == [999.0, 998.0, 997.0]
     assert searches.calls == [(start, (walk,) * 74, False)]
-    assert settled.startswith(
+    assert settled == (
         "Lost a life at step 74. That was settled before the earliest moment the AI can "
-        "go back to, 74 steps before: nothing pressed since changes it (6 plays, "
+        "go back to, 74 steps before: nothing pressed since changes it (6 plays, 4.0 s to "
+        "find out)."
+    )
+    # Where that time runs out, it searches from the last moment it could ask, and says
+    # that it could look no further.
+    _, settled = loses(way_seconds=2.5)
+    assert asked == [(third, 34, 1.5), (second, 54, 0.5)]
+    assert searches.calls == [(second, (walk,) * 54, False)]
+    assert settled == (
+        "Lost a life at step 74. That was settled before the moment 54 steps back: nothing "
+        "pressed since changes it (4 plays, 5.0 s to find out). The time a search may take "
+        "ran out before the AI could look further back."
     )
     # A moment saved with no look at the screen cannot be searched from: it stops there.
     real = ScreenWatch.mark
@@ -248,16 +271,28 @@ def test_the_search_is_told_and_time_is_kept(
     steps(r, LONG_DIED)
     assert [kw["live"] for kw in given] == [OFF_THE_EDGE, 1]
     r.finish()
-    # Finding it has the time one search may take, and no more: a play in flight is
-    # finished, so with next to no time the first play is all there is.
+    # Finding it has the time one search may take, and no more. With none of it left
+    # nothing is asked, not a play is made, and the search is the one it was.
     given.clear()
     caplog.clear()
-    r, _ = going(lab, LONG, last_chance=True, way_seconds=1e-9)
+    asked: list[object] = []
+    asking = episode.last_chance
+
+    def noting(*args: object, **kw: object) -> object:
+        asked.append(kw["seconds"])
+        return asking(*args, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(episode, "last_chance", noting)
+    monkeypatch.setattr(episode, "time", Ticking())
+    monkeypatch.setattr(
+        episode, "find_way", lambda *a, **kw: (given.append(kw), Search(None, 0, 0.5, True))[1]
+    )
+    r, _ = going(lab, LONG, last_chance=True, way_seconds=0.5)
     r.begin()
     steps(r, LONG_DIED - 1)
     with caplog.at_level(logging.INFO, logger=LOG):
         assert r.step()
-    assert [kw["live"] for kw in given] == [None]
+    assert asked == [] and [kw["live"] for kw in given] == [None]
     assert lab.loaded == [NOW_SLOT]  # no play was started; the game is where it was
     first, second = said(caplog)
     assert first == (
@@ -266,6 +301,7 @@ def test_the_search_is_told_and_time_is_kept(
     )
     assert "Went back 34 steps and made 0 tries" in second and "none got past" in second
     r.finish()
+    monkeypatch.setattr(episode, "find_way", finding)
     # Played again, what it did does not lose the life on the same step: nothing can be
     # told from it, and the search is the one it was.
     given.clear()
