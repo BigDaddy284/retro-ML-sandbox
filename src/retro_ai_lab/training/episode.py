@@ -46,6 +46,7 @@ from retro_ai_lab.services.rewards import (
 )
 from retro_ai_lab.training.chance import WALK, last_chance
 from retro_ai_lab.training.deaths import DeathWatch
+from retro_ai_lab.training.earned import rose_anyway
 from retro_ai_lab.training.moments import LEAD, Moment, Moments
 from retro_ai_lab.training.route import Route
 from retro_ai_lab.training.search import BUDGET, find_way
@@ -68,6 +69,11 @@ FINGERPRINT_STEPS = 64  # state keys a go remembers, for spotting two identical 
 # instead of one (n-step returns, T-963). Half a second at four frames a step.
 LOOKAHEAD_STEPS = 8
 DEFAULT_SETTLE_FRAMES = 5  # the understanding engine's event window
+# A rise is asked about from the newest saved moment this many steps before it or
+# more (T-1036: from about ten steps before, the fewest wrong answers), and not from
+# further back than RISE_MOST.
+RISE_BACK = 8
+RISE_MOST = 40
 NOW_SLOT = "back_now"  # where the present is saved while a search plays its tries (T-1007)
 # Steps a search wants before the step a loss was settled at (T-1031): what going back
 # ``LEAD`` steps from the counter leaves on the practice game, where the fall and the
@@ -159,6 +165,7 @@ class EpisodeSignals:
         self._again: tuple[tuple[str, float], ...] = ()
         self._names: dict[str, str] = {}  # each row's name as it was last paid under
         self._gone: set[str] = set()  # rows removed from the rewards since last asked
+        self._rose: dict[str, None] = {}  # values paid for going up since last asked (T-1036)
         bus.subscribe(RewardEarned, self._on_reward)
         bus.subscribe(PaidAgain, self._on_again)
         bus.subscribe(RewardProfileChanged, self._on_profile)
@@ -242,6 +249,7 @@ class EpisodeSignals:
         self._parts = ()
         self._pending_again = {}
         self._again = ()
+        self._rose = {}
         self._listening = True
 
     def stop(self) -> None:
@@ -270,6 +278,13 @@ class EpisodeSignals:
         self._scores = 0
         return out
 
+    def take_rises(self) -> tuple[str, ...]:
+        """The values paid for going up since the last call, each once, in the order
+        they first paid; clears them (T-1036)."""
+        out = tuple(self._rose)
+        self._rose = {}
+        return out
+
     def take_setbacks(self) -> int:
         """Life or health drops since the last call; clears the count (T-934)."""
         out = self._setbacks
@@ -294,6 +309,9 @@ class EpisodeSignals:
         if not self._listening:
             return
         self._reward += event.amount
+        cause = event.event
+        if cause.variable_id is not None and (cause.delta or 0) > 0:
+            self._rose[cause.variable_id] = None
         ids = event.behaviour_ids
         shares = event.shares if len(event.shares) == len(ids) else ()
         names = event.names if len(event.names) == len(ids) else ()
@@ -494,7 +512,15 @@ class EpisodeRunner:
         route: Route | None = None,
         stand_after: int = 0,
         last_chance: bool = False,
+        rise_worth_asking: Callable[[str], bool] | None = None,
+        rise_answered: Callable[[str, bool], None] | None = None,
     ) -> None:
+        if (rise_worth_asking is None) != (rise_answered is None):
+            raise ConfigurationError("rise_worth_asking and rise_answered go together.")
+        if rise_worth_asking is not None and not (
+            callable(rise_worth_asking) and callable(rise_answered)
+        ):
+            raise ConfigurationError("rise_worth_asking and rise_answered must be callable.")
         if not isinstance(last_chance, bool):
             raise ConfigurationError("last_chance must be true or false.")
         if route is not None and not isinstance(route, Route):
@@ -568,6 +594,10 @@ class EpisodeRunner:
         self._ways_per_go = ways_per_go
         self._way_tries = way_tries
         self._way_seconds = way_seconds
+        # Whether a value paid for going up went up whatever was pressed: which are
+        # worth asking the game about, and who is told the answer (T-1036).
+        self._rise_worth_asking = rise_worth_asking
+        self._rise_answered = rise_answered
         # Searches in a row that found nothing, across goes; at give_up_after the
         # runner stops going back for good: in this game it only costs time (T-1009).
         self._give_up_after = give_up_after
@@ -1099,6 +1129,7 @@ class EpisodeRunner:
         if not settled:
             return False
         if self._setbacks > lost_before:
+            self._signals.take_rises()  # what rose as a life went is not asked about
             self._forced.clear()  # whatever way was being played did not get past
             self._route_left = 0
             self._pressing = False  # a press that cost a life is not one that got nothing
@@ -1119,6 +1150,78 @@ class EpisodeRunner:
                     "used to end the go. The AI has gone back to before it and carries on.",
                 )
                 self._held_said = True
+        elif not self._ask_rises():
+            return False
+        return True
+
+    def _ask_rises(self) -> bool:
+        """Ask the game whether what this step was paid for rising was earned (T-1036).
+        False if the link dropped.
+
+        A clock goes up whatever is pressed, and read as progress it pays best for
+        standing still. From the newest saved moment ``RISE_BACK`` steps or more
+        before, the game is played again with every other move held
+        (:func:`rose_anyway`), off the record, and the answer is told to whoever
+        keeps count; then the game is put back to where it was.
+        """
+        rose = self._signals.take_rises()
+        moments = self._moments
+        worth, answered = self._rise_worth_asking, self._rise_answered
+        if not rose or moments is None or worth is None or answered is None:
+            return True
+        knowledge = self._encoder.knowledge
+        values = [knowledge.get(i) for i in rose if i in knowledge and worth(i)]
+        if not values:
+            return True
+        found = moments.since(max(0, moments.steps - RISE_BACK))
+        if found is None or not RISE_BACK <= len(found[1]) <= RISE_MOST:
+            return True
+        moment, trace = found
+        steps = f"{len(trace)} steps"
+        try:
+            fast = self._flat_out() if self._flat_out is not None else nullcontext()
+            with fast, app_work.timed("step: search"):
+                self._connection.call(lambda a: a.save_state(NOW_SLOT))
+                for value in values:
+                    rise = rose_anyway(
+                        self._connection,
+                        moment.slot,
+                        trace,
+                        self._agent.space,
+                        frames_per_step=self._frames_per_step,
+                        value=value,
+                        seconds=self._way_seconds,
+                    )
+                    if rise is None:
+                        continue
+                    answered(value.id, rise.anyway)
+                    plays = f"{rise.plays} plays"
+                    if rise.anyway:
+                        log.info(
+                            "%s went up at step %d and was paid. The AI asked the game: "
+                            "played again from %s before with each other move held, it "
+                            "went up just the same (%s). What goes up whatever is "
+                            "pressed is not progress, so that counts against it.",
+                            value.display_name,
+                            self._steps,
+                            steps,
+                            plays,
+                        )
+                    else:
+                        log.info(
+                            "%s went up at step %d and was paid. The AI asked the game: "
+                            "played again from %s before with another move held, it "
+                            "stayed lower (%s), so that rise was earned.",
+                            value.display_name,
+                            self._steps,
+                            steps,
+                            plays,
+                        )
+                self._connection.call(lambda a: a.load_state(NOW_SLOT))
+        except EmulatorError:
+            self._ended_by = "disconnected"
+            self._signals.stop()
+            return False
         return True
 
     def _paid_moves(self) -> list[tuple[str, int]]:
@@ -1977,6 +2080,8 @@ __all__ = [
     "LOOKAHEAD_STEPS",
     "NOW_SLOT",
     "PRESS_FOR",
+    "RISE_BACK",
+    "RISE_MOST",
     "ROOM",
     "Earning",
     "EpisodeResult",
