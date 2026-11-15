@@ -1156,6 +1156,8 @@ class TrainingService:
                 stand_after=self._stand_after if goes_back else 0,
                 flat_out=self._flat_out,
                 last_chance=goes_back,
+                rise_worth_asking=self._discovery.rise_worth_asking if goes_back else None,
+                rise_answered=self._discovery.rise_answered if goes_back else None,
             )
         self._busy = True
         try:
