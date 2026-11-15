@@ -305,6 +305,13 @@ game; on a real game the plays take some seconds. Finding this out may take
 as long as one search, so a life lost can hold the game up for 30 seconds at
 the most, where it was 15.
 
+Where the time for that runs out before the step is found, the AI goes by
+what it knows by then: the latest step it has found to be too late. It goes
+back to a saved moment before that one and tries its changes before it; some
+of those are then tried at steps that were too late as well, which costs
+tries and nothing else. The log says "settled at least 34 steps before" in
+that case, and that the time ran out.
+
 A brain that has lost lives at a spot can turn timid: it stops short and
 waits, loses nothing, and so never finds the way past. Where the AI can go
 back, it does not let that stand. When a go has been paid nothing for 24
