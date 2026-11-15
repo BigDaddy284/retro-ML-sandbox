@@ -14,7 +14,10 @@ Toy Hopper is the smallest game that does:
   only when it ends is the life taken and the player put back at the start,
   as console games do (the life counter moves well after the fatal touch);
 * a 64-byte RAM with the state at fixed addresses, noise and a timer;
-* a 256x240 colour screen drawn from the state.
+* a 256x240 colour screen drawn from the state;
+* one level, started again at its flag, unless the cartridge is told to hold
+  more (``levels``, T-1040): then the flag leads to the next level, with a
+  layout and colours of its own.
 
 Nothing outside this module may rely on the RAM layout or on how the level is
 laid out: the rest of the application has to learn both. Tests may import
