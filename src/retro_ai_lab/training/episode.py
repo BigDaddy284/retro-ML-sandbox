@@ -1476,7 +1476,9 @@ class EpisodeRunner:
         it (T-1033, :attr:`dying_steps`). By that time the moments that would leave
         no room are passed over unasked, as long as an older one is there, and the
         first one asked is given the step the time puts the last chance at as its
-        guess. A guess costs a few plays where it is wrong and decides nothing.
+        guess. A guess costs a few plays where it is wrong and decides nothing: the
+        step found is the same, and where a moment passed over turns out to have
+        room after all, the search is from that one, as without the memory.
         """
         moments = self._moments
         assert moments is not None
@@ -1491,6 +1493,7 @@ class EpisodeRunner:
         tried = first  # steps of what it did that the last asking played again
         dying = self._dying
         kept = [older for older in reversed(moments.kept) if older.step <= moment.step]
+        passed: list[tuple[Moment, tuple[int, ...]]] = []  # not asked, the newest first
         for number, older in enumerate(kept):
             if not isinstance(older.mark, Mark):
                 break
@@ -1512,7 +1515,9 @@ class EpisodeRunner:
                     and number + 1 < len(kept)
                     and isinstance(kept[number + 1].mark, Mark)
                 ):
-                    continue  # no room here by that time, and an older moment is there
+                    # No room here by that time, and an older moment is there.
+                    passed.append((older, since[1]))
+                    continue
                 # No guess once a moment was too late from its first step: the time
                 # remembered was wrong for this loss.
                 guess = (
@@ -1542,6 +1547,16 @@ class EpisodeRunner:
                     break
                 plays += found.plays
                 live, sure = found.live, found.sure
+                did = since[1]
+                if sure:
+                    # A loss that took less time than remembered: a moment passed over
+                    # has room after all. The newest that has is the one to search
+                    # from, as it would be had each been asked.
+                    for newer, less in passed:
+                        ahead = len(did) - len(less)
+                        if live - ahead >= ROOM:
+                            older, since, live = newer, (newer, less), live - ahead
+                            break
                 room = live if sure else 0
             moment, trace = older, since[1]
             if room >= ROOM:

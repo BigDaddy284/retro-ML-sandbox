@@ -300,6 +300,37 @@ def test_moments_passed_over(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
     assert r.dying_steps == 53
     assert goes.lose(Chance(1, 9)) == [(54, None, None)]
     assert goes.searched == (54, 1)
+    # An answer the time cut short moves nothing: the step may lie earlier than it
+    # says, so the moment passed over is not gone to on its word.
+    assert goes.lose(Chance(40, 9, sure=False)) == [(54, None, None)]
+    assert goes.searched == (54, 40) and r.dying_steps == 53
+
+
+def test_a_moment_passed_over_that_has_room_after_all(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    goes = Goes(lab, monkeypatch, SIX)
+    r = goes.r
+    assert goes.lose(Chance(0, 9), Chance(0, 9), Chance(3, 9)) == [
+        (34, None, None),
+        (54, 20, None),
+        (74, 20, None),
+    ]
+    assert r.dying_steps == 71
+    # This loss took 40 steps, not 71. The moment 54 back, passed over, has 14 steps
+    # before the settled one: one short of room, so the search stays where it asked.
+    assert goes.lose(Chance(34, 9)) == [(74, None, 2)]
+    assert goes.searched == (74, 34) and r.dying_steps == 40
+    # One step shorter and that moment has room: the search is from there, with the
+    # count as that moment has it, as if it had been asked itself.
+    assert goes.lose(Chance(35, 9)) == [(74, None, 33)]
+    assert goes.searched == (54, 15) and r.dying_steps == 40
+    # Where both moments passed over have room, the newest is the one.
+    assert goes.lose(Chance(55, 9)) == [(74, None, 33)]
+    assert goes.searched == (34, 15)
+    assert r.dying_steps == 19  # and what this loss took is what is remembered
+    assert goes.lose(Chance(15, 9)) == [(34, None, 14)]
+    assert goes.searched == (34, 15)
 
 
 def test_an_older_moment_must_be_one_to_search_from(
