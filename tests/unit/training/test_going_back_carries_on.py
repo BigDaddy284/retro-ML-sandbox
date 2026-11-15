@@ -9,9 +9,10 @@ import pytest
 from retro_ai_lab.emulator.fake import toy_hopper
 from retro_ai_lab.training import EpisodeRunner, episode
 from retro_ai_lab.training.episode import MOST_SOUGHT, EpisodeResult
+from retro_ai_lab.training.moments import Moments
 from retro_ai_lab.training.search import TOP, Search, Spot
 from tests.unit.training import test_going_back as going_back
-from tests.unit.training.test_going_back import DIED_AT, Lab, steps
+from tests.unit.training.test_going_back import DIED_AT, SLOTS, Lab, steps
 from tests.unit.training.test_going_back_rests import walk_on
 from tests.unit.training.test_search_at_a_loss import searching
 from tests.unit.training.test_standing_still import FAR, hop_about, standing
@@ -256,6 +257,23 @@ def test_where_the_life_went_is_where_the_watch_was(
     a_go(lab, r)
     assert wheres[3:] == [(0, (137, 0), 128), (0, (329, 0), 128), (0, (553, 0), 128)]
     assert asked.found == [False] * 3 + [True] * 3
+
+
+def test_where_the_life_went_names_the_place_of_the_go(lab: Lab) -> None:
+    lab.teach()
+    lab.game.reset()
+    watch = lab.watch()
+    r = lab.runner(moments=Moments(SLOTS), watch=watch, ways_per_go=1)
+    r.begin()
+    steps(r, 20)
+    here = r._lost_where()
+    assert here is not None and here[0] == 0 and here[1] == watch.ground.place != (0, 0)
+    # The watch is told the screen shows somewhere new (T-1038): the second place of
+    # the go, at its door.
+    assert watch.ground.new_place() == 1
+    assert r._lost_where() == (1, (0, 0), 128)
+    watch.ground.go_to(0)
+    assert r._lost_where() == (0, (0, 0), 128)
 
 
 def test_a_search_that_stopped_at_the_top_is_begun_there_and_nothing_is_said(
