@@ -325,6 +325,8 @@ def test_a_snapshot_brings_back_its_level() -> None:
 def test_each_level_has_colours_of_its_own() -> None:
     assert len(PALETTES) == 3
     assert tuple(PALETTES[0]) == (th.SKY, th.GROUND, th.GRASS, th.WALL)
+    # By day, in a cave, at dusk: the second level is the dark one.
+    assert PALETTES[1].sky == (36, 28, 72) and PALETTES[2].sky == (240, 144, 96)
     fixed = (th.PLAYER, th.PLAYER_HEAD, th.WALKER, th.WALKER_FEET, th.COIN, th.FLAG, th.HUD)
     colours = [colour for palette in PALETTES for colour in palette] + list(fixed)
     assert len(colours) == 19 and len(set(colours)) == 19
