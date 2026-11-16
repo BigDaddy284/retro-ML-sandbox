@@ -202,8 +202,9 @@ def test_what_hurt_by_the_old_rule_still_hurts() -> None:
     learner.evidence["thing-3"] = mixed
     (role,) = learner.roles()
     assert (role.confidence, role.ways) == (Confidence.MEDIUM, (Way.SIDE,))  # three: not four
-    # In one way only: the lives of that way.
-    mixed.touches, mixed.ways[Way.ABOVE] = 12, WayEvidence(touches=10, hurt=1)
+    # In one way only: the lives of that way, two of its four.
+    mixed.touches, mixed.hurt = 12, 4
+    mixed.ways[Way.ABOVE] = WayEvidence(touches=10, hurt=2)
     (role,) = learner.roles()
     assert (role.tag, role.confidence, role.ways) == (
         SpriteTag.HAZARD,
@@ -272,6 +273,10 @@ def test_what_is_not_noted_as_close() -> None:
     assert not m.learner.close
     m.see(me(100), then=LOST)
     assert m.learner.last_blame is None and m.learner.roles() == ()
+    # How far off is the larger of across and up-and-down: 20 each way is 20, not 40.
+    m.see(me(100), thing(5, "bird", 100 + 16 + 20, GROUND - 16 - 20))
+    m.see(me(100), then=LOST)
+    assert m.learner.last_blame == Blame("bird", Way.BELOW, 1, 20, False)
     # Just within reach is noted.
     m.see(me(100), thing(1, "far", 100 + 16 + REACH))
     assert m.learner.close
@@ -298,6 +303,7 @@ def test_a_touch_waiting_is_preferred_to_a_closer_thing() -> None:
     m.see(me(100), block)
     assert m.learner.waiting and not m.learner.close
     m.see(me(60), thing(6, "walker", 86))  # away from the block; a walker 10 pixels off
+    assert m.learner.waiting and not m.learner.close  # it is the touch a life would go to
     m.see(me(60), then=LOST)
     assert m.learner.last_blame == Blame("block", Way.BELOW, 2, 0, True)
     assert "walker" not in m.learner.evidence
