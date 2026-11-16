@@ -136,6 +136,15 @@ def test_it_cannot_be_changed_while_training_runs(
     panel.choose_go_until_over(True)
     assert "Stop training before changing" in panel.note_text
     assert t.go_until_over is False and timers.shown()[:3] == FOR_A_TIME
+    # A pick that got in just as training started goes the same way: the list does
+    # not keep showing what the service refused.
+    note = panel.findChild(QLabel, "learning_note")
+    assert note is not None
+    note.setText("")
+    assert panel.note_text == ""
+    timers.pick(OVER)
+    assert "Stop training before changing" in panel.note_text
+    assert t.go_until_over is False and timers.shown()[:3] == FOR_A_TIME
     panel.stop()
     assert timers.ends.isEnabled()
     timers.pick(OVER)
