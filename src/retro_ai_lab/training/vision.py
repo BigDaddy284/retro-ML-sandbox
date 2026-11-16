@@ -140,6 +140,11 @@ class ScreenWatch:
         # The places the go has been in (T-1038), by their number in the ground's
         # count: the screen at the door of each, and the screen it last left each by.
         self._doors: list[Frame | None] = [None]
+        # The game's memory as it was at each place's door, where it was handed over
+        # (T-1049): what its count of the camera reads there.
+        self._door_memory: list[bytes | None] = [None]
+        self._count_at: int | None = None  # the look its count went to the door's
+        self._count_said = False
         self._lefts: list[Frame | None] = [None]
         self._arriving = False  # the screen jumped, and where it is has not been settled
         self._last_frame: Frame | None = None  # the screen of the look before
@@ -279,6 +284,8 @@ class ScreenWatch:
         # (A cut not settled when the last go ended settles at this go's first look,
         # as the place it begins in: that screen is its door.)
         self._doors, self._lefts = [None], [None]
+        self._door_memory = [None]
+        self._count_at = None
         self._life_at = None
         self._came = None
         self._around = None
@@ -324,6 +331,7 @@ class ScreenWatch:
         self._shown = (mark.screen, mark.hide)
         self._memory = None  # nor across this
         self._ground.put_back(mark.ground)
+        self._count_at = None
         self._learner.let_go()
         self._jolt_at = None
         self._prior_box = None
@@ -464,6 +472,7 @@ class ScreenWatch:
             self._camera = CameraMemory()
             self._said.clear()
             self._memory = None
+            self._door_memory = [None] * len(self._door_memory)
         return b"".join(bytes(memory[name]) for name in names)
 
     def _learn_camera(self, was: bytes, now: bytes) -> None:
@@ -523,8 +532,11 @@ class ScreenWatch:
         cut = jolt and share >= CUT
         if self._doors[0] is None:
             self._doors[0] = frame  # where the go began is the door of its first place
+            self._door_memory[0] = self._memory
         if jolt and not self._was_jolt and self._elsewhere():
             self._jolt_at = self._looks
+        if self._elsewhere() and self._count_at_the_door():
+            self._count_at = self._looks
         if lost:
             self._lost_at = self._life_at = self._looks
             came, self._came = self._came, None
@@ -536,9 +548,25 @@ class ScreenWatch:
             and self._lost_at is not None
             and abs(self._jolt_at - self._lost_at) <= BACK_LOOKS
         )
-        if respawn:
+        by_count = (
+            self._count_at is not None
+            and self._lost_at is not None
+            and abs(self._count_at - self._lost_at) <= BACK_LOOKS
+        )
+        if by_count and not respawn:
+            if self._count_at == self._looks:
+                moved = (0, 0)  # what the picture read as this look's slide was the put-back
+            log.log(
+                logging.DEBUG if self._count_said or self._quiet else logging.INFO,
+                "A life was lost and the screen showed no jump, but the game's own count "
+                "of its camera is back at what it was where this place began and the AI "
+                "is somewhere else on the screen: the game put it back. Ground it walks "
+                "again from there is not new.",
+            )
+            self._count_said = True
+        if respawn or by_count:
             self._ground.back()
-            self._jolt_at = self._lost_at = None
+            self._jolt_at = self._lost_at = self._count_at = None
         elif cut:
             if not self._arriving:
                 self._arriving = True
@@ -560,6 +588,31 @@ class ScreenWatch:
         if self.follows_camera:
             self._new_ground += new  # otherwise counted and not paid, now or later
             self._ground_again += self._ground.again
+
+    def _count_at_the_door(self) -> bool:
+        """The game's own count of its camera (T-1020) reads what it read at the door of
+        the place it is in, while the ground has the camera more than a look's slide
+        from that door (T-1049). With a life lost about then and the player seen
+        somewhere else on the screen, that is the game putting it back where the
+        screen cannot show it: on plain ground the start's screen and the screen the
+        life went on look alike, and the picture reads the put-back as a slide.
+
+        Every byte found must read the door's value, and one at least must have the
+        camera far from the door its way. With no byte found, or no memory kept from
+        the door, there is nothing to go by."""
+        here = self._ground.place_number
+        door = self._door_memory[here] if here < len(self._door_memory) else None
+        now = self._memory
+        if door is None or now is None or len(door) != len(now) or not self._ground.scrolls:
+            return False
+        far = False
+        for way, byte in enumerate(self._camera.found):
+            if byte is None:
+                continue
+            if now[byte] != door[byte]:
+                return False
+            far = far or abs(self._ground.place[way]) > LOOK_SHIFT
+        return far
 
     def _leave(self) -> None:
         """The screen has jumped: the screen before it is where the place it is in was
@@ -600,6 +653,9 @@ class ScreenWatch:
         while len(self._doors) <= number:
             self._doors.append(None)
         self._doors[number] = frame
+        while len(self._door_memory) <= number:
+            self._door_memory.append(None)
+        self._door_memory[number] = self._memory
         self._came = (self._looks, here)
         if not self._quiet:
             log.info(
