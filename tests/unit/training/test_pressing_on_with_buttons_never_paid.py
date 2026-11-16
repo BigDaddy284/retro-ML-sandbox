@@ -87,6 +87,16 @@ def test_the_button_paid_most_often_is_first(lab: Lab) -> None:
     assert r.paid_buttons == ("a", "right")  # four steps against three
 
 
+def test_a_move_of_two_buttons_counts_for_both(lab: Lab) -> None:
+    lab.teach()
+    paying = Paying(lab, {1: (1.0,), 2: (1.0,), 3: (5.0,)})
+    r = lab.runner()
+    jump = lab.move("a", "right")
+    paid_go(lab, paying, r, [jump, jump, lab.move("b")])
+    # Two steps each for "a" and "right", one (and the most pay) for "b".
+    assert r.paid_buttons == ("a", "right", "b")
+
+
 def test_equal_counts_go_by_the_sum_and_then_the_name(lab: Lab) -> None:
     lab.teach()
     paying = Paying(lab, {1: (5.0,), 2: (7.0,), 3: (5.0,)})
