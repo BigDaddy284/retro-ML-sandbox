@@ -52,7 +52,7 @@ from retro_ai_lab.training import (
     TrainingStepped,
 )
 from retro_ai_lab.training.insights import describe_changes, describe_experiments
-from retro_ai_lab.training.service import UNTIL_OVER_MOST_FRAMES
+from retro_ai_lab.training.service import UNTIL_OVER_MOST_FRAMES, GoLeft
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.learning_graph import LearningGraph
 from retro_ai_lab.ui.worker import report
@@ -107,6 +107,23 @@ def seconds_to_steps(seconds: float, frames_per_step: int) -> int:
 
 def steps_to_seconds(steps: int, frames_per_step: int) -> float:
     return steps * frames_per_step / FRAMES_PER_SECOND
+
+
+# The countdown under the go's line (T-1046), by whether being paid puts the end off.
+COUNTDOWN = {
+    False: "This go has {} s left.",
+    True: "This go ends if nothing is paid in the next {} s.",
+}
+# A way a search has just found is played to its end past the go's time (T-1018).
+COUNTDOWN_UP = "This go's time is up: it ends when the way it has just found is played out."
+
+
+def countdown_line(left: GoLeft, frames_per_step: int) -> str:
+    """What the go in progress has left, in whole seconds of the game's time, rounded up."""
+    if left.steps <= 0:
+        return COUNTDOWN_UP
+    seconds = -(-left.steps * frames_per_step // FRAMES_PER_SECOND)
+    return COUNTDOWN[left.unpaid].format(seconds)
 
 
 FAST_SLICE_SECONDS = 0.02  # how long a synchronous fast tick may hog the GUI
@@ -672,6 +689,9 @@ class LearningPanel(QWidget):
             self._status.setText(IDLE_TEXT)
             return
         lines = [t.summary()]
+        left = t.go_left
+        if left is not None:
+            lines.append(countdown_line(left, t.frames_per_step))
         episode = t.episode
         if episode is not None and t.mode.ai_plays and episode.steps > 0:
             pressed = " + ".join(sorted(episode.last_buttons)) or "nothing"

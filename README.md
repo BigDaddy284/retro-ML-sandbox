@@ -252,6 +252,14 @@ it more seconds (up to 600) if you want it to keep trying longer. No go lasts
 more than 30 minutes. The goes table says "nothing more was paid" for a go
 that ended this way. The choice is remembered for that game.
 
+While a go is being played, the panel's status counts it down under the
+go's line: "This go has 23 s left." For a go that lasts until the game is
+over it is the wait instead, "This go ends if nothing is paid in the next
+23 s.", and that goes back up to the full seconds each time the AI is paid.
+The seconds are the game's own, so in "Practise fast" they go by much faster
+than a clock's. The way the AI plays from memory at the start of a go does
+not use the time up, so the countdown stands still until that is played.
+
 "Speed" in the same panel is "Watch it play" (one step a game tick) or
 "Practise fast": the emulator runs flat out, the picture drops to two a
 second and the Discovery and Rewards panels refresh once every two seconds
