@@ -169,11 +169,14 @@ def test_goes_on_the_practice_game_end_when_the_game_is_over(
         ("no_gain", 50),
         ("no_gain", 58),
     ]
-    # Goes that gain something last past the time.
-    assert [r.steps > TIME for r in results] == [r.reward != 0.0 for r in results]
+    # Goes that gain something last past the time. (Since T-1048 the seventh loses a
+    # life on its last step and is paid nothing: points taken off are not a gain.)
+    gained = [any(e.amount > 0 for e in r.earned) for r in results]
+    assert [r.steps > TIME for r in results] == gained
+    assert [r.reward for r in results] == [35.0, 0.0, 7.0, 0.0, 0.0, -18.0, -10.0, -18.0]
     # Three of them lost every life: the game was over, which paid them the last time
     # ("Game over switches on"), and they ended. With no timer they never did.
-    assert [r.setbacks for r in results] == [2, 0, 3, 0, 0, 3, 0, 3]
+    assert [r.setbacks for r in results] == [2, 0, 3, 0, 0, 3, 1, 3]
     # The restart is the next go: each begins from the checkpoint with every life.
     assert began == [(toy_racer.START_LIVES, False)] * 8
     said = [rec.getMessage() for rec in caplog.records if rec.getMessage().startswith("Go ")]
@@ -195,6 +198,6 @@ def test_with_a_timer_out_of_reach_such_a_go_does_not_end(lab: Lab) -> None:
     # With the choice made, the goes that follow end: the time after their last pay.
     t.set_go_length(TIME)
     t.set_go_until_over(True)
-    after = [record.result for record in t.train(4)]
+    after = [record.result for record in t.train(5)]  # (four, before T-1048)
     assert all(r.ended_by == "no_gain" and TIME <= r.steps < 500 for r in after)
     assert any(r.setbacks == toy_racer.START_LIVES for r in after)  # game over among them
