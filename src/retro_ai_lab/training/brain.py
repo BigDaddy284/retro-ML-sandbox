@@ -31,6 +31,7 @@ class Brain:
     go_length: int | None = None  # steps a go lasts at most
     give_up_after: int | None = None  # steps with nothing changing before a go gives up
     closer: tuple[tuple[str, int], ...] = ()  # sights read in fine steps (T-981)
+    until_over: bool = False  # a go lasts until the game is over, not for a set time (T-1044)
 
     def __post_init__(self) -> None:
         if not self.game_id or not isinstance(self.game_id, str):
@@ -41,6 +42,8 @@ class Brain:
             value = getattr(self, name)
             if value is not None and (not isinstance(value, int) or value < 1):
                 raise ConfigurationError(f"A brain's {name} must be a whole number of steps.")
+        if not isinstance(self.until_over, bool):
+            raise ConfigurationError("A brain's until_over must be true or false.")
 
     @property
     def algorithm(self) -> str:
@@ -63,6 +66,8 @@ class Brain:
             data["give_up_after"] = self.give_up_after
         if self.closer:
             data["closer"] = [[vid, b] for vid, b in self.closer]
+        if self.until_over:
+            data["until_over"] = True
         return data
 
     @classmethod
@@ -85,6 +90,7 @@ class Brain:
                 _steps_or_none(data.get("go_length")),
                 _steps_or_none(data.get("give_up_after")),
                 tuple((str(vid), int(b)) for vid, b in data.get("closer", [])),
+                data.get("until_over", False),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"Bad brain data: {exc}") from exc

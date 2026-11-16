@@ -4,7 +4,8 @@ Each step the agent looks at the game (a :class:`State` from the believed
 variables), picks an action, presses it as the AI, lets a few frames pass,
 and learns from the points the reward and goal services announced in the
 meantime. An episode ends when the game starts over (a reset event), after
-``max_steps``, or if the emulator link drops. With save states, every
+``max_steps``, or if the emulator link drops; with ``gain_within``, also once it
+has been paid nothing for that many steps (T-1044). With save states, every
 episode can start from the same checkpoint (DESIGN.md §9).
 """
 
@@ -389,7 +390,8 @@ class EpisodeResult:
     steps: int
     frames: int
     reward: float
-    ended_by: str  # "reset", "max_steps", "stuck", "disconnected", "stopped", "mode change"
+    # "reset", "max_steps", "no_gain", "stuck", "disconnected", "stopped", "mode change"
+    ended_by: str
     states_seen: int
     objectives: int = 0  # objectives completed during the go
     earned: tuple[Earning, ...] = ()  # what paid, biggest first (T-857)
@@ -506,6 +508,7 @@ class EpisodeRunner:
         *,
         frames_per_step: int = DEFAULT_FRAMES_PER_STEP,
         max_steps: int = DEFAULT_MAX_STEPS,
+        gain_within: int | None = None,
         harness: ExperimentHarness | None = None,
         unstick_after: int | None = DEFAULT_UNSTICK_AFTER,
         unstick_buttons: tuple[str, ...] = DEFAULT_UNSTICK_BUTTONS,
@@ -574,6 +577,12 @@ class EpisodeRunner:
             raise ConfigurationError("lookahead must be at least 1.")
         if max_steps < 1:
             raise ConfigurationError("max_steps must be at least 1.")
+        if gain_within is not None and (
+            isinstance(gain_within, bool) or not isinstance(gain_within, int) or gain_within < 1
+        ):
+            raise ConfigurationError(
+                "gain_within must be a whole number of steps, 1 or more (or None)."
+            )
         if unstick_after is not None and unstick_after < 1:
             raise ConfigurationError("unstick_after must be at least 1 (or None).")
         if settle_frames < 0:
@@ -584,6 +593,10 @@ class EpisodeRunner:
         self._encoder = encoder
         self._frames_per_step = frames_per_step
         self._max_steps = max_steps
+        # A go with no timer of its own (T-1044): it ends once this many of its own
+        # steps have passed since it was last paid anything. None: no such end.
+        self._gain_within = gain_within
+        self._paid_at = 0  # the own steps played when it was last paid
         self._harness = harness
         self._unstick_after = unstick_after
         self._unstick_buttons = unstick_buttons
@@ -868,6 +881,20 @@ class EpisodeRunner:
         return self._steps - self._from_memory
 
     @property
+    def steps_left(self) -> int:
+        """Own steps this go has left on its timer (T-1046). Never less than nought: a
+        way a search has just found is played out past the timer's end (T-1018)."""
+        return max(0, self._max_steps - self.own_steps)
+
+    @property
+    def unpaid_steps_left(self) -> int | None:
+        """Own steps this go may still be paid nothing before it ends for that
+        (T-1044, T-1046); None for a go with no such count. Never less than nought."""
+        if self._gain_within is None:
+            return None
+        return max(0, self._gain_within - (self.own_steps - self._paid_at))
+
+    @property
     def paid_buttons(self) -> tuple[str, ...]:
         """The buttons that have been paid, over this runner's goes, the best-paid first."""
         return tuple(sorted(self._paid, key=lambda name: (-self._paid[name], name)))
@@ -890,6 +917,7 @@ class EpisodeRunner:
         self._steps = 0
         self._frames = 0
         self._reward = 0.0
+        self._paid_at = 0
         self._states.clear()
         self._ended_by = None
         self._same_state = 0
@@ -1987,6 +2015,8 @@ class EpisodeRunner:
                     self._on_learned(Transition(state, action, reward, next_state, done, source))
         self._reward += reward
         self._steps += 1
+        if reward > 0:
+            self._paid_at = self.own_steps
         if self._route is not None:
             # What the story has been paid so far (T-1015): the person's rewards, so
             # the way remembered is the best go by what they pay for.
@@ -2030,6 +2060,17 @@ class EpisodeRunner:
             # short of it again, so nothing of the way was remembered and the next go
             # did the same, search and all.
             self._ended_by = "max_steps"
+        elif (
+            self._gain_within is not None
+            and self.own_steps - self._paid_at >= self._gain_within
+            and not (self._way_left and self._forced)
+        ):
+            # A go that lasts until the game is over (T-1044). A game that is over
+            # pays nothing more, whether or not it says so by starting over: on a
+            # dead screen a press can move a value for good, and then nothing here
+            # ever counted as standing still. A way a search has just found is played
+            # to its end first, as for the timer.
+            self._ended_by = "no_gain"
         if self._ended_by is not None:
             self._signals.stop()
             return False

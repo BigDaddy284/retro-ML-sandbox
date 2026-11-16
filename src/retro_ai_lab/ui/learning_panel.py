@@ -52,6 +52,7 @@ from retro_ai_lab.training import (
     TrainingStepped,
 )
 from retro_ai_lab.training.insights import describe_changes, describe_experiments
+from retro_ai_lab.training.service import UNTIL_OVER_MOST_FRAMES, GoLeft
 from retro_ai_lab.ui.context import AppContext
 from retro_ai_lab.ui.learning_graph import LearningGraph
 from retro_ai_lab.ui.worker import report
@@ -68,6 +69,35 @@ FRAME_MS = 1000 / 60
 FRAMES_PER_SECOND = 60  # the console's frame rate: the go timers are shown in seconds (T-873)
 GO_SECONDS_RANGE = (1.0, 600.0)
 GIVE_UP_SECONDS_RANGE = (0.5, 120.0)
+# How long a go lasts (T-1045): the choices of the list beside the seconds box, each
+# with its hint, and what the seconds in the box are for each (False: for a set time).
+UNTIL_OVER_MOST_MINUTES = UNTIL_OVER_MOST_FRAMES // (FRAMES_PER_SECOND * 60)
+GO_ENDS = (
+    (
+        "time",
+        "for a set time",
+        "Each go lasts as long as the box says. Then the AI starts the next one.",
+    ),
+    (
+        "over",
+        "until the game is over",
+        "Each go lasts until the game starts over, or until the AI has been paid nothing "
+        f"for as long as the box says ({UNTIL_OVER_MOST_MINUTES} minutes at the most). "
+        "The restart is the next go.",
+    ),
+)
+GO_SECONDS_WORDS = {False: "of", True: "or until nothing is paid for"}
+GO_SECONDS_HINTS = {
+    False: "How long each go lasts before the AI starts the next one",
+    True: "How long a go may be paid nothing before the AI starts the next one",
+}
+GO_NOTES = {
+    False: "Each go now lasts {:g} seconds.",
+    True: (
+        "Each go now lasts until the game is over, or until it has been paid nothing "
+        "for {:g} seconds."
+    ),
+}
 
 
 def seconds_to_steps(seconds: float, frames_per_step: int) -> int:
@@ -77,6 +107,23 @@ def seconds_to_steps(seconds: float, frames_per_step: int) -> int:
 
 def steps_to_seconds(steps: int, frames_per_step: int) -> float:
     return steps * frames_per_step / FRAMES_PER_SECOND
+
+
+# The countdown under the go's line (T-1046), by whether being paid puts the end off.
+COUNTDOWN = {
+    False: "This go has {} s left.",
+    True: "This go ends if nothing is paid in the next {} s.",
+}
+# A way a search has just found is played to its end past the go's time (T-1018).
+COUNTDOWN_UP = "This go's time is up: it ends when the way it has just found is played out."
+
+
+def countdown_line(left: GoLeft, frames_per_step: int) -> str:
+    """What the go in progress has left, in whole seconds of the game's time, rounded up."""
+    if left.steps <= 0:
+        return COUNTDOWN_UP
+    seconds = -(-left.steps * frames_per_step // FRAMES_PER_SECOND)
+    return COUNTDOWN[left.unpaid].format(seconds)
 
 
 FAST_SLICE_SECONDS = 0.02  # how long a synchronous fast tick may hog the GUI
@@ -117,6 +164,7 @@ INSIGHTS_LINES = 5  # the advice under the graph scrolls past this many lines (T
 ENDED_BY = {
     "reset": "the game started over",
     "max_steps": "time was up",
+    "no_gain": "nothing more was paid",
     "stuck": "the screen stopped changing",
     "disconnected": "the game went away",
     "stopped": "you pressed Stop",
@@ -183,6 +231,15 @@ class LearningPanel(QWidget):
         self._spot.setToolTip("Practise this part of the game: every go starts from here.")
         self._spot.clicked.connect(self.toggle_spot)
 
+        # Whether a go lasts for a set time or until the game is over (T-1045).
+        self._go_ends = QComboBox(self)
+        self._go_ends.setObjectName("go_ends_combo")
+        for value, label, hint in GO_ENDS:
+            self._go_ends.addItem(label, value)
+            self._go_ends.setItemData(self._go_ends.count() - 1, hint, 3)  # tooltip role
+        self._go_ends.activated.connect(self._on_go_ends_activated)
+        self._go_seconds_words = QLabel(GO_SECONDS_WORDS[False], self)
+        self._go_seconds_words.setObjectName("go_seconds_words")
         # How long a go runs before the next try, in seconds (T-873).
         self._go_seconds = QDoubleSpinBox(self)
         self._go_seconds.setObjectName("go_seconds_spin")
@@ -191,7 +248,7 @@ class LearningPanel(QWidget):
         self._go_seconds.setSingleStep(5.0)
         self._go_seconds.setSuffix(" s")
         self._go_seconds.setKeyboardTracking(False)
-        self._go_seconds.setToolTip("How long each go lasts before the AI starts the next one")
+        self._go_seconds.setToolTip(GO_SECONDS_HINTS[False])
         self._go_seconds.valueChanged.connect(self._on_go_seconds_changed)
         self._give_up_seconds = QDoubleSpinBox(self)
         self._give_up_seconds.setObjectName("give_up_seconds_spin")
@@ -254,16 +311,22 @@ class LearningPanel(QWidget):
 
         timers = QHBoxLayout()
         timers.addWidget(QLabel("Each go lasts", self))
+        timers.addWidget(self._go_ends)
+        timers.addWidget(self._go_seconds_words)
         timers.addWidget(self._go_seconds)
-        timers.addWidget(QLabel("Give up when nothing changes for", self))
-        timers.addWidget(self._give_up_seconds)
         timers.addStretch(1)
+        # A row of its own: with the list, one row was wider than the panel (T-1045).
+        giving_up = QHBoxLayout()
+        giving_up.addWidget(QLabel("Give up when nothing changes for", self))
+        giving_up.addWidget(self._give_up_seconds)
+        giving_up.addStretch(1)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(pickers)
         layout.addLayout(buttons)
         layout.addLayout(timers)
+        layout.addLayout(giving_up)
         layout.addWidget(self._status)
         layout.addWidget(self._graph, 2)
         layout.addWidget(self._insights_scroll)
@@ -423,11 +486,26 @@ class LearningPanel(QWidget):
         """What the "Give up when nothing changes for" box shows."""
         return float(self._give_up_seconds.value())
 
+    @property
+    def go_until_over(self) -> bool:
+        """Whether the "Each go lasts" list shows "until the game is over"."""
+        return bool(self._go_ends.currentData() == "over")
+
     def choose_go_seconds(self, seconds: float) -> None:
-        """Make each go last this long (T-873)."""
-        steps = seconds_to_steps(seconds, self._training.frames_per_step)
-        if self._call(lambda: self._training.set_go_length(steps)):
-            self._note.setText(f"Each go now lasts {seconds:g} seconds.")
+        """Make each go last this long (T-873); for a go that lasts until the game is
+        over, make that how long it may be paid nothing (T-1045)."""
+        t = self._training
+        steps = seconds_to_steps(seconds, t.frames_per_step)
+        if self._call(lambda: t.set_go_length(steps)):
+            self._note.setText(GO_NOTES[t.go_until_over].format(seconds))
+        self.refresh()
+
+    def choose_go_until_over(self, on: bool) -> None:
+        """Make each go last until the game is over, or for a set time again (T-1045)."""
+        t = self._training
+        if self._call(lambda: t.set_go_until_over(on)):
+            seconds = steps_to_seconds(t.max_steps, t.frames_per_step)
+            self._note.setText(GO_NOTES[on].format(seconds))
         self.refresh()
 
     def choose_give_up_seconds(self, seconds: float) -> None:
@@ -566,6 +644,16 @@ class LearningPanel(QWidget):
             box.setValue(value)
             box.blockSignals(False)
             box.setEnabled(editable)
+        over = t.go_until_over
+        self._set_combo(self._go_ends, "over" if over else "time")
+        self._go_ends.setEnabled(editable)
+        self._go_seconds_words.setText(GO_SECONDS_WORDS[over])
+        self._go_seconds.setToolTip(GO_SECONDS_HINTS[over])
+
+    def _on_go_ends_activated(self, index: int) -> None:
+        on = self._go_ends.itemData(index) == "over"
+        if on != self._training.go_until_over:
+            self.choose_go_until_over(on)
 
     def _on_go_seconds_changed(self, seconds: float) -> None:
         if seconds_to_steps(seconds, self._training.frames_per_step) != self._training.max_steps:
@@ -601,6 +689,9 @@ class LearningPanel(QWidget):
             self._status.setText(IDLE_TEXT)
             return
         lines = [t.summary()]
+        left = t.go_left
+        if left is not None:
+            lines.append(countdown_line(left, t.frames_per_step))
         episode = t.episode
         if episode is not None and t.mode.ai_plays and episode.steps > 0:
             pressed = " + ".join(sorted(episode.last_buttons)) or "nothing"

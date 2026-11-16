@@ -241,6 +241,25 @@ of a go, see "When the AI loses a life", comes on top) and "Give up when nothing
 two seconds), both in seconds and remembered for that game. Change them while
 training is stopped.
 
+Beside "Each go lasts" is a list: "for a set time" or "until the game is
+over". Until the game is over, a go has no timer. It ends when the game
+starts over, and the restart is the next go. The AI cannot always tell that
+a game is over (some games just sit there), so such a go also ends when the
+AI has been paid nothing, by the rewards you set, for as long as the seconds
+box says: a game that is over pays nothing more. That means a go that stands
+about or keeps failing at one spot ends too, with lives still in hand; give
+it more seconds (up to 600) if you want it to keep trying longer. No go lasts
+more than 30 minutes. The goes table says "nothing more was paid" for a go
+that ended this way. The choice is remembered for that game.
+
+While a go is being played, the panel's status counts it down under the
+go's line: "This go has 23 s left." For a go that lasts until the game is
+over it is the wait instead, "This go ends if nothing is paid in the next
+23 s.", and that goes back up to the full seconds each time the AI is paid.
+The seconds are the game's own, so in "Practise fast" they go by much faster
+than a clock's. The way the AI plays from memory at the start of a go does
+not use the time up, so the countdown stands still until that is played.
+
 "Speed" in the same panel is "Watch it play" (one step a game tick) or
 "Practise fast": the emulator runs flat out, the picture drops to two a
 second and the Discovery and Rewards panels refresh once every two seconds
