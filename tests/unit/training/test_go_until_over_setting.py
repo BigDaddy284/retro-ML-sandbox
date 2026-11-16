@@ -31,8 +31,9 @@ def test_the_most_a_go_may_last_is_thirty_minutes_of_console_time() -> None:
 
 
 def test_it_is_off_until_asked_for_and_asked_for_only_when_idle(lab: Lab) -> None:
-    lab.connect()
     t = lab.training
+    assert t.go_until_over is False and t.go_limits == (TIME, None)  # with no game yet, too
+    lab.connect()
     assert t.go_until_over is False and t.go_limits == (TIME, None)
     brain = t.brain()
     assert brain is not None and brain.until_over is False and "until_over" not in brain.to_dict()
@@ -108,6 +109,9 @@ def test_the_brain_carries_it(lab: Lab) -> None:
             Brain.from_dict({**data, "until_over": bad}, space=space)
     with pytest.raises(ConfigurationError, match="until_over must be true or false"):
         Brain(brain.game_id, brain.agent, until_over="no")  # type: ignore[arg-type]
+    # A brain made with nothing said about it has a timer.
+    bare = Brain(brain.game_id, brain.agent)
+    assert bare.until_over is False and "until_over" not in bare.to_dict()
 
 
 def test_what_a_go_is_built_with(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
