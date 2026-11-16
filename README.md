@@ -545,7 +545,13 @@ the AI stands. The row appears the first time there is ground to pay for;
 change its points, switch it off or remove it like any other. The same
 ground never pays twice in a go. When the screen jumps altogether, the AI
 works out where it is. Just after a life was lost the game has put it back,
-and the ground it walks again pays nothing. With no life lost it is
+and the ground it walks again pays nothing. On plain ground the start of a
+level can look so much like the spot where the life went that nothing on the
+screen jumps. Then the AI goes by the game's own count of its camera, once it
+has found that count: when a life is lost, the AI is suddenly somewhere else
+on the screen and the count reads what it read where the place began, the
+game has put it back (the log says so the first time: "the game put it
+back"). With no life lost it is
 somewhere else: the next level, a room behind a door, a bonus room. Then
 the first steps there pay, because that ground is new (before, a new level
 paid nothing until the AI was further into it than it had got in the level
