@@ -187,6 +187,12 @@ def test_what_hurt_by_the_old_rule_still_hurts() -> None:
     learner.evidence["thing-3"] = KindEvidence(touches=4, hurt=2)
     (role,) = learner.roles()
     assert (role.tag, role.confidence, role.ways) == (SpriteTag.HAZARD, Confidence.MEDIUM, ())
+    assert (
+        role.detail == ""
+        and role.describe() == "thing-3 is something that hurts (medium, 4 touches)."
+    )
+    # A way with nothing in it is no way it hurts.
+    assert KindEvidence(touches=1, ways={Way.SIDE: WayEvidence()}).hurts() == ()
     # By the touches together its lives are counted together, as they were.
     mixed = KindEvidence(touches=5, hurt=3)
     mixed.ways = {
