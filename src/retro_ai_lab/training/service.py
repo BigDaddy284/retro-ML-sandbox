@@ -134,6 +134,9 @@ GIVE_UP_AFTER = 8  # searches in a row for nothing before it stops going back in
 # Steps a go may be paid nothing before it presses on with its best-paid button, where
 # it goes back (T-1011): one short of the unchanged steps that end a go as stuck.
 PRESS_AFTER = 24
+# The most a go that lasts until the game is over may last (T-1044): 30 minutes of
+# console time, at 60 frames a second. A game may pay a little for ever.
+UNTIL_OVER_MOST_FRAMES = 108_000
 DEFAULT_HISTORY = 200
 DEFAULT_PROMOTE_AT = 1000  # known situations before an "auto" brain moves to a network
 
@@ -251,6 +254,7 @@ class TrainingService:
         self._route = Route()
         self._default_max_steps = max_steps  # a game with no choice of its own uses these (T-873)
         self._default_unstick_after = unstick_after
+        self._until_over = False  # a go lasts until the game is over (T-1044)
         self._use_checkpoint = checkpoint
         self._unstick_after = unstick_after
         self._settings = settings or Settings()
@@ -403,6 +407,33 @@ class TrainingService:
         """Steps with nothing changing before a go gives up (None: never)."""
         return self._unstick_after
 
+    @property
+    def go_until_over(self) -> bool:
+        """Whether a go lasts until the game is over instead of for a set time (T-1044)."""
+        return self._until_over
+
+    @property
+    def go_limits(self) -> tuple[int, int | None]:
+        """What the next go is built with: the most steps of its own it may last, and
+        the steps it may be paid nothing before it ends (None: for as long as it lasts).
+
+        For a set time that is the time. Until the game is over (T-1044) the time is
+        how long the go may be paid nothing, which is how the AI tells a game that is
+        over and does not say so by starting again, and the most it may last is
+        ``UNTIL_OVER_MOST_FRAMES``."""
+        if not self._until_over:
+            return self._max_steps, None
+        return until_over_most_steps(self._frames_per_step), self._max_steps
+
+    @_locked
+    def set_go_until_over(self, on: bool) -> None:
+        """Whether a go lasts until the game is over, for this game from now on; idle
+        only (T-1044). The time chosen with :meth:`set_go_length` is kept: it is then
+        how long a go may be paid nothing, and the timer again when this is off."""
+        if not isinstance(on, bool):
+            raise ConfigurationError("A go lasts until the game is over, or it does not.")
+        self._change_go_settings(until_over=on)
+
     @_locked
     def set_go_length(self, steps: int) -> None:
         """How many steps a go lasts at most, for this game from now on; idle only (T-873)."""
@@ -417,7 +448,7 @@ class TrainingService:
             raise ConfigurationError("Giving up takes at least one step, or never.")
         self._change_go_settings(unstick_after=steps)
 
-    def _change_go_settings(self, **changes: int | None) -> None:
+    def _change_go_settings(self, **changes: int | bool | None) -> None:
         if self._status is not Status.IDLE:
             raise ConfigurationError("Stop training before changing how long a go lasts.")
         for name, value in changes.items():
@@ -479,6 +510,7 @@ class TrainingService:
             self._max_steps if self._max_steps != self._default_max_steps else None,
             self._unstick_after if self._unstick_after != self._default_unstick_after else None,
             self._encoder.closer if self._encoder is not None else self._closer_kept,
+            until_over=self._until_over,
         )
 
     def curve(self, window: int = DEFAULT_WINDOW) -> LearningCurve:
@@ -779,6 +811,7 @@ class TrainingService:
             self._max_steps = brain.go_length
         if brain.give_up_after is not None:
             self._unstick_after = brain.give_up_after
+        self._until_over = brain.until_over
         self._closer_kept = brain.closer  # applied once the encoder exists (T-981)
         if self._encoder is not None:
             self._keep_closer()
@@ -968,6 +1001,7 @@ class TrainingService:
         self._demonstrations = Demonstrations(seed=self._seed)
         self._max_steps = self._default_max_steps  # a saved brain may bring its own (T-873)
         self._unstick_after = self._default_unstick_after
+        self._until_over = False
         self._fresh_start = ""
         self._last_change = ""
         self._closer_kept = ()
@@ -1139,7 +1173,8 @@ class TrainingService:
                 self._agent,
                 self._encoder,
                 frames_per_step=self._frames_per_step,
-                max_steps=self._max_steps,
+                max_steps=self.go_limits[0],
+                gain_within=self.go_limits[1],
                 harness=self._harness,
                 unstick_after=self._unstick_after,
                 unstick_buttons=(self._wake_button,) if self._wake_button else (),
@@ -1679,6 +1714,18 @@ class TrainingService:
         self._bus.publish(TrainingStateChanged(self._status, self._mode, reason))
 
 
+def until_over_most_steps(frames_per_step: int) -> int:
+    """The most steps of its own a go that lasts until the game is over may last
+    (T-1044): ``UNTIL_OVER_MOST_FRAMES`` of console time, at least one step."""
+    if (
+        isinstance(frames_per_step, bool)
+        or not isinstance(frames_per_step, int)
+        or frames_per_step < 1
+    ):
+        raise ConfigurationError("frames_per_step must be a whole number, 1 or more.")
+    return max(1, UNTIL_OVER_MOST_FRAMES // frames_per_step)
+
+
 def goes_look_identical(
     earlier: tuple[tuple[str, ...], bool], later: tuple[tuple[str, ...], bool]
 ) -> bool:
@@ -1720,6 +1767,7 @@ __all__ = [
     "PRESS_AFTER",
     "RESET_SUSPECT_GOES",
     "RESET_SUSPECT_STEPS",
+    "UNTIL_OVER_MOST_FRAMES",
     "WAYS_PER_GO",
     "WAY_SECONDS",
     "EpisodeFinished",
@@ -1727,4 +1775,5 @@ __all__ = [
     "TrainingStateChanged",
     "TrainingStepped",
     "goes_look_identical",
+    "until_over_most_steps",
 ]
