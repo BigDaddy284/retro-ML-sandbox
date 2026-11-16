@@ -1490,7 +1490,7 @@ class TrainingService:
             result.describe_losses(),  # survival in the log (T-934)
             result.describe_ways(),  # and what going back came to (T-1009)
             result.describe_pressing(),  # and how often it pressed on (T-1011)
-            f": {why}" if result.ended_by == "reset" and why else "",
+            f": {why}" if result.ended_by in ("reset", "game_over") and why else "",
         )
         if self._agent is not None and self._encoder is not None:
             # Which brain, how much it still guesses and what it sees (T-913): the user's

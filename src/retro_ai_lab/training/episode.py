@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from typing import Any
@@ -134,6 +134,13 @@ def describe_earned(earned: Iterable[Earning], most: int | None = 3) -> str:
     return ", ".join(words)
 
 
+def _named(variable: Variable) -> str:
+    """A value as the log names it: the person's name and where it is, or the AI's."""
+    if not variable.name:
+        return variable.display_name
+    return f"{variable.name} at {variable.region}[{variable.offset}]"
+
+
 def _with(
     parts: tuple[tuple[str, float], ...], more: tuple[tuple[str, float], ...]
 ) -> tuple[tuple[str, float], ...]:
@@ -170,6 +177,15 @@ class EpisodeSignals:
         self._names: dict[str, str] = {}  # each row's name as it was last paid under
         self._gone: set[str] = set()  # rows removed from the rewards since last asked
         self._rose: dict[str, None] = {}  # values paid for going up since last asked (T-1036)
+        # The game being over, read from the values lives lost are counted on (T-1050):
+        # their names, what each read when the go began, those that have fallen by
+        # one, and those that have jumped otherwise (no plain count of lives).
+        self._lives: dict[str, str] = {}
+        self._life_began: dict[str, int] = {}
+        self._life_fell: set[str] = set()
+        self._life_out: set[str] = set()
+        self._overs = 0  # of the restarts since the last take, those such a count told
+        self._over = False
         bus.subscribe(RewardEarned, self._on_reward)
         bus.subscribe(PaidAgain, self._on_again)
         bus.subscribe(RewardProfileChanged, self._on_profile)
@@ -195,6 +211,13 @@ class EpisodeSignals:
     def last_reset_ids(self) -> tuple[str, ...]:
         """The values the last reset blamed (T-845)."""
         return self._last_reset_ids
+
+    @property
+    def over(self) -> bool:
+        """The restarts last handed over by :meth:`take` were all told by a count of
+        lives running out (T-1050): the game was over, and nothing else said it had
+        started again."""
+        return self._over
 
     @property
     def earned(self) -> tuple[Earning, ...]:
@@ -254,6 +277,11 @@ class EpisodeSignals:
         self._pending_again = {}
         self._again = ()
         self._rose = {}
+        self._life_began = {}
+        self._life_fell = set()
+        self._life_out = set()
+        self._overs = 0
+        self._over = False
         self._listening = True
 
     def stop(self) -> None:
@@ -264,8 +292,11 @@ class EpisodeSignals:
         of is in :attr:`parts` until the next take, and what a go played straight would
         have been paid on top of it in :attr:`again`."""
         out = (self._reward, self._resets)
+        if self._resets:
+            self._over = self._overs == self._resets
         self._reward = 0.0
         self._resets = 0
+        self._overs = 0
         self._parts = tuple(sorted(self._pending.items()))
         self._pending = {}
         self._again = tuple(sorted(self._pending_again.items()))
@@ -308,6 +339,11 @@ class EpisodeSignals:
         rewards follow are what a death looks like.
         """
         self._watched = ids
+
+    def watch_lives(self, names: Mapping[str, str]) -> None:
+        """The values the game being over is read from, each with the name the log
+        gives it (T-1050): those lives lost are counted on that are no health guess."""
+        self._lives = dict(names)
 
     def _on_reward(self, event: RewardEarned) -> None:
         if not self._listening:
@@ -371,6 +407,59 @@ class EpisodeSignals:
                 # the AI also takes it for a life count, as a SETBACK too: one death (T-967).
                 dropped.add(event.variable_id)
         self._setbacks += len(dropped)
+        restarted = any(event.kind is EventKind.RESET for event in update.events)
+        read: set[str] = set()  # a change may come as two events: read once
+        for event in update.events:
+            value = event.variable_id
+            if value is None or value not in self._lives or value in read:
+                continue
+            if event.before is None or event.after is None:
+                continue
+            read.add(value)
+            self._read_lives(value, event.before, event.after, event.frame, restarted)
+
+    def _read_lives(self, value: str, before: int, after: int, frame: int, restarted: bool) -> None:
+        """Whether this change of a count of lives is the game being over (T-1050).
+
+        A count of lives falls by one, and now and then rises by one. When the last
+        life goes, a game either takes the count below nought (0 to 255 on a count
+        kept in a byte), or leaves it and sets it anew when it begins again. So a
+        change of more than one, on a count that has fallen by one in this go, is the
+        game over if it leaves nought for more than the count began the go with, or
+        comes to exactly what it began with. The first is also the last life going,
+        which nothing else counted: it read as a rise.
+
+        Any other change of more than one says this value is no plain count of lives
+        (health that is filled up, a number that is something else), and it is not
+        read again in this go.
+        """
+        began = self._life_began.setdefault(value, before)
+        if value in self._life_out:
+            return
+        step = after - before
+        if abs(step) == 1:
+            if step < 0:
+                self._life_fell.add(value)
+            return
+        below = before == 0 and after > began
+        anew = after == began
+        if value not in self._life_fell or not (below or anew):
+            self._life_out.add(value)
+            return
+        self._resets += 1
+        self._overs += 1
+        if below:
+            self._setbacks += 1
+        if not restarted:  # (the detector's own reason stands where it gave one)
+            how = (
+                "it fell below nought, so every life is lost"
+                if below
+                else "it was set back to what it was when the go began"
+            )
+            self._last_reset = (
+                f"{self._lives[value]} went from {before} to {after}: {how} (frame {frame})"
+            )
+            self._last_reset_ids = ()
 
 
 @dataclass(slots=True)
@@ -390,7 +479,8 @@ class EpisodeResult:
     steps: int
     frames: int
     reward: float
-    # "reset", "max_steps", "no_gain", "stuck", "disconnected", "stopped", "mode change"
+    # "reset", "game_over", "max_steps", "no_gain", "stuck", "disconnected", "stopped",
+    # "mode change"
     ended_by: str
     states_seen: int
     objectives: int = 0  # objectives completed during the go
@@ -1212,7 +1302,7 @@ class EpisodeRunner:
             if self._times_back == back:
                 self._loss_stands()  # the story ends before it (T-1014)
             if waiting and self._times_back == back:
-                self._ended_by = "reset"  # no way past: the restart stands (T-1013)
+                self._ended_by = self._restart  # no way past: the restart stands (T-1013)
                 self._signals.stop()
                 return False
             if waiting:
@@ -2086,7 +2176,7 @@ class EpisodeRunner:
             ):
                 self._held_reset = True
             else:
-                self._ended_by = "reset"
+                self._ended_by = self._restart
         elif self.own_steps >= self._max_steps and not (self._way_left and self._forced):
             # The steps of the way it remembers are not the go's own (T-1015): a long way
             # would leave a go no steps to get any further in. And a way a search has
@@ -2111,6 +2201,12 @@ class EpisodeRunner:
             return False
         return True
 
+    @property
+    def _restart(self) -> str:
+        """How a go that ends by the game starting over ended: "game_over" where a count
+        of lives running out was all that said so (T-1050), else "reset"."""
+        return "game_over" if self._signals.over else "reset"
+
     def _watch_deaths(self, knowledge: Knowledge) -> None:
         """Count this go's deaths on the values the person penalises, else the AI's best
         life and health guesses (T-940, T-964); the log names them when they change."""
@@ -2122,16 +2218,19 @@ class EpisodeRunner:
             best = (knowledge.best(VariableKind.LIVES), knowledge.best(VariableKind.HEALTH))
             ids = frozenset(v.id for v in best if v is not None)
         self._signals.watch_setbacks(ids)
+        # The game being over is read from the same values, health left out: that is
+        # filled up again in play (T-1050).
+        counted = sorted((knowledge.get(i) for i in ids), key=lambda v: (v.region, v.offset))
+        self._signals.watch_lives(
+            {v.id: _named(v) for v in counted if v.kind is not VariableKind.HEALTH}
+        )
         if ids == self._watched_last:
             return
         self._watched_last = ids
         if not ids:
             log.info("Lives lost are not counted: the AI has no life count or health guess yet.")
             return
-        names = ", ".join(
-            v.display_name if not v.name else f"{v.name} at {v.region}[{v.offset}]"
-            for v in sorted((knowledge.get(i) for i in ids), key=lambda v: (v.region, v.offset))
-        )
+        names = ", ".join(_named(v) for v in counted)
         log.info(
             "Lives lost are counted on %s, %s.",
             names,
