@@ -182,10 +182,9 @@ def test_one_unlucky_touch_among_harmless_ones_the_same_way_is_no_hazard() -> No
 
 
 def test_what_hurt_by_the_old_rule_still_hurts() -> None:
-    # Half of all its touches, and in no one way half of that way's: two of three from
-    # the side... made so that only the touches together say it.
+    # Half of all its touches, with nothing kept of the way they were made.
     learner = RoleLearner()
-    learner.evidence["thing-3"] = KindEvidence(touches=4, hurt=2)  # nothing kept by the way
+    learner.evidence["thing-3"] = KindEvidence(touches=4, hurt=2)
     (role,) = learner.roles()
     assert (role.tag, role.confidence, role.ways) == (SpriteTag.HAZARD, Confidence.MEDIUM, ())
     # By the touches together its lives are counted together, as they were.

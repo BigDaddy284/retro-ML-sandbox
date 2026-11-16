@@ -717,7 +717,7 @@ class ScreenWatch:
             )
         elif blame is None:
             log.info(
-                "A life was lost with nothing seen touching the AI or close to it in the %d "
+                "A life was lost with nothing seen coming to touch the AI or close to it in the %d "
                 "looks before: nothing is blamed.",
                 self._soon,
             )
