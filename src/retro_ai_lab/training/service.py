@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, NamedTuple, TypeVar
 
 from retro_ai_lab.core import ConfigurationError, EmulatorError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
@@ -424,6 +424,22 @@ class TrainingService:
         if not self._until_over:
             return self._max_steps, None
         return until_over_most_steps(self._frames_per_step), self._max_steps
+
+    @property
+    def go_left(self) -> GoLeft | None:
+        """What the go in progress has left before it ends for its length (T-1046):
+        the fewer of the steps on its timer and the steps it may still be paid
+        nothing. Before a go's first step that is all of it, as the summary says
+        "step 0". None while training is stopped."""
+        if not self._enabled or self._status is Status.IDLE:
+            return None
+        runner = self.episode
+        timer, unpaid = (
+            self.go_limits if runner is None else (runner.steps_left, runner.unpaid_steps_left)
+        )
+        if unpaid is not None and unpaid < timer:  # on the same step the timer ends it
+            return GoLeft(unpaid, True)
+        return GoLeft(timer, False)
 
     @_locked
     def set_go_until_over(self, on: bool) -> None:
@@ -1712,6 +1728,13 @@ class TrainingService:
 
     def _announce(self, reason: str) -> None:
         self._bus.publish(TrainingStateChanged(self._status, self._mode, reason))
+
+
+class GoLeft(NamedTuple):
+    """What a go in progress has left (T-1046)."""
+
+    steps: int  # own steps before it ends for its length
+    unpaid: bool  # whether those are steps with nothing paid: being paid puts the end off
 
 
 def until_over_most_steps(frames_per_step: int) -> int:

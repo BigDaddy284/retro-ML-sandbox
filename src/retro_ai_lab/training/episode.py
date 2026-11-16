@@ -881,6 +881,20 @@ class EpisodeRunner:
         return self._steps - self._from_memory
 
     @property
+    def steps_left(self) -> int:
+        """Own steps this go has left on its timer (T-1046). Never less than nought: a
+        way a search has just found is played out past the timer's end (T-1018)."""
+        return max(0, self._max_steps - self.own_steps)
+
+    @property
+    def unpaid_steps_left(self) -> int | None:
+        """Own steps this go may still be paid nothing before it ends for that
+        (T-1044, T-1046); None for a go with no such count. Never less than nought."""
+        if self._gain_within is None:
+            return None
+        return max(0, self._gain_within - (self.own_steps - self._paid_at))
+
+    @property
     def paid_buttons(self) -> tuple[str, ...]:
         """The buttons that have been paid, over this runner's goes, the best-paid first."""
         return tuple(sorted(self._paid, key=lambda name: (-self._paid[name], name)))
