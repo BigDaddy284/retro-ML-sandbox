@@ -252,6 +252,16 @@ it more seconds (up to 600) if you want it to keep trying longer. No go lasts
 more than 30 minutes. The goes table says "nothing more was paid" for a go
 that ended this way. The choice is remembered for that game.
 
+Either way, a go also ends when every life is gone. The AI reads that from
+the count of lives it follows (the value your "goes down" penalty is on, or
+else its own best guess at the life count). A count it has seen fall one life
+at a time in this go, which then drops below nought (many games show 255
+there) or jumps back to what it read when the go began, means the game is
+over. Where the AI can still look for a way past the life it just lost, it
+does that first. The goes table says "the game was over" for a go that ended
+this way, and the go's line in the log says what the count did ("Lives at
+ram[7] went from 0 to 255: it fell below nought, so every life is lost").
+
 While a go is being played, the panel's status counts it down under the
 go's line: "This go has 23 s left." For a go that lasts until the game is
 over it is the wait instead, "This go ends if nothing is paid in the next

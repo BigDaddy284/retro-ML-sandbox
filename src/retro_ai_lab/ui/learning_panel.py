@@ -163,6 +163,7 @@ class _StepTask(QRunnable):
 INSIGHTS_LINES = 5  # the advice under the graph scrolls past this many lines (T-889)
 ENDED_BY = {
     "reset": "the game started over",
+    "game_over": "the game was over",
     "max_steps": "time was up",
     "no_gain": "nothing more was paid",
     "stuck": "the screen stopped changing",
