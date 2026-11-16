@@ -240,13 +240,16 @@ def find_way(
     def taken() -> float:
         return max(0.0, clock() - began)
 
-    def may_play() -> bool:
-        """Whether another play may start; says so when it is the time that is up."""
+    def may_play(until: float | None = None) -> bool:
+        """Whether another play may start; says so when it is the time that is up.
+        With ``until``, a list's own time (T-1043): not once that long has passed,
+        which is not the search's time up. The clock is read once."""
         nonlocal late
         if tries >= budget:
             return False
-        late = seconds is not None and taken() >= seconds
-        return not late
+        now = taken()
+        late = seconds is not None and now >= seconds
+        return not late and (until is None or now < until)
 
     played: set[tuple[int, ...]] = set()
     # The screens that plays which got nowhere new ended on (``stood``), as digests.
@@ -277,7 +280,7 @@ def find_way(
         nonlocal tries
 
         def go_on() -> bool:
-            return tries < limit and may_play() and (until is None or taken() < until)
+            return tries < limit and may_play(until)
 
         if upto is not None and upto < 1:
             return None, begin  # the loss was settled before the first step: nothing to change
