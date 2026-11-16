@@ -23,7 +23,7 @@ from retro_ai_lab.ui.learning_panel import ENDED_BY
 from retro_ai_lab.understanding import VariableKind
 from retro_ai_lab.understanding.events import EventKind, GameEvent
 from tests.unit.training import test_going_back as going_back
-from tests.unit.training.test_going_back import DIED_AT, Lab, steps
+from tests.unit.training.test_going_back import DIED_AT, SURE, Lab, steps
 from tests.unit.training.test_search_at_a_loss import GAP_ENDS, searching
 
 lab = going_back.lab  # the practice game behind the real services (pytest fixture)
@@ -324,6 +324,20 @@ def test_without_the_count_nothing_is_read(lab: Lab, one_in_reserve: None) -> No
     assert lab.game.state.game_over and played > 2 * DIED_AT
     result = r.finish()
     assert (result.ended_by, result.setbacks, r.last_reset) == ("stuck", 0, "")
+
+
+def test_a_count_nobody_named_is_named_as_the_ai_names_it(lab: Lab, one_in_reserve: None) -> None:
+    lab.teach(lives=False)
+    count = lab.knowledge.propose("ram", LAYOUT.lives, kind=VariableKind.LIVES, evidence=SURE)
+    lab.bus.publish(DiscoveryUpdated((count,), (), (), ()))
+    assert not count.name and count.display_name
+    lab.game.reset()
+    r = lab.runner(max_steps=4000)
+    r.begin()
+    while r.step():
+        pass
+    assert r.finish().ended_by == "game_over"
+    assert r.last_reset.startswith(f"{count.display_name} went from 0 to 255: {BELOW} (frame ")
 
 
 class LastLife:
