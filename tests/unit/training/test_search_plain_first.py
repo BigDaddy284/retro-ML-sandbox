@@ -184,11 +184,12 @@ def test_the_time_limit_holds_over_both_parts(
 
     back, on = hopper.move("left"), hopper.move("right")
     trace = [back] * 10
-    # Up while the plain way's changes are tried: what it did is not begun.
+    # Three seconds, a second a play: the plain way and a change to it have the first
+    # half (T-1043), a change to what it did the rest, and then the time is up.
     script = timed([lost_at(6)] + [DEAD] * 50)
     out = look_for(hopper, trace, object, plain=on, seconds=3, clock=lambda: now[0])
     assert out == Search(None, 3, out_of_time=True) and len(script.calls) == 3
-    assert all(back not in moves for moves, _ in script.calls)
+    assert [back in moves for moves, _ in script.calls] == [False, False, True]
     # Up after the plain way's first play, which stayed alive: it is not looked at.
     script = timed([ALIVE, ACROSS])
     out = look_for(hopper, trace, object, plain=on, seconds=1, clock=lambda: now[0])

@@ -311,11 +311,11 @@ def test_a_search_out_of_time_leaves_the_loss_standing(
         steps(r, DIED_AT)
     assert limits == [4.5]
     assert (r.ways_sought, r.ways_found, r.times_back) == (1, 0, 0)
-    assert len(lab.loaded) == 4 + 1 and lab.loaded[-1] == NOW_SLOT
+    assert len(lab.loaded) == 3 + 1 and lab.loaded[-1] == NOW_SLOT
     assert lab.game.state.lives == toy_hopper.START_LIVES - 1 and len(moments) == 0
     said = [rec.getMessage() for rec in caplog.records if rec.getMessage().startswith("Lost a")]
     assert said == [
-        f"Lost a life at step {DIED_AT}. Went back {DIED_AT} steps and made 4 tries in 6.0 s, "
+        f"Lost a life at step {DIED_AT}. Went back {DIED_AT} steps and made 3 tries in 6.0 s, "
         "all the time a search may take: none got past."
     ]
     assert r.step() and r.finish().setbacks == 1
