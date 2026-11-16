@@ -95,6 +95,11 @@ def test_a_move_of_two_buttons_counts_for_both(lab: Lab) -> None:
     paid_go(lab, paying, r, [jump, jump, lab.move("b")])
     # Two steps each for "a" and "right", one (and the most pay) for "b".
     assert r.paid_buttons == ("a", "right", "b")
+    # Each of the two has one step for a step, not two: two more steps for "b" put it
+    # ahead, three against two.
+    paying.new_go({1: (1.0,), 2: (1.0,)})
+    paid_go(lab, paying, r, [lab.move("b"), lab.move("b")])
+    assert r.paid_buttons == ("b", "a", "right")
 
 
 def test_equal_counts_go_by_the_sum_and_then_the_name(lab: Lab) -> None:
