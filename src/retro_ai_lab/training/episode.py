@@ -658,6 +658,7 @@ class EpisodeRunner:
         self._way_left = 0  # moves of a way a search found that are still to play (T-1018)
         self._remembered = 0  # steps of it this go began with
         self._paid: dict[str, float] = {}
+        self._paid_steps: dict[str, int] = {}  # on how many steps each was paid (T-1048)
         self._unpaid = 0  # steps since anything was paid
         self._press_next = 0  # which of the paid buttons the next press holds, best first
         self._pressing = False  # the moves being played are a press
@@ -686,6 +687,7 @@ class EpisodeRunner:
         self._held_said = False
         self._pressed_on = 0
         self._press_said = False
+        self._try_said = False
         self._restored = False
         self._unsticks = 0
         self._same_state = 0
@@ -896,8 +898,14 @@ class EpisodeRunner:
 
     @property
     def paid_buttons(self) -> tuple[str, ...]:
-        """The buttons that have been paid, over this runner's goes, the best-paid first."""
-        return tuple(sorted(self._paid, key=lambda name: (-self._paid[name], name)))
+        """The buttons that have been paid, over this runner's goes: the one paid on the
+        most steps first, then the larger sum (T-1048). One large sum by accident (a jump
+        on the spot that a score guess pays for) does not outrank the button that is paid
+        step after step."""
+        order = sorted(
+            self._paid, key=lambda name: (-self._paid_steps[name], -self._paid[name], name)
+        )
+        return tuple(order)
 
     @property
     def unsticks(self) -> int:
@@ -1287,16 +1295,24 @@ class EpisodeRunner:
             return False
         return True
 
-    def _paid_moves(self) -> list[tuple[str, int]]:
-        """The buttons that have been paid, best first, each with its own move."""
+    def _own_moves(self, names: Iterable[str]) -> list[tuple[str, int]]:
+        """Each of these buttons that has a move of its own, with that move."""
         space = self._agent.space
         moves = []
-        for name in self.paid_buttons:
+        for name in names:
             try:
                 moves.append((name, space.index_of([name])))
             except ConfigurationError:
                 continue  # no move of its own: it is only ever held with another
         return moves
+
+    def _paid_moves(self) -> list[tuple[str, int]]:
+        """The buttons that have been paid, best first, each with its own move."""
+        return self._own_moves(self.paid_buttons)
+
+    def _unpaid_moves(self) -> list[tuple[str, int]]:
+        """The buttons never paid, in the controller's order, each with its own move."""
+        return self._own_moves(name for name in self._buttons if name not in self._paid)
 
     def _press_on(self, *, stuck: bool = False) -> bool:
         """Paid nothing for a while, hold the best-paid button for a while (T-1011).
@@ -1305,8 +1321,10 @@ class EpisodeRunner:
         loses no life, and so never looks for the way past what it is avoiding. Only
         where the go can still go back: there a life lost to the press is how the way
         is found. A press that was paid nothing (and cost no life, or the search would
-        have followed) is followed by the next-best-paid button, round and round; any
-        pay starts again from the best.
+        have followed) is followed by the next-best-paid button; after the last of the
+        paid buttons each button never paid takes a turn (T-1048: the paid ones may all
+        have been paid by accident, and the way on may need a button that never was),
+        and then round again; any pay starts again from the best.
 
         ``stuck`` is the go about to end because nothing changes: that is getting
         nowhere whatever the count of unpaid steps says (the last pay can come a step
@@ -1329,21 +1347,37 @@ class EpisodeRunner:
         moves = self._paid_moves()
         if not moves:
             return False
-        name, move = moves[self._press_next % len(moves)]
+        known = len(moves)
+        moves += self._unpaid_moves()
+        turn = self._press_next % len(moves)
+        name, move = moves[turn]
         self._forced.extend([move] * self._press_for)
         self._pressing = True
         self._pressed_stuck = stuck
         self._pressed_on += 1
         self._unpaid = 0
-        log.log(
-            logging.DEBUG if self._press_said else logging.INFO,
-            "The AI has been paid nothing for %d steps, so it presses on with %s for %d steps. "
-            "It does this where it can go back: if that costs a life, it looks for the way past.",
-            self._press_after,
-            name,
-            self._press_for,
-        )
-        self._press_said = True
+        if turn < known:
+            log.log(
+                logging.DEBUG if self._press_said else logging.INFO,
+                "The AI has been paid nothing for %d steps, so it presses on with %s for %d "
+                "steps. It does this where it can go back: if that costs a life, it looks for "
+                "the way past.",
+                self._press_after,
+                name,
+                self._press_for,
+            )
+            self._press_said = True
+        else:
+            log.log(
+                logging.DEBUG if self._try_said else logging.INFO,
+                "The AI has been paid nothing for %d steps, and the buttons it has been paid "
+                "for got it nothing either, so it tries %s, which it has not been paid for "
+                "yet, for %d steps.",
+                self._press_after,
+                name,
+                self._press_for,
+            )
+            self._try_said = True
         return True
 
     def _stands_still(self, *, stuck: bool = False) -> bool:
@@ -1992,6 +2026,7 @@ class EpisodeRunner:
             if action is not None:
                 for name in self._agent.space.buttons_for(action):
                     self._paid[name] = self._paid.get(name, 0.0) + reward
+                    self._paid_steps[name] = self._paid_steps.get(name, 0) + 1
         else:
             self._unpaid += 1
         self._seen = None
