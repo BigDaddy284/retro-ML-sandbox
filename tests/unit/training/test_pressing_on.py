@@ -194,11 +194,12 @@ def test_a_press_that_got_nothing_is_followed_by_the_next_best_button(lab: Lab) 
         return move, got
 
     # Walking back over ground it has been on pays nothing, and so does being pressed
-    # on over it: the next press is the next-best-paid button's, then round again.
+    # on over it: the next press is the next-best-paid button's, and then the first
+    # button never paid has its turn (T-1048; it was round again to the first).
     r = go(back)
     assert pressed(r, 1) == (walk, 0.0)
     assert pressed(r, 2) == (lab.move("a"), 0.0)
-    assert pressed(r, 3) == (walk, 0.0)
+    assert pressed(r, 3) == (lab.move("up"), 0.0)
     assert lab.game.state.lives == toy_hopper.START_LIVES and r.ways_sought == 0
     assert r.finish().pressed_on == 3
     # Standing where it got to, the press walks on to new ground and is paid: the

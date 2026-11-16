@@ -388,11 +388,22 @@ was ever finished are now finished 9, 9, 3 and 3 times in 12 goes.
 A brain that has lost lives at a spot can turn timid: it stops short and
 waits, loses nothing, and so never finds the way past. Where the AI can go
 back, it does not let that stand. When a go has been paid nothing for 24
-steps, it holds the button that has paid it best so far for 16 steps
+steps, it holds the button it has been paid for most often for 16 steps
 (in a game that scrolls to the right, that is Right), whatever the brain
 would have done. If that costs a life, going back looks for the way past,
 and the go carries on from there. Each go's line in the log ends with how
 often it pressed on.
+
+If that press gets it nothing, the next one holds the button paid next most
+often, and when the buttons it has been paid for have all had a turn it
+tries each button it has never been paid for, one after another, before it
+starts again from the first. A button can be paid by accident (a jump on the
+spot that happens to move a number the AI takes for the score), and the way
+on can need a button that never was. The log says so the first time: "...so
+it tries left, which it has not been paid for yet, for 16 steps." Measured
+on 24 practice levels with three sets of dice and both pauses after a life
+lost, the AI finished a level 1,390 times where it had finished one 1,213
+times, and lost 646 lives where it had lost 633.
 
 A wall costs no life, so nothing above would ever get the AI over one: it
 would walk up to it and stand there until the go ran out. So it also goes
