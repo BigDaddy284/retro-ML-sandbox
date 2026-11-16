@@ -47,7 +47,9 @@ from retro_ai_lab.understanding.knowledge import Variable
 
 BUDGET = 120  # plays a search may make
 CARRY_ON = 20  # steps a try runs on past where the life went
-PLAIN_SHARE = 0.5  # of the budget: the most the plain way may use (T-1012)
+# Of the budget: the most the plain way may use (T-1012). And of the time a search
+# after a life lost may take: the plain way's changes start no play after it (T-1043).
+PLAIN_SHARE = 0.5
 
 # Where in one of its lists of changes a search begins, and where it stopped (T-1042):
 # the number of the hold in ``HOLDS``, and how many steps before the last step a change
@@ -146,7 +148,9 @@ def find_way(
 
     On a real emulator a try costs real time. With ``seconds``, no play is started
     once that long has passed on ``clock`` since the search began (T-1008); a play
-    in flight is finished.
+    in flight is finished. After a life lost, no change to the plain way is started
+    once ``PLAIN_SHARE`` of that time has passed (T-1043): the changes to ``trace``
+    have what is left.
 
     With ``plain``, a move, the plain way is tried first (T-1012): that move held
     for as long as the trace and the carry-on. Alive and on new ground, it is the
@@ -236,13 +240,16 @@ def find_way(
     def taken() -> float:
         return max(0.0, clock() - began)
 
-    def may_play() -> bool:
-        """Whether another play may start; says so when it is the time that is up."""
+    def may_play(until: float | None = None) -> bool:
+        """Whether another play may start; says so when it is the time that is up.
+        With ``until``, a list's own time (T-1043): not once that long has passed,
+        which is not the search's time up. The clock is read once."""
         nonlocal late
         if tries >= budget:
             return False
-        late = seconds is not None and taken() >= seconds
-        return not late
+        now = taken()
+        late = seconds is not None and now >= seconds
+        return not late and (until is None or now < until)
 
     played: set[tuple[int, ...]] = set()
     # The screens that plays which got nowhere new ended on (``stood``), as digests.
@@ -258,13 +265,23 @@ def find_way(
         return hashlib.blake2b(outcome.screen, digest_size=16).digest()
 
     def seek(
-        base: Sequence[int], limit: int, upto: int | None = None, begin: Spot = (0, 0)
+        base: Sequence[int],
+        limit: int,
+        upto: int | None = None,
+        begin: Spot = (0, 0),
+        until: float | None = None,
     ) -> tuple[tuple[Change, tuple[int, ...], int] | None, Spot]:
         """The first small change to ``base`` that gets past, with its moves and the
         new ground counted, while the tries stay under ``limit``; and where in the
         list it stopped. With ``upto`` the changes are placed before that step of
-        ``base`` only (T-1031). The list is begun at ``begin`` (T-1042)."""
+        ``base`` only (T-1031). The list is begun at ``begin`` (T-1042). With
+        ``until`` no play is started once the search has taken that long (T-1043):
+        this list's time is up, which is not the search's."""
         nonlocal tries
+
+        def go_on() -> bool:
+            return tries < limit and may_play(until)
+
         if upto is not None and upto < 1:
             return None, begin  # the loss was settled before the first step: nothing to change
         # At a standstill the earliest change that gets on is tried first: it is the
@@ -283,7 +300,7 @@ def find_way(
             moves = change.apply(base, carry_on, whole=stood)
             if moves in played:
                 continue  # the other part of the search has been here
-            if tries >= limit or not may_play():
+            if not go_on():
                 return None, spot(change)
             tries += 1
             blind = play(
@@ -298,7 +315,7 @@ def find_way(
             if blind.lost or ended_on(blind) in nowhere:
                 played.add(moves)  # lost, or where getting nowhere ended up (T-1018)
                 continue
-            if tries >= limit or not may_play():
+            if not go_on():
                 # Alive and not looked at yet: not settled, so not marked as played.
                 return None, spot(change)
             played.add(moves)
@@ -338,7 +355,11 @@ def find_way(
             base = (plain,) * first.steps
             # Its loss takes as long to play out as the one at the end of the trace.
             upto = None if live is None else first.steps - (len(trace) - live)
-            got, plain_at = seek(base, share, upto, plain_at)
+            # Half the tries, and half the time (T-1043): on a real emulator the time
+            # is up long before the tries, and the plain way's half of the tries was
+            # then the whole search.
+            its_time = None if seconds is None else seconds * PLAIN_SHARE
+            got, plain_at = seek(base, share, upto, plain_at, its_time)
             if got is not None:
                 change, moves, ground = got
                 way = Way(moves, change, tries, ground, plain=plain, lost_at=first.steps)

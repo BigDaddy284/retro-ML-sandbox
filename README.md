@@ -304,7 +304,9 @@ pass unnoticed and the later ones do not. A life count going down is a lost
 life and never the game starting over, even where the game puts you back at
 the start of the level for it, which used to be taken for a restart.
 
-A search runs at the emulator's top speed and is over within 15 seconds;
+A search runs at the emulator's top speed and is over within 15 seconds
+(at most half of them for changes to holding its best-paid button, the
+rest for changes to what it did itself);
 a go searches at most three times. In a game where eight searches in a row
 find nothing and none has ever found a way, the AI stops going back for the
 rest of that session, because there it only costs time. Where going back has

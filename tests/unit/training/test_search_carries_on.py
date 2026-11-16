@@ -285,8 +285,8 @@ def test_the_two_lists_are_carried_apart(hopper: Hopper, monkeypatch: pytest.Mon
     found = look_for(hopper, trace, object, carry_on=4, plain=on, begin_at=((0, 2), (1, 6)))
     assert found.way is not None and found.way.change == Change(0, on, 10)
     assert found.stopped_at == ((0, 2), (1, 6))
-    # Out of time in the plain way's list (a second passes with every play): it says
-    # where in that list, and what it did was not gone into.
+    # Out of time (a second passes with every play): the plain way's list has half of
+    # it (T-1043) and what it did the rest, and it says where each of them stopped.
     script = scripted(monkeypatch, [lost_at(6)] + [DEAD] * 7)
     out = look_for(
         hopper,
@@ -299,8 +299,10 @@ def test_the_two_lists_are_carried_apart(hopper: Hopper, monkeypatch: pytest.Mon
         begin_at=((0, 2), (1, 6)),
     )
     assert out == Search(None, 4, out_of_time=True)
-    assert script.calls == [held, *played(plain[2:5], base)]
-    assert out.stopped_at == (spot_of(plain[5], base), (1, 6)) == ((0, 4), (1, 6))
+    from_there = [change for change in did if spot_of(change, trace) >= (1, 6)]
+    assert script.calls == [held, *played(plain[2:3], base), *played(from_there[:2], trace)]
+    assert out.stopped_at == (spot_of(plain[3], base), spot_of(from_there[2], trace))
+    assert out.stopped_at == ((0, 2), (1, 8))
 
 
 def test_a_place_in_the_list_means_the_same_in_another_go(
