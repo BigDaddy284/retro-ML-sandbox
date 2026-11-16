@@ -141,6 +141,7 @@ def test_a_step_of_one_is_never_it(bus: EventBus, signals: EpisodeSignals) -> No
         (2, 5),  # more than one before any fall
         (2, 0),  # ... downwards
         (0, 255),  # a go that begins at nought: no fall has been seen
+        (2, 3, 4, 2),  # it has only risen (a rise is no fall), and comes back
     ],
 )
 def test_a_jump_before_any_fall_rules_the_value_out(
@@ -187,6 +188,10 @@ def test_only_the_values_lives_are_counted_on_and_no_health(
     # A change with no values to it is not read.
     tell(bus, GameEvent(EventKind.DOWN, 7, LIFES, ""), GameEvent(EventKind.UP, 8, LIFES, ""))
     assert taken(signals) == (0, 1, False)
+    # Nor one with only one of them.
+    tell(bus, GameEvent(EventKind.UP, 7, LIFES, "", None, 9))
+    tell(bus, GameEvent(EventKind.UP, 7, LIFES, "", 9, None))
+    assert taken(signals) == (0, 0, False)
     # Other values' events in the same update do not get in the way.
     counts(bus, LIFES, 2, 1, 0)
     tell(bus, a_change(OTHER, 9, 0), a_change(HEALTH, 3, 9), a_change(LIFES, 0, 255))
@@ -268,6 +273,10 @@ def test_with_the_detectors_restart_it_is_a_restart(bus: EventBus, signals: Epis
     )
     assert taken(signals) == (2, 0, False)
     assert signals.last_reset == f"{WENT_HOME} (frame 9)" and signals.last_reset_ids == ("a",)
+    # The next one in this go is the count's alone: the values blamed then are not its.
+    counts(bus, LIFES, 3, 2, 1, 0, 255)
+    assert taken(signals) == (1, 4, True)
+    assert signals.last_reset.startswith(NAME) and signals.last_reset_ids == ()
     # A restart the detector alone tells, after one the count told, is not the count's.
     signals.start()
     counts(bus, LIFES, 2, 1, 0, 255)
@@ -354,6 +363,24 @@ def test_a_count_nobody_named_is_named_as_the_ai_names_it(lab: Lab, one_in_reser
         pass
     assert r.finish().ended_by == "game_over"
     assert r.last_reset.startswith(f"{count.display_name} went from 0 to 255: {BELOW} (frame ")
+
+
+def test_a_health_guess_is_not_read(lab: Lab, one_in_reserve: None) -> None:
+    # The same byte taken for health: lives lost are counted on it, and it is not
+    # read for the game being over (health is filled up again in play).
+    lab.teach(lives=False)
+    health = lab.knowledge.propose(
+        "ram", LAYOUT.lives, kind=VariableKind.HEALTH, name="Energy", evidence=SURE
+    )
+    lab.bus.publish(DiscoveryUpdated((health,), (), (), ()))
+    lab.game.reset()
+    r = lab.runner(max_steps=4000)
+    r.begin()
+    while r.step():
+        pass
+    assert lab.game.state.game_over
+    result = r.finish()
+    assert result.setbacks > 0 and (result.ended_by, r.last_reset) == ("stuck", "")
 
 
 class LastLife:
