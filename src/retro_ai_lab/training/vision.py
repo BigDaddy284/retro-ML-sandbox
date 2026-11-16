@@ -51,7 +51,9 @@ from retro_ai_lab.understanding.roles import Happening, Role, RoleLearner, withi
 log = logging.getLogger(__name__)
 
 DEFAULT_LOOK_EVERY = 2  # steps between two looks (a look costs a screenshot and ~15 ms)
-SOON_LOOKS = 30  # looks after a touch in which a life lost is put down to it (~4 s)
+# Looks after a touch in which a life lost is put down to it: 6 s at a look every 8
+# frames. It was 30 (T-1051): a game whose dying takes 3.5 s was barely inside that.
+SOON_LOOKS = 45
 FIRST_LOOK_REACH = 16  # pixels from where the player was found, at a go's first look
 PART_REACH = 128  # pixels across within which a thing is in the brain's view (T-978)
 NEAR = 48  # pixels across within which a thing is "close" rather than "coming"
@@ -120,6 +122,7 @@ class ScreenWatch:
         self._seen_me = 0
         self._lives_lost = 0
         self._lives_after_touch = 0
+        self._lives_after_closest = 0  # with no touch seen: put down to the closest thing
         self._lives_after_fall = 0
         # Falling out of the bottom of the screen (T-988).
         self._soon = soon
@@ -203,6 +206,11 @@ class ScreenWatch:
     def lives_after_touch(self) -> int:
         """Lives lost soon after touching something."""
         return self._lives_after_touch
+
+    @property
+    def lives_after_closest(self) -> int:
+        """Lives lost with no touch seen, put down to the thing that was closest (T-1051)."""
+        return self._lives_after_closest
 
     @property
     def lives_after_fall(self) -> int:
@@ -422,7 +430,8 @@ class ScreenWatch:
         if self._box is None and self._sign is not None and self._was_seen and self._falling():
             self._fell_at = self._looks
         happened: list[Happening] = []
-        if lost and not self._a_fall(lost):
+        fell = bool(lost) and self._a_fall(lost)
+        if lost and not fell:
             happened.append(Happening.LIFE_LOST)
         self._around = None
         if self._box is not None:
@@ -445,6 +454,8 @@ class ScreenWatch:
         self._learner.observe(
             self._looks, tracks, self._me, happened, me=self._box if self._sign else None
         )
+        if lost:
+            self._say_lost(fell)
         self._looks += 1
         self._looks_this_go += 1
 
@@ -686,8 +697,51 @@ class ScreenWatch:
     def told(self, *, lost: int = 0) -> None:
         """Lives lost that no look will come for (the go ended): counted and put down to
         a fall or to the touch that was waiting, with no new screen to go by (T-988)."""
-        if lost and not self._a_fall(lost):
+        if not lost:
+            return
+        fell = self._a_fall(lost)
+        if not fell:
             self._learner.life_lost()
+        self._say_lost(fell)
+
+    def _say_lost(self, fell: bool) -> None:
+        """One line in the log for a life lost: what it was put down to (T-1051). It is
+        how a log shows whether the AI saw what cost the life."""
+        if self._quiet:
+            return
+        blame = None if fell else self._learner.last_blame
+        if fell:
+            log.info(
+                "A life was lost falling off the bottom of the screen: nothing it touched "
+                "is blamed."
+            )
+        elif blame is None:
+            log.info(
+                "A life was lost with nothing seen touching the AI or close to it in the %d "
+                "looks before: nothing is blamed.",
+                self._soon,
+            )
+        elif blame.seen:
+            also = ", ".join(
+                f"{kind} {way.value} ({_looks(ago)} before)" for kind, way, ago in blame.also
+            )
+            log.info(
+                "A life was lost. Put down to %s, touched %s %s before.%s",
+                blame.kind,
+                blame.way.value,
+                _looks(blame.ago),
+                f" Also touched in that time: {also}." if also else "",
+            )
+        else:
+            log.info(
+                "A life was lost with no touch seen in the %d looks before. Put down to %s, "
+                "the closest thing in that time: %d pixels off, met %s, %s before.",
+                self._soon,
+                blame.kind,
+                blame.gap,
+                blame.way.value,
+                _looks(blame.ago),
+            )
 
     def _falling(self) -> bool:
         """At its last sighting it was coming down with nothing under it (and now it is
@@ -710,6 +764,8 @@ class ScreenWatch:
             return True
         if self._learner.waiting:
             self._lives_after_touch += lost
+        elif self._learner.close:
+            self._lives_after_closest += lost
         return False
 
     def _find_me(self, tracks: tuple[Track, ...]) -> int | None:
@@ -754,6 +810,11 @@ class ScreenWatch:
             if self._lives_after_fall
             else ""
         )
+        closest = (
+            f", {self._lives_after_closest} with no touch seen and put down to the closest thing"
+            if self._lives_after_closest
+            else ""
+        )
         lost = (
             ""
             if self.follows_camera
@@ -766,7 +827,7 @@ class ScreenWatch:
         return (
             f"On the screen so far: {self._looks} looks, itself followed in {share}% of them; "
             f"{kinds} kinds of thing; {self._lives_lost} lives lost, "
-            f"{self._lives_after_touch} of them soon after touching something{fell}; "
+            f"{self._lives_after_touch} of them soon after touching something{closest}{fell}; "
             f"{hurts} kinds found to hurt, {items} to pick up.{lost}"
         )
 
@@ -819,6 +880,10 @@ class ScreenWatch:
                 self._told[r.kind] = now
                 out.append(r)
         return tuple(out)
+
+
+def _looks(count: int) -> str:
+    return "1 look" if count == 1 else f"{count} looks"
 
 
 __all__ = ["DEFAULT_LOOK_EVERY", "SOON_LOOKS", "Mark", "ScreenWatch", "side"]
