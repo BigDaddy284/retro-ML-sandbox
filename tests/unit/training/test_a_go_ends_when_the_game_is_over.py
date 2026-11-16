@@ -193,6 +193,16 @@ def test_only_the_values_lives_are_counted_on_and_no_health(
     assert taken(signals) == (1, 3, True)
 
 
+def test_the_values_read_are_those_last_handed_over(bus: EventBus, signals: EpisodeSignals) -> None:
+    # Lives lost are counted on something else now (or on a health guess only).
+    signals.watch_lives({OTHER: "Other"})
+    counts(bus, LIFES, 2, 1, 0, 255)
+    assert taken(signals) == (0, 2, False)
+    counts(bus, OTHER, 2, 1, 0, 255)
+    assert taken(signals) == (1, 1, True)
+    assert signals.last_reset.startswith("Other went from 0 to 255")
+
+
 def test_a_change_told_twice_is_read_once(bus: EventBus, signals: EpisodeSignals) -> None:
     # A person's value the AI also takes for a life count comes as two events.
     def both(before: int, after: int) -> None:
@@ -241,6 +251,12 @@ def test_a_new_go_begins_anew(bus: EventBus, signals: EpisodeSignals) -> None:
     # How the last restart was told is forgotten with the go.
     signals.start()
     assert signals.over is False and signals.last_reset == ""
+    # So is a game over nobody asked about before the go was stopped: a restart the
+    # detector tells in the next go is not the count's.
+    counts(bus, LIFES, 2, 1, 0, 255)
+    signals.start()
+    tell(bus, GameEvent(EventKind.RESET, 9, None, WENT_HOME))
+    assert taken(signals) == (1, 0, False)
 
 
 def test_with_the_detectors_restart_it_is_a_restart(bus: EventBus, signals: EpisodeSignals) -> None:
