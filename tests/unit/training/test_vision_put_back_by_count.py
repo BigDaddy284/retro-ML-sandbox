@@ -360,6 +360,8 @@ def test_a_new_places_door_is_its_own(
     hopper.adapter.load_state(DOOR)
     look(hopper, watches, steps=0, lost=1)
     assert given.ground.place == (0, 0) and given.ground.place_number == 1
+    tried.look(frame_of(hopper), lost=1, memory=memory_of(hopper.game))
+    assert afar(tried, far) and tried.ground.place_number == 1
     assert said(caplog) == [(logging.INFO, SAID)]
 
 
@@ -375,6 +377,19 @@ def test_a_door_with_no_memory_has_no_value(hopper: Hopper, no_jolt: None, door:
     assert given.camera_bytes == (BYTE, None)
     put_back(hopper, watches)
     assert afar(given, far)
+
+
+def test_a_look_handed_no_memory_tells_nothing(
+    hopper: Hopper, no_jolt: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG, logger=LOGGER)
+    given, _ = watches = begun(hopper)
+    far = far_off(hopper, watches)
+    # The look of the put-back comes with no memory: the count is not read there.
+    hopper.adapter.load_state(DOOR)
+    look(hopper, watches, steps=0, lost=1, memory=None)
+    assert given.camera_bytes == (BYTE, None)
+    assert afar(given, far) and said(caplog) == []
 
 
 def test_without_the_count_it_is_the_watch_it_was(hopper: Hopper) -> None:
