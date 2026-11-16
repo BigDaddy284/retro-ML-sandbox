@@ -221,6 +221,42 @@ def test_no_one_sign_is_enough(hopper: Hopper, no_jolt: None) -> None:
     assert far > 256 + LOOK_SHIFT and afar(given, far)
 
 
+def test_a_count_one_off_the_doors_is_not_the_doors(
+    hopper: Hopper, no_jolt: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG, logger=LOGGER)
+    given, _ = watches = begun(hopper)
+    far = far_off(hopper, watches)
+    # Everything of a put-back but the count, which reads one more than at the door.
+    hopper.adapter.load_state(DOOR)
+    ram = bytearray(hopper.game.ram)
+    assert ram[BYTE[1]] == 0
+    ram[BYTE[1]] = 1
+    look(hopper, watches, steps=0, lost=1, memory={"ram": bytes(ram)})
+    assert afar(given, far) and said(caplog) == []
+    assert given.camera_bytes == (BYTE, None)
+
+
+def test_far_from_the_door_is_far_either_way(hopper: Hopper, no_jolt: None) -> None:
+    given, _ = watches = begun(hopper)
+    walk(hopper, *watches, LEARN)
+    assert given.camera_bytes == (BYTE, None)
+    # A go that begins part-way along, and walks back to the level's start: the
+    # camera is left of its door, and the player nearer the screen's edge.
+    for watch in watches:
+        watch.begin_go()
+    hopper.adapter.save_state("here")
+    look(hopper, watches, steps=0)
+    here = camera(hopper.game)
+    assert here > 2 * LOOK_SHIFT
+    while hopper.game.state.x > toy_hopper.START_X:
+        look(hopper, watches, ("left",))
+    assert camera(hopper.game) == 0 and given.ground.place == (-here, 0)
+    hopper.adapter.load_state("here")
+    look(hopper, watches, steps=0, lost=1)
+    assert given.ground.place == (0, 0)
+
+
 def test_with_no_life_lost_it_is_no_put_back(
     hopper: Hopper, no_jolt: None, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -289,13 +325,54 @@ def test_the_door_is_the_places_own(hopper: Hopper, no_jolt: None) -> None:
     assert given.ground.place == (0, 0)
 
 
-@pytest.mark.parametrize("door", ["none", "another"])
+def test_a_new_places_door_is_its_own(
+    hopper: Hopper, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG, logger=LOGGER)
+    given, plain = watches = begun(hopper)
+    walk(hopper, *watches, LEARN)
+    assert given.camera_bytes == (BYTE, None)
+    # A go that begins part-way along the level, by day: at its door the count is 73.
+    for watch in watches:
+        watch.begin_go()
+    look(hopper, watches, steps=0)
+    assert hopper.game.ram[BYTE[1]] == 73
+    # The screen cuts to somewhere else: a level's start, in a cave. At the first look
+    # that can be measured it is a new place, and there the count reads nought.
+    monkeypatch.setattr(toy_hopper, "PALETTES", (toy_hopper.PALETTES[1],))
+    hopper.adapter.load_state(DOOR)
+    look(hopper, watches, steps=0)
+    look(hopper, watches)
+    assert (given.ground.place_number, given.ground.places) == (1, 2)
+    assert hopper.game.ram[BYTE[1]] == 0
+    # From here on the screen shows no put-back.
+    monkeypatch.setattr(vision, "JOLT", 2.0)
+    walk(hopper, given, plain, AFAR)
+    far = camera(hopper.game)
+    assert hopper.game.state.lives == toy_hopper.START_LIVES
+    assert far > 400 and given.ground.place == (far, 0) and given.ground.place_number == 1
+    # (A watch lent for a try knows the places and none of their doors' memory: handed
+    # the memory all the same, it looks as it would without.)
+    tried = given.trial(given.mark())
+    tried.look(frame_of(hopper), memory=memory_of(hopper.game))
+    assert tried.ground.place == (far, 0)
+    # Put back to this place's door: told by this door's value, not the first's.
+    hopper.adapter.load_state(DOOR)
+    look(hopper, watches, steps=0, lost=1)
+    assert given.ground.place == (0, 0) and given.ground.place_number == 1
+    assert said(caplog) == [(logging.INFO, SAID)]
+
+
+@pytest.mark.parametrize("door", ["none", "another", "renamed"])
 def test_a_door_with_no_memory_has_no_value(hopper: Hopper, no_jolt: None, door: str) -> None:
     # The go's first look was handed no memory, or a memory laid out another way than
-    # every look after it: nothing is known of the count at the door.
-    other = {"ram": bytes(hopper.game.ram), "more": b"\x00"}
-    given, _ = watches = begun(hopper, memory=None if door == "none" else other)
+    # every look after it (more of it, or the same bytes under another name): nothing
+    # is known of the count at the door.
+    ram = bytes(hopper.game.ram)
+    other = {"another": {"ram": ram, "more": b"\x00"}, "renamed": {"mem": ram}}
+    given, _ = watches = begun(hopper, memory=other.get(door))
     far = far_off(hopper, watches)
+    assert given.camera_bytes == (BYTE, None)
     put_back(hopper, watches)
     assert afar(given, far)
 
@@ -331,6 +408,34 @@ def test_the_log_says_it_once(
     put_back(hopper, watches)
     assert given.ground.place == (0, 0)
     assert said(caplog) == [(logging.INFO, SAID), (logging.DEBUG, SAID)]
+
+
+def test_a_put_back_told_uses_up_its_signs(
+    hopper: Hopper, no_jolt: None, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG, logger=LOGGER)
+    given, _ = watches = begun(hopper)
+    far_off(hopper, watches)
+    put_back(hopper, watches)
+    assert len(said(caplog)) == 1
+    # Its life does not answer for a count gone to the door again within a few looks
+    # of it: far from the door once more, and at the door with no life lost.
+    hopper.adapter.load_state(FAR)
+    for _ in range(BACK_LOOKS - 1):
+        look(hopper, watches, ("right",), steps=4)
+    out = given.ground.place[0]
+    assert out > 2 * LOOK_SHIFT
+    put_back(hopper, watches, lost=0)
+    assert afar(given, out) and len(said(caplog)) == 1
+    # Nor does that count answer for a life lost after one it has answered for.
+    hopper.adapter.load_state(FAR)
+    look(hopper, watches, steps=0)
+    for _ in range(BACK_LOOKS):
+        look(hopper, watches, ("right",))
+    put_back(hopper, watches)
+    assert given.ground.place == (0, 0) and len(said(caplog)) == 2
+    look(hopper, watches, lost=1)
+    assert len(said(caplog)) == 2
 
 
 @pytest.mark.parametrize("how", ["a new go", "going back"])

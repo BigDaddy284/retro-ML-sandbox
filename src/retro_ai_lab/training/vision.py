@@ -557,7 +557,7 @@ class ScreenWatch:
             if self._count_at == self._looks:
                 moved = (0, 0)  # what the picture read as this look's slide was the put-back
             log.log(
-                logging.DEBUG if self._count_said or self._quiet else logging.INFO,
+                logging.DEBUG if self._count_said else logging.INFO,
                 "A life was lost and the screen showed no jump, but the game's own count "
                 "of its camera is back at what it was where this place began and the AI "
                 "is somewhere else on the screen: the game put it back. Ground it walks "
@@ -603,8 +603,8 @@ class ScreenWatch:
         here = self._ground.place_number
         door = self._door_memory[here] if here < len(self._door_memory) else None
         now = self._memory
-        if door is None or now is None or len(door) != len(now) or not self._ground.scrolls:
-            return False
+        if door is None or now is None:
+            return False  # (a door's memory is laid out as now is: another layout voids it)
         far = False
         for way, byte in enumerate(self._camera.found):
             if byte is None:
