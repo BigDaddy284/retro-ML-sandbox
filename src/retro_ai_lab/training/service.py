@@ -37,7 +37,7 @@ from retro_ai_lab.learning.learner import (
     describe_algorithm,
     make_learner,
 )
-from retro_ai_lab.learning.promotion import convert, promote
+from retro_ai_lab.learning.promotion import carries_over, convert, promote
 from retro_ai_lab.learning.qlearning import QLearningAgent, Settings
 from retro_ai_lab.learning.replay import Transition
 from retro_ai_lab.learning.skills import SkillsLearner
@@ -696,13 +696,28 @@ class TrainingService:
         if self._agent is None or algorithm == AUTO or self._agent.algorithm == algorithm:
             return ""
         was = describe_algorithm(self._agent.algorithm)[0].lower()
+        kept = carries_over(self._agent, algorithm)
         self._agent = convert(self._agent, algorithm, seed=self._seed)
         self._runner = None
         now = describe_algorithm(algorithm)[0].lower()
-        self._last_change = f"The AI moved from the {was} to the {now}, keeping what it learned."
+        self._last_change = f"The AI moved from the {was} to the {now}, " + (
+            "keeping what it learned."
+            if kept
+            else "and starts learning afresh: what it had learned could not be taken along."
+        )
         self.save()
         self._announce("algorithm change")
         return self._last_change
+
+    def starts_afresh(self, algorithm: str) -> bool:
+        """Whether choosing ``algorithm`` now would lose what the AI has learned
+        (T-1055): the screen network and the others cannot take each other's
+        learning along. False while it has learned nothing."""
+        _check_algorithm(algorithm)
+        agent = self._agent
+        if agent is None or agent.updates == 0:
+            return False
+        return not carries_over(agent, algorithm)
 
     @_locked
     def rehearse(self, passes: int = 1) -> int:

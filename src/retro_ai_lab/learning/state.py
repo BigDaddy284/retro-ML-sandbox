@@ -39,9 +39,10 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from retro_ai_lab.core import ConfigurationError
+from retro_ai_lab.learning.picture import Sight
 from retro_ai_lab.observation.memory import MemorySnapshot
 from retro_ai_lab.understanding.knowledge import (
     INPUT_LINKED,
@@ -176,9 +177,15 @@ def split_distance(vid: str) -> tuple[str, str] | None:
 
 @dataclass(frozen=True, slots=True)
 class State:
-    """Which bucket each believed variable is in, in a fixed order."""
+    """Which bucket each believed variable is in, in a fixed order.
+
+    ``sight`` is what the screen showed (T-1055), for a learner that asks for it. It
+    is no part of which situation this is: two states with the same parts are equal,
+    hash alike and share a key whatever either saw.
+    """
 
     parts: tuple[tuple[str, int], ...] = ()
+    sight: Sight | None = field(default=None, compare=False, repr=False)
 
     @property
     def key(self) -> str:
@@ -202,7 +209,11 @@ class State:
     def coarse(self) -> State:
         """The same situation with every fine bucket read coarsely again (T-982): what
         the brain knew of the whole bucket before it looked closer."""
-        return State(tuple((vid, coarse_bucket(b)) for vid, b in self.parts))
+        return State(tuple((vid, coarse_bucket(b)) for vid, b in self.parts), self.sight)
+
+    def seeing(self, sight: Sight | None) -> State:
+        """The same situation, showing ``sight``."""
+        return State(self.parts, sight)
 
     def describe(self, knowledge: Knowledge | None = None, *, most: int | None = None) -> str:
         """The situation in words; ``most`` caps the values named ("and N more", T-889)."""

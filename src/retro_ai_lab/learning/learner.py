@@ -32,6 +32,11 @@ _LABELS: dict[str, tuple[str, str]] = {
         "Guesses scores for situations it has never seen from ones like them. "
         "Better once the game gets big.",
     ),
+    "screen": (
+        "Screen network",
+        "Watches the screen itself, shrunk to a small picture, and learns which buttons "
+        "pay from what it sees. Needs nothing found in the game's memory to see with.",
+    ),
     "skills": (
         "Skills per goal step",
         "Learns a separate skill for each step of the goal and uses the one for the step "

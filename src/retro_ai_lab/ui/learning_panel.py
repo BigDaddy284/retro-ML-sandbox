@@ -136,6 +136,12 @@ FORGET_QUESTION = (
     "This deletes everything the AI has learned about this game, including the saved "
     "brain, and it cannot be undone. Start from scratch?"
 )
+AFRESH_QUESTION = (
+    "The screen network learns from pictures and the other ways of learning from numbers "
+    "in the game's memory, so neither can take the other's learning along. Changing now "
+    "loses everything the AI has learned about this game, and it cannot be undone. "
+    "Change anyway?"
+)
 
 
 class _StepSignals(QObject):
@@ -441,6 +447,18 @@ class LearningPanel(QWidget):
         self.refresh()
 
     def choose_algorithm(self, algorithm: str) -> None:
+        # Asked first where the choice would lose what was learned (T-1055): the
+        # screen network and the others cannot take each other's learning along.
+        t = self._training
+        if (
+            t.status is Status.IDLE
+            and algorithm in algorithm_choices()
+            and t.starts_afresh(algorithm)
+            and not self.confirm(AFRESH_QUESTION)
+        ):
+            self._note.setText("Kept the brain.")
+            self.refresh()
+            return
         note = ""
 
         def change() -> None:

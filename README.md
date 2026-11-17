@@ -187,6 +187,34 @@ app has moved the spot its goes start from past a life (it does that to get
 a game going), each such go counts that life as lost, and a line says how
 many goes that was.
 
+### The screen network
+
+"How the AI learns" has a fourth choice, **Screen network**. The simple
+table and the neural network are fed a handful of numbers the app has found
+in the game's memory, and can learn nothing those numbers do not say. The
+screen network is fed what every game shows: the screen, shrunk to a small
+grey picture of 32 by 28, what changed in it since the step before, and the
+buttons it last pressed. It learns from the same rewards as the others.
+Nothing in it knows any game, and it is the same for a console of any
+screen size.
+
+It learns from pictures and the others from numbers, so neither can take
+the other's learning along: changing to it or away from it starts the AI
+afresh for this game, and the app asks first when there is something to
+lose. "Choose for me" does not pick it yet. An emulator that cannot give a
+picture of its screen leaves it with nothing to learn from, and the log
+says so.
+
+Measure it like any other:
+
+```bash
+python -m retro_ai_lab.tools.learning_bench racer --algorithm screen --goes 300
+```
+
+On the practice racer it learns by itself where the other two do not (see
+the tracker, T-1055, for the figures). On the practice hopper it does not
+yet: it gets a little further and loses more lives. That is the next work.
+
 The app's own log does the same every five seconds while it runs: next to the
 emulator link's line, an "App work" line counts the stalls of the window's
 thread and names what that thread did, event by event (`on DiscoveryUpdated`),

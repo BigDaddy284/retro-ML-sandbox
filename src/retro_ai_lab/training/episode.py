@@ -29,6 +29,7 @@ from retro_ai_lab.core import (
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.core.worklog import app_work
 from retro_ai_lab.learning.learner import Learner
+from retro_ai_lab.learning.picture import NO_MOVE, Sight, shrink
 from retro_ai_lab.learning.qlearning import Settings
 from retro_ai_lab.learning.replay import Transition
 from retro_ai_lab.learning.state import State, StateEncoder
@@ -737,6 +738,12 @@ class EpisodeRunner:
         self._watch = watch  # looks at the screen every few steps (T-976)
         self._look_every = look_every
         self._seen: Frame | None = None  # the screenshot of the step being settled
+        # A learner that watches the screen is handed every state with its sight
+        # (T-1055): the screen is asked for with every step, whatever the watch does.
+        self._wants_pictures = bool(getattr(agent, "wants_picture", False))
+        self._pictures = self._wants_pictures  # and the emulator gives them: see begin()
+        self._shot: Frame | None = None  # the screen after the step being settled
+        self._picture: bytes | None = None  # the last sight's picture: the next one's "before"
         # Lives lost and score rises on steps without a look, kept for the next look (T-988).
         self._unseen_lost = 0
         self._unseen_scored = 0
@@ -1157,6 +1164,15 @@ class EpisodeRunner:
         score = self._encoder.knowledge.best(VariableKind.SCORE)
         self._signals.watch_scores(frozenset({score.id}) if score is not None else frozenset())
         self._seen = None
+        self._shot = None  # a step that failed may have left its screen behind
+        if self._wants_pictures:
+            can = self._connection.call(lambda a: a.capabilities()).screen_capture
+            if not can and self._pictures:
+                log.warning(
+                    "This emulator gives no picture of the screen, so a learner that "
+                    "watches the screen has nothing to learn from here."
+                )
+            self._pictures = can
         self._unseen_lost = 0
         self._unseen_scored = 0
         if self._watch is not None:
@@ -1171,10 +1187,34 @@ class EpisodeRunner:
             )
         self._signals.start()
         self._bus.publish(GoStarted(self._observation.frame))  # T-878
-        self._state = self._encoder.encode(snapshot)
+        self._state = self._sighted(self._encoder.encode(snapshot), NO_MOVE, fresh=True)
         self._states.add(self._state.key)
         self._begin_route()
         return self._state
+
+    def _sighted(self, state: State, held: int, *, fresh: bool = False) -> State:
+        """``state`` with what the screen shows now, for a learner that watches it
+        (T-1055); ``state`` as it is for any other.
+
+        The screen is the one that came with the step being settled, or is asked for
+        (a go's start, the game put back, a step somebody else played). ``held`` is
+        the move just made. ``fresh`` says nothing went before: the game was put
+        somewhere, so the picture a step earlier is this one. An emulator that gives
+        no screen leaves the state without a sight, which the learner counts.
+        """
+        if not self._pictures:
+            return state
+        frame, self._shot = self._shot, None
+        if frame is None:
+            try:
+                frame = self._connection.call(lambda a: a.capture_frame())
+            except EmulatorError:
+                self._picture = None  # the next picture has none a step before it
+                return state
+        now = shrink(frame)
+        before = now if fresh or self._picture is None else self._picture
+        self._picture = now
+        return state.seeing(Sight(now, before, held))
 
     def _loss_stands(self) -> None:
         """A life went and the go did not get it back. What the go remembers of itself
@@ -1361,11 +1401,13 @@ class EpisodeRunner:
             reads = self._observation.snapshot_reads()
             pressed = frozenset(held)
             look = self._watch is not None and self._steps % self._look_every == 0
+            shot = look or self._pictures
             with app_work.timed("step: emulator"):
                 result = self._connection.call(
-                    lambda a: a.step(frames, pressed=pressed, reads=reads, screenshot=look)
+                    lambda a: a.step(frames, pressed=pressed, reads=reads, screenshot=shot)
                 )
             self._seen = result.frame if look else None
+            self._shot = result.frame if self._pictures else None
             # The snapshot's readers (change tracker, discovery, rewards) run inside.
             with app_work.timed("step: observe"):
                 self._observation.advance(frames, snapshot=result.reads if reads else None)
@@ -2274,6 +2316,7 @@ class EpisodeRunner:
         self._flush(self._state, done=True)
         if snapshot is not None:
             self._state = self._encoder.encode(snapshot)
+        self._state = self._sighted(self._state, NO_MOVE, fresh=True)
         self._states.add(self._state.key)
         self._same_state = 0
         self._seen = None
@@ -2387,6 +2430,7 @@ class EpisodeRunner:
         snapshot = self._observation.latest
         with app_work.timed("step: encode"):
             next_state = self._encoder.encode(snapshot) if snapshot is not None else state
+            next_state = self._sighted(next_state, NO_MOVE if action is None else action)
         done = resets > 0
         with app_work.timed("step: learn"):
             if action is None:
