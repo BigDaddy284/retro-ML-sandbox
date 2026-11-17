@@ -4,14 +4,26 @@ The app starts every game with the table and, when the game turns out to be
 big, promotes the brain to a network that first learns everything the table
 knew, so the child never sees the AI forget. The child can also move it
 either way by hand.
+
+The screen network (T-1055) is the exception. What a table or the first network
+knows is told in numbers from the game's memory; the screen network knows only
+pictures, and neither can be put into the other's words. A brain changed to or
+from it starts learning afresh, and :func:`carries_over` says so beforehand.
 """
 
 from __future__ import annotations
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning.dqn import DEFAULT_DISTIL_STEPS, DQN, DQNConfig, DQNLearner
-from retro_ai_lab.learning.learner import AUTO, Q_TABLE, Learner, algorithm_choices
+from retro_ai_lab.learning.learner import (
+    AUTO,
+    Q_TABLE,
+    Learner,
+    algorithm_choices,
+    make_learner,
+)
 from retro_ai_lab.learning.qlearning import QLearningAgent
+from retro_ai_lab.learning.screen import SCREEN
 from retro_ai_lab.learning.skills import DEFAULT_SKILL, SKILLS, SkillsLearner
 
 
@@ -38,6 +50,26 @@ def demote(agent: DQNLearner, *, seed: int | None = None) -> QLearningAgent:
     return table
 
 
+def _check(algorithm: str) -> None:
+    if algorithm not in algorithm_choices():
+        raise ConfigurationError(
+            f"There is no learning algorithm called {algorithm!r} "
+            f"(choices: {', '.join(algorithm_choices())})."
+        )
+
+
+def carries_over(agent: Learner, algorithm: str) -> bool:
+    """Whether ``agent`` changed to ``algorithm`` keeps what it learned.
+
+    False only between the screen network and any other way of learning: pictures
+    and numbers from the game's memory cannot be told in each other's words.
+    """
+    _check(algorithm)
+    if algorithm == AUTO or agent.algorithm == algorithm:
+        return True
+    return SCREEN not in (algorithm, agent.algorithm)
+
+
 def convert(
     agent: Learner,
     algorithm: str,
@@ -46,14 +78,19 @@ def convert(
     config: DQNConfig | None = None,
     steps: int = DEFAULT_DISTIL_STEPS,
 ) -> Learner:
-    """The agent as ``algorithm``; the same object when it already is (or for ``auto``)."""
-    if algorithm not in algorithm_choices():
-        raise ConfigurationError(
-            f"There is no learning algorithm called {algorithm!r} "
-            f"(choices: {', '.join(algorithm_choices())})."
-        )
+    """The agent as ``algorithm``; the same object when it already is (or for ``auto``).
+
+    To or from the screen network it is a new learner that knows nothing
+    (:func:`carries_over`); the screen network carries on the count of goes.
+    """
+    _check(algorithm)
     if algorithm == AUTO or agent.algorithm == algorithm:
         return agent
+    if not carries_over(agent, algorithm):
+        fresh = make_learner(algorithm, agent.space, getattr(agent, "settings", None), seed=seed)
+        if algorithm == SCREEN:
+            fresh.resume_from(agent)  # type: ignore[attr-defined]
+        return fresh
     if algorithm == SKILLS:
         skills = SkillsLearner(agent.space, getattr(agent, "settings", None), seed=seed)
         skills.adopt(DEFAULT_SKILL, agent)
@@ -69,4 +106,4 @@ def convert(
     raise ConfigurationError(f"Can't turn a {agent.algorithm!r} brain into a {algorithm!r} one.")
 
 
-__all__ = ["convert", "demote", "promote"]
+__all__ = ["carries_over", "convert", "demote", "promote"]

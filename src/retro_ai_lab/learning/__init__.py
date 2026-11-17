@@ -25,7 +25,7 @@ from retro_ai_lab.learning.picture import (
     Sight,
     shrink,
 )
-from retro_ai_lab.learning.promotion import convert, demote, promote
+from retro_ai_lab.learning.promotion import carries_over, convert, demote, promote
 from retro_ai_lab.learning.qlearning import QLearningAgent, QTable, Settings
 from retro_ai_lab.learning.replay import ReplayBuffer, Transition
 from retro_ai_lab.learning.screen import SCREEN, ScreenConfig, ScreenLearner
@@ -66,6 +66,7 @@ __all__ = [
     "algorithm_choices",
     "algorithms",
     "bucket",
+    "carries_over",
     "convert",
     "demote",
     "describe_algorithm",
