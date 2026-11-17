@@ -262,6 +262,32 @@ def test_the_lives_lost_are_the_games_own_count_step_by_step() -> None:
     assert report.played == [Go(3, 40, 4, "game_over"), Go(0, 9, 2, "stuck")]
 
 
+def test_a_go_that_begins_with_a_life_already_gone_is_a_life_down() -> None:
+    story = Story(
+        ToyRacer(seed=1),
+        [
+            [[at(3, 0), hold, at(3, 10)]],
+            # The app moved where its goes start (it does, to get a game going): this
+            # go begins further on with a life gone. By the game's account it is a
+            # life down, whatever it does next.
+            [[at(2, 115), hold, at(2, 120)], [hold, at(1, 130)], [hold, at(1, 131)]],
+            [[at(1, 115), hold, at(1, 116)]],
+            # Back at the game's start, and with a life more than it starts with:
+            # nothing gone, and nothing taken off for the extra.
+            [[at(3, 0), hold, at(3, 3)]],
+            [[at(4, 0), hold, at(4, 3)], [hold, at(3, 9)]],
+        ],
+        [result(1), result(3), result(1), result(1), result(2)],
+    )
+    report = _played(story)
+    assert [go.lost for go in report.played] == [0, 2, 2, 0, 1]
+    assert report.began_short == 2
+    assert report.lines()[-2] == (
+        "2 goes began with a life already gone (the app had moved where its goes start): "
+        "that life is counted as lost in each."
+    )
+
+
 def test_a_life_given_back_within_the_step_was_not_lost() -> None:
     story = Story(
         ToyRacer(seed=1),
@@ -461,6 +487,12 @@ def test_one_block_one_go_and_the_other_words_of_the_heading() -> None:
         "own units (a lap is 256)."
     )
     assert _report([]).lines()[1:] == ["No goes were played."]
+    said = "began with a life already gone (the app had moved where its goes start): "
+    assert _report(FIVE, began_short=1).lines()[-2] == (
+        f"1 go {said}that life is counted as lost in each."
+    )
+    assert _report(FIVE, began_short=1200).lines()[-2].startswith(f"1,200 goes {said}")
+    assert not any("already gone" in line for line in _report(FIVE).lines())
 
 
 # ------------------------------------------------------------------- arguments

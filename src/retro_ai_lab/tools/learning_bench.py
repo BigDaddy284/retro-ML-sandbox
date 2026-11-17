@@ -97,6 +97,7 @@ class Report:
     ways_sought: int = 0  # times it went back to look for a way (after a loss or before one)
     remembered: int = 0  # steps begun with from a way remembered
     looked_ahead: int = 0  # times it played ahead off the record
+    began_short: int = 0  # goes that began with a life already gone (counted as lost)
 
     def blocks(self) -> tuple[Block, ...]:
         """The goes in blocks of ``block``; those left over are a last, shorter one."""
@@ -135,6 +136,12 @@ class Report:
             out.append(
                 f"{goes}: {b.lost:.2f} lives lost a go; got {b.far:,.0f} far on average, "
                 f"{b.best:,} at best; {b.clean} of {n} with no life lost."
+            )
+        if self.began_short:
+            goes = "1 go" if self.began_short == 1 else f"{self.began_short:,} goes"
+            out.append(
+                f"{goes} began with a life already gone (the app had moved where its goes "
+                "start): that life is counted as lost in each."
             )
         if not blocks:
             out.append("No goes were played.")
@@ -280,13 +287,22 @@ def _train(
     # comes after the game was put back to its start, which no one here is told of.
     lives: list[int] = []
     bus.subscribe(ButtonsHeld, lambda event: lives.append(game.state.lives))
+    # Every life in hand: the game was just put to its own start. A go the app starts
+    # from further on with a life gone (it moves where its goes start, to get a game
+    # going) is a life down by the game's account, and is counted so.
+    full = game.state.lives
     training.start(Mode.INDEPENDENT)
     while training.episodes < report.goes:
         go = training.episodes
-        lost, far, looked = 0, 0, 0
+        lost, far, looked, begun = 0, 0, 0, False
         while training.episodes == go:
             lives.clear()
             training.step()
+            if lives and not begun:
+                begun = True
+                if lives[0] < full:
+                    lost += full - lives[0]
+                    report.began_short += 1
             if lives:
                 # A life the game was put back for within the step is there again:
                 # it was not lost.

@@ -25,7 +25,9 @@ def test_the_network_alone_on_the_practice_racer_is_whole_and_seeded() -> None:
     first, last = report.blocks()
     assert (first.first, first.last, last.first, last.last) == (1, 25, 26, 50)
     lines = report.lines()
-    assert len(lines) == 4
+    # A line more where the app moved its goes' start past a life (it does on this run).
+    assert report.began_short > 0 and len(lines) == 5
+    assert lines[3].startswith(f"{report.began_short} goes began with a life already gone")
     assert lines[0] == (
         "Learning bench on Toy Racer: neural network, 50 goes of up to 300 steps, seed 1, "
         "the learner alone, every helper off. How far is in the game's own units "
