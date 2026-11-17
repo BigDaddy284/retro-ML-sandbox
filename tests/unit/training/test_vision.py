@@ -1016,8 +1016,10 @@ def test_a_life_lost_to_a_walker_on_the_ground_is_put_down_to_it() -> None:
         watch.look(flat(camera, things))
     parts = dict(watch.parts())
     assert parts["screen:hurts dx"] == 1 and parts["screen:hurts dy"] == 0
-    # The same go seen the old way: nothing is put down to the walker.
+    # The same go seen the old way: no touch is seen. (Until T-1051 nothing was put down
+    # to the walker then; it was seen coming, and is blamed as the closest thing now.)
     old = ScreenWatch(hero_with_colours((86, 200)))
     old._tracker = ObjectTracker(max_shift=LOOK_SHIFT, whole=False)
     into_a_walker(old)
-    assert old.lives_lost == 1 and old.lives_after_touch == 0 and old.roles() == ()
+    assert old.lives_lost == 1 and old.lives_after_touch == 0 and old.lives_after_closest == 1
+    assert [r.tag for r in old.roles()] == [SpriteTag.ENEMY]
