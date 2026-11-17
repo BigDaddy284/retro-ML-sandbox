@@ -369,7 +369,9 @@ class EpisodeSignals:
             return
         self._reward += event.amount
         cause = event.event
-        if cause.variable_id is not None and (cause.delta or 0) > 0:
+        # (A fall below nought reads higher than it was, and is a fall: T-1053.)
+        fell = cause.kind in (EventKind.SETBACK, EventKind.DOWN)
+        if cause.variable_id is not None and (cause.delta or 0) > 0 and not fell:
             self._rose[cause.variable_id] = None
         ids = event.behaviour_ids
         shares = event.shares if len(event.shares) == len(ids) else ()
@@ -403,6 +405,7 @@ class EpisodeSignals:
         if not self._listening:
             return
         dropped: set[str] = set()  # watched values that fell this update (T-967)
+        told: set[str] = set()  # values whose fall was counted with none watched (T-1053)
         if any(
             e.kind is EventKind.SCORE_GAIN
             or (e.kind is EventKind.UP and e.variable_id in self._score_ids)
@@ -417,6 +420,8 @@ class EpisodeSignals:
             elif self._watched is None:
                 if event.kind is EventKind.SETBACK:
                     self._setbacks += 1
+                    if event.variable_id is not None:
+                        told.add(event.variable_id)
             elif (
                 event.kind in (EventKind.SETBACK, EventKind.DOWN)
                 and event.variable_id is not None
@@ -435,9 +440,12 @@ class EpisodeSignals:
             if event.before is None or event.after is None:
                 continue
             read.add(value)
-            self._read_lives(value, event.before, event.after, event.frame, restarted)
+            counted = value in dropped or value in told
+            self._read_lives(value, event.before, event.after, event.frame, restarted, counted)
 
-    def _read_lives(self, value: str, before: int, after: int, frame: int, restarted: bool) -> None:
+    def _read_lives(
+        self, value: str, before: int, after: int, frame: int, restarted: bool, counted: bool
+    ) -> None:
         """Whether this change of a count of lives is the game being over (T-1050).
 
         A count of lives falls by one, and now and then rises by one. When the last
@@ -445,8 +453,9 @@ class EpisodeSignals:
         kept in a byte), or leaves it and sets it anew when it begins again. So a
         change of more than one, on a count that has fallen by one in this go, is the
         game over if it leaves nought for more than the count began the go with, or
-        comes to exactly what it began with. The first is also the last life going,
-        which nothing else counted: it read as a rise.
+        comes to exactly what it began with. The first is also the last life going:
+        it is counted here unless ``counted`` says the change was told as a fall and
+        counted as one already (T-1053; told as a rise, nothing else counted it).
 
         Any other change of more than one says this value is no plain count of lives
         (health that is filled up, a number that is something else), and it is not
@@ -467,7 +476,7 @@ class EpisodeSignals:
             return
         self._resets += 1
         self._overs += 1
-        if below:
+        if below and not counted:
             self._setbacks += 1
         if not restarted:  # (the detector's own reason stands where it gave one)
             how = (

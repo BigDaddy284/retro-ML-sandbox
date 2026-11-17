@@ -239,6 +239,10 @@ class EventDetector:
         # seen at, by place (T-1022). Kept across goes and across watches made anew.
         self._low: dict[_Place, int] = {}
         self._high: dict[_Place, int] = {}
+        # The places whose value has been seen to fall by exactly one: they count down,
+        # and one of them leaving nought for the most it can hold fell below nought
+        # (T-1053). Kept as the lowest and highest are.
+        self._counts_down: set[_Place] = set()
 
     @property
     def observed(self) -> int:
@@ -463,20 +467,39 @@ class EventDetector:
             return value == self._high.get(_place(watch.variable))
         return False
 
+    def _fell_below(self, var: Variable, before: int, value: int) -> bool:
+        """Did this change take a count below nought (T-1053)?
+
+        A count kept without a sign cannot read below nought: one taken from nought
+        it reads the most its layout can hold (0 to 255 in a byte, 0 to 99 in a packed
+        decimal one). No count gains that much in one step, so on a value that counts
+        down (it has been seen to fall by exactly one) that change is a fall. Health is
+        left out: it is filled up in play. A value that never fell by one is no count
+        (a byte that switches between 0 and 255).
+        """
+        if before != 0 or var.kind is VariableKind.HEALTH:
+            return False
+        return value == var.most and _place(var) in self._counts_down
+
     def _judge(self, watch: _Watch, value: int, frame: int) -> list[GameEvent]:
         var = watch.variable
         before = watch.last
         name = var.display_name
         kind = var.kind
         out: list[GameEvent] = []
+        below = self._fell_below(var, before, value)
+        if value == before - 1:
+            self._counts_down.add(_place(var))
         if var.id in self._asked:
-            up = value > before
+            up = value > before and not below
             out.append(
                 GameEvent(
                     EventKind.UP if up else EventKind.DOWN,
                     frame,
                     var.id,
-                    f"{name} went {'up' if up else 'down'} to {value}.",
+                    f"{name} went down below nought (it reads {value})."
+                    if below
+                    else f"{name} went {'up' if up else 'down'} to {value}.",
                     before,
                     value,
                 )
@@ -507,7 +530,19 @@ class EventDetector:
             # Learn what an ordinary step looks like (big jumps pull it up slowly).
             watch.typical_gain += (min(gain, 4 * watch.typical_gain) - watch.typical_gain) * 0.2
         elif kind in (VariableKind.LIVES, VariableKind.HEALTH):
-            if value < before:
+            if below:
+                # The last life going, on a count of those in reserve: not one gained.
+                out.append(
+                    GameEvent(
+                        EventKind.SETBACK,
+                        frame,
+                        var.id,
+                        f"{name} fell below nought (it reads {value}).",
+                        before,
+                        value,
+                    )
+                )
+            elif value < before:
                 out.append(
                     GameEvent(
                         EventKind.SETBACK,

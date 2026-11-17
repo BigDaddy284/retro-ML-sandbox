@@ -123,6 +123,20 @@ class Encoding(Enum):
             return MAX_DIGITS
         return MAX_BINARY if self.sized else self.width
 
+    def most(self, length: int = 0) -> int | None:
+        """The most a value held this way can read (T-1053): every bit set for a binary
+        layout, every digit a nine for a decimal one. ``length`` is the bytes (or digits)
+        of a sized layout. None for a signed byte, which reads below nought as it is,
+        and for a flag, which is no number."""
+        if self in (Encoding.S8, Encoding.FLAG):
+            return None
+        n = self.width or length
+        if self in (Encoding.DIGITS_LE, Encoding.DIGITS_BE):
+            return int(10**n - 1)
+        if self in (Encoding.BCD, Encoding.BCD_LE, Encoding.BCD_BE):
+            return int(100**n - 1)
+        return int(256**n - 1)
+
     def describe(self, length: int) -> str:
         """How a value is held, in plain words: "1 byte", "6 digits", "2 bytes, low first"."""
         if self in (Encoding.DIGITS_LE, Encoding.DIGITS_BE):
@@ -256,6 +270,11 @@ class Variable:
     @property
     def width(self) -> int:
         return self.length if self.encoding.sized else self.encoding.width
+
+    @property
+    def most(self) -> int | None:
+        """The most this value can read, None where its layout has none (T-1053)."""
+        return self.encoding.most(self.length)
 
     @property
     def address(self) -> str:
