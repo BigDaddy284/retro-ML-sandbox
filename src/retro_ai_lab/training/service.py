@@ -486,6 +486,12 @@ class TrainingService:
         return self._harness
 
     @property
+    def looks_ahead(self) -> bool:
+        """Whether a go that can go back looks ahead when a thing of a kind that has
+        cost a life comes near (T-1052): what the service was made with."""
+        return self._look_ahead
+
+    @property
     def remembered(self) -> int:
         """Steps of the way the AI remembers from the spot goes start from (T-1015)."""
         return len(self._route.moves)
