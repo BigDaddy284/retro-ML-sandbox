@@ -8,6 +8,7 @@ service sets by hand.
 from __future__ import annotations
 
 from collections.abc import Callable
+from itertools import pairwise
 from types import SimpleNamespace
 from typing import Any
 
@@ -22,6 +23,7 @@ from retro_ai_lab.services import (
     ButtonsHeld,
     ConnectionService,
     EmulatorDisconnected,
+    InputRecorded,
     ObservationService,
 )
 from retro_ai_lab.tools import learning_bench
@@ -179,6 +181,8 @@ def test_the_racers_first_go_drives_lifts_off_changes_lane_and_starts_again() ->
         assert isinstance(adapter, FakeEmulatorAdapter)
         game = adapter.game
         held: list[tuple[bool, tuple[str, ...], int]] = []
+        told: list[Any] = []
+        bus.subscribe(InputRecorded, lambda recorded: told.append(recorded.event))
         real = adapter.set_input
 
         def spy(buttons: Any) -> None:
@@ -193,6 +197,11 @@ def test_the_racers_first_go_drives_lifts_off_changes_lane_and_starts_again() ->
         finally:
             monkeypatch.undo()
         assert len(held) == 600 and observation.frame == 600
+        # The app is told what was held, as it is of a person's play: once for every
+        # change, which is what discovery learns the buttons from.
+        changes = sum(a[1] != b[1] for a, b in pairwise(held))
+        assert len(told) == changes + 1 > 20
+        assert (told[0].frame, set(told[0].buttons)) == (0, {"up", "left"})
         # What it holds while the game is on: up for 35 frames of every 50, left at
         # every 90th frame and right halfway between.
         on = {i: names for i, (over, names, _) in enumerate(held) if not over}
