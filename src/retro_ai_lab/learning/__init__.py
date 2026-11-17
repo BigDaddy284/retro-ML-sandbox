@@ -17,9 +17,18 @@ from retro_ai_lab.learning.learner import (
     register_learner,
 )
 from retro_ai_lab.learning.network import Network
+from retro_ai_lab.learning.picture import (
+    NO_MOVE,
+    PICTURE_HEIGHT,
+    PICTURE_SIZE,
+    PICTURE_WIDTH,
+    Sight,
+    shrink,
+)
 from retro_ai_lab.learning.promotion import convert, demote, promote
 from retro_ai_lab.learning.qlearning import QLearningAgent, QTable, Settings
 from retro_ai_lab.learning.replay import ReplayBuffer, Transition
+from retro_ai_lab.learning.screen import SCREEN, ScreenConfig, ScreenLearner
 from retro_ai_lab.learning.skills import SKILLS, SkillsLearner
 from retro_ai_lab.learning.state import DEFAULT_BINS, State, StateEncoder, bucket
 
@@ -27,7 +36,12 @@ __all__ = [
     "AUTO",
     "DEFAULT_BINS",
     "DQN",
+    "NO_MOVE",
+    "PICTURE_HEIGHT",
+    "PICTURE_SIZE",
+    "PICTURE_WIDTH",
     "Q_TABLE",
+    "SCREEN",
     "SKILLS",
     "Action",
     "ActionSpace",
@@ -41,7 +55,10 @@ __all__ = [
     "QLearningAgent",
     "QTable",
     "ReplayBuffer",
+    "ScreenConfig",
+    "ScreenLearner",
     "Settings",
+    "Sight",
     "SkillsLearner",
     "State",
     "StateEncoder",
@@ -56,4 +73,5 @@ __all__ = [
     "make_learner",
     "promote",
     "register_learner",
+    "shrink",
 ]
