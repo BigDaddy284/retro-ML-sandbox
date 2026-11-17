@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from retro_ai_lab.observation.sprites import SpriteTag
 from retro_ai_lab.training.vision import PART_REACH, ScreenWatch
-from tests.unit.training.test_vision import COIN, HERO, WALKER, screen
+from tests.unit.training.test_vision import COIN, HERO, WALKER, hero_found, screen
 from tests.unit.training.test_vision_what_cost_a_life import a_watch, touch
 
 HERO_AT = 40  # where the hero is drawn in these screens
@@ -91,3 +91,26 @@ def test_threats_are_nearest_first() -> None:
     watch.look(screen([(100, 100, HERO), (40, 100, WALKER), (130, 60, WALKER)]))
     by_track = {t.id: t for t in watch.tracker.tracks()}
     assert [by_track[track].centre[0] for track, _ in watch.threats()] == [47, 137]
+
+
+def test_the_player_is_no_threat_to_itself() -> None:
+    """A thing that looks just as the player does costs a life: the kind a life was put
+    down to is then the player's own kind too. (A watch that follows the player as a
+    track of its own, with no colours to know it by.)"""
+    watch = ScreenWatch(hero_found())
+    watch.begin_go()
+    for x in (120, 104, 88, 72):
+        watch.look(screen([(HERO_AT, 100, HERO), (x, 100, HERO)]))
+    for _ in range(3):
+        watch.look(screen([(HERO_AT, 100, HERO)]))
+    watch.look(screen([(HERO_AT, 100, HERO)]), lost=1)
+    (role,) = watch.roles()
+    assert role.tag is SpriteTag.ENEMY and watch.lives_after_closest == 1
+    for _ in range(4):
+        watch.look(screen([(HERO_AT, 100, HERO)]))
+    own = [t for t in watch.tracker.tracks() if t.kind == role.kind]
+    assert len(own) == 1 and own[0].missing == 0  # the player's track is of that kind
+    assert watch.threats() == ()
+    watch.look(screen([(HERO_AT, 100, HERO), (150, 100, HERO)]))
+    ((track, kind),) = watch.threats()
+    assert kind == role.kind and track != own[0].id

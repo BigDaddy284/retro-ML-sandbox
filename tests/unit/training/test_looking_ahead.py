@@ -528,24 +528,26 @@ def test_it_stops_looking_ahead_in_a_game_where_that_keeps_finding_nothing(
     near = Near(monkeypatch, r.watch)
     sought = Sought(monkeypatch, [NOTHING, "the real search", NOTHING, NOTHING, "real"])
 
-    def a_go(thing: int) -> None:
+    def a_go() -> None:
+        # The same thing at the same place in every go: what a go looked ahead for,
+        # and the step a way found took it past, are that go's alone.
         lab.game.reset()
         near.now = ()
         r.begin()
         steps(r, 5)
-        near.now = ((thing, "thing-9"),)
+        near.now = THING
         assert r.step()
 
     # For nothing, then a way found (which starts the count again), then for nothing
     # twice in a row.
     with caplog.at_level(logging.INFO, logger=LOG):
-        for go, found in enumerate((0, 1, 0)):
-            a_go(go)
+        for found in (0, 1, 0):
+            a_go()
             assert (r.looked_ahead, r.ways_ahead, r.ways_ahead_found) == (1, 1, found)
             assert not r.ahead_gave_up
             r.finish()
         assert not said(caplog)[-1].startswith("Looking for a way past")
-        a_go(3)
+        a_go()
     assert r.ahead_gave_up and (r.ways_ahead, r.ways_ahead_found) == (1, 0)
     last, gave_up = said(caplog)[-2:]
     assert last.endswith("none got past, so it carries on.")  # one sentence says it stops
@@ -555,7 +557,7 @@ def test_it_stops_looking_ahead_in_a_game_where_that_keeps_finding_nothing(
     )
     r.finish()
     # From then on it does not look ahead, in this go or a later one...
-    a_go(4)
+    a_go()
     assert (r.looked_ahead, r.ways_ahead) == (0, 0) and len(sought.calls) == 4
     # ...and still goes back after a life lost.
     assert not r.gave_up
@@ -566,8 +568,8 @@ def test_it_stops_looking_ahead_in_a_game_where_that_keeps_finding_nothing(
     r, _ = looking(lab, give_up_after=None)
     near = Near(monkeypatch, r.watch)
     sought = Sought(monkeypatch, [NOTHING] * 9)
-    for go in range(9):
-        a_go(go)
+    for _ in range(9):
+        a_go()
         assert r.looked_ahead == 1 and not r.ahead_gave_up
         r.finish()
 
