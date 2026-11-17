@@ -396,8 +396,9 @@ class ScreenLearner:
     # ------------------------------------------------------------ persistence
 
     def to_dict(self) -> dict[str, Any]:
-        """Everything but the memory of steps: its pictures would make the file a
-        hundred times the size, and the network is what was learnt from them."""
+        """Everything but the memory of steps and the target network: the memory's
+        pictures would make the file many times the size, and the network is what was
+        learnt from them. Loaded, the target starts as a copy of the network."""
         return {
             "schema": SCHEMA_VERSION,
             "algorithm": self.algorithm,
@@ -413,7 +414,6 @@ class ScreenLearner:
             "run": self._runs.to_dict(),
             "rng": self._rng.getstate(),
             "network": _packed(self._net),
-            "target": _packed(self._target),
         }
 
     @classmethod
@@ -442,10 +442,7 @@ class ScreenLearner:
             agent._results.load(data.get("results"))
             agent._runs.load(data.get("run"), actions=len(saved))
             _unpack(agent._net, data["network"])
-            if "target" in data:
-                _unpack(agent._target, data["target"])
-            else:
-                agent._target.load_from(agent._net)
+            agent._target.load_from(agent._net)
             if "rng" in data:
                 agent._rng.setstate(_rng_state(data["rng"]))
         except (KeyError, TypeError, ValueError) as exc:

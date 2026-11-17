@@ -740,7 +740,8 @@ class EpisodeRunner:
         self._seen: Frame | None = None  # the screenshot of the step being settled
         # A learner that watches the screen is handed every state with its sight
         # (T-1055): the screen is asked for with every step, whatever the watch does.
-        self._pictures = bool(getattr(agent, "wants_picture", False))
+        self._wants_pictures = bool(getattr(agent, "wants_picture", False))
+        self._pictures = self._wants_pictures  # and the emulator gives them: see begin()
         self._shot: Frame | None = None  # the screen after the step being settled
         self._picture: bytes | None = None  # the last sight's picture: the next one's "before"
         # Lives lost and score rises on steps without a look, kept for the next look (T-988).
@@ -1165,6 +1166,14 @@ class EpisodeRunner:
         self._seen = None
         self._shot = None
         self._picture = None
+        if self._wants_pictures:
+            can = self._connection.call(lambda a: a.capabilities()).screen_capture
+            if not can and self._pictures:
+                log.warning(
+                    "This emulator gives no picture of the screen, so a learner that "
+                    "watches the screen has nothing to learn from here."
+                )
+            self._pictures = can
         self._unseen_lost = 0
         self._unseen_scored = 0
         if self._watch is not None:
