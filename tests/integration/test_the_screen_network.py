@@ -44,3 +44,16 @@ def test_the_screen_network_alone_on_a_practice_game_is_whole_and_seeded(game: s
     assert again.played == report.played and again.lines() == lines
     other = run(game, 8, seed=2, algorithm="screen", max_steps=100, block=4)
     assert other.played != report.played
+
+
+@pytest.mark.slow
+def test_on_the_practice_racer_it_gets_further_than_it_began() -> None:
+    """Fifty goes of 300 steps with every helper off, as the bench first measures a
+    learner: in the second block of 25 it drives half as far again as in the first.
+    (One seed, and a guard against it going blind, not the measure of how well it
+    learns: the tracker holds that, over 300 goes and two seeds.)"""
+    report = run("racer", 50, seed=2, algorithm="screen")
+    first, last = report.blocks()
+    assert (first.first, last.last) == (1, 50)
+    assert last.far > 1.4 * first.far and last.far > 400
+    assert last.best >= first.best > 0

@@ -14,7 +14,9 @@ import pytest
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.learning import (
     NO_MOVE,
+    PICTURE_HEIGHT,
     PICTURE_SIZE,
+    PICTURE_WIDTH,
     SCREEN,
     ActionSpace,
     Decision,
@@ -271,44 +273,73 @@ def test_new_settings_reach_its_runs_and_its_rebound() -> None:
 # ------------------------------------------------------------------- it learns
 
 
+HALF = PICTURE_WIDTH // 2
+
+
+def lit(world: Random, side: int) -> bytes:
+    """A picture bright on one half and dark on the other; no two are alike."""
+
+    def row() -> bytes:
+        return bytes(
+            world.randrange(150, 256) if (x < HALF) == (side == LEFT) else world.randrange(61)
+            for x in range(PICTURE_WIDTH)
+        )
+
+    return b"".join(row() for _ in range(PICTURE_HEIGHT))
+
+
+def noise(world: Random) -> bytes:
+    return bytes(world.randrange(256) for _ in range(PICTURE_SIZE))
+
+
 @pytest.mark.parametrize("seed", [1, 2, 3])
 def test_it_learns_which_move_pays_when_only_the_picture_says(seed: int) -> None:
-    """Bright: right pays. Dark: left pays. The parts of the state are the same."""
+    """The move on the bright side pays. Every picture is a new one, and the parts of
+    the state are the same throughout: only looking tells it."""
     agent = toy(seed)
     world = Random(7)
-    state = A
+    side = world.randrange(2)
+    state = seen(lit(world, side))
     for _ in range(1000):
         action = agent.choose(state)
-        pays = RIGHT if state.sight.now == BRIGHT else LEFT  # type: ignore[union-attr]
-        nxt = seen(world.choice([DARK, BRIGHT]))
-        agent.learn(state, action, 10.0 if action == pays else -10.0, nxt, done=True)
-        state = nxt
-    assert agent.greedy(A) == LEFT and agent.greedy(B) == RIGHT
-    assert agent.value(A, LEFT) > 0.5 > -0.5 > agent.value(A, RIGHT)
-    assert agent.value(B, RIGHT) > 0.5 > -0.5 > agent.value(B, LEFT)
+        following = world.randrange(2)
+        nxt = seen(lit(world, following))
+        agent.learn(state, action, 10.0 if action == side else -10.0, nxt, done=True)
+        state, side = nxt, following
     assert agent.updates == 1000 and agent.known == 200 and agent.trained == 993
+    fresh = Random(99)  # pictures it has never been shown
+    for side in (LEFT, RIGHT):
+        shown = [seen(lit(fresh, side)) for _ in range(10)]
+        assert sum(agent.greedy(state) == side for state in shown) >= 9
+        paying = sum(agent.value(state, side) for state in shown) / 10
+        other = sum(agent.value(state, 1 - side) for state in shown) / 10
+        assert paying > 0.5 > -0.5 > other  # near the plus and minus one it was paid
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3])
 def test_it_learns_which_move_pays_when_only_the_last_move_says(seed: int) -> None:
-    """One picture throughout. A move pays only when it is not the move just made:
+    """The pictures are noise. A move pays only when it is not the move just made:
     a button that wants a fresh press."""
     agent = toy(seed)
+    world = Random(7)
     held = NO_MOVE
-    state = seen(DARK, held=held)
+    picture = noise(world)
+    state = seen(picture, held=held)
     for _ in range(1000):
         action = agent.choose(state)
         reward = 10.0 if action != held else -10.0
         held = action
-        nxt = seen(DARK, held=held)
+        following = noise(world)
+        nxt = seen(following, picture, held)
         agent.learn(state, action, reward, nxt, done=True)
-        state = nxt
-    assert agent.greedy(seen(DARK, held=LEFT)) == RIGHT
-    assert agent.greedy(seen(DARK, held=RIGHT)) == LEFT
-    assert agent.value(seen(DARK, held=LEFT), RIGHT) > 0.5
-    assert agent.value(seen(DARK, held=LEFT), LEFT) < -0.5
-    assert agent.value(seen(DARK, held=RIGHT), LEFT) > 0.5
-    assert agent.value(seen(DARK, held=RIGHT), RIGHT) < -0.5
+        state, picture = nxt, following
+    fresh = Random(99)
+    for held in (LEFT, RIGHT):
+        shown = [seen(noise(fresh), held=held) for _ in range(10)]
+        assert sum(agent.greedy(state) == 1 - held for state in shown) >= 9
+        paying = sum(agent.value(state, 1 - held) for state in shown) / 10
+        other = sum(agent.value(state, held) for state in shown) / 10
+        assert paying > 0.3 > -0.3 > other
 
 
 def test_what_comes_later_reaches_back_through_the_pictures() -> None:
