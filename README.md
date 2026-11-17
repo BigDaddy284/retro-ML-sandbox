@@ -165,6 +165,28 @@ comes near (see "Before the AI loses a life"); the first line then says
 how often a life would have gone and how often it found the way past
 first. Without it the bench measures as it did before.
 
+To measure what the AI learns by itself, on either practice game, run the
+learning bench:
+
+```bash
+python -m retro_ai_lab.tools.learning_bench racer
+python -m retro_ai_lab.tools.learning_bench hopper --goes 200
+```
+
+It trains with every helper switched off: the AI never goes back after a
+life lost, remembers no way, and looks ahead at nothing. What is left is the
+learner and its rewards, which is the part that has to work on any game. It
+prints one line for every 25 goes (`--block` changes that), by the game's
+own account: the lives lost a go, how far it got (the racer's laps and its
+place on the track, the hopper's levels and its place in the level, as one
+number), and the goes in which no life was lost. The last line puts the
+first block beside the last. A learner that learns shows it from one line
+to the next. `--goes`, `--steps`, `--seed` and `--algorithm` are as on the
+practice bench; `--helpers` trains as the app does, to compare. Where the
+app has moved the spot its goes start from past a life (it does that to get
+a game going), each such go counts that life as lost, and a line says how
+many goes that was.
+
 The app's own log does the same every five seconds while it runs: next to the
 emulator link's line, an "App work" line counts the stalls of the window's
 thread and names what that thread did, event by event (`on DiscoveryUpdated`),
