@@ -140,6 +140,25 @@ def test_its_settings_are_checked() -> None:
             ScreenConfig(**bad)  # type: ignore[arg-type]
     assert ScreenConfig(reward_scale=1).reward_scale == 1
     assert ScreenConfig.from_dict(QUICK.to_dict()) == QUICK
+    own = ScreenConfig(
+        hidden=(8, 4),
+        batch_size=4,
+        warmup=6,
+        target_sync=7,
+        learning_rate=0.01,
+        memory=50,
+        reward_scale=0.5,
+    )
+    assert own.to_dict() == {
+        "hidden": [8, 4],
+        "batch_size": 4,
+        "warmup": 6,
+        "target_sync": 7,
+        "learning_rate": 0.01,
+        "memory": 50,
+        "reward_scale": 0.5,
+    }
+    assert ScreenConfig.from_dict(own.to_dict()) == own  # nothing of it falls back
     assert ScreenConfig.from_dict({}) == ScreenConfig()
     assert ScreenConfig.from_dict({"hidden": [32]}) == ScreenConfig(hidden=(32,))
     for bad_data in ({"hidden": 5}, {"batch_size": "many"}, {"hidden": ["a"]}, "nope"):
@@ -238,6 +257,19 @@ def test_what_it_tries_is_half_the_time_one_button_from_what_it_would_do() -> No
         assert set(picks) == set(range(len(space)))
         assert agent.greedy(state) == own  # choosing teaches it nothing
     assert held >= 3
+
+
+def test_a_decision_holds_what_it_thinks_the_move_it_made_is_worth() -> None:
+    agent = quick(seed=3, epsilon=1.0, epsilon_min=1.0, explore_run=1)
+    state = seen(BRIGHT, DARK, LEFT)
+    values = agent.values(state)
+    assert values[LEFT] != values[RIGHT]
+    made = set()
+    for _ in range(40):
+        action = agent.choose(state)
+        made.add(action)
+        assert agent.last_decision == Decision(action, True, values[action])
+    assert made == {LEFT, RIGHT}  # the worse move was tried too, and valued as itself
 
 
 def test_where_every_move_scores_the_same_it_picks_among_them() -> None:
@@ -498,6 +530,9 @@ def test_its_memory_holds_so_many_steps_and_the_oldest_go_first() -> None:
     agent.learn(A, LEFT, 90.0, B)
     assert [step[2] for step in agent._memory] == [9.0, 6.0, 7.0, 8.0]
     assert agent.known == 4 and agent.updates == 9
+    assert agent.stats().startswith(
+        "Watches the screen. Remembers 4 steps, learned from 9 steps over 0 goes; "
+    )
     first = quick()
     first.learn(A, LEFT, 1.0, B)
     assert first.stats().startswith(
@@ -635,8 +670,10 @@ def test_saved_and_loaded_it_chooses_and_learns_the_same() -> None:
         state = nxt
     agent.learn(BLIND, LEFT, 1.0, B)
     agent.end_episode(4.0)
+    start_a_run(agent)  # saved in the middle of a try it is holding
     text = json.dumps(agent.to_dict())
     data = json.loads(text)
+    assert data["run"]["left"] > 0
     assert data["algorithm"] == "screen" and data["schema"] == 1
     # Without its memory of steps and without the copy: a few kilobytes a go would
     # otherwise be megabytes.
@@ -652,7 +689,11 @@ def test_saved_and_loaded_it_chooses_and_learns_the_same() -> None:
     assert (again.epsilon, again.updates, again.episodes) == (agent.epsilon, 40, 1)
     assert (again.trained, again.unseen) == (agent.trained, 1)
     assert again.recent_rewards == (4.0,)
+    assert again._runs.to_dict() == agent._runs.to_dict() == data["run"]
     assert again.known == 0  # the memory starts empty
+    held = data["run"]["action"]  # the try goes on where it was
+    assert [again.choose(A) for _ in range(data["run"]["left"])] == [held] * data["run"]["left"]
+    assert [agent.choose(A) for _ in range(data["run"]["left"])] == [held] * data["run"]["left"]
     for state in (A, B, seen(BRIGHT, DARK, RIGHT), seen(DARK, BRIGHT, LEFT)):
         assert again.values(state) == agent.values(state)
         assert again.greedy(state) == agent.greedy(state)
@@ -698,6 +739,9 @@ def test_what_is_not_its_brain_is_refused() -> None:
         ScreenLearner.from_dict({**data, "network": {**net, "numbers": "not base64!"}})
     with pytest.raises(ConfigurationError, match="the network's numbers"):
         ScreenLearner.from_dict({**data, "network": {**net, "numbers": 5}})
+    stray = net["numbers"][:8] + "!?" + net["numbers"][8:]  # not skipped over: refused
+    with pytest.raises(ConfigurationError, match="the network's numbers"):
+        ScreenLearner.from_dict({**data, "network": {**net, "numbers": stray}})
     with pytest.raises(ConfigurationError, match="the network's numbers"):
         ScreenLearner.from_dict({**data, "network": {**net, "numbers": net["numbers"][:-16]}})
     raw = bytearray(base64.b64decode(net["numbers"]))

@@ -83,14 +83,13 @@ def convert(
     To or from the screen network it is a new learner that knows nothing
     (:func:`carries_over`); the screen network carries on the count of goes.
     """
-    _check(algorithm)
-    if algorithm == AUTO or agent.algorithm == algorithm:
-        return agent
-    if not carries_over(agent, algorithm):
+    if not carries_over(agent, algorithm):  # which refuses a name that is no way of learning
         fresh = make_learner(algorithm, agent.space, getattr(agent, "settings", None), seed=seed)
         if algorithm == SCREEN:
             fresh.resume_from(agent)  # type: ignore[attr-defined]
         return fresh
+    if algorithm == AUTO or agent.algorithm == algorithm:
+        return agent
     if algorithm == SKILLS:
         skills = SkillsLearner(agent.space, getattr(agent, "settings", None), seed=seed)
         skills.adopt(DEFAULT_SKILL, agent)
