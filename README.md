@@ -267,6 +267,14 @@ does that first. The goes table says "the game was over" for a go that ended
 this way, and the go's line in the log says what the count did ("Lives at
 ram[7] went from 0 to 255: it fell below nought, so every life is lost").
 
+That last life costs points like any other. A count kept this way cannot read
+below nought, so one life taken from none reads the most it can hold (0 to
+255 in a byte). No count gains that much in one step, so on a value the AI
+has seen fall by one it is read as a fall: "Losing Lives" and your own "goes
+down" penalty are paid for it, and "Gaining Lives" is not (it used to be, which
+was pay for dying). Health is left as it was, since games fill it up from
+nothing, and so is a value that only ever switches between 0 and 255.
+
 While a go is being played, the panel's status counts it down under the
 go's line: "This go has 23 s left." For a go that lasts until the game is
 over it is the wait instead, "This go ends if nothing is paid in the next

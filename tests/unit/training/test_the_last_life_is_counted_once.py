@@ -88,6 +88,14 @@ def test_another_values_fall_is_not_the_counts(bus: EventBus, signals: EpisodeSi
     signals.take_setbacks()
     tell(bus, told(SETBACK, HEALTH, 5, 4), told(SETBACK))
     assert taken(signals) == (1, 2, True)
+    # And where every setback counts, with the count's own told as a rise: two again.
+    signals.watch_setbacks(None)
+    signals.start()
+    for before in (2, 1):
+        tell(bus, told(SETBACK, LIFES, before, before - 1))
+    signals.take_setbacks()
+    tell(bus, told(SETBACK, HEALTH, 5, 4), told(UP))
+    assert taken(signals) == (1, 2, True)
 
 
 def test_a_plain_fall_is_counted_as_ever(bus: EventBus, signals: EpisodeSignals) -> None:
