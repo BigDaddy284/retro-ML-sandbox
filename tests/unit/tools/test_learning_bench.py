@@ -15,9 +15,15 @@ import pytest
 
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.core.events import EventBus
-from retro_ai_lab.emulator.fake import ToyHopper, toy_hopper, toy_racer
+from retro_ai_lab.emulator.fake import FakeEmulatorAdapter, ToyHopper, toy_hopper, toy_racer
 from retro_ai_lab.emulator.fake.toy_racer import ToyRacer
-from retro_ai_lab.services import ButtonsHeld
+from retro_ai_lab.emulator.registry import default_registry
+from retro_ai_lab.services import (
+    ButtonsHeld,
+    ConnectionService,
+    EmulatorDisconnected,
+    ObservationService,
+)
 from retro_ai_lab.tools import learning_bench
 from retro_ai_lab.tools.learning_bench import (
     Block,
@@ -26,11 +32,12 @@ from retro_ai_lab.tools.learning_bench import (
     _compared,
     _train,
     build_parser,
+    first_drive,
     how_far,
     main,
     run,
 )
-from retro_ai_lab.training import Mode
+from retro_ai_lab.training import Mode, Status, TrainingService
 from retro_ai_lab.training.episode import STAND_AFTER
 from retro_ai_lab.training.service import WAYS_PER_GO
 
@@ -80,6 +87,139 @@ def test_the_hopper_is_played_likewise() -> None:
     assert (report.ways_sought, report.remembered, report.looked_ahead) == (0, 0, 0)
     assert report.lines()[0].startswith("Learning bench on Toy Hopper: simple table, 2 goes")
     assert "(a level is 2,560)" in report.lines()[0]
+
+
+def test_with_the_helpers_on_the_report_says_so() -> None:
+    report = run("racer", 2, seed=1, algorithm="q_table", max_steps=30, helpers=True)
+    assert report.helpers is True
+    _whole(report, 2, 30)
+    assert "trained as the app does, with its helpers on." in report.lines()[0]
+
+
+@pytest.mark.parametrize("algorithm", ["q_table", "dqn"])
+def test_the_way_of_learning_asked_for_is_the_one_that_trains(
+    algorithm: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[str] = []
+    trained: list[str] = []
+    stopped: list[Status] = []
+
+    class Spy(TrainingService):
+        def set_algorithm(self, name: str) -> None:
+            asked.append(name)
+            super().set_algorithm(name)
+
+        def start(self, *args: Any, **options: Any) -> None:
+            super().start(*args, **options)
+            trained.append(self.algorithm)
+
+        def stop(self) -> None:
+            stopped.append(self.status)
+            super().stop()
+
+    monkeypatch.setattr(learning_bench, "TrainingService", Spy)
+    run("racer", 1, seed=1, algorithm=algorithm, max_steps=5)
+    assert asked == [algorithm] and trained == [algorithm]
+    assert stopped == [Status.RUNNING]  # stopped once when it was done, while running
+
+
+def test_a_run_that_fails_before_training_began_fails_with_its_own_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[str] = []
+
+    def train(training: Any, bus: Any, playing: Any, report: Report) -> None:
+        bus.subscribe(EmulatorDisconnected, lambda event: closed.append("closed"))
+        raise RuntimeError("the first go went wrong")
+
+    monkeypatch.setattr(learning_bench, "_train", train)
+    # Not "Nothing is running to stop": what went wrong is what is said, and the
+    # practice console is let go of all the same.
+    with pytest.raises(RuntimeError, match="the first go went wrong"):
+        run("racer", 1, seed=1, algorithm="q_table")
+    assert closed == ["closed"]
+
+
+@pytest.mark.parametrize(
+    ("game", "start", "first_go"),
+    [("racer", 0, "first_drive"), ("hopper", toy_hopper.START_X, "first_go")],
+)
+def test_a_first_go_is_played_and_the_game_put_back_to_its_start_before_training(
+    game: str, start: int, first_go: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    order: list[Any] = []
+    home = learning_bench if game == "racer" else learning_bench.practice_bench
+    real = getattr(home, first_go)
+
+    def played(connection: Any, observation: Any, frames: int) -> None:
+        real(connection, observation, frames)
+        state = connection.adapter.game.state
+        order.append(("first go", frames, state.frame))
+
+    def train(training: Any, bus: Any, playing: Any, report: Report) -> None:
+        state = playing.state
+        order.append(("train", state.lives, how_far(playing), state.score, state.game_over))
+
+    monkeypatch.setattr(home, first_go, played)
+    monkeypatch.setattr(learning_bench, "_train", train)
+    report = run(game, 3, seed=1, algorithm="q_table")
+    # The first go ran for all its frames, then the game was at its own start, every
+    # life in hand and nothing scored, when training began.
+    assert order == [("first go", 3000, 3000), ("train", 3, start, 0, False)]
+    assert report.played == []
+
+
+def test_the_racers_first_go_drives_lifts_off_changes_lane_and_starts_again() -> None:
+    bus = EventBus()
+    connection = ConnectionService(default_registry(), bus)
+    observation = ObservationService(connection, bus)
+    connection.connect("fake", game="racer", seed=2)
+    try:
+        adapter = connection.adapter
+        assert isinstance(adapter, FakeEmulatorAdapter)
+        game = adapter.game
+        held: list[tuple[bool, tuple[str, ...], int]] = []
+        real = adapter.set_input
+
+        def spy(buttons: Any) -> None:
+            state = game.state
+            held.append((state.game_over, tuple(b.name for b in buttons), how_far(game)))
+            real(buttons)
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(adapter, "set_input", spy)
+        try:
+            first_drive(connection, observation, 600)
+        finally:
+            monkeypatch.undo()
+        assert len(held) == 600 and observation.frame == 600
+        # What it holds while the game is on: up for 35 frames of every 50, left at
+        # every 90th frame and right halfway between.
+        on = {i: names for i, (over, names, _) in enumerate(held) if not over}
+        assert [on[i] for i in (0, 1, 34, 35, 45, 50, 90, 135, 180)] == [
+            ("up", "left"),
+            ("up",),
+            ("up",),
+            (),
+            ("right",),
+            ("up",),
+            ("left",),
+            ("right",),
+            ("up", "left"),
+        ]
+        assert all(
+            names in {(), ("up",), ("left",), ("right",)} or len(names) == 2
+            for names in on.values()
+        )
+        # It got somewhere, lost its lives doing it, and each time the game was over
+        # it pressed Start alone and the game was on again a frame later.
+        assert max(far for _, _, far in held) > 100
+        over = [i for i, (was, _, _) in enumerate(held) if was]
+        assert len(over) >= 3
+        assert all(held[i][1] == ("start",) for i in over)
+        assert all(not held[i + 1][0] for i in over if i + 1 < len(held))
+    finally:
+        connection.disconnect()
 
 
 class _BuiltError(Exception):
@@ -314,6 +454,26 @@ def test_a_life_that_stayed_lost_after_going_back_is_counted() -> None:
     assert _played(story).played == [Go(1, 36, 2, "max_steps")]
 
 
+def test_a_life_lost_and_played_on_from_within_the_step_is_counted() -> None:
+    # The buttons went down again after the life went (nothing was found to go back
+    # for): the step is counted from its first buttons, not its last.
+    story = Story(
+        ToyRacer(seed=1),
+        [[[at(3, 0), hold, at(2, 40), hold, at(2, 44)], [hold, at(2, 50)]]],
+        [result(2)],
+    )
+    assert _played(story).played == [Go(1, 50, 2, "max_steps")]
+
+
+def test_a_life_won_takes_nothing_off_the_lives_lost() -> None:
+    story = Story(
+        ToyRacer(seed=1),
+        [[[at(3, 0), hold, at(2, 10)], [hold, at(3, 20)], [hold, at(4, 30)], [hold, at(3, 40)]]],
+        [result(4)],
+    )
+    assert _played(story).played == [Go(2, 40, 4, "max_steps")]
+
+
 def test_the_furthest_is_kept_when_the_game_goes_back_and_is_the_gos_own() -> None:
     story = Story(
         ToyRacer(seed=1),
@@ -457,6 +617,22 @@ def test_the_last_line_says_which_way_it_went() -> None:
     same = _report([FIVE[0], FIVE[1], FIVE[1], FIVE[0]]).lines()[-1]
     assert same == (
         "From the first block to the last: lives lost a go 2.00 to 2.00 (the same), "
+        "how far 150 to 150 (the same)."
+    )
+
+
+def test_each_figure_is_compared_as_the_report_shows_it() -> None:
+    # Lives are shown to two decimals and compared so: half a life fewer is fewer.
+    halves = [Go(2, 150, 9, "stuck"), Go(2, 150, 9, "stuck"), Go(2, 150, 9, "stuck")]
+    halves.append(Go(1, 150, 9, "stuck"))
+    assert _report(halves).lines()[-1] == (
+        "From the first block to the last: lives lost a go 2.00 to 1.50 (fewer), "
+        "how far 150 to 150 (the same)."
+    )
+    # How far is shown whole and compared whole: a quarter of a step is not further.
+    quarter = [Go(1, 150, 9, "stuck")] * 7 + [Go(1, 151, 9, "stuck")]
+    assert _report(quarter, block=4).lines()[-1] == (
+        "From the first block to the last: lives lost a go 1.00 to 1.00 (the same), "
         "how far 150 to 150 (the same)."
     )
 

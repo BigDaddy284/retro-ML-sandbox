@@ -41,7 +41,7 @@ from retro_ai_lab.services import (
 )
 from retro_ai_lab.storage import GoalStore, KnowledgeStore, RewardStore
 from retro_ai_lab.tools import practice_bench
-from retro_ai_lab.training import Mode, TrainingService
+from retro_ai_lab.training import Mode, Status, TrainingService
 from retro_ai_lab.training.episode import STAND_AFTER
 from retro_ai_lab.training.service import WAYS_PER_GO
 
@@ -275,7 +275,8 @@ def run(
             played.reset()  # the AI's goes start from the game's start, every life in hand
             _train(training, bus, played, report)
         finally:
-            training.stop()
+            if training.status is not Status.IDLE:  # it may have failed before it began
+                training.stop()
             connection.disconnect()
     return report
 
@@ -308,9 +309,8 @@ def _train(
                 # it was not lost.
                 lost += max(0, lives[0] - game.state.lives)
                 far = max(far, how_far(game))
-            runner = training.episode
-            if runner is not None:
-                looked = max(looked, getattr(runner, "looked_ahead", 0))
+            # No go in hand, or one that knows nothing of looking ahead, counts as none.
+            looked = max(looked, getattr(training.episode, "looked_ahead", 0))
         result = training.history[-1].result
         report.played.append(Go(lost, far, result.steps, result.ended_by))
         report.ways_sought += result.ways_sought + result.ways_ahead
