@@ -703,7 +703,18 @@ every thing of that kind the moment it is on the screen, walking or standing
 still, so an enemy it walks into is there to be blamed. (A thing that never
 moves and stands on the ground, spikes for one, is still not seen, and
 neither is an enemy drawn in the colours of the ground under it beyond the
-edge that moves.) At every look the brain is told what is around it, read off the
+edge that moves.) It keeps each touch with the way it was made: from above,
+from the side or from below. A kind hurts once it has cost a life after at
+least half the touches made in any one of those ways, so an enemy that can be
+landed on is still known to hurt from the side, however often it is landed
+on. A life is put down to what was touched in the 45 looks before it (about
+6 seconds; it was 4). When no touch was seen in that time, it is put down
+to the thing that was seen closest to the AI, within 32 pixels: a look comes
+only every few frames, and what a game shows of a hit does not always show
+the two touching. For every life lost the log says what it was put down to
+("A life was lost. Put down to thing-4, touched from the side 26 looks
+before."), and the line for a kind says after how many touches of each way
+a life went. At every look the brain is told what is around it, read off the
 picture next to where it sees itself: how much floor there is to its right
 and to its left before a drop, how far the way is clear at its own height on
 each side, and whether it stands on something, has something below it or has
