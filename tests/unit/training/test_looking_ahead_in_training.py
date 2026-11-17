@@ -102,26 +102,28 @@ def test_the_bench_report_says_how_often_it_looked_ahead() -> None:
         "still with none lost, and found a way past in 3 (60%)."
     )
     assert not any(line.startswith("Looking ahead") for line in old)
-    assert report(ways_sought=4, ways_found=1).lines()[-1] == (
-        "Ways past: after losing a life it went back 4 times and found a way past in 1 (25%)."
-    )
-    # The searches made before a life went are told apart, and the looks ahead counted.
-    lines = report(ways_sought=9, ways_found=6, ways_stood=2, ways_ahead=4, looked_ahead=31).lines()
-    assert lines[-2:] == [
-        "Ways past: it went back 9 times, 3 after losing a life, 4 before a life it saw "
-        "going was lost and 2 where it stood still with none lost, and found a way past "
-        "in 6 (67%).",
+    # The searches made before a life went are counted apart, in a line of their own:
+    # what is said of the go's own searches does not change.
+    lines = report(
+        ways_sought=5, ways_found=3, ways_stood=2, looked_ahead=31, ways_ahead=4, ways_ahead_found=3
+    ).lines()
+    assert lines[:-1] == old
+    assert lines[-1] == (
         "Looking ahead: 31 times a thing of a kind that had cost a life came near and it "
-        "played ahead what it was about to do; that would have cost a life in 4.",
-    ]
-    lines = report(ways_sought=1, ways_found=1, ways_ahead=1, looked_ahead=1).lines()
+        "played ahead what it was about to do; that would have cost a life in 4, and it "
+        "went back and found a way past before the life went in 3 of those (75%)."
+    )
+    lines = report(ways_sought=4, ways_found=1, looked_ahead=1, ways_ahead=1).lines()
     assert lines[-2:] == [
-        "Ways past: it went back 1 time, 0 after losing a life and 1 before a life it saw "
-        "going was lost, and found a way past in 1 (100%).",
+        "Ways past: after losing a life it went back 4 times and found a way past in 1 (25%).",
         "Looking ahead: 1 time a thing of a kind that had cost a life came near and it "
-        "played ahead what it was about to do; that would have cost a life in 1.",
+        "played ahead what it was about to do; that would have cost a life in 1, and it "
+        "went back and found a way past before the life went in 0 of those (0%).",
     ]
-    # Looked ahead and never saw a life going: the searches read as before.
-    lines = report(ways_sought=2, ways_found=2, looked_ahead=7).lines()
-    assert lines[-2].startswith("Ways past: after losing a life it went back 2 times")
-    assert lines[-1].endswith("that would have cost a life in 0.")
+    # Looked ahead and never saw a life going, in a run that never went back.
+    lines = report(looked_ahead=7).lines()
+    assert lines[-2:] == [
+        "Ways past: it never went back to look for one.",
+        "Looking ahead: 7 times a thing of a kind that had cost a life came near and it "
+        "played ahead what it was about to do; that would have cost a life in 0.",
+    ]

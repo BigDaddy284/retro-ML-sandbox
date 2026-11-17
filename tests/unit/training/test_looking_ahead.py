@@ -131,7 +131,8 @@ def test_a_life_seen_going_is_saved_before_it_goes(
     with caplog.at_level(logging.INFO, logger=LOG):
         assert r.step()
     assert r.looked_ahead == 1
-    assert (r.ways_sought, r.ways_found, r.ways_ahead, r.times_back) == (1, 1, 1, 1)
+    assert (r.ways_ahead, r.ways_ahead_found, r.times_back) == (1, 1, 1)
+    assert (r.ways_sought, r.ways_found) == (0, 0)  # none of the go's searches was used
     # The play ahead was from a save of the present, which was then put back; the
     # search was from the moment before, and its way is what the game was put back for.
     assert lab.saved[-2:] == [NOW_SLOT, NOW_SLOT]  # the look ahead's, and the search's
@@ -159,8 +160,9 @@ def test_a_life_seen_going_is_saved_before_it_goes(
     assert lab.game.state.lives == toy_hopper.START_LIVES and lab.game.state.x > GAP_ENDS
     result = r.finish()
     assert (result.setbacks, result.first_setback_step) == (0, None)
-    assert (result.ways_sought, result.ways_found, result.ways_ahead) == (1, 1, 1)
-    assert result.describe_ways() == ", went back once (before a life went) and found a way past"
+    assert (result.ways_sought, result.ways_found) == (0, 0)
+    assert (result.ways_ahead, result.ways_ahead_found) == (1, 1)
+    assert result.describe_ways() == (", saw a life going once before it went and found a way past")
 
 
 def test_the_search_is_over_what_it_did_and_what_it_was_about_to_do(
@@ -219,7 +221,7 @@ def test_the_dying_pause_it_remembers_is_played_on_top_and_asked_about(
     near.now = THING
     with caplog.at_level(logging.INFO, logger=LOG):
         assert r.step()
-    assert (r.looked_ahead, r.ways_sought, r.ways_found, r.ways_ahead) == (1, 1, 1, 1)
+    assert (r.looked_ahead, r.ways_sought, r.ways_ahead, r.ways_ahead_found) == (1, 0, 1, 1)
     settled, found = said(caplog)
     assert settled.startswith(
         f"Carrying on from step 5 would cost a life {LONG_DIED - 5} steps on. That was "
@@ -414,37 +416,31 @@ def test_looking_ahead_is_off_the_record(lab: Lab, monkeypatch: pytest.MonkeyPat
 # ------------------------------------------------------------ alive
 
 
-def test_alive_it_plays_what_it_checked(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_alive_nothing_is_changed(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
     r, moments = looking(lab, LONG)  # the long pause: the walk goes on for 74 steps
     near = Near(monkeypatch, r.watch)
-    Played(monkeypatch)
-    walk, jump, hop = lab.move("right"), lab.move("a", "right"), lab.move("a")
+    played = Played(monkeypatch)
+    walk, stand = lab.move("right"), lab.move()
     r.begin()
     assert walked(lab, r, 3) == []  # the learner is asked each step, and walks
-    lab.agent.script.extend([jump] * 200)  # what the learner would do next, were it asked
-    # A thing comes near and carrying on stays alive: the next 40 steps are the plain
-    # move it checked, and the learner is not asked.
+    lab.agent.script.extend([stand] * 4)  # what the learner does next
+    # A thing comes near and carrying on stays alive: nothing is queued. The learner is
+    # asked at that very step and after, and what it chooses is played, not the move
+    # that was checked. (A queue filled with that move kept a go from looking for a
+    # way on where it stood at a wall: no level was finished in twelve goes.)
     near.now = THING
     moves = []
-    for _ in range(AHEAD):
+    for _ in range(4):
         asked = lab.agent.asked
         assert r.step()
-        assert lab.agent.asked == asked
+        assert lab.agent.asked == asked + 1
         moves.append(r.last_action)
-    assert moves == [walk] * AHEAD
-    assert walked(lab, r, 2) == [] and r.last_action == jump  # and then it is again
-    # Moves queued stay first, and are filled up to 40 with the plain move.
-    r.go_back(moments.kept[0], then=[hop] * 3)
-    moves = []
-    for _ in range(AHEAD):
-        assert r.step()
-        moves.append(r.last_action)
-    assert moves == [hop] * 3 + [walk] * (AHEAD - 3)
-    assert walked(lab, r, 1) == []
-    # A longer queue is left as it is.
-    r.go_back(moments.kept[0], then=[hop] * (AHEAD + 2))
-    assert walked(lab, r, AHEAD + 3) == list(range(AHEAD + 2))
-    assert r.looked_ahead == 3 and r.ways_sought == 0
+    assert played.moves == [(walk,) * AHEAD] and moves == [stand] * 4
+    # Moves queued are played as they were and no more: after the last of them the
+    # learner is asked again, though it looked ahead while they were played.
+    r.go_back(moments.kept[0], then=[stand] * (AHEAD_EVERY + 2))
+    assert walked(lab, r, AHEAD_EVERY + 5) == list(range(AHEAD_EVERY + 2))
+    assert r.looked_ahead == 2 and (r.ways_sought, r.ways_ahead) == (0, 0)
 
 
 # ------------------------------------------------------------ no way found
@@ -462,7 +458,7 @@ def test_no_way_found_and_the_go_carries_on(
     near.now = THING
     with caplog.at_level(logging.INFO, logger=LOG):
         assert r.step()
-    assert (r.looked_ahead, r.ways_sought, r.ways_found, r.ways_ahead) == (1, 1, 0, 1)
+    assert (r.looked_ahead, r.ways_sought, r.ways_ahead, r.ways_ahead_found) == (1, 0, 1, 0)
     assert r.times_back == 0 and lab.loaded[-1] == NOW_SLOT
     # The game is where one step from there puts it, and the moments are kept: the
     # loss has not happened.
@@ -477,15 +473,17 @@ def test_no_way_found_and_the_go_carries_on(
     # It looks ahead no more in this go: one search for nothing was all it had.
     near.now = ((2, "thing-9"),)
     steps(r, DIED_AT - 7)
-    assert r.looked_ahead == 1 and r.ways_sought == 1
+    assert r.looked_ahead == 1 and (r.ways_sought, r.ways_ahead) == (0, 1)
     # The life goes, and the go's search after a life lost is still there to be made.
     assert r.step()
-    assert (r.ways_sought, r.ways_found, r.ways_ahead, r.times_back) == (2, 1, 1, 1)
+    assert (r.ways_sought, r.ways_found, r.times_back) == (1, 1, 1)
+    assert (r.ways_ahead, r.ways_ahead_found) == (1, 0)
     assert len(sought.calls) == 2
     result = r.finish()
     assert result.setbacks == 1
     assert result.describe_ways() == (
-        ", went back 2 times (once before a life went) and found a way past once"
+        ", went back once and found a way past, saw a life going once before it went and "
+        "found no way past"
     )
     # A new go looks ahead again.
     sought.answers.append(NOTHING)
@@ -509,7 +507,7 @@ def test_it_stops_looking_after_as_many_for_nothing_as_a_go_has_searches(
             near.now = ((track, "thing-9"),)
             steps(r, AHEAD_EVERY)
     assert len(played.moves) == 2 and r.looked_ahead == 2
-    assert (r.ways_sought, r.ways_found, r.ways_ahead) == (2, 0, 2)
+    assert (r.ways_sought, r.ways_ahead, r.ways_ahead_found) == (0, 2, 0)
     first, second = said(caplog)
     assert first.endswith("none got past, so it carries on.")
     assert second.endswith(
@@ -517,8 +515,61 @@ def test_it_stops_looking_after_as_many_for_nothing_as_a_go_has_searches(
         "may before a life is lost, and looks ahead no more in this go."
     )
     assert r.finish().describe_ways() == (
-        ", went back 2 times (each time before a life went) and found no way past"
+        ", saw a life going 2 times before it went and found no way past"
     )
+
+
+def test_it_stops_looking_ahead_in_a_game_where_that_keeps_finding_nothing(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """As the searches after a life lost and those at a standstill do, each counted
+    apart: as many in a row for nothing as ``give_up_after``, from go to go."""
+    r, _ = looking(lab, give_up_after=2)
+    near = Near(monkeypatch, r.watch)
+    sought = Sought(monkeypatch, [NOTHING, "the real search", NOTHING, NOTHING, "real"])
+
+    def a_go(thing: int) -> None:
+        lab.game.reset()
+        near.now = ()
+        r.begin()
+        steps(r, 5)
+        near.now = ((thing, "thing-9"),)
+        assert r.step()
+
+    # For nothing, then a way found (which starts the count again), then for nothing
+    # twice in a row.
+    with caplog.at_level(logging.INFO, logger=LOG):
+        for go, found in enumerate((0, 1, 0)):
+            a_go(go)
+            assert (r.looked_ahead, r.ways_ahead, r.ways_ahead_found) == (1, 1, found)
+            assert not r.ahead_gave_up
+            r.finish()
+        assert not said(caplog)[-1].startswith("Looking for a way past")
+        a_go(3)
+    assert r.ahead_gave_up and (r.ways_ahead, r.ways_ahead_found) == (1, 0)
+    last, gave_up = said(caplog)[-2:]
+    assert last.endswith("none got past, so it carries on.")  # one sentence says it stops
+    assert gave_up == (
+        "Looking for a way past a life it saw going found none 2 times in a row, so the AI "
+        "stops looking ahead in this game: here it only costs time."
+    )
+    r.finish()
+    # From then on it does not look ahead, in this go or a later one...
+    a_go(4)
+    assert (r.looked_ahead, r.ways_ahead) == (0, 0) and len(sought.calls) == 4
+    # ...and still goes back after a life lost.
+    assert not r.gave_up
+    near.now = ()
+    steps(r, DIED_AT - 6)
+    assert (r.ways_sought, r.ways_found, r.times_back) == (1, 1, 1)
+    # A runner told never to give up does not.
+    r, _ = looking(lab, give_up_after=None)
+    near = Near(monkeypatch, r.watch)
+    sought = Sought(monkeypatch, [NOTHING] * 9)
+    for go in range(9):
+        a_go(go)
+        assert r.looked_ahead == 1 and not r.ahead_gave_up
+        r.finish()
 
 
 def test_a_way_found_ahead_costs_none_of_the_gos_searches(
@@ -530,13 +581,13 @@ def test_a_way_found_ahead_costs_none_of_the_gos_searches(
     steps(r, 5)
     near.now = THING
     assert r.step()
-    assert (r.ways_sought, r.ways_found, r.ways_ahead, r.times_back) == (1, 1, 1, 1)
+    assert (r.ways_sought, r.ways_ahead, r.ways_ahead_found, r.times_back) == (0, 1, 1, 1)
     # Over the gap, the learner walks on into the next place a life goes at: the go's
     # one search after a life lost is made there.
     near.now = ()
-    while r.ways_sought == 1:
+    while r.ways_sought == 0:
         assert r.step()
-    assert (r.ways_sought, r.ways_ahead, r.times_back) == (2, 1, 2)
+    assert (r.ways_sought, r.ways_ahead, r.times_back) == (1, 1, 2)
     # And it still looks ahead: the way found took none of those either.
     played = Played(monkeypatch)
     near.now = ((7, "thing-9"),)
@@ -570,41 +621,43 @@ def test_moments_are_kept_while_it_may_still_look_ahead(
 
 
 def test_the_result_counts_them() -> None:
-    def result(sought: int, found: int, stood: int = 0, ahead: int = 0) -> EpisodeResult:
+    def result(sought: int, found: int, stood: int, ahead: int, ahead_found: int) -> EpisodeResult:
         return EpisodeResult(
             10, 40, 1.0, "max_steps", 3, ways_sought=sought, ways_found=found,
-            ways_stood=stood, ways_ahead=ahead,
+            ways_stood=stood, ways_ahead=ahead, ways_ahead_found=ahead_found,
         )  # fmt: skip
 
-    assert result(0, 0).describe_ways() == ""
+    assert result(0, 0, 0, 0, 0).describe_ways() == ""
+    saw = ", saw a life going "
     says = {
-        (1, 1, 0, 1): ", went back once (before a life went) and found a way past",
-        (1, 0, 0, 1): ", went back once (before a life went) and found no way past",
-        (3, 3, 0, 3): ", went back 3 times (each time before a life went) and found a way "
+        (0, 0, 0, 1, 1): saw + "once before it went and found a way past",
+        (0, 0, 0, 1, 0): saw + "once before it went and found no way past",
+        (0, 0, 0, 3, 3): saw + "3 times before it went and found a way past each time",
+        (0, 0, 0, 3, 1): saw + "3 times before it went and found a way past once",
+        (0, 0, 0, 4, 2): saw + "4 times before it went and found a way past 2 times",
+        (0, 0, 0, 2, 0): saw + "2 times before it went and found no way past",
+        # After what it says of the go's own searches, which reads as it did.
+        (2, 1, 0, 1, 1): ", went back 2 times and found a way past once"
+        + saw
+        + "once before it went and found a way past",
+        (3, 1, 2, 5, 4): ", went back 3 times (2 times where it stood still) and found a "
+        "way past once" + saw + "5 times before it went and found a way past 4 times",
+        (1, 1, 1, 0, 0): ", went back once (where it stood still) and found a way past",
+        (2, 0, 2, 0, 0): ", went back 2 times (each time where it stood still) and found "
+        "no way past",
+        (2, 2, 1, 0, 0): ", went back 2 times (once where it stood still) and found a way "
         "past each time",
-        (3, 2, 0, 1): ", went back 3 times (once before a life went) and found a way past 2 times",
-        (4, 1, 0, 2): ", went back 4 times (2 times before a life went) and found a way past once",
-        (2, 2, 1, 1): ", went back 2 times (once where it stood still, once before a life "
-        "went) and found a way past each time",
-        (6, 3, 2, 3): ", went back 6 times (2 times where it stood still, 3 times before a "
-        "life went) and found a way past 3 times",
-        # As before for a go with none ahead.
-        (1, 1, 1, 0): ", went back once (where it stood still) and found a way past",
-        (2, 0, 2, 0): ", went back 2 times (each time where it stood still) and found no way past",
-        (
-            3,
-            1,
-            2,
-            0,
-        ): ", went back 3 times (2 times where it stood still) and found a way past once",
-        (2, 1, 0, 0): ", went back 2 times and found a way past once",
+        (2, 1, 0, 0, 0): ", went back 2 times and found a way past once",
     }
     for counts, words in says.items():
         assert result(*counts).describe_ways() == words
     # Saved and read back; a go saved before this task has none.
-    kept = result(4, 1, 1, 2)
+    kept = result(4, 1, 1, 3, 2)
     data = kept.to_dict()
-    assert data["ways_ahead"] == 2 and EpisodeResult.from_dict(data) == kept
-    del data["ways_ahead"]
-    assert EpisodeResult.from_dict(data).ways_ahead == 0
-    assert EpisodeResult(10, 40, 1.0, "max_steps", 3).ways_ahead == 0
+    assert (data["ways_ahead"], data["ways_ahead_found"]) == (3, 2)
+    assert EpisodeResult.from_dict(data) == kept
+    del data["ways_ahead"], data["ways_ahead_found"]
+    old = EpisodeResult.from_dict(data)
+    assert (old.ways_ahead, old.ways_ahead_found) == (0, 0) and old.ways_sought == 4
+    plain = EpisodeResult(10, 40, 1.0, "max_steps", 3)
+    assert (plain.ways_ahead, plain.ways_ahead_found) == (0, 0)

@@ -140,6 +140,15 @@ def describe_earned(earned: Iterable[Earning], most: int | None = 3) -> str:
     return ", ".join(words)
 
 
+def _found(found: int, sought: int) -> str:
+    """ "found a way past once", of ``sought`` searches."""
+    if found == 0:
+        return "found no way past"
+    if found == sought:
+        return "found a way past" if found == 1 else "found a way past each time"
+    return f"found a way past {'once' if found == 1 else f'{found} times'}"
+
+
 def _steps(count: int) -> str:
     return "1 step" if count == 1 else f"{count} steps"
 
@@ -502,7 +511,8 @@ class EpisodeResult:
     pressed_on: int = 0  # times it was paid nothing for a while and pressed on (T-1011)
     remembered: int = 0  # steps it began with from the way it remembered (T-1014)
     ways_stood: int = 0  # of ways_sought, those where it stood still, no life lost (T-1018)
-    ways_ahead: int = 0  # of ways_sought, those for a life seen going, before it went (T-1052)
+    ways_ahead: int = 0  # times it went back for a life seen going, before it went (T-1052)
+    ways_ahead_found: int = 0  # times that found a way past: counted apart from ways_sought
 
     @property
     def succeeded(self) -> bool:
@@ -524,38 +534,26 @@ class EpisodeResult:
     def describe_ways(self) -> str:
         """ ", went back 2 times and found a way past once", or "" when it never looked
         (T-1007). Where some of those were at a standstill and not after a life lost
-        (T-1018): ", went back 2 times (once where it stood still) and ...". And where
-        some were for a life seen going, before it went (T-1052): "... (once where it
-        stood still, 2 times before a life went) and ..."."""
-        if self.ways_sought == 0:
-            return ""
-        back = "once" if self.ways_sought == 1 else f"{self.ways_sought} times"
-        notes = [
-            (count, what)
-            for count, what in (
-                (self.ways_stood, "where it stood still"),
-                (self.ways_ahead, "before a life went"),
-            )
-            if count
-        ]
-        if len(notes) == 1 and self.ways_sought == 1:
-            back += f" ({notes[0][1]})"
-        elif len(notes) == 1 and notes[0][0] == self.ways_sought:
-            back += f" (each time {notes[0][1]})"
-        elif notes:
-            told = ", ".join(
-                f"{'once' if count == 1 else f'{count} times'} {what}" for count, what in notes
-            )
-            back += f" ({told})"
-        if self.ways_found == 0:
-            found = "found no way past"
-        elif self.ways_found == self.ways_sought:
-            found = "found a way past" if self.ways_found == 1 else "found a way past each time"
-        else:
-            found = (
-                f"found a way past {'once' if self.ways_found == 1 else f'{self.ways_found} times'}"
-            )
-        return f", went back {back} and {found}"
+        (T-1018): ", went back 2 times (once where it stood still) and ...". The searches
+        for a life seen going, before it went, are counted apart and said after
+        (T-1052): ", saw a life going 3 times before it went and found a way past 2
+        times"."""
+        said = ""
+        if self.ways_sought:
+            back = "once" if self.ways_sought == 1 else f"{self.ways_sought} times"
+            if self.ways_stood and self.ways_sought == 1:
+                back += " (where it stood still)"
+            elif self.ways_stood == self.ways_sought:
+                back += " (each time where it stood still)"
+            elif self.ways_stood:
+                stood = "once" if self.ways_stood == 1 else f"{self.ways_stood} times"
+                back += f" ({stood} where it stood still)"
+            said = f", went back {back} and {_found(self.ways_found, self.ways_sought)}"
+        if self.ways_ahead:
+            times = "once" if self.ways_ahead == 1 else f"{self.ways_ahead} times"
+            found = _found(self.ways_ahead_found, self.ways_ahead)
+            said += f", saw a life going {times} before it went and {found}"
+        return said
 
     def describe_losses(self) -> str:
         """ ", lost a life 2 times, the first at step 3", or "" when none were lost (T-934)."""
@@ -586,6 +584,7 @@ class EpisodeResult:
             "remembered": self.remembered,
             "ways_stood": self.ways_stood,
             "ways_ahead": self.ways_ahead,
+            "ways_ahead_found": self.ways_ahead_found,
         }
 
     @classmethod
@@ -607,6 +606,7 @@ class EpisodeResult:
                 int(data.get("remembered", 0)),
                 int(data.get("ways_stood", 0)),
                 int(data.get("ways_ahead", 0)),
+                int(data.get("ways_ahead_found", 0)),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"Bad go result: {exc}") from exc
@@ -772,7 +772,10 @@ class EpisodeRunner:
         self._looks_ahead = look_ahead
         self._ahead_left = 0
         self._ways_ahead = 0
+        self._ways_ahead_found = 0
         self._looked_ahead = 0
+        self._ahead_missed = 0  # such searches in a row that found nothing, go to go
+        self._ahead_gave_up = False
         self._minded: set[int] = set()
         self._looked_at: int | None = None
         # The step of the story a life was last seen going at and a way past found: it
@@ -974,9 +977,21 @@ class EpisodeRunner:
 
     @property
     def ways_ahead(self) -> int:
-        """Of :attr:`ways_sought`, those made for a life seen going, before it went
-        (T-1052)."""
+        """Times this go went back to look for a way past a life it saw going, before
+        it went (T-1052). Not among :attr:`ways_sought`: these take none of the go's
+        searches after a life lost."""
         return self._ways_ahead
+
+    @property
+    def ways_ahead_found(self) -> int:
+        """Times that found one."""
+        return self._ways_ahead_found
+
+    @property
+    def ahead_gave_up(self) -> bool:
+        """Its searches for a life seen going kept finding nothing, so it looks ahead
+        no more in this game (T-1052). After a life lost it still goes back."""
+        return self._ahead_gave_up
 
     @property
     def looks_ahead(self) -> bool:
@@ -1100,8 +1115,10 @@ class EpisodeRunner:
                     "finding nothing. From this go on it goes back after a life lost again."
                 )
         self._ways_left = 0 if self._gave_up else self._ways_per_go
-        self._ahead_left = self._ways_per_go if self._looks_ahead else 0
+        looks = self._looks_ahead and not self._ahead_gave_up
+        self._ahead_left = self._ways_per_go if looks else 0
         self._ways_ahead = 0
+        self._ways_ahead_found = 0
         self._looked_ahead = 0
         self._minded.clear()
         self._looked_at = None
@@ -1652,10 +1669,9 @@ class EpisodeRunner:
         and the game is put back. False if the link dropped.
 
         What it is about to do is the moves queued (the way it remembers, a way a
-        search found, a press) and then its plain move. Staying alive, it plays
-        what it checked: the queue is filled up to ``AHEAD`` moves with the plain
-        move. A life going is searched for as a life lost is (:meth:`_seek`),
-        before it is lost.
+        search found, a press) and then its plain move. Staying alive, nothing is
+        changed and the AI carries on by its own choice. A life going is searched
+        for as a life lost is (:meth:`_seek`), before it is lost.
 
         Only where a search could follow, and not within ``AHEAD_EVERY`` steps of
         the last look ahead: a play off the record costs time on a real emulator,
@@ -1705,12 +1721,11 @@ class EpisodeRunner:
             return self._seek(coming=todo[: seen.steps], near=new[0])
         log.debug(
             "Something of a kind that has cost a life (%s) came near at step %d. The next "
-            "%d steps of carrying on cost none, so the AI plays them.",
+            "%d steps of carrying on cost none.",
             new[0],
             self._steps,
             AHEAD,
         )
-        self._forced.extend([plain] * (AHEAD - len(self._forced)))
         return True
 
     def _way_back(
@@ -1824,7 +1839,7 @@ class EpisodeRunner:
             self._ways_ahead += 1
         else:
             self._ways_left -= 1
-        self._ways_sought += 1
+            self._ways_sought += 1
         if stood:
             self._ways_stood += 1
         space = self._agent.space
@@ -1922,6 +1937,10 @@ class EpisodeRunner:
                 del self._sought[:-MOST_SOUGHT]
             if coming:
                 self._ahead_left -= 1
+                self._ahead_missed += 1
+                # As many in a row for nothing as stop the searches after a life lost
+                # (``give_up_after``), counted apart as those at a standstill are.
+                done = self._give_up_after is not None and self._ahead_missed >= self._give_up_after
                 log.info(
                     "%s %s made %d tries in %.1f s%s: none got past, so it carries on.%s",
                     seen,
@@ -1930,10 +1949,19 @@ class EpisodeRunner:
                     search.seconds,
                     ", all the time a search may take" if search.out_of_time else "",
                     ""
-                    if self._ahead_left
+                    if self._ahead_left or done
                     else " It has now looked for nothing as often as a go may before a "
                     "life is lost, and looks ahead no more in this go.",
                 )
+                if done:
+                    self._ahead_gave_up = True
+                    self._ahead_left = 0
+                    log.info(
+                        "Looking for a way past a life it saw going found none %d times in "
+                        "a row, so the AI stops looking ahead in this game: here it only "
+                        "costs time.",
+                        self._ahead_missed,
+                    )
                 return True
             log.info(
                 "Lost a life at step %d. Went back %s and made %d tries in %.1f s%s: "
@@ -1966,13 +1994,17 @@ class EpisodeRunner:
                         times,
                     )
             return True
-        if stood:
-            self._stood_missed = 0
+        if coming:
+            self._ahead_missed = 0
+            self._ways_ahead_found += 1
         else:
-            self._missed = 0
-            self._found_past = True
-            self._rest_next = REST_GOES
-        self._ways_found += 1
+            if stood:
+                self._stood_missed = 0
+            else:
+                self._missed = 0
+                self._found_past = True
+                self._rest_next = REST_GOES
+            self._ways_found += 1
         change = way.change
         lead = (
             f"Stayed about one spot for {stayed} steps, with no life lost. Went back "
@@ -2557,6 +2589,7 @@ class EpisodeRunner:
             self._remembered,
             self._ways_stood,
             self._ways_ahead,
+            self._ways_ahead_found,
         )
         self._state = None
         return result

@@ -119,9 +119,11 @@ class Report:
     ways_found: int = 0
     ways_stood: int = 0  # of those sought, the ones where it stood still (T-1018)
     # Looking ahead when a thing of a kind that has cost a life comes near (T-1052):
-    # the plays ahead, and of the searches those for a life seen going, before it went.
+    # the plays ahead, the searches for a life seen going before it went, and those of
+    # them that found a way past. Counted apart from the searches above.
     looked_ahead: int = 0
     ways_ahead: int = 0
+    ways_ahead_found: int = 0
 
     @property
     def deaths(self) -> int:
@@ -226,21 +228,7 @@ class Report:
                 f"{statistics.fmean(self.lost[-WINDOW:]):.2f}; levels finished "
                 f"{sum(self.finished)}{self._describe_clean()}."
             )
-        if self.ways_ahead:
-            lost = self.ways_sought - self.ways_stood - self.ways_ahead
-            parts = [
-                f"{lost:,} after losing a life",
-                f"{self.ways_ahead:,} before a life it saw going was lost",
-            ]
-            if self.ways_stood:
-                parts.append(f"{self.ways_stood:,} where it stood still with none lost")
-            out.append(
-                f"Ways past: it went back {self.ways_sought:,} "
-                f"time{'' if self.ways_sought == 1 else 's'}, {', '.join(parts[:-1])} and "
-                f"{parts[-1]}, and found a way past in {self.ways_found:,} "
-                f"({_share(self.ways_found, self.ways_sought)}%)."
-            )
-        elif self.ways_stood:
+        if self.ways_stood:
             lost = self.ways_sought - self.ways_stood
             out.append(
                 f"Ways past: it went back {self.ways_sought:,} "
@@ -262,7 +250,14 @@ class Report:
                 f"Looking ahead: {self.looked_ahead:,} "
                 f"time{'' if self.looked_ahead == 1 else 's'} a thing of a kind that had cost "
                 f"a life came near and it played ahead what it was about to do; that would "
-                f"have cost a life in {self.ways_ahead:,}."
+                f"have cost a life in {self.ways_ahead:,}"
+                + (
+                    f", and it went back and found a way past before the life went in "
+                    f"{self.ways_ahead_found:,} of those "
+                    f"({_share(self.ways_ahead_found, self.ways_ahead)}%)."
+                    if self.ways_ahead
+                    else "."
+                )
             )
         return out
 
@@ -505,6 +500,7 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
         report.ways_found += result.ways_found
         report.ways_stood += result.ways_stood
         report.ways_ahead += getattr(result, "ways_ahead", 0)
+        report.ways_ahead_found += getattr(result, "ways_ahead_found", 0)
         report.looked_ahead += looked
         if began is not None and training.watch is not None:
             report.ground_goes += 1
