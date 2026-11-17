@@ -65,6 +65,7 @@ class AppContext:
             store=self.brain_store,
             goals=self.goals,
             rewards=self.rewards,
+            look_ahead=True,  # T-1052: a life seen going is saved before it goes
         )
         self.saved_ai_store = SavedAiStore(self.data_dir / "saved_ais")
         self.saved_ais = SavedAiService(

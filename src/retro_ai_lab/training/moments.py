@@ -130,13 +130,16 @@ class Moments:
         if self._kept:
             self._moves.append(move)
 
-    def before_loss(self) -> tuple[Moment, tuple[int, ...]] | None:
+    def before_loss(self, ahead: int = 0) -> tuple[Moment, tuple[int, ...]] | None:
         """The moment to go back to after a life lost now, and the moves made since it.
 
         The newest moment at least ``lead`` steps back; ``None`` when there is none.
+        With ``ahead``, for a life that would go that many steps on from now
+        (T-1052): the newest moment at least ``lead`` steps before that step.
         """
+        _whole(ahead, "The steps ahead a life would go at", 0)
         for moment in reversed(self._kept):
-            if self._steps - moment.step >= self._lead:
+            if self._steps + ahead - moment.step >= self._lead:
                 return moment, tuple(self._moves[moment.step - self._kept[0].step :])
         return None
 

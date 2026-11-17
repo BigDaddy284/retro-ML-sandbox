@@ -158,7 +158,12 @@ build finished a level 423 times with one set and 332 times with another),
 so a change is only called better where it is better on several sets. The first line says
 which dice too. A death that had only begun when its go ended costs no life (the
 next go starts from its save): the "Deaths" line counts those apart, and
-not among the deaths the eyes are asked to explain.
+not among the deaths the eyes are asked to explain. `--look-ahead` trains
+as the app does and looks ahead when a thing of a kind that has cost a life
+comes near (see "Before the AI loses a life"); the first line then says
+"looking ahead" and a last line, "Looking ahead:", says how often it did,
+how often a life would have gone and how often it found the way past
+first. Without it the bench measures as it did before.
 
 The app's own log does the same every five seconds while it runs: next to the
 emulator link's line, an "App work" line counts the stalls of the window's
@@ -485,6 +490,47 @@ cut and each go's line says how many steps it began with. The way is kept while 
 wherever the game is the new spot the goes start from, and a way from the
 old spot is forgotten, as it is when you start the AI from scratch. It is
 not kept when the app is closed.
+
+## Before the AI loses a life
+
+The AI's eyes learn which kinds of thing have cost it a life (see "What the
+AI sees"). Knowing that used to change nothing in what it did: the next
+thing of the same kind cost a life again, and only then did the AI go back
+and look for a way past. Now it looks first. Whenever a thing of a kind
+that has cost it a life comes near (within 128 pixels to either side), the
+AI looks ahead before it carries on: it saves the game, plays what it was
+about to do for the next 40 steps and for as long again as this game takes
+over a dying, and puts the game back exactly as it was. None of that is
+counted, paid or learned from.
+
+If it stays alive, nothing changes and it carries on as it would have. If
+the life would go, it does what it does after losing a life, only before:
+it goes back to a saved moment a little earlier, looks for a small change
+that gets it past, and plays that. The life is never lost. The log says so
+in one sentence: "Something of a kind that has cost a life (thing-5) came
+near at step 131, and carrying on would cost one 88 steps on. Went back 11
+steps and found a way past on try 3, after 0.7 s: holding right instead of
+what it did, with right + a for 4 steps, starting 54 steps before that
+would lose the life." The way it found becomes part of the way it
+remembers, so the next go plays it without looking.
+
+These searches are counted apart from the three a go may make after a life
+is lost, and one that finds a way costs nothing, so a go can get past
+enemy after enemy. A go stops looking ahead once three such searches have
+found nothing, and when eight in a row find nothing the AI stops looking
+ahead for the rest of that session ("here it only costs time"); after a
+life lost it still goes back. It looks ahead once for each thing, at most
+every ten steps, and not again while it is still playing a way it found.
+Each go's line in the log says how often: "saw a life going 3 times before
+it went and found a way past 2 times".
+
+It needs what going back needs: an emulator that can save and load the
+game, and a lives value the AI follows. What it does not do yet: the first
+thing of each kind still costs a life, because a kind is only known to
+hurt once it has; a pit is not a thing, so a fall is not seen coming; it
+plays ahead its plain way of carrying on (the moves already lined up, then
+the button that has paid best), not every move the brain might choose; and
+what it has learnt about kinds is forgotten when the app is closed.
 
 ## Reading the rewards
 
