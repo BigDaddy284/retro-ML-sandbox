@@ -7,14 +7,15 @@ import logging
 
 import pytest
 
-from retro_ai_lab.core import ConfigurationError, EmulatorError
+from retro_ai_lab.core import ConfigurationError, EmulatorError, UnsupportedCapabilityError
 from retro_ai_lab.emulator.fake import toy_hopper
 from retro_ai_lab.training import EpisodeRunner, episode
 from retro_ai_lab.training.episode import AHEAD, AHEAD_EVERY, NOW_SLOT, EpisodeResult
 from retro_ai_lab.training.moments import LEAD, Moments
-from retro_ai_lab.training.search import Search
+from retro_ai_lab.training.search import Search, Way
 from retro_ai_lab.training.trial import Outcome
 from retro_ai_lab.training.vision import ScreenWatch
+from retro_ai_lab.training.ways import Change
 from tests.unit.training import test_going_back as going_back
 from tests.unit.training.test_going_back import DIED_AT, Lab, steps
 from tests.unit.training.test_last_chance_in_a_go import (
@@ -244,10 +245,93 @@ def test_the_dying_pause_it_remembers_is_played_on_top_and_asked_about(
         looked.append(r.looked_ahead)
     assert looked == [1] * LONG_DIED
     assert lab.game.state.lives == toy_hopper.START_LIVES and lab.game.state.x > GAP_ENDS
-    # Past it, it does: the next place a life would go at is seen from here.
+    # Past it, it does, and plays 40 steps and that pause ahead, no more.
+    played = Played(monkeypatch)
     assert r.step()
-    assert r.looked_ahead == 2
+    assert r.looked_ahead == 2 and [len(moves) for moves in played.moves] == [AHEAD + 53]
     assert r.finish().setbacks == 0
+
+
+def test_the_step_after_going_back_is_from_where_the_game_was_put_back_to(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    r, _ = looking(lab)
+    near = Near(monkeypatch, r.watch)
+    r.begin()
+    steps(r, 26)
+    start = lab.agent.learned[0][0]  # what the learner saw at the go's first step
+    near.now = THING
+    assert r.step()  # the life would go ten steps on: back to the go's first moment
+    assert (r.ways_ahead_found, r.times_back) == (1, 1)
+    near.now = ()
+    taught = len(lab.agent.learned)
+    assert lab.agent.learned[taught - 1][0] != start  # where it had come to reads otherwise
+    while len(lab.agent.learned) == taught:
+        assert r.step()
+    # The step that looked ahead was played from the moment gone back to, and that is
+    # what the learner is taught it from: not from where the go stood when it looked.
+    assert lab.agent.learned[taught][0] == start
+
+
+def test_from_where_it_stands_and_what_a_change_to_what_it_did_is_called(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    walk, hop = lab.move("right"), lab.move("a")
+    # A moment is saved at the very step it looks ahead at, and the life would go 30
+    # steps on: that moment is far enough before, and nothing is gone back over.
+    r, moments = looking(lab)
+    near = Near(monkeypatch, r.watch)
+    Played(monkeypatch, lost_at=30)
+    sought = Sought(monkeypatch, [NOTHING])
+    r.begin()
+    steps(r, 20)
+    near.now = THING
+    with caplog.at_level(logging.INFO, logger=LOG):
+        assert r.step()
+    assert sought.calls == [(moments.kept[-1].slot, (walk,) * 30)] and moments.kept[-1].step == 20
+    assert said(caplog) == [
+        "Something of a kind that has cost a life (thing-9) came near at step 20, and "
+        "carrying on would cost one 30 steps on. From where it stands it made 5 tries in "
+        "0.0 s: none got past, so it carries on. It has now looked for nothing as often as "
+        "a go may before a life is lost, and looks ahead no more in this go."
+    ]
+    r.finish()
+    # A way that changes what it did (and is not the plain way) is told by how long
+    # before the step the life would go at, which has not been played.
+    caplog.clear()
+    r, moments = looking(lab)
+    near = Near(monkeypatch, r.watch)
+    way = Way((walk,) * 35 + (hop,) * 2 + (walk,) * 25, Change(35, hop, 2), 4, 0)
+    sought = Sought(monkeypatch, [Search(way, 4)])
+    r.begin()
+    steps(r, 12)
+    near.now = THING
+    with caplog.at_level(logging.INFO, logger=LOG):
+        assert r.step()
+    assert sought.calls == [(moments.kept[0].slot, (walk,) * 12 + (walk,) * 30)]
+    assert said(caplog) == [
+        "Something of a kind that has cost a life (thing-9) came near at step 12, and "
+        "carrying on would cost one 30 steps on. Went back 12 steps and found a way past on "
+        "try 4, after 0.0 s: a for 2 steps, starting 7 steps before the life would go."
+    ]
+
+
+def test_a_life_going_too_soon_for_any_moment_is_not_searched_for(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Two steps into the go and the life would go three steps on: the one moment is
+    # five steps before that, and a search starts 30 before (T-1003). Nothing is
+    # sought, and the moment is kept: no life was lost.
+    r, moments = looking(lab)
+    near = Near(monkeypatch, r.watch)
+    Played(monkeypatch, lost_at=3)
+    sought = Sought(monkeypatch, [])
+    r.begin()
+    steps(r, 2)
+    near.now = THING
+    assert r.step()
+    assert r.looked_ahead == 1 and r.ways_ahead == 0 and sought.calls == []
+    assert len(moments) == 1 and r.times_back == 0
 
 
 # ------------------------------------------------------------ when it looks
@@ -298,7 +382,7 @@ def test_it_looks_ahead_for_a_thing_once_and_not_too_often(
 
 @pytest.mark.parametrize(
     "why",
-    ["not asked for", "no searches", "no moments", "no lives", "nothing to go by"],
+    ["not asked for", "no searches", "no moments", "cannot save", "no lives", "nothing to go by"],
 )
 def test_where_no_search_could_follow_it_does_not_look(
     lab: Lab, monkeypatch: pytest.MonkeyPatch, why: str
@@ -313,6 +397,13 @@ def test_where_no_search_could_follow_it_does_not_look(
         lab.teach()
         watch = lab.watch()
         r = lab.runner(watch=watch, look_ahead=True, ways_per_go=1)
+    elif why == "cannot save":
+        r, moments = looking(lab)
+
+        def cannot(slot: str) -> None:
+            raise UnsupportedCapabilityError("save_states")
+
+        monkeypatch.setattr(lab.adapter, "save_state", cannot)
     elif why == "no lives":
         lab.teach(lives=False)
         watch = lab.watch()
@@ -333,6 +424,8 @@ def test_where_no_search_could_follow_it_does_not_look(
         return
     steps(r, 20)
     assert played.moves == [] and r.looked_ahead == 0 and NOW_SLOT not in lab.saved
+    if why == "cannot save":
+        assert len(moments) == 0
 
 
 def test_look_ahead_is_true_or_false(lab: Lab) -> None:
@@ -651,6 +744,14 @@ def test_moments_are_kept_while_it_may_still_look_ahead(
     assert len(moments) == 0
     r, moments = a_go(True)
     assert len(moments) == 1 and r.ways_ahead == 0
+    # And the search for a life seen going is still made: it takes from an allowance
+    # of its own, not from the go's searches after a life lost, of which none is left.
+    near = Near(monkeypatch, r.watch)
+    sought = Sought(monkeypatch, [NOTHING])
+    Played(monkeypatch, lost_at=35)
+    near.now = THING
+    assert r.step()
+    assert len(sought.calls) == 1 and (r.ways_sought, r.ways_ahead) == (1, 1)
 
 
 # ------------------------------------------------------------ the result
