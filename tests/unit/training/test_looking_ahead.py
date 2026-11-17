@@ -7,7 +7,7 @@ import logging
 
 import pytest
 
-from retro_ai_lab.core import ConfigurationError
+from retro_ai_lab.core import ConfigurationError, EmulatorError
 from retro_ai_lab.emulator.fake import toy_hopper
 from retro_ai_lab.training import EpisodeRunner, episode
 from retro_ai_lab.training.episode import AHEAD, AHEAD_EVERY, NOW_SLOT, EpisodeResult
@@ -342,6 +342,35 @@ def test_look_ahead_is_true_or_false(lab: Lab) -> None:
             lab.runner(look_ahead=wrong)
 
 
+@pytest.mark.parametrize("at", ["the save", "the play", "the load"])
+def test_the_link_dropping_while_it_looks_ahead_ends_the_go(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, at: str
+) -> None:
+    r, _ = looking(lab)
+    near = Near(monkeypatch, r.watch)
+    r.begin()
+    steps(r, 5)
+
+    def gone(*a: object, **kw: object) -> None:
+        raise EmulatorError("the link dropped")
+
+    if at == "the save":
+        save = lab.adapter.save_state
+        monkeypatch.setattr(
+            lab.adapter, "save_state", lambda slot: gone() if slot == NOW_SLOT else save(slot)
+        )
+    elif at == "the play":
+        monkeypatch.setattr(episode, "play", gone)
+    else:
+        Played(monkeypatch)
+        monkeypatch.setattr(lab.adapter, "load_state", gone)
+    near.now = THING
+    asked = lab.agent.asked
+    assert not r.step()
+    assert lab.agent.asked == asked and r.looked_ahead == 0  # no step was played
+    assert r.finish().ended_by == "disconnected"
+
+
 # ------------------------------------------------------------ what is played ahead
 
 
@@ -519,12 +548,13 @@ def test_it_stops_looking_after_as_many_for_nothing_as_a_go_has_searches(
     )
 
 
+@pytest.mark.parametrize("a_go_may", [1, 3])
 def test_it_stops_looking_ahead_in_a_game_where_that_keeps_finding_nothing(
-    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, a_go_may: int
 ) -> None:
     """As the searches after a life lost and those at a standstill do, each counted
     apart: as many in a row for nothing as ``give_up_after``, from go to go."""
-    r, _ = looking(lab, give_up_after=2)
+    r, _ = looking(lab, give_up_after=2, ways_per_go=a_go_may)
     near = Near(monkeypatch, r.watch)
     sought = Sought(monkeypatch, [NOTHING, "the real search", NOTHING, NOTHING, "real"])
 
@@ -555,6 +585,10 @@ def test_it_stops_looking_ahead_in_a_game_where_that_keeps_finding_nothing(
         "Looking for a way past a life it saw going found none 2 times in a row, so the AI "
         "stops looking ahead in this game: here it only costs time."
     )
+    # Not in this go either, whatever the go had left: another thing comes near.
+    near.now = ((9, "thing-9"),)
+    steps(r, AHEAD_EVERY + 1)
+    assert r.looked_ahead == 1 and len(sought.calls) == 4
     r.finish()
     # From then on it does not look ahead, in this go or a later one...
     a_go()

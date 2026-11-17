@@ -3,6 +3,7 @@ and the practice bench ask, and the bench counts it."""
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from retro_ai_lab.core import ConfigurationError
 from retro_ai_lab.tools.practice_bench import Report
 from retro_ai_lab.training.moments import Moments
+from retro_ai_lab.training.records import Mode
 from retro_ai_lab.ui.context import AppContext
 from tests.unit.training import test_going_back_in_training as in_training
 from tests.unit.training.test_going_back_in_training import NO_SAVES, Lab, walking_right
@@ -49,6 +51,36 @@ def test_the_service_has_its_goes_look_ahead_where_asked(
         assert go is not None and not go.looks_ahead
         t.stop()
         lab.connection.disconnect()
+
+
+SAYS = (
+    "And when a thing of a kind that has cost it a life comes near, it looks ahead: it "
+    "plays what it is about to do off the record, and where that would cost a life it "
+    "goes back and looks for the way past before the life is lost."
+)
+
+
+def test_the_service_says_once_a_session_that_it_looks_ahead(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def said(connect: dict[str, object], **kw: object) -> list[str]:
+        caplog.clear()
+        t = lab.training(**kw)
+        lab.connect(**connect)
+        walking_right(t, monkeypatch)
+        with caplog.at_level(logging.INFO, logger="retro_ai_lab.training"):
+            assert t.step()
+            t.stop()
+            t.start(Mode.INDEPENDENT)  # started again: a new runner, nothing said again
+            assert t.step()
+            t.stop()
+        lab.connection.disconnect()
+        return [r.getMessage() for r in caplog.records if r.getMessage().startswith("And when")]
+
+    assert said({}, look_ahead=True) == [SAYS]
+    assert said({}) == []  # not asked
+    assert said({}, look_ahead=True, ways_per_go=0) == []  # it does not go back at all
+    assert said({"capabilities": NO_SAVES}, look_ahead=True) == []
 
 
 def test_the_app_asks_for_it(tmp_path: Path) -> None:

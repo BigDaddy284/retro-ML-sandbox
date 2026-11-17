@@ -1194,6 +1194,13 @@ class TrainingService:
                         "way on.",
                         self._stand_after,
                     )
+                if self._look_ahead:
+                    log.info(
+                        "And when a thing of a kind that has cost it a life comes near, it "
+                        "looks ahead: it plays what it is about to do off the record, and "
+                        "where that would cost a life it goes back and looks for the way "
+                        "past before the life is lost."
+                    )
             self._runner = EpisodeRunner(
                 self._connection,
                 self._observation,
