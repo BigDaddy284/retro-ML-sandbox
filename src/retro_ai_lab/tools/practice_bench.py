@@ -118,6 +118,10 @@ class Report:
     ways_sought: int = 0
     ways_found: int = 0
     ways_stood: int = 0  # of those sought, the ones where it stood still (T-1018)
+    # Looking ahead when a thing of a kind that has cost a life comes near (T-1052):
+    # the plays ahead, and of the searches those for a life seen going, before it went.
+    looked_ahead: int = 0
+    ways_ahead: int = 0
 
     @property
     def deaths(self) -> int:
@@ -222,7 +226,21 @@ class Report:
                 f"{statistics.fmean(self.lost[-WINDOW:]):.2f}; levels finished "
                 f"{sum(self.finished)}{self._describe_clean()}."
             )
-        if self.ways_stood:
+        if self.ways_ahead:
+            lost = self.ways_sought - self.ways_stood - self.ways_ahead
+            parts = [
+                f"{lost:,} after losing a life",
+                f"{self.ways_ahead:,} before a life it saw going was lost",
+            ]
+            if self.ways_stood:
+                parts.append(f"{self.ways_stood:,} where it stood still with none lost")
+            out.append(
+                f"Ways past: it went back {self.ways_sought:,} "
+                f"time{'' if self.ways_sought == 1 else 's'}, {', '.join(parts[:-1])} and "
+                f"{parts[-1]}, and found a way past in {self.ways_found:,} "
+                f"({_share(self.ways_found, self.ways_sought)}%)."
+            )
+        elif self.ways_stood:
             lost = self.ways_sought - self.ways_stood
             out.append(
                 f"Ways past: it went back {self.ways_sought:,} "
@@ -239,6 +257,13 @@ class Report:
             )
         else:
             out.append("Ways past: it never went back to look for one.")
+        if self.looked_ahead:
+            out.append(
+                f"Looking ahead: {self.looked_ahead:,} "
+                f"time{'' if self.looked_ahead == 1 else 's'} a thing of a kind that had cost "
+                f"a life came near and it played ahead what it was about to do; that would "
+                f"have cost a life in {self.ways_ahead:,}."
+            )
         return out
 
 
@@ -347,6 +372,7 @@ def run(
             way_seconds=None,  # a search cut short by the clock would not be repeatable
             remember=remember,
             stand_after=STAND_AFTER if stand else 0,
+            look_ahead=True,  # as the app trains (T-1052)
         )
         training.set_algorithm(algorithm)
         connection.connect("fake", game="hopper", seed=seed)
@@ -390,11 +416,15 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
         carried_at = {before.level: 0}
         clean = False
         back = 0  # times the go has gone back to an earlier moment (T-1009)
+        looked = 0  # times the go has played ahead off the record (T-1052)
         dying = ""  # the death now under way: "fall", "walker", or "" for none
         while training.episodes == go:
             training.step()
             runner = training.episode
             went_back = False
+            if runner is not None:
+                # (Read where the go has it: a stand-in for the service need not.)
+                looked = max(looked, getattr(runner, "looked_ahead", 0))
             if runner is not None and runner.times_back != back:
                 # The game was put back: where the camera is now against where it was
                 # is the app's own jump, not a move for the watch to have measured.
@@ -474,6 +504,8 @@ def _train(training: TrainingService, game: ToyHopper, report: Report) -> None:
         report.ways_sought += result.ways_sought
         report.ways_found += result.ways_found
         report.ways_stood += result.ways_stood
+        report.ways_ahead += getattr(result, "ways_ahead", 0)
+        report.looked_ahead += looked
         if began is not None and training.watch is not None:
             report.ground_goes += 1
             report.ground_before += fresh

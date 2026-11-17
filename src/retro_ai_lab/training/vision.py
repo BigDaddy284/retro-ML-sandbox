@@ -871,6 +871,31 @@ class ScreenWatch:
             out.append((f"screen:{name} dy", side(pick.centre[1] - my, near=None)))
         return tuple(out)
 
+    def threats(self) -> tuple[tuple[int, str], ...]:
+        """The things in sight of a kind a life was ever put down to (T-1052), within
+        ``PART_REACH`` across of the player and not the player's own: each one's
+        track and kind, the nearest first. Every such kind, not only those now found
+        to hurt: one passed safely often enough reads as harmless again, and looking
+        ahead for it costs a play off the record and no more. Nothing where the
+        player was not seen at the last look."""
+        if self._box is None:
+            return ()
+        cost = {kind for kind, ev in self._learner.evidence.items() if ev.hurt}
+        tracks = self._tracker.tracks()
+        x, y, w, h = self._box
+        mx, my = x + w // 2, y + h // 2
+        mine = {self._me} if self._sign is None else {t.id for t in tracks if within(t, self._box)}
+        near = [
+            t
+            for t in tracks
+            if t.id not in mine
+            and t.missing == 0
+            and t.kind in cost
+            and abs(t.centre[0] - mx) <= PART_REACH
+        ]
+        near.sort(key=lambda t: (abs(t.centre[0] - mx) + abs(t.centre[1] - my), t.id))
+        return tuple((t.id, t.kind) for t in near if t.kind is not None)
+
     def news(self) -> tuple[Role, ...]:
         """Roles that are new or changed since the last call (for the log)."""
         out: list[Role] = []

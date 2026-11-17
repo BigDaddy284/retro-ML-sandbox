@@ -211,10 +211,13 @@ class TrainingService:
         way_seconds: float | None = WAY_SECONDS,
         remember: bool = True,
         stand_after: int = STAND_AFTER,
+        look_ahead: bool = False,
     ) -> None:
         _check_algorithm(algorithm)
         if not isinstance(remember, bool):
             raise ConfigurationError("remember must be True or False.")
+        if not isinstance(look_ahead, bool):
+            raise ConfigurationError("look_ahead must be True or False.")
         if isinstance(ways_per_go, bool) or not isinstance(ways_per_go, int) or ways_per_go < 0:
             raise ConfigurationError("ways_per_go must be a whole number, 0 or more.")
         if isinstance(stand_after, bool) or not isinstance(stand_after, int) or stand_after < 0:
@@ -247,6 +250,9 @@ class TrainingService:
         self._remember = remember  # begin each go with the best way played (T-1015)
         # Going back where a go stays about one spot with no life lost (T-1018); 0 never.
         self._stand_after = stand_after
+        # Looking ahead when a thing of a kind that has cost a life comes near (T-1052).
+        # The app asks for it; a service made without saying so trains as before.
+        self._look_ahead = look_ahead
         self._can_save = False  # the console has save states
         self._back_said = False  # the log has said the AI will go back, for this game
         # The best go played from the spot goes start from (T-1015): one for the
@@ -1209,6 +1215,7 @@ class TrainingService:
                 last_chance=goes_back,
                 rise_worth_asking=self._discovery.rise_worth_asking if goes_back else None,
                 rise_answered=self._discovery.rise_answered if goes_back else None,
+                look_ahead=goes_back and self._look_ahead,
             )
         self._busy = True
         try:
