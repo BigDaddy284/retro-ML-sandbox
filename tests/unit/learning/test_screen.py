@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import itertools
 import json
 from random import Random
 from typing import Any
@@ -63,6 +64,15 @@ def quick(seed: int = 1, **settings: Any) -> ScreenLearner:
 
 def toy(seed: int, **settings: Any) -> ScreenLearner:
     return ScreenLearner(SPACE, Settings(**{**STEADY, **settings}), seed=seed, config=TOY)
+
+
+def start_a_run(agent: ScreenLearner) -> None:
+    """Choose until a try is being held for some steps more."""
+    for _ in range(100):
+        agent.choose(A)
+        if agent._runs.to_dict()["left"] > 0:
+            return
+    raise AssertionError("no run of tries began in a hundred choices")
 
 
 def spy_on_training(agent: ScreenLearner, monkeypatch: pytest.MonkeyPatch) -> list[Any]:
@@ -208,6 +218,56 @@ def test_it_explores_in_runs() -> None:
     assert explored / starts > 4.0  # a new move every step would average 1.4
 
 
+def test_what_it_tries_is_half_the_time_one_button_from_what_it_would_do() -> None:
+    space = ActionSpace.from_buttons(("up", "down", "left", "right", "a", "b"))
+    always = dict(epsilon=1.0, epsilon_min=1.0, epsilon_decay=1.0, rebound=0.0, explore_run=1)
+    agent = ScreenLearner(space, Settings(**always), seed=5, config=QUICK)
+    held = 0
+    for shade in range(0, 240, 20):
+        state = seen(bytes([shade]) * PICTURE_SIZE, held=shade % len(space))
+        own = agent.greedy(state)  # what the network, as it stands, would do here
+        near = set(space.near(own))
+        if not near:  # it would hold nothing: there is nothing to keep doing
+            continue
+        held += 1
+        picks = [agent.choose(state) for _ in range(3000)]
+        expected = 0.5 + 0.5 * len(near) / len(space)
+        assert abs(sum(p in near for p in picks) / len(picks) - expected) < 0.04
+        assert set(picks) == set(range(len(space)))
+        assert agent.greedy(state) == own  # choosing teaches it nothing
+    assert held >= 3
+
+
+def test_where_every_move_scores_the_same_it_picks_among_them() -> None:
+    """With no picture every move is worth nought. Asked for its best it names the
+    first; playing, it does not hold the first move for ever."""
+    agent = quick(epsilon=0.0, epsilon_min=0.0)
+    picks = [agent.choose(BLIND) for _ in range(200)]
+    assert set(picks) == {LEFT, RIGHT} and 60 < picks.count(LEFT) < 140
+    assert agent.last_decision is not None and not agent.last_decision.explored
+    assert agent.greedy(BLIND) == LEFT
+
+
+def test_new_settings_reach_its_runs_and_its_rebound() -> None:
+    agent = quick(seed=4)
+    agent.configure(
+        Settings(epsilon=1.0, epsilon_min=0.05, epsilon_decay=1.0, explore_steps=10, rebound=0.5)
+    )
+    for _ in range(10):
+        agent.learn(A, LEFT, 0.0, B)
+    for reward in (10.0,) * 10 + (0.0,) * 10:
+        agent.end_episode(reward)
+    assert agent.lift == 0.5 and agent.epsilon == 0.5  # the new rebound, not the old nought
+    short = quick(seed=4)
+    short.configure(Settings(epsilon=1.0, epsilon_min=1.0, epsilon_decay=1.0, explore_run=1))
+    picks = [short.choose(A) for _ in range(400)]
+    changes = sum(a != b for a, b in itertools.pairwise(picks))
+    assert changes > 120  # a new try every step; held for up to 8 it changed far less often
+    held = quick(seed=4, epsilon=1.0, epsilon_min=1.0)
+    picks = [held.choose(A) for _ in range(400)]
+    assert sum(a != b for a, b in itertools.pairwise(picks)) < 100
+
+
 # ------------------------------------------------------------------- it learns
 
 
@@ -288,7 +348,7 @@ def test_the_next_move_is_chosen_by_the_network_and_valued_by_the_copy(
     agent = quick(gamma=0.9)
     calls = spy_on_training(agent, monkeypatch)
     for _ in range(QUICK.warmup - 1):
-        assert agent.learn(A, RIGHT, 20.0, B) is not None
+        agent.learn(A, RIGHT, 20.0, B)
     assert calls == []
     # The network prefers the right-hand move next; the copy thinks left worth 7 and
     # right worth 3. The step is aimed at the copy's 3, not at its best, 7.
@@ -374,8 +434,10 @@ def test_it_waits_for_enough_steps_then_trains_every_step_and_copies_itself() ->
         agent.learn(A, RIGHT, 10.0, B)
     assert agent.trained == 0 and agent.updates == 7 and agent.known == 7
     assert same(agent.network.parameters, start)
-    agent.learn(B, RIGHT, 10.0, A)
+    told = agent.learn(B, RIGHT, 10.0, A)
+    assert told == agent.value(B, RIGHT) != 0.0  # what it now thinks that move is worth
     assert agent.trained == 1 and agent.network.steps == 1 and agent.known == 8
+    assert "; network trained 1 time; " in agent.stats()
     assert not same(agent.network.parameters, start)
     assert same(agent.target.parameters, start)  # the copy is not brought up yet
     for _ in range(QUICK.target_sync - 1):
@@ -465,7 +527,7 @@ def test_exploring_rises_again_when_the_goes_get_worse() -> None:
 
 def test_a_run_of_tries_ends_with_the_go() -> None:
     agent = quick(seed=4, epsilon=1.0, epsilon_min=1.0)
-    agent.choose(A)
+    start_a_run(agent)
     assert agent._runs.to_dict() != quick()._runs.to_dict()  # a run is on
     agent.end_episode()
     assert agent._runs.to_dict() == quick()._runs.to_dict()
@@ -477,9 +539,12 @@ def test_started_again_it_knows_nothing() -> None:
         agent.learn(A, agent.choose(A), 10.0, B)
     agent.learn(BLIND, LEFT, 1.0, B)
     agent.end_episode(3.0)
+    start_a_run(agent)
+    assert agent._runs.to_dict() != quick()._runs.to_dict()
     learnt = [p.copy() for p in agent.network.parameters]
     assert agent.known == 30 and agent.trained > 0 and agent.unseen == 1
     agent.reset()
+    assert agent._runs.to_dict() == quick()._runs.to_dict()
     assert (agent.known, agent.updates, agent.episodes, agent.trained, agent.unseen) == (0,) * 5
     assert agent.epsilon == 0.5 and agent.last_decision is None
     assert agent.recent_rewards == () and agent._memory == [] and agent._at == 0

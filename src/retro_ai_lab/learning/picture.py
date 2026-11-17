@@ -29,7 +29,7 @@ def _edges(source: int, cells: int) -> tuple[np.ndarray, np.ndarray]:
     proportion, nothing cropped, and at least one pixel each (a screen smaller than
     the picture has its pixels repeated)."""
     marks = np.arange(cells + 1) * source // cells
-    first = np.minimum(marks[:-1], source - 1)
+    first = marks[:-1]
     last = np.maximum(marks[1:], first + 1)
     return first, last
 

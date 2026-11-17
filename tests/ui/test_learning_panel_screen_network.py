@@ -82,6 +82,13 @@ def test_a_change_that_loses_what_was_learned_is_asked_first(
     assert t.agent is table and table.updates == learned and t.algorithm == Q_TABLE
     assert panel.algorithm == Q_TABLE
     assert combo.currentData() == Q_TABLE  # type: ignore[attr-defined]
+    # Picked in the picker itself and answered no, the picker goes back to what it was.
+    index = combo.findData(SCREEN)  # type: ignore[attr-defined]
+    combo.setCurrentIndex(index)  # type: ignore[attr-defined]
+    combo.activated.emit(index)  # type: ignore[attr-defined]
+    assert len(asked) == 2 and t.agent is table
+    assert combo.currentData() == Q_TABLE and panel.algorithm == Q_TABLE  # type: ignore[attr-defined]
+    del asked[1:]
     # Between the table and the first network nothing is lost, so nothing is asked.
     panel.choose_algorithm(DQN)
     assert isinstance(t.agent, DQNLearner) and len(asked) == 1

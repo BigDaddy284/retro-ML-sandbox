@@ -94,6 +94,8 @@ def test_changing_to_the_screen_network_and_back_starts_afresh_and_says_so(
     connection: ConnectionService = training.connection  # type: ignore[attr-defined]
     for algorithm in (AUTO, Q_TABLE, DQN, SCREEN, SKILLS):
         assert training.starts_afresh(algorithm) is False  # no game, no brain to lose
+    with pytest.raises(ConfigurationError, match="magic"):
+        training.starts_afresh("magic")  # no way of learning, brain or no brain
     connection.connect("fake", seed=3)
     table = training.agent
     assert isinstance(table, QLearningAgent)

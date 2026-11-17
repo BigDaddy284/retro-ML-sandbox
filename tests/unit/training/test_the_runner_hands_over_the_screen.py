@@ -85,6 +85,7 @@ class Lab:
     observation: ObservationService
     discovery: DiscoveryService
     shots: list[int] = field(default_factory=list)  # one entry a screen the emulator gave
+    asks: list[int] = field(default_factory=list)  # one entry a screen asked for by itself
 
     def connect(self, game: str, **kw: Any) -> FakeEmulatorAdapter:
         self.connection.connect("fake", game=game, seed=3, **kw)
@@ -97,6 +98,13 @@ class Lab:
             return real()
 
         adapter._do_capture_frame = capture  # type: ignore[method-assign]
+        ask = adapter.capture_frame
+
+        def asked() -> Frame:
+            self.asks.append(self.observation.frame)
+            return ask()
+
+        adapter.capture_frame = asked  # type: ignore[method-assign]
         return adapter
 
     def runner(self, agent: Any, **kw: Any) -> EpisodeRunner:
@@ -151,8 +159,9 @@ def test_every_situation_shows_the_screen_then_the_one_before_and_the_move_made(
     # The screen does change, and so does the move: these are not one picture throughout.
     assert len({state.sight.now for state in states}) > 5  # type: ignore[union-attr]
     assert len({state.sight.held for state in states}) > 2  # type: ignore[union-attr]
-    # One screen a step and one at the start, and no more.
-    assert len(lab.shots) == steps + 1
+    # One screen a step and one at the start, and no more. A step's screen comes back
+    # with the step, in the one request: only the start's is asked for by itself.
+    assert len(lab.shots) == steps + 1 and len(lab.asks) == 1
     last = r.state
     assert last is not None and last.sight is not None
     assert last.sight.now == shrink(adapter.game.render())
@@ -224,7 +233,7 @@ def test_put_back_to_a_saved_moment_it_shows_that_screen_and_nothing_before(lab:
     there = shrink(adapter.game.render())
     assert back is r.state and back.sight == Sight(there, there, NO_MOVE)
     assert there != now.sight.now  # the game is somewhere else, and that is what it shows
-    assert len(lab.shots) == shots + 1
+    assert len(lab.shots) == shots + 1 and len(lab.asks) == 2  # the start, and here
     # A move played from there is a step like any other: the picture before is this one.
     jump = space.index_of(["a", "right"])
     assert r.go_back(moment, then=[jump]).sight == Sight(there, there, NO_MOVE)
@@ -253,10 +262,90 @@ def test_a_step_somebody_else_played_shows_the_screen_after_it(lab: Lab) -> None
     up = space.index_of(["up"])
     assert state.sight == Sight(shrink(adapter.game.render()), first.sight.now, up)
     assert state.sight.now != first.sight.now  # the road moved
-    assert len(lab.shots) == 2  # the start, and this step
+    assert len(lab.shots) == 2 == len(lab.asks)  # the start, and this step
     r.finish()
     assert [(s, a, n) for s, a, n, _, _ in agent.learned] == [(first, up, state)]
     assert agent.learned[0][0].sight is first.sight and agent.learned[0][2].sight is state.sight
+
+
+def test_after_a_step_of_its_own_somebody_elses_step_shows_its_own_screen(lab: Lab) -> None:
+    """The screen that came with the AI's step is used once: the next step's is asked for."""
+    adapter = lab.connect("racer")
+    space = ActionSpace.from_buttons(adapter.buttons())
+    agent = Watching(space, adapter.game)
+    up = space.index_of(["up"])
+    agent.always = up
+    r = lab.runner(agent)
+    r.begin(restore=False)
+    for _ in range(3):
+        assert r.step()
+    own = r.state
+    assert own is not None and own.sight is not None
+    held = frozenset(b for b in adapter.buttons() if b.name == "up")
+    for _ in range(3):
+        adapter.step(FRAMES, pressed=held)
+    lab.observation.advance(3 * FRAMES)
+    assert r.observe_step(["up"], 3 * FRAMES)
+    state = r.state
+    assert state is not None and state.sight is not None
+    assert state.sight == Sight(shrink(adapter.game.render()), own.sight.now, up)
+    assert state.sight.now != own.sight.now
+    r.finish()
+
+
+def test_a_step_the_app_made_to_wake_the_game_is_nobodys_move(lab: Lab) -> None:
+    """Nothing is known of this game, so nothing ever changes for the runner; after a
+    few steps of that it presses a wake button itself, and that step shows no move."""
+    adapter = lab.connect("racer")
+    space = ActionSpace.from_buttons(adapter.buttons())
+    agent = Watching(space, adapter.game)
+    r = lab.runner(agent, unstick_after=4, unstick_buttons=("start",), max_steps=12)
+    r.begin()
+    woke: list[State] = []
+    while True:
+        asked = len(agent.asked)
+        went_on = r.step()
+        state = r.state
+        assert state is not None and state.sight is not None
+        if len(agent.asked) == asked and r.steps > 0 and went_on:
+            woke.append(state)  # a step was made, and the learner was not asked
+        if not went_on:
+            break
+    assert woke, "the runner never pressed a wake button in this go"
+    for state in woke:
+        assert state.sight is not None and state.sight.held == NO_MOVE
+        assert len(state.sight.now) == PICTURE_SIZE
+    r.finish()
+
+
+def test_a_go_begun_after_a_step_that_failed_looks_at_the_screen_afresh(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter = lab.connect("hopper")
+    space = ActionSpace.from_buttons(adapter.buttons())
+    agent = Watching(space, adapter.game)
+    agent.always = space.index_of(["right"])
+    harness = ExperimentHarness(lab.connection)
+    harness.checkpoint()
+    r = lab.runner(agent, harness=harness)
+    r.begin()
+    for _ in range(10):
+        assert r.step()
+    real = lab.observation.advance
+
+    def failing(*args: Any, **kw: Any) -> Any:
+        raise EmulatorError("The emulator stopped answering.")
+
+    monkeypatch.setattr(lab.observation, "advance", failing)
+    assert not r.step()  # the frames were played and their screen came back; then it broke
+    monkeypatch.setattr(lab.observation, "advance", real)
+    left = shrink(adapter.game.render())
+    assert r.finish().ended_by == "disconnected"
+    again = r.begin()
+    start = shrink(adapter.game.render())
+    assert start != left
+    assert again.sight == Sight(start, start, NO_MOVE)  # not the failed step's screen
+    r.finish()
 
 
 @pytest.mark.parametrize("game", ["racer", "hopper"])

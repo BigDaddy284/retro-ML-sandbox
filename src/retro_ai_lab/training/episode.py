@@ -1164,8 +1164,7 @@ class EpisodeRunner:
         score = self._encoder.knowledge.best(VariableKind.SCORE)
         self._signals.watch_scores(frozenset({score.id}) if score is not None else frozenset())
         self._seen = None
-        self._shot = None
-        self._picture = None
+        self._shot = None  # a step that failed may have left its screen behind
         if self._wants_pictures:
             can = self._connection.call(lambda a: a.capabilities()).screen_capture
             if not can and self._pictures:
@@ -1209,8 +1208,8 @@ class EpisodeRunner:
         if frame is None:
             try:
                 frame = self._connection.call(lambda a: a.capture_frame())
-            except (EmulatorError, UnsupportedCapabilityError):
-                self._picture = None
+            except EmulatorError:
+                self._picture = None  # the next picture has none a step before it
                 return state
         now = shrink(frame)
         before = now if fresh or self._picture is None else self._picture
@@ -2317,7 +2316,6 @@ class EpisodeRunner:
         self._flush(self._state, done=True)
         if snapshot is not None:
             self._state = self._encoder.encode(snapshot)
-        self._shot = None  # a screen from before the game was put back shows another moment
         self._state = self._sighted(self._state, NO_MOVE, fresh=True)
         self._states.add(self._state.key)
         self._same_state = 0
