@@ -119,8 +119,10 @@ class Report:
     ways_found: int = 0
     ways_stood: int = 0  # of those sought, the ones where it stood still (T-1018)
     # Looking ahead when a thing of a kind that has cost a life comes near (T-1052):
-    # the plays ahead, the searches for a life seen going before it went, and those of
-    # them that found a way past. Counted apart from the searches above.
+    # whether the run was asked to, the plays ahead, the searches for a life seen going
+    # before it went, and those of them that found a way past. Counted apart from the
+    # searches above.
+    look_ahead: bool = False
     looked_ahead: int = 0
     ways_ahead: int = 0
     ways_ahead_found: int = 0
@@ -158,6 +160,7 @@ class Report:
             f"{self.max_steps} steps, {label}"
             f"{'' if self.remember else ', without the way it remembers'}"
             f"{'' if self.stand else ', without going back where it stands still'}"
+            f"{', looking ahead' if self.look_ahead else ''}"
             f"{self._describe_pause()}{self._describe_dice()}."
         ]
         if self.looks:
@@ -297,6 +300,7 @@ def run(
     stand: bool = True,
     dying_frames: int | None = None,
     dice: int = 0,
+    look_ahead: bool = False,
 ) -> Report:
     """Run the bench and return what it measured. Seeded: the same arguments, the same report.
 
@@ -311,11 +315,17 @@ def run(
     ``seed + dice``, while the level, the game's noise and the scripted first go stay
     those of ``seed``. How well a build plays one level depends a good deal on its
     dice, so a build is measured on several.
+    ``look_ahead=True`` trains as the app does since T-1052: when a thing of a kind that
+    has cost a life comes near, the go plays ahead off the record, and a life seen
+    going is searched for before it goes. Off unless asked: the bench's older
+    measures were made without it.
     """
     if not isinstance(remember, bool):
         raise ConfigurationError("The bench needs remember to be True or False.")
     if not isinstance(stand, bool):
         raise ConfigurationError("The bench needs stand to be True or False.")
+    if not isinstance(look_ahead, bool):
+        raise ConfigurationError("The bench needs look_ahead to be True or False.")
     if dying_frames is not None and (
         isinstance(dying_frames, bool)
         or not isinstance(dying_frames, int)
@@ -344,6 +354,7 @@ def run(
         stand=stand,
         dying_frames=dying_frames,
         dice=dice,
+        look_ahead=look_ahead,
     )
     with tempfile.TemporaryDirectory() as scratch:
         data = Path(scratch)
@@ -367,7 +378,7 @@ def run(
             way_seconds=None,  # a search cut short by the clock would not be repeatable
             remember=remember,
             stand_after=STAND_AFTER if stand else 0,
-            look_ahead=True,  # as the app trains (T-1052)
+            look_ahead=look_ahead,  # T-1052: the app asks for it
         )
         training.set_algorithm(algorithm)
         connection.connect("fake", game="hopper", seed=seed)
@@ -617,6 +628,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not go back to look for a way on where a go stands still with no life lost",
     )
     parser.add_argument(
+        "--look-ahead",
+        action="store_true",
+        help="look ahead when a thing of a kind that has cost a life comes near, and look "
+        "for the way past before the life is lost (as the app trains)",
+    )
+    parser.add_argument(
         "--dying-frames",
         type=_pause,
         default=None,
@@ -674,6 +691,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         stand=not args.no_standstill,
         dying_frames=args.dying_frames,
         dice=args.dice,
+        look_ahead=args.look_ahead,
     )
     for line in report.lines():
         print(line)

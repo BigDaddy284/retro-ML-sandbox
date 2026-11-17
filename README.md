@@ -158,7 +158,12 @@ build finished a level 423 times with one set and 332 times with another),
 so a change is only called better where it is better on several sets. The first line says
 which dice too. A death that had only begun when its go ended costs no life (the
 next go starts from its save): the "Deaths" line counts those apart, and
-not among the deaths the eyes are asked to explain.
+not among the deaths the eyes are asked to explain. `--look-ahead` trains
+as the app does and looks ahead when a thing of a kind that has cost a life
+comes near (see "Before the AI loses a life"); the first line then says
+"looking ahead" and a last line, "Looking ahead:", says how often it did,
+how often a life would have gone and how often it found the way past
+first. Without it the bench measures as it did before.
 
 The app's own log does the same every five seconds while it runs: next to the
 emulator link's line, an "App work" line counts the stalls of the window's
