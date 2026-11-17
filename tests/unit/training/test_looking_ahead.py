@@ -484,7 +484,7 @@ def test_no_way_found_and_the_go_carries_on(
     r.begin()
     steps(r, 5)
     kept, where = moments.kept, lab.game.state
-    near.now = THING
+    near.now = (*THING, (5, "thing-4"))  # two things: the nearer is the one it names
     with caplog.at_level(logging.INFO, logger=LOG):
         assert r.step()
     assert (r.looked_ahead, r.ways_sought, r.ways_ahead, r.ways_ahead_found) == (1, 0, 1, 0)
