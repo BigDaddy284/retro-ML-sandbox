@@ -39,7 +39,7 @@ def test_looking_ahead_on_the_practice_game() -> None:
 
 
 def test_the_bench_looks_ahead_only_where_asked(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(ConfigurationError, match="look_ahead"):
+    with pytest.raises(ConfigurationError, match="The bench needs look_ahead to be True or"):
         run(1, look_ahead="yes")  # type: ignore[arg-type]
     code = main(["--goes", "1", "--steps", "20", "--play-frames", "600", "--look-ahead"])
     out = capsys.readouterr().out.splitlines()
@@ -54,3 +54,6 @@ def test_the_bench_looks_ahead_only_where_asked(capsys: pytest.CaptureFixture[st
         "Practice bench: Toy Hopper level 0, 1 goes of up to 20 steps, Neural network."
     )
     assert not any(line.startswith("Looking ahead") for line in plain.lines())
+    code = main(["--goes", "1", "--steps", "20", "--play-frames", "600"])
+    out = capsys.readouterr().out.splitlines()
+    assert code == 0 and out == plain.lines()
