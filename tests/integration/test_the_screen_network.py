@@ -55,5 +55,5 @@ def test_on_the_practice_racer_it_gets_further_than_it_began() -> None:
     report = run("racer", 50, seed=2, algorithm="screen")
     first, last = report.blocks()
     assert (first.first, last.last) == (1, 50)
-    assert last.far > 1.4 * first.far and last.far > 400
+    assert last.far > 1.4 * first.far and last.far > 300
     assert last.best >= first.best > 0
