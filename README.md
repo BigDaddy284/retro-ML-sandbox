@@ -358,6 +358,17 @@ last seconds again, again with one small change at a time. If it finds a
 way it plays on from there, so the go continues beyond the spot that
 killed it, and the brain learns from the way that worked.
 
+What counts as "past" depends on the game. Where the screen scrolls, a try
+must keep the life and reach ground the go had not been on: standing still
+in front of a gap keeps the life too, and is no way across. On a game of
+one screen (a catcher, a paddle, a maze, a shooter that stays put) there is
+no new ground once the floor has been walked, and nothing is lost there for
+want of ground: something came at the player. So where the screen has not
+scrolled for about 20 seconds of play, the first change that keeps the life
+is taken for the way, and the log says so once a go ("The screen has not
+scrolled for a good while, so there is no new ground to get to here"). One
+move of the screen and the AI asks for new ground again.
+
 Many games put you back at the start of the level when a life goes, and
 the app takes the game starting over for the end of a go. Where it can go
 back it looks for the way past first, and the go only ends there if it

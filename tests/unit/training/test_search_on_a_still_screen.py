@@ -124,6 +124,21 @@ def test_with_no_plain_move_the_first_change_to_what_it_did_that_keeps_the_life(
     )
 
 
+def test_a_way_found_further_down_the_list_says_where(
+    hopper: Hopper, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    on = hopper.move("right")
+    trace = [on] * 10
+    listed = list(changes(trace, hopper.space))
+    last = len(trace) - 1
+    spots = [(HOLDS.index(c.hold), last - c.at) for c in listed]
+    nth = next(i for i, spot in enumerate(spots) if spot != (0, 0))
+    script, _, _ = scripted(hopper, monkeypatch, [DEAD] * nth + [ALIVE])
+    found = look_for(hopper, trace, no_watch, carry_on=4, still=True)
+    assert found.way == Way(listed[nth].apply(trace, 4), listed[nth], tries=nth + 1, ground=0)
+    assert found.stopped_at == ((0, 0), spots[nth]) and len(script.calls) == nth + 1
+
+
 def test_the_plain_ways_changes_come_first_and_then_those_to_what_it_did(
     hopper: Hopper, monkeypatch: pytest.MonkeyPatch
 ) -> None:
