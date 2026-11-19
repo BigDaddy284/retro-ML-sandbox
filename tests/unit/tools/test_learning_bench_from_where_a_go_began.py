@@ -166,6 +166,19 @@ def test_the_games_start_is_read_when_training_begins() -> None:
     assert [(go.far, go.began) for go in _played(racer).played] == [(50, 0)]
 
 
+def test_the_games_start_is_read_before_the_service_is_started() -> None:
+    class Wakes(Story):
+        """A service that moves the game about as it starts (it may, to get a game
+        going): where the game stands after that is not the game's start."""
+
+        def start(self, mode: object) -> None:
+            super().start(mode)
+            self.put(3, 60)
+
+    story = Wakes(ToyRacer(seed=1), [[[at(2, 115), hold, at(2, 131)]]], [result()])
+    assert [(go.far, go.began) for go in _played(story).played] == [(16, 115)]
+
+
 def test_the_lives_and_the_reports_lines_are_as_they_were_for_goes_begun_further_on() -> None:
     # The story of T-1054's own test of a go begun a life down.
     story = Story(
