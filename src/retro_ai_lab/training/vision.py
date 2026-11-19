@@ -167,6 +167,7 @@ class ScreenWatch:
         # The last screen looked at in this go and the box hidden in it (T-1023).
         self._shown: tuple[Frame | None, tuple[int, int, int, int] | None] = (None, None)
         self._said: set[tuple[int, int]] = set()  # the bytes found that the log has named
+        self._strip_said = False  # the log has said that a strip of the screen stands still
 
     @property
     def camera_bytes(self) -> tuple[tuple[str, int] | None, tuple[str, int] | None]:
@@ -378,6 +379,7 @@ class ScreenWatch:
         other._quiet = True
         other._last_me = mark.last_me
         other._measured = deque(self._measured, maxlen=self._measured.maxlen)
+        other._tracker.read_like(self._tracker)  # under a still strip or not (T-1061)
         return other
 
     def look(
@@ -425,6 +427,13 @@ class ScreenWatch:
                     self._my_kind = me.kind
             else:
                 self._box = None
+        if self._tracker.windowed and not self._strip_said and not self._quiet:
+            self._strip_said = True
+            log.info(
+                "A strip of the screen stands still while the rest slides (a status bar, "
+                "most likely), and it was outvoting the little that moves. The AI reads "
+                "how far the screen slid from the part that moves."
+            )
         if was is not None and now is not None:
             self._learn_camera(was, now)
         if self._box is None and self._sign is not None and self._was_seen and self._falling():
