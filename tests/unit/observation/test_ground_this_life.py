@@ -173,10 +173,17 @@ def test_a_new_go_has_a_new_life() -> None:
     ground.back()
     ground.new_life()
     assert looks(ground, STEP, 2) == [(0, 1)] * 2
+    assert ground.keep().life == 1
     ground.begin()
-    assert ground.fresh == 0
+    assert ground.fresh == 0 and ground.keep().life == 0
     assert ground.look(STILL, ME, 16) == 0 and ground.fresh == 0
     assert looks(ground, STEP, 5) == [(1, 1)] * 5
+    # A moment of the new go is a moment of its first life: put back to, it leaves
+    # what that life has reached.
+    kept = ground.keep()
+    assert looks(ground, STEP, 2) == [(1, 1)] * 2
+    ground.put_back(kept)
+    assert looks(ground, STEP, 2) == [(0, 0)] * 2
 
 
 def test_on_a_screen_that_never_scrolls() -> None:

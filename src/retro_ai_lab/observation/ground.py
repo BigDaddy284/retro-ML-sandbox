@@ -154,8 +154,7 @@ class _Place:
 
     def life_before(self) -> None:
         """The life before is on again, as far as it had got."""
-        self.life_reach, self.life_paid = self.was_reach, self.was_paid
-        self.was_reach, self.was_paid = [0, 0, 0, 0], [0, 0, 0, 0]
+        self.life_reach, self.life_paid = list(self.was_reach), list(self.was_paid)
 
     def story(self) -> tuple[_Four, _Four]:
         reach, counted = self.story_reach, self.story_paid
