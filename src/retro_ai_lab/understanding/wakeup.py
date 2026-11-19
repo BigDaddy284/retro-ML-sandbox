@@ -12,7 +12,9 @@ Two questions, both answered by experiment from a save state:
 * :func:`inputs_matter`: from here, does holding buttons change where the
   memory ends up, compared with holding nothing? Both runs end with a few
   idle frames so a controller mirror (a byte that just echoes the pad)
-  settles to the same value in both.
+  settles to the same value in both. Where every button in turn changes
+  nothing, each is held by itself and asked again (T-1057): left and then
+  right may only have walked something there and back.
 * :func:`find_wake_button`: press one button, wait for the game to settle
   (a "WORLD 1-1" splash takes a few seconds), then ask the first question
   again. The first button that makes inputs matter is the answer, and the
@@ -83,6 +85,10 @@ def probe_inputs(
     it was. Locations that differ between two idle runs (noise) are ignored. The
     bytes that changed during the idle run yet ended the same after the busy run
     are ``self_moving`` (T-855): they move whether or not anyone plays.
+
+    Where the busy run ends like the idle one, each button is asked by itself
+    before the buttons are said not to matter (T-1057): one may have undone
+    what another did.
     """
     names = tuple(dict.fromkeys(buttons))
     if not names:
@@ -104,11 +110,41 @@ def probe_inputs(
         ]
         plan.append(((), settle))
         busy = _probe(connection, capture, plan)
+        driven = _differences(idle, busy) - unstable
+        if not driven:
+            driven = _driven_alone(
+                connection, capture, [known[n] for n in names], per_button, settle
+            )
     finally:
         connection.call(lambda a: a.load_state(WAKE_SLOT))
-    driven = _differences(idle, busy) - unstable
     alone = _differences(before, idle) - unstable - driven
     return InputProbe(bool(driven), alone)
+
+
+def _driven_alone(
+    connection: ConnectionService,
+    capture: MemoryCapture,
+    buttons: list[Button],
+    per_button: int,
+    settle: int,
+) -> frozenset[tuple[str, int]]:
+    """What each button drives when it is held by itself (T-1057).
+
+    One button may undo another: where the pad only walks something left and right
+    at one speed, left and then right puts it back where it was, and the run of
+    every button in turn ends like the run holding nothing. So where that run showed
+    nothing, each button is held alone, then let go for the settling frames, and
+    compared with holding nothing for as long. Every button is asked, also after one
+    has answered: what each drives is not something that moves by itself.
+    """
+    wait: list[tuple[tuple[Button, ...], int]] = [((), per_button + settle)]
+    idle = _probe(connection, capture, wait)
+    unstable = _differences(idle, _probe(connection, capture, wait))
+    driven: frozenset[tuple[str, int]] = frozenset()
+    for button in buttons:
+        held = _probe(connection, capture, [((button,), per_button), ((), settle)])
+        driven |= _differences(idle, held) - unstable
+    return driven
 
 
 def find_wake_button(
