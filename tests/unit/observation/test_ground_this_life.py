@@ -338,8 +338,9 @@ def test_a_kept_moment_names_its_life_by_a_whole_number(life: object) -> None:
     ground = started()
     looks(ground, STEP, 2)
     kept = dataclasses.replace(ground.keep(), life=life)  # type: ignore[arg-type]
+    looks(ground, STEP, 2)
     with pytest.raises(ConfigurationError, match="A kept life is numbered 0 or more"):
         ground.put_back(kept)
-    # Refused before anything was changed.
-    assert ground.place == (32, 0) and ground.keep().life == 0
+    # Refused before anything was changed: it is where it had walked on to.
+    assert ground.place == (64, 0) and ground.keep().life == 0
     assert looks(ground, STEP, 1) == [(1, 1)]
