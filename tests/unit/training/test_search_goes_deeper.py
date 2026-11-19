@@ -833,18 +833,21 @@ def test_a_life_seen_coming_is_searched_deeper_as_one_lost_is(
 def test_not_where_the_screen_stands_still(
     lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    asked = Asked(monkeypatch, [nothing(True, ((1, 6), (4, 2))), nothing(True), nothing(True)])
-    r, _ = searching(lab, ways_per_go=3, give_up_after=None, max_steps=400)
+    stopped = ((1, 6), (4, 2))
+    asked = Asked(monkeypatch, [nothing(True), nothing(False, stopped), nothing(True)])
+    r, _ = searching(lab, ways_per_go=3, give_up_after=None, max_steps=600)
     r.begin()
     steps(r, DIED_AT)
+    steps(r, DIED_AT)
+    assert asked.deeper == [False, True]
     # The place is known for it, and for where in a second list a search stopped. With
     # the ground saying the screen stands still, a search there is for a change that
-    # keeps the life, and goes no deeper.
+    # keeps the life: it goes no deeper, and is not told where a deeper one stopped.
     monkeypatch.setattr(Ground, "still", property(lambda self: True))
     with caplog.at_level(logging.INFO, logger=LOG):
         steps(r, DIED_AT)
-    assert asked.deeper == [False, False] and said(caplog, TOLD) == []
-    assert asked.deeper_at == [TOP, TOP]
+    assert asked.deeper == [False, True, False] and said(caplog, TOLD) == []
+    assert asked.deeper_at == [TOP, TOP, TOP]
 
 
 def test_never_at_a_standstill(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
