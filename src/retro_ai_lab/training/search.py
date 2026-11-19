@@ -39,6 +39,11 @@ a change that got further: lost all the same, but later than waiting as long
 as the change lasts could have put it off, and, looked at once, on new ground.
 The small changes after it are tried on the moves that try made, and the
 first that gets past is the way, with both changes.
+
+Where even that finds nothing (three gaps close together), the change that
+got furthest is not thrown away (T-1060): the search hands it back as a part
+of the way (:attr:`Search.part`), to be played up to before its own loss was
+settled and searched on from where the life then goes.
 """
 
 from __future__ import annotations
@@ -115,6 +120,11 @@ class Search:
     # and for the other: the change it would have played next after the first change
     # ``stopped_at`` names. The top where it stopped in none.
     deeper_at: tuple[Spot, Spot] = field(default=TOP, compare=False)
+    # A part of the way (T-1060), where the search went deeper and found none: the
+    # change that lost the life later and furthest on, with its moves up to before its
+    # own loss was settled. Played, the life goes further on, and a search there may
+    # find the rest. None where no such change was looked at, and with a way.
+    part: Way | None = field(default=None, compare=False)
 
 
 class _Got(NamedTuple):
@@ -251,6 +261,15 @@ def find_way(
     such a list (its :attr:`Search.deeper_at`), for the first change it stopped at.
     Not at a standstill; and where ``still`` says there is no new ground, no step on
     can be told and none is looked for.
+
+    A search that went deeper and found no way hands back a part of one (T-1060,
+    :attr:`Search.part`): of the steps on it looked at, the one that got furthest (the
+    earlier one where two got as far), with its moves up to before its own loss was
+    settled, which is as far before that loss as ``live`` is before the end of
+    ``trace``. Played, the life goes further on, and a search from there may find the
+    rest: a place that wants three changes or more is got past a part at a time. No
+    play is made for it. None without ``live``, and none where the change itself would
+    not be over by then.
     """
     if not slot or not isinstance(slot, str):
         raise ConfigurationError("A search needs the name of the save to start from.")
@@ -340,6 +359,9 @@ def find_way(
 
     deep = deeper and not still
     lapped = False
+    # The step on that got furthest (T-1060), cut before its own loss was settled, and
+    # for one from the plain way's list the step the plain way lost the life at.
+    kept: tuple[_Got, int | None] | None = None
 
     def from_spot(listed: list[Change], spot: Callable[[Change], Spot], begin: Spot) -> int:
         """The first change at or past where a list is to begin; past its end is its
@@ -385,7 +407,7 @@ def find_way(
             """A change that lost the life later than waiting could have put it off
             (T-1059): whether it is a step on the way, and the first small change after
             it that gets past. Or where in that list the tries or the time ran out."""
-            nonlocal tries
+            nonlocal tries, kept
             if not go_on():
                 return None, begin
             tries += 1
@@ -396,6 +418,15 @@ def find_way(
             # Its loss takes as long to play out as the one at the end of ``base``.
             upto2 = None if upto is None else seen.steps - (len(base) - upto)
             after = first.at + first.hold
+            # Should no way be found, the one of these that got furthest is a part of
+            # it (T-1060): its moves up to where its own loss was settled, as long as
+            # the whole change comes before that.
+            more = kept is None or seen.ground > kept[0].ground
+            if upto2 is not None and upto2 >= after and more:
+                kept = (
+                    _Got(first, stone[:upto2], seen.ground),
+                    None if base is trace else len(base),
+                )
             listed = [c for c in changes(stone, space, upto=upto2) if c.at >= after]
             # The move that got it a step on is tried first to get it on from there (a
             # jump after a jump), and then the others.
@@ -561,7 +592,19 @@ def find_way(
         if got is not None:
             way = Way(got.moves, got.change, tries, got.ground, first=got.first)
             return Search(way, tries, taken(), stopped_at=(plain_at, trace_at))
-    return Search(None, tries, taken(), late, (plain_at, trace_at), lapped, (plain_on, trace_on))
+    part: Way | None = None
+    if kept is not None:
+        got, lost_at = kept
+        part = Way(
+            got.moves,
+            got.change,
+            tries,
+            got.ground,
+            plain=None if lost_at is None else plain,
+            lost_at=lost_at,
+        )
+    stopped, stopped_on = (plain_at, trace_at), (plain_on, trace_on)
+    return Search(None, tries, taken(), late, stopped, lapped, stopped_on, part)
 
 
 __all__ = ["BUDGET", "CARRY_ON", "PLAIN_SHARE", "TOP", "Search", "Spot", "Way", "find_way"]
