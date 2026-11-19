@@ -546,15 +546,14 @@ class ObjectTracker:
         half or more stood still against that move are left out, and the move is
         measured again by what changed in the window that is left. It is taken if a
         strip was left out at all and the window is the larger part of the screen; if
-        what it explains
-        covers a quarter of the screen's rows or of its columns and turned at least two
-        colours (something came as something went: a floor that only turned into sky
-        did not move); and if what still differs in the window, with what changed in
-        the strips, is at most :data:`EXPLAINS` of what differed. And it is looked for
-        only on a game where the camera has been read that way at least as often as
-        by the whole screen (:attr:`read_as`): where the whole screen tells, a band of
-        clouds drifting over a level that stands still is not the camera moving.
-        :attr:`windowed` says a move was read that way.
+        what it explains covers a quarter of the screen's rows or of its columns and
+        turned at least two colours (something came as something went: a floor that
+        only turned into sky did not move); and if what still differs in the window,
+        with what changed in the strips, is at most :data:`EXPLAINS` of what
+        differed. And it is looked for only on a game where the camera has been read
+        that way at least as often as by the whole screen (:attr:`read_as`): where the
+        whole screen tells, a band of clouds drifting over a level that stands still
+        is not the camera moving. :attr:`windowed` says a move was read that way.
 
         ``expect`` is the camera's move since the last frame as the caller has it from
         somewhere that is not the picture (T-1020: the game's own count of where its
