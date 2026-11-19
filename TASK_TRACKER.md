@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-1057 | "Is the game listening" is not fooled by buttons that undo each other. The check holds each of the AI's buttons in turn and looks at where the memory ends up; where left then right puts the player back where it was (a catcher, a bat, anything that walks at one speed on one screen), the buttons seemed to do nothing, the app said "The game is not listening to the AI", looked for a button to wake it and let the game run meanwhile, and every go began a life down. Where the buttons together change nothing, each is now asked alone. | 8 | In progress | 0/8 | see PR |
 | T-1056 | The learning bench counts how far a go got from where the go began. Where the app had moved its goes' start past a life (it does on the practice racer), the bench counted the moved start as distance driven: T-1055's racer figures on seed 2 were 120 to 170 too high in every block. Found while trying, in seven try-outs, to get the screen network to learn the practice hopper by itself (none does it reliably; the figures are kept in the section). The bench is put right, the figures measured again and corrected where they are written. | 8 | Done | 9/9 | see PR #298 |
 | T-1055 | A network that watches the screen (Boss, 17 Nov: "i want to plug it into any game, any it should learn by network or RL"). A new way of learning, the screen network: it is fed the screen picture itself, shrunk, what changed in it since the step before and the buttons it last held, and learns from the rewards the app already works out. Nothing in it knows a game. Measured with the learning bench on both practice games, every helper off, against T-1054's figures. Measured with every helper off: on the practice racer it learns by itself where the table and the first network did not; on the practice hopper it does not yet. | 8 | Done | 9/9 | see PR #297 |
 | T-1054 | The learner alone is measured, on both practice games (Boss, 17 Nov: "how will this help when i switch to a driving game?" and "i want to plug it into any game, any it should learn by network or RL"). Looking ahead where the floor ends was tried four ways and is not built. On the practice driving game the app's going back, remembering and looking ahead never switch on (they wait for the AI to find itself on the screen), and with them off the network does not learn to keep its lives. A new bench, `learning_bench`, plays either practice game with every helper off and says, block of goes by block, what the learner alone has learnt, by the game's own account. It is the measure the next tasks are held to, and its first figures are that the learner alone learns neither practice game yet. | 8 | Done | 9/9 | see PR #296 |
@@ -3104,6 +3105,45 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; understanding + services + integration 241 passed; full suite 1358 passed, 10 skipped in 183.18s (0:03:03).
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
+
+### T-1057 – "Is the game listening" is not fooled by buttons that undo each other
+- **Status:** In progress
+- **Phase:** 8 (the plan's Stage 3, the AI smarter; what any game needs before anything is learnt).
+- **Why now:** Boss (18 Nov): "in a few days i'm going to plug a random new game which could be anything and i expect it it to learn from playing the game". A one-screen game tried outside the app (T-1056, limit 5) showed this at once, before the first go: "The game is not listening to the AI; trying each button to get it going", three times, "No button got the game going", and all 10 goes began a life down, because the game ran on with nobody playing while the app looked for a button to wake it. The game was listening all the time.
+- **Try-outs (19 Nov, a scratch worktree, the scratch game "Toy Catcher" of T-1056 put on the practice console from a script; nothing in the repository):**
+  1. *Why.* `understanding.wakeup.probe_inputs` plays one run holding nothing and one holding each of the AI's buttons in turn for 5 frames, and says the buttons matter when the memory ends up different. The catcher walks 2 pixels a frame: left for 5 frames then right for 5 puts it back where it was, the other buttons do nothing there, and the falling things fall the same either way. Nothing differs, so "does not matter".
+  2. *Each button asked alone where the buttons together change nothing:* the same script, the table, 10 goes of 300 steps, seed 1: "not listening" is not said, no go begins a life down (10 of 10 did), 0.90 lives lost a go (2.80), 26 points a go (12).
+  3. *The practice racer and hopper are not fooled today:* speeding up and braking leave the racer somewhere else, and the hopper speeds up and slows down, so left then right does not put it back.
+- **Objective:** where the AI's buttons held one after another change nothing, the check asks each button alone before it says the game is not listening.
+  1. `probe_inputs`: the runs it makes today, unchanged. Only where they show nothing driven: two runs holding nothing for one button's frames and the settling frames (what differs between them is noise), then one run for each button, held alone for its frames and let go for the settling frames. What ends up different from the run holding nothing, noise left out, is driven.
+  2. `self_moving` (T-855) stays what changed holding nothing and is driven by nothing: what a single button drives is taken out of it.
+  3. The game is put back where it was, as today, however the probe ends.
+  4. `inputs_matter`, `find_wake_button` and the three places in the training service that ask (`_listens`, the wake search, the start moved past a life) get this through `probe_inputs`; none of them changes.
+- **Scope:** `understanding/wakeup.py`, its tests, the documents. **Not in it:** a button that only does something held together with another, or held longer than the probe holds it; the scores and progress guessed wrongly on the same game (next); the practice console (no game is added to it, by Boss's choice of 19 Nov).
+- **Acceptance criteria:**
+  1. On a game where left then right puts the player back and nothing else answers the pad, `inputs_matter` says yes, and the game is put back where it was.
+  2. Where the buttons together already change something, not one frame more is played than before: the same adapter operations, the same answer.
+  3. A screen that ignores the pad still says no (the practice racer's game-over screen without Start, as the existing test holds), with the game put back; a byte that only echoes the pad still does not count; a byte that differs between two runs holding nothing still does not count.
+  4. `self_moving` names what moves by itself and none of what a single button drives, on the game of criterion 1.
+  5. `find_wake_button` finds the button that starts such a game from its game-over screen, and leaves it running.
+  6. One button that matters among several that undo each other or do nothing is enough, whichever comes first or last.
+  7. The training service on such a game: the first go is not taken for "not listening", no wake search is made and the go begins with the game where it was put.
+  8. Every existing test passes unchanged; `ruff format`, `ruff check`, `mypy` clean; deliberate breaks of the new lines are noticed; README, ARCHITECTURE, CHANGELOG and this tracker say what is so; the scratch game's figures before and after are in the results, measured outside the app's tests.
+- **Expected changes:** `src/retro_ai_lab/understanding/wakeup.py`; new `tests/unit/understanding/test_wakeup_buttons_that_undo_each_other.py`; README, ARCHITECTURE, CHANGELOG, this tracker.
+- **Test plan (written before the code):**
+  1. *Unit, a stand-in game inside the test* (a practice racer whose pad only walks its place left and right at one speed, put into the practice console's adapter the way the existing two-press racer is): the buttons matter; asked with left and right alone, with every button, with left last and with right first; the game is where it was afterwards; a stand-in that answers to nothing says no; one whose pad is only echoed in a byte says no; one with a byte of noise that is not replayed says no.
+  2. *Unit, what is played:* a spy counts the adapter's steps and frames: on the practice racer in play (the buttons together change something) the count is what it is on main; on the stand-in it is that and the runs of the plan (two idle and one a button), to the frame.
+  3. *Unit, `self_moving`:* on the stand-in the frame counter and timer are named and the place the pad walks is not.
+  4. *Unit, the wake search:* the stand-in at its game-over screen: Start is found and the game left running; with a pad that undoes itself as the only playing buttons.
+  5. *Unit, the service:* `TrainingService` started on the stand-in: no "not listening" in the log, no wake search (`find_wake_button` spied), the first step is played.
+  6. *The existing tests* of `wakeup` and of the service pass unchanged.
+  7. *Deliberate breaks* of every new line; *the whole suite alone*; CI on both systems.
+  8. *Outside the app's tests:* the scratch one-screen game before and after, 10 goes, for the tracker.
+- **Changed while building:** (none yet)
+- **Results:** (pending)
+- **Limits:** (pending)
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** (pending)
 
 ### T-1056 – The bench counts how far a go got from where it began
 - **Status:** Done
