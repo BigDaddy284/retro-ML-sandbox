@@ -381,6 +381,15 @@ has been tried about here and none got past"), and names both changes when
 it finds such a way. It takes a few searches at the place before that
 happens: the single changes are all tried once first.
 
+Some places want more than two: three pits close together, a row of
+platforms over a drop. Two changes do not get past those either. A search
+that tried and found nothing now keeps the change that got furthest before
+it lost the life ("One change got further before it lost the life … so the
+AI keeps it"). The AI goes back and plays that change; the life then goes
+further on, and it searches there for the rest. So a long obstacle is got
+past a piece at a time, and it can cost a life or two for each piece. The
+summary of a go counts these ("and once kept the change that got furthest").
+
 Many games put you back at the start of the level when a life goes, and
 the app takes the game starting over for the end of a go. Where it can go
 back it looks for the way past first, and the go only ends there if it
