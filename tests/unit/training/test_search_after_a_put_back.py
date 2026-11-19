@@ -29,6 +29,7 @@ from retro_ai_lab.training.vision import ScreenWatch
 from tests.unit.training import test_going_back as going_back
 from tests.unit.training.test_going_back import Lab
 from tests.unit.training.test_last_chance_in_a_go import GAP_ENDS, LONG, going
+from tests.unit.training.test_looking_ahead import THING, Near
 
 lab = going_back.lab  # the practice game behind the real services (pytest fixture)
 
@@ -36,6 +37,7 @@ LOG = "retro_ai_lab.training.episode"
 OWN = toy_hopper.DYING_FRAMES  # the practice game's own dying pause
 OVER_THE_GAP = 19  # steps walked from the start before the jump that clears the first gap
 PAST_THE_WALKER = 490  # level pixels: the first walker paces from 416 to 466
+SEES_THE_WALKER = 330  # where the watch is made to say that the walker is near
 # The two ways a go is run: the practice game's own short pause with the search as it
 # first was, and a pause as long as a console game's with the step the loss was
 # settled at asked for, as the app runs it.
@@ -51,6 +53,7 @@ class Told:
     put_back_at: int  # the go's step at which the game put the player back
     counted: int  # steps of new ground the go had counted by then
     far: int  # how far the first life got, in level pixels
+    near: Near | None = None  # what the watch says is near, where the go looks ahead
 
     @property
     def watch(self) -> ScreenWatch:
@@ -69,6 +72,7 @@ def a_second_life(
     by_hand: bool = True,
     searches: int = 4,
     wait: int = 0,
+    look_ahead: bool = False,
 ) -> Told:
     """Play the go until its fourth search is over (or as many as ``searches``). With
     ``wait`` the learner stands that many steps before it walks: the life then goes
@@ -84,7 +88,10 @@ def a_second_life(
         return made[-1]
 
     monkeypatch.setattr(episode, "find_way", find)
-    r, _ = going(lab, frames, ways_per_go=9, max_steps=1500, last_chance=chance)
+    r, _ = going(
+        lab, frames, ways_per_go=9, max_steps=1500, last_chance=chance, look_ahead=look_ahead
+    )
+    near = Near(monkeypatch, r.watch) if look_ahead else None  # nothing near, until told
     lab.agent.script.extend([lab.move()] * wait)
     r.begin()
     far = 0
@@ -94,7 +101,7 @@ def a_second_life(
     assert len(made) == 3 and lab.game.state.lives == START_LIVES - 1
     watch = r._watch
     assert watch is not None
-    told = Told(r, made, r.steps, watch.ground.steps, far)
+    told = Told(r, made, r.steps, watch.ground.steps, far, near)
     if by_hand:
         walk, jump = lab.move("right"), lab.move("a", "right")
         lab.agent.script.extend([walk] * OVER_THE_GAP + [jump] * 4)
@@ -202,3 +209,43 @@ def test_the_log_says_the_game_put_it_back_and_then_that_a_way_was_found(
     assert len(put_back) == 1 and len(found) == 3
     assert found[1] < put_back[0] < found[2]
     assert "Lost a life at step" in lines[found[2]]
+
+
+@pytest.mark.parametrize("held_off", [False, True])
+@pytest.mark.parametrize(("frames", "chance"), RUNS)
+def test_a_life_seen_coming_on_walked_ground_is_saved(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, frames: int, chance: bool, held_off: bool
+) -> None:
+    """The go looks ahead when a thing of a kind that has cost a life comes near
+    (T-1052). In its second life it comes to the walker again, sees the life going,
+    and looks for a way past before it goes: on ground the go has walked."""
+    told = a_second_life(
+        lab, monkeypatch, frames, chance, held_off=held_off, searches=3, look_ahead=True
+    )
+    r, near = told.runner, told.near
+    assert near is not None and r.looked_ahead == 0
+    while lab.game.state.x < SEES_THE_WALKER:
+        assert r.step()
+    assert lab.game.state.lives == START_LIVES - 1 and len(told.searches) == 3
+    near.now = THING
+    assert r.step()
+    near.now = ()
+    assert r.looked_ahead == 1 and len(told.searches) == 4
+    assert r.ways_sought == 3  # none of the go's searches after a life lost was used
+    ahead = told.searches[3]
+    if held_off:
+        # Every change tried, none of them the way: it carries on and the life goes.
+        assert ahead.way is None and ahead.tries > 100
+        assert (r.ways_ahead, r.ways_ahead_found) == (1, 0)
+        while lab.game.state.lives == START_LIVES - 1:
+            assert r.step()
+        assert lab.game.state.x < told.far
+    else:
+        assert ahead.way is not None and ahead.tries < BUDGET
+        assert ahead.way.change.move == lab.move("a", "right")
+        assert (r.ways_ahead, r.ways_ahead_found) == (1, 1)
+        past_the_walker(lab, r)
+        assert lab.game.state.lives == START_LIVES - 1
+        assert lab.game.state.mode == toy_hopper.PLAYING
+        # None of it was paid for a second time.
+        assert told.watch.ground.steps == told.counted
