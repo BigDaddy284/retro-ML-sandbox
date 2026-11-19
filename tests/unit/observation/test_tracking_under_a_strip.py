@@ -448,11 +448,16 @@ def test_the_bar_becomes_glass_and_the_scenery_stands_still_in_the_level() -> No
     assert tracker.glass == tuple(range(4, 12))
     assert tracker.camera == (15, 40)
     tracks = tracker.tracks()
-    lives = [t for t in tracks if t.glass]
-    assert len(lives) == 3 and all(t.y == 4 and t.missing == 0 for t in lives)
-    scenery = [t for t in tracks if not t.glass and t.missing == 0 and t.seen >= 3]
-    assert len(scenery) >= 10
-    assert all(not t.moves and t.velocity == (0.0, 0.0) for t in scenery)
+    # The bar is one piece of scenery, lives and all: nothing of it is a thing, and no
+    # edge of it is taken for a thing moving through the level at the camera's speed.
+    # (A thing that slid under the bar is followed there for a few looks, unseen.)
+    assert all(t.y >= TALL for t in tracks if t.missing == 0)
+    assert tracker.movers == ()
+    # What was in sight at all six looks stands still in the level: where the camera
+    # is read as standing, each of these would move 8 rows a look.
+    scenery = [t for t in tracks if t.missing == 0 and t.seen == 6]
+    assert len(scenery) >= 8
+    assert all(not t.moves and max(abs(v) for v in t.velocity) < 0.5 for t in scenery)
 
 
 # ------------------------------------------------------------ cost and edges

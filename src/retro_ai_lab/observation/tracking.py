@@ -381,6 +381,7 @@ class ObjectTracker:
         self._searches = 0
         self._unexplained = 0.0
         self._windowed = False  # the last move was read under a strip that stood still
+        self._strips: NDArray[np.bool_] | None = None  # ... and where the strips were
         # How this game's camera has been read so far: moves the whole screen told,
         # and moves read under a still strip (T-1061). Kept over a reset, like the
         # glass: it is about the game.
@@ -469,7 +470,7 @@ class ObjectTracker:
         self._sighted = (0, 0)
         self._hidden = None
         self._unexplained = 0.0
-        self._windowed = False
+        self._windowed, self._strips = False, None
 
     def update(
         self,
@@ -590,7 +591,7 @@ class ObjectTracker:
     ) -> tuple[int, int]:
         a, b = _packed(frame), _packed(prev)
         self._unexplained = 0.0
-        self._windowed = False
+        self._windowed, self._strips = False, None
         if self._stuck is None:
             self._stuck = np.zeros(frame.height, np.int16)
         out_a = np.zeros(a.shape, np.bool_)  # what has no say, on the new screen ...
@@ -653,10 +654,10 @@ class ObjectTracker:
         if self._strip_moves >= self._whole_moves:
             under = self._under_a_strip(a, b, va, vb, telling, reach)
             if under is not None:
-                self._windowed = True
+                shift, self._unexplained, window = under
+                self._windowed, self._strips = True, ~window
                 self._strip_moves += 1
-                self._unexplained = under[1]
-                return under[0]
+                return shift
         self._unexplained = still or 0.0
         return (0, 0)
 
@@ -668,10 +669,10 @@ class ObjectTracker:
         vb: NDArray[np.bool_],
         telling: NDArray[np.bool_],
         reach: tuple[int, int],
-    ) -> tuple[tuple[int, int], float] | None:
-        """The camera's move read from the part of the screen that moved, and the share
-        of the pixels with a say it leaves unexplained (T-1061); None where no part
-        moved inside strips that stood still. See :meth:`update`."""
+    ) -> tuple[tuple[int, int], float, NDArray[np.bool_]] | None:
+        """The camera's move read from the part of the screen that moved, the share of
+        the pixels with a say it leaves unexplained, and that part (T-1061); None where
+        no part moved inside strips that stood still. See :meth:`update`."""
         votes = va & telling  # only what changed has a say in which move it was
         if not votes.any():
             return None
@@ -712,7 +713,7 @@ class ObjectTracker:
         left_over += int(np.count_nonzero(differed & ~window))
         if left_over > EXPLAINS * int(np.count_nonzero(differed)):
             return None
-        return shift, left_over / max(1, int(np.count_nonzero(va & vb)))
+        return shift, left_over / max(1, int(np.count_nonzero(va & vb))), window
 
     @staticmethod
     def _moving_window(
@@ -1019,6 +1020,10 @@ class ObjectTracker:
         moved = moving_mask(prev, frame, self._scroll)
         if self._stuck is not None:
             moved[self._stuck >= GLASS_AFTER] = False  # what is on the glass moves with nothing
+        if self._strips is not None:
+            # Nor does a strip that stood still while the rest slid (T-1061): laid over
+            # the screen before as the rest moved, every edge in it differs.
+            moved[self._strips] = False
         sx, sy = self._scroll
         # What is already a thing needs no second look, and neither does the spot a
         # thing of a known kind has just left (its trail is a change too). A mover cut
