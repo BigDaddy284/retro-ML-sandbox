@@ -870,7 +870,18 @@ which the camera holds still on the screen, has no say, and neither have the
 rows it has found to be painted on the glass (a strip of lives and score
 stands still while everything else slides, so after two camera moves it is
 left out); and one small thing changing on a still screen is not taken for
-the camera moving. Where the scenery cannot tell how far the screen slid
+the camera moving. A solid status bar over a road, a starfield or any other
+screen with little on it used to hide the slide altogether: the bar's edge
+outvoted the few marks that moved, the AI took the camera to be standing
+still, and nothing paid it for driving on. Now, where the whole screen says
+"no move" though much changed, it looks for the part of the screen that moved
+inside strips that stood still (along the top, the bottom or a side) and
+reads the slide from that part. The log says so the first time ("A strip of
+the screen stands still while the rest slides"). It does this only on a game
+it has come to read that way, and not for a thing or two moving in step. A
+slanting slide with only a pixel or two of it across the bar is still read as
+its part along the bar, and several things moving by themselves over a screen
+with little on it can still hide the slide. Where the scenery cannot tell how far the screen slid
 (bare ground with one enemy walking on it, a blank stretch, a pattern that
 repeats), it goes by the game's own count of where its camera is. Nobody
 tells it where that is kept: it finds by itself which number in the game's

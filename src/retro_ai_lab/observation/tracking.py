@@ -21,6 +21,13 @@ as walking.
 Since T-992 the tracker's camera is measured at the pace the AI looks, and
 only by what can tell: see :meth:`ObjectTracker.update`.
 
+Since T-1061 the camera's move is also read under a strip that stands still. A solid
+status bar over thin scenery (a road, a starfield) outvotes it: every row of scenery
+that comes out from under the bar differs from the bar, and that is more pixels than
+the few marks on the road that moved. So where the whole screen says "no move" though
+much changed, the tracker looks for a part that moved inside strips that stood still:
+see :meth:`ObjectTracker.update`.
+
 Since T-1016 a thing cut out of the scenery by its motion is filled out by its
 colours to the whole thing (what differs between two screens is only the edge
 a flat-coloured thing leads with), taken only if it stood elsewhere a look
@@ -31,6 +38,7 @@ the tracker without that.
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TypeVar
@@ -60,6 +68,10 @@ GLASS_AFTER = 2  # camera moves a row stood still through before it counts as gl
 GLASS_MOST = 4  # ... and the most that are counted, so a row can be unlearnt again
 SCREEN_SHARE = 4  # the camera's reach is at most a quarter of the screen either way
 EXPLAINS = 0.5  # a move must leave at most this share of what differed still differing
+# A move brings one thing in as it takes another away: of the pixels a move under a still
+# strip explains, those of the second most common colour are at least this share (T-1061).
+CAME_AND_WENT = 0.1
+FEW = 1024  # changed pixels at most that every shift is tried on (T-1061)
 # A move the caller expects is taken where it leaves at most this share of the pixels
 # with a say differing more than the picture's own answer does (T-1020): a thing or
 # two that moved by themselves, not scenery that tells.
@@ -183,6 +195,63 @@ def _search(
     if not ranked:
         return (0, 0)
     return ranked[0][3], ranked[0][2]
+
+
+def _search_each(
+    a: NDArray[np.int32],
+    b: NDArray[np.int32],
+    votes: NDArray[np.bool_],
+    vb: NDArray[np.bool_],
+    max_dx: int,
+    max_dy: int,
+) -> tuple[int, int]:
+    """The shift that leaves least of the pixels in ``votes`` differing, with every
+    shift within reach tried on them (T-1061): they are few (what changed between two
+    looks), so each can be tried, and a coarse look at every fourth of them would miss
+    the thin things a move across little scenery is told by. Of more than ``FEW``, that
+    many vote, picked without a pattern (every other one would be one side of each thin
+    thing, and a pixel more or less would fit as well). Ranked as :func:`_rank` does;
+    (0, 0) where none votes."""
+    ys, xs = np.nonzero(votes)
+    if len(ys) == 0:
+        return (0, 0)
+    if len(ys) > FEW:
+        some = np.sort(np.random.default_rng(len(ys)).choice(len(ys), FEW, replace=False))
+        ys, xs = ys[some], xs[some]
+    colours = a[ys, xs]
+    height, width = a.shape
+    # The screen before with a rim no pixel votes from, so a partner off the screen (or
+    # left out of the vote) is simply not counted. A colour is never below nought.
+    rimmed = np.full((height + 2 * max_dy, width + 2 * max_dx), -1, np.int32)
+    rimmed[max_dy : max_dy + height, max_dx : max_dx + width] = np.where(vb, b, -1)
+    across = np.arange(-max_dx, max_dx + 1)
+    columns = xs[None, :] + max_dx + across[:, None]
+    keys: list[_Key] = []
+    for dy in range(-max_dy, max_dy + 1):
+        partners = rimmed[ys + max_dy + dy, columns]
+        counted = partners >= 0
+        voters = np.count_nonzero(counted, axis=1)
+        wrong = np.count_nonzero((partners != colours) & counted, axis=1)
+        for dx, n, bad in zip(across.tolist(), voters.tolist(), wrong.tolist(), strict=True):
+            if n:
+                keys.append((round(bad / n, 6), abs(dx) + abs(dy), dy, dx))
+    if not keys:
+        return (0, 0)
+    best = min(keys)
+    return best[3], best[2]
+
+
+def _between(edge: NDArray[np.bool_], weight: NDArray[np.int64]) -> tuple[int, int] | None:
+    """Of the stretches between two edges (or an edge and the end), the one that holds
+    most ``weight``: where it begins, and where it ends. None when none holds any
+    (T-1061)."""
+    marks = [-1, *np.flatnonzero(edge).tolist(), len(edge)]
+    best: tuple[int, int, int] | None = None
+    for before, after in itertools.pairwise(marks):
+        held = int(weight[before + 1 : after].sum())
+        if held > 0 and (best is None or held > best[0]):
+            best = (held, before + 1, after)
+    return None if best is None else (best[1], best[2])
 
 
 def _votes(mask: object, frame: Frame, what: str) -> NDArray[np.bool_] | None:
@@ -356,6 +425,13 @@ class ObjectTracker:
         self._stuck: NDArray[np.int16] | None = None
         self._searches = 0
         self._unexplained = 0.0
+        self._windowed = False  # the last move was read under a strip that stood still
+        self._strips: NDArray[np.bool_] | None = None  # ... and where the strips were
+        # How this game's camera has been read so far: moves the whole screen told,
+        # and moves read under a still strip (T-1061). Kept over a reset, like the
+        # glass: it is about the game.
+        self._whole_moves = 0
+        self._strip_moves = 0
 
     @property
     def catalogue(self) -> ObjectCatalogue:
@@ -398,6 +474,27 @@ class ObjectTracker:
         return self._sighted
 
     @property
+    def windowed(self) -> bool:
+        """The camera's move at the last look was read from the part of the screen that
+        moved, with a strip that stood still left out (T-1061): the whole screen's own
+        answer was "no move"."""
+        return self._windowed
+
+    @property
+    def read_as(self) -> tuple[int, int]:
+        """How often the camera's move has been told by the whole screen, and how often
+        it was read under a strip that stood still (T-1061). Under a strip is only
+        looked where that has told at least as often as the whole screen has."""
+        return (self._whole_moves, self._strip_moves)
+
+    def read_like(self, other: ObjectTracker) -> None:
+        """Read the camera as ``other`` has come to read it on this game: a tracker for
+        a try starts with what the go's own has found, not as on a game never seen."""
+        if not isinstance(other, ObjectTracker):
+            raise ConfigurationError("Only another tracker has a way of reading to take over.")
+        self._whole_moves, self._strip_moves = other._whole_moves, other._strip_moves
+
+    @property
     def unexplained(self) -> float:
         """The share of the pixels with a say that still differed at the last look once
         the camera's move was allowed for (T-993): next to nothing after a real move,
@@ -418,6 +515,7 @@ class ObjectTracker:
         self._sighted = (0, 0)
         self._hidden = None
         self._unexplained = 0.0
+        self._windowed, self._strips = False, None
 
     def update(
         self,
@@ -438,6 +536,24 @@ class ObjectTracker:
         largest size, the camera stood still. (Things known to move are not left out:
         a wrong scroll makes the scenery's own edges look like movers, and leaving
         those out would keep the scroll wrong.)
+
+        Where that vote says "no move" though more than one small thing changed, a
+        strip that stood still may have outvoted the scenery (T-1061: a status bar over
+        a road). Then the move that explains most of the pixels that changed is looked
+        for, with every move within reach tried on them (:func:`_search_each`: they
+        are few, and thin things tell a move only at the very shift it was). The
+        strips along the screen's edges that lie beyond a row or a column of which
+        half or more stood still against that move are left out, and the move is
+        measured again by what changed in the window that is left. It is taken if a
+        strip was left out at all and the window is the larger part of the screen; if
+        what it explains covers a quarter of the screen's rows or of its columns and
+        turned at least two colours (something came as something went: a floor that
+        only turned into sky did not move); and if what still differs in the window,
+        with what changed in the strips, is at most :data:`EXPLAINS` of what
+        differed. And it is looked for only on a game where the camera has been read
+        that way at least as often as by the whole screen (:attr:`read_as`): where the
+        whole screen tells, a band of clouds drifting over a level that stands still
+        is not the camera moving. :attr:`windowed` says a move was read that way.
 
         ``expect`` is the camera's move since the last frame as the caller has it from
         somewhere that is not the picture (T-1020: the game's own count of where its
@@ -522,6 +638,7 @@ class ObjectTracker:
     ) -> tuple[int, int]:
         a, b = _packed(frame), _packed(prev)
         self._unexplained = 0.0
+        self._windowed, self._strips = False, None
         if self._stuck is None:
             self._stuck = np.zeros(frame.height, np.int16)
         out_a = np.zeros(a.shape, np.bool_)  # what has no say, on the new screen ...
@@ -569,18 +686,129 @@ class ObjectTracker:
         self._searches += 1
         scroll = _search(a, b, va, vb, *reach)
         still = _mismatch(a, b, va, vb, 0, 0)
-        if scroll == (0, 0):
-            self._unexplained = still or 0.0
-            return scroll
-        # The best of a bad lot is no measure: after a cut to another place, or a move
-        # past the reach, some shift still fits best. A real move explains most of
-        # what differed.
-        moved = _mismatch(a, b, va, vb, *scroll)
-        if still is None or moved is None or moved > EXPLAINS * still:
-            self._unexplained = still or 0.0
-            return (0, 0)
-        self._unexplained = moved
-        return scroll
+        if scroll != (0, 0):
+            # The best of a bad lot is no measure: after a cut to another place, or a
+            # move past the reach, some shift still fits best. A real move explains
+            # most of what differed.
+            moved = _mismatch(a, b, va, vb, *scroll)
+            if still is not None and moved is not None and moved <= EXPLAINS * still:
+                self._unexplained = moved
+                self._whole_moves += 1
+                return scroll
+        # Under a strip only on a game where that has told as often as the whole
+        # screen: where the whole screen tells, a band of clouds drifting over a level
+        # that stands still is not the camera moving.
+        if self._strip_moves >= self._whole_moves:
+            under = self._under_a_strip(a, b, va, vb, telling, reach)
+            if under is not None:
+                shift, self._unexplained, window = under
+                self._windowed, self._strips = True, ~window
+                self._strip_moves += 1
+                return shift
+        self._unexplained = still or 0.0
+        return (0, 0)
+
+    def _under_a_strip(
+        self,
+        a: NDArray[np.int32],
+        b: NDArray[np.int32],
+        va: NDArray[np.bool_],
+        vb: NDArray[np.bool_],
+        telling: NDArray[np.bool_],
+        reach: tuple[int, int],
+    ) -> tuple[tuple[int, int], float, NDArray[np.bool_]] | None:
+        """The camera's move read from the part of the screen that moved, the share of
+        the pixels with a say it leaves unexplained, and that part (T-1061); None where
+        no part moved inside strips that stood still. See :meth:`update`."""
+        votes = va & telling  # only what changed has a say in which move it was
+        if not votes.any():
+            return None
+        shift = _search_each(a, b, votes, vb, *reach)
+        if shift == (0, 0):
+            return None
+        found = self._moving_window(a, b, va, vb, votes, shift)
+        if found is None:
+            return None
+        # Measured again inside the window: what came out from under a strip has
+        # nothing to be compared with there, as at the screen's own edge.
+        again = _search_each(a, b, votes & found[0], vb & found[0], *reach)
+        if again == (0, 0):
+            return None
+        if again != shift:
+            shift = again
+            found = self._moving_window(a, b, va, vb, votes, shift)
+            if found is None:
+                return None
+        window, as_moved = found
+        if 2 * int(np.count_nonzero(window)) <= window.size:
+            return None  # the part that moved is the larger part: a strip is a strip
+        height, width = a.shape
+        rows = int(np.count_nonzero(as_moved.any(axis=1)))
+        columns = int(np.count_nonzero(as_moved.any(axis=0)))
+        if rows < height // SCREEN_SHARE and columns < width // SCREEN_SHARE:
+            return None  # a thing or two moving alike is no camera move
+        # A move brings one thing in as it takes another away.
+        counts = np.sort(np.unique(a[as_moved], return_counts=True)[1])
+        if len(counts) < 2 or int(counts[-2]) < CAME_AND_WENT * int(counts.sum()):
+            return None
+        # The move, with the strips standing still, explains most of what differed.
+        differed = (a != b) & va & vb
+        inside_a, inside_b = va & window, vb & window
+        aa, bb = _overlap(a, b, *shift)
+        ok = _overlap(inside_a, inside_a, *shift)[0] & _overlap(inside_b, inside_b, *shift)[1]
+        left_over = int(np.count_nonzero((aa != bb) & ok))
+        left_over += int(np.count_nonzero(differed & ~window))
+        if left_over > EXPLAINS * int(np.count_nonzero(differed)):
+            return None
+        return shift, left_over / max(1, int(np.count_nonzero(va & vb))), window
+
+    @staticmethod
+    def _moving_window(
+        a: NDArray[np.int32],
+        b: NDArray[np.int32],
+        va: NDArray[np.bool_],
+        vb: NDArray[np.bool_],
+        votes: NDArray[np.bool_],
+        shift: tuple[int, int],
+    ) -> tuple[NDArray[np.bool_], NDArray[np.bool_]] | None:
+        """The screen less its still strips under ``shift`` (the window), and the changed
+        pixels in it that are as the shift says. A strip is the rows along the top or
+        the bottom, or the columns at the left or the right, that lie beyond an edge:
+        a row or a column of which half or more stood still against the shift. None
+        when the shift explains nothing, or no strip is left out: then the whole
+        screen has had its say already."""
+        dx, dy = shift
+        aa, bb = _overlap(a, b, dx, dy)
+        ok = _overlap(va, va, dx, dy)[0] & _overlap(vb, vb, dx, dy)[1]
+        y0, x0 = max(0, -dy), max(0, -dx)
+        inside = (slice(y0, y0 + aa.shape[0]), slice(x0, x0 + aa.shape[1]))
+        as_moved = np.zeros(a.shape, np.bool_)
+        as_moved[inside] = (aa == bb) & ok & votes[inside]
+        if not as_moved.any():
+            return None
+        against = np.zeros(a.shape, np.bool_)
+        against[inside] = (aa != bb) & ok & (a[inside] == b[inside])
+        # A strip's edge is a row (or a column) of which half or more stood still
+        # against the shift: scenery that came out from under a bar and is compared
+        # with the bar, or the bar's own edge compared with the scenery it hid. What
+        # moved lies between two such, or between one and the screen's edge: where
+        # most is as the shift says. (A figure that changed inside a status bar may
+        # happen to be as the shift says too: it lies beyond the edge.)
+        rows = _between(2 * against.sum(axis=1) >= a.shape[1], as_moved.sum(axis=1))
+        if rows is None:
+            return None
+        top, bottom = rows
+        columns = _between(
+            2 * against[top:bottom].sum(axis=0) >= bottom - top,
+            as_moved[top:bottom].sum(axis=0),
+        )
+        if columns is None:
+            return None
+        window = np.zeros(a.shape, np.bool_)
+        window[top:bottom, columns[0] : columns[1]] = True
+        if window.all():
+            return None
+        return window, as_moved & window
 
     def _told(
         self,
@@ -839,6 +1067,10 @@ class ObjectTracker:
         moved = moving_mask(prev, frame, self._scroll)
         if self._stuck is not None:
             moved[self._stuck >= GLASS_AFTER] = False  # what is on the glass moves with nothing
+        if self._strips is not None:
+            # Nor does a strip that stood still while the rest slid (T-1061): laid over
+            # the screen before as the rest moved, every edge in it differs.
+            moved[self._strips] = False
         sx, sy = self._scroll
         # What is already a thing needs no second look, and neither does the spot a
         # thing of a known kind has just left (its trail is a change too). A mover cut
