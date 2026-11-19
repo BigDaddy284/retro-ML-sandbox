@@ -316,12 +316,26 @@ def test_the_move_is_measured_again_inside_the_window(
     assert votes_again.any() and (votes_again[TALL + 8 :] == votes[TALL + 8 :]).all()
 
 
-def test_with_all_the_counter_changing_the_second_measure_tells() -> None:
+def test_with_all_the_counter_changing_the_second_measure_tells(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """At the last look here all that changed fits a slide of 7 rows best, the counter
+    with it; what changed in the window says 5. The window is then that of the 5."""
+    windows: list[tuple[int, int]] = []
+    real = ObjectTracker._moving_window
+
+    def kept(*args: object) -> object:
+        windows.append(args[-1])  # type: ignore[arg-type]
+        return real(*args)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ObjectTracker, "_moving_window", staticmethod(kept))
     tracker = ObjectTracker(max_shift=REACH)
     for i in range(9):
+        windows.clear()
         tracker.update(seen(THIN, (500, 500 - 5 * i), count=7777 * (i % 2)))
         assert tracker.scroll == ((0, -5) if i else (0, 0)), i
     assert tracker.read_as == (0, 8)
+    assert windows == [(0, -7), (0, -5)]
 
 
 LOOK_AFTER_LOOK = {  # moves of every size and slant, twelve looks of each
@@ -522,15 +536,25 @@ def test_a_floor_that_opens_is_no_move() -> None:
     still([(60, 200, hole)], [])
 
 
-def test_a_wide_thing_going_is_no_move() -> None:
-    """The lower half of a wide slab goes: "the screen slid" fits, the backdrop below
-    it having come up into its place. All that explains turned one colour."""
-    slab = np.full((20, 150, 3), MARK, np.uint8)
-    still([(50, 60, slab), (50, 80, slab)], [(50, 60, slab)])
-    # Nor with a small thing that happened to move as far: its colour is a twentieth
-    # of what the move explains, not the tenth that something coming in would be.
-    thing = block(12, 12)
-    still([(50, 60, slab), (50, 80, slab), (200, 150, thing)], [(50, 60, slab), (200, 130, thing)])
+@pytest.mark.parametrize("with_a_small_thing", [False, True])
+def test_a_wide_thing_going_is_no_move(with_a_small_thing: bool) -> None:
+    """The lower half of a wide slab goes, in a place with nothing else in it (no floor
+    to say otherwise): "the screen slid" fits, the backdrop below having come up into
+    its place. But all that explains turned one colour: nothing came as something went.
+    Nor with a small thing that happened to move as far: its colour is a twentieth of
+    what the move explains, not the tenth that something coming in would be."""
+    empty = np.zeros((1400, 1400, 3), np.uint8)
+    empty[:] = NIGHT
+    slab, thing = np.full((20, 150, 3), MARK, np.uint8), block(12, 12)
+    before: list[Thing] = [(50, 60, slab), (50, 80, slab)]
+    after: list[Thing] = [(50, 60, slab)]
+    if with_a_small_thing:
+        before.append((200, 150, thing))
+        after.append((200, 130, thing))
+    tracker = ObjectTracker(max_shift=REACH)
+    tracker.update(seen(empty, START, things=before))
+    tracker.update(seen(empty, START, things=after))
+    assert tracker.scroll == (0, 0) and not tracker.windowed and tracker.read_as == (0, 0)
 
 
 def test_a_bar_that_changes_all_over_outweighs_a_little_scenery() -> None:
