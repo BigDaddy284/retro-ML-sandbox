@@ -267,6 +267,9 @@ from, and the start is moved at most three times from one checkpoint.
 
 Press Start in the Learning panel wherever the game is, even on its title
 screen. The AI first checks whether its buttons change anything in the game.
+It holds them one after another and looks at where the game ends up; where
+that changes nothing (left then right can put a player back exactly where it
+stood), it asks each button by itself before it decides.
 If the game ignores it (a demo is playing, or the game is over), it tries
 every button on the controller, one at a time, until it finds the one that
 gets the game going (pressing a button again, a few times at most, when a press
