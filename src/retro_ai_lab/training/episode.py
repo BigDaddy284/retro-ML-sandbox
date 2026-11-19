@@ -28,6 +28,7 @@ from retro_ai_lab.core import (
 )
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.core.worklog import app_work
+from retro_ai_lab.learning.actions import ActionSpace
 from retro_ai_lab.learning.learner import Learner
 from retro_ai_lab.learning.picture import NO_MOVE, Sight, shrink
 from retro_ai_lab.learning.qlearning import Settings
@@ -51,7 +52,7 @@ from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.training.earned import rose_anyway
 from retro_ai_lab.training.moments import LEAD, Moment, Moments
 from retro_ai_lab.training.route import Route
-from retro_ai_lab.training.search import BUDGET, TOP, Spot, find_way
+from retro_ai_lab.training.search import BUDGET, TOP, Spot, Way, find_way
 from retro_ai_lab.training.trial import Outcome, play
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, Mark, ScreenWatch
 from retro_ai_lab.training.ways import carry
@@ -528,6 +529,9 @@ class EpisodeResult:
     ways_stood: int = 0  # of ways_sought, those where it stood still, no life lost (T-1018)
     ways_ahead: int = 0  # times it went back for a life seen going, before it went (T-1052)
     ways_ahead_found: int = 0  # times that found a way past: counted apart from ways_sought
+    # Of the searches after a life lost that found no way: those that kept the change
+    # that got furthest and played on from it (T-1060).
+    parts_kept: int = 0
 
     @property
     def succeeded(self) -> bool:
@@ -564,6 +568,9 @@ class EpisodeResult:
                 stood = "once" if self.ways_stood == 1 else f"{self.ways_stood} times"
                 back += f" ({stood} where it stood still)"
             said = f", went back {back} and {_found(self.ways_found, self.ways_sought)}"
+            if self.parts_kept:
+                kept = "once" if self.parts_kept == 1 else f"{self.parts_kept} times"
+                said += f" (and {kept} kept the change that got furthest)"
         if self.ways_ahead:
             times = "once" if self.ways_ahead == 1 else f"{self.ways_ahead} times"
             found = _found(self.ways_ahead_found, self.ways_ahead)
@@ -600,6 +607,7 @@ class EpisodeResult:
             "ways_stood": self.ways_stood,
             "ways_ahead": self.ways_ahead,
             "ways_ahead_found": self.ways_ahead_found,
+            "parts_kept": self.parts_kept,
         }
 
     @classmethod
@@ -622,6 +630,7 @@ class EpisodeResult:
                 int(data.get("ways_stood", 0)),
                 int(data.get("ways_ahead", 0)),
                 int(data.get("ways_ahead_found", 0)),
+                int(data.get("parts_kept", 0)),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConfigurationError(f"Bad go result: {exc}") from exc
@@ -795,6 +804,7 @@ class EpisodeRunner:
         self._ahead_left = 0
         self._ways_ahead = 0
         self._ways_ahead_found = 0
+        self._parts_kept = 0  # searches of this go that kept a part of the way (T-1060)
         self._looked_ahead = 0
         self._ahead_missed = 0  # such searches in a row that found nothing, go to go
         self._ahead_gave_up = False
@@ -1010,6 +1020,12 @@ class EpisodeRunner:
         return self._ways_ahead_found
 
     @property
+    def parts_kept(self) -> int:
+        """Searches of this go after a life lost that found no way and kept the change
+        that got furthest, to play on from it (T-1060)."""
+        return self._parts_kept
+
+    @property
     def ahead_gave_up(self) -> bool:
         """Its searches for a life seen going kept finding nothing, so it looks ahead
         no more in this game (T-1052). After a life lost it still goes back."""
@@ -1141,6 +1157,7 @@ class EpisodeRunner:
         self._ahead_left = self._ways_per_go if looks else 0
         self._ways_ahead = 0
         self._ways_ahead_found = 0
+        self._parts_kept = 0
         self._looked_ahead = 0
         self._minded.clear()
         self._looked_at = None
@@ -1872,6 +1889,12 @@ class EpisodeRunner:
         single changes (:attr:`Search.lapped`, remembered with the place), the
         searches there from then on also go on from a change that loses the life
         later and further on, with a second change after it (``deeper``, T-1059).
+        Such a search that finds no way may hand back a part of one
+        (:attr:`Search.part`, T-1060): the change that got furthest before it lost the
+        life. After a life lost the go is put back and plays it as it plays a way; the
+        life then goes further on, and the search there looks for the rest. The place
+        is remembered as searched for nothing, and the count of searches for nothing
+        in a row is left as it is.
 
         With ``coming`` no life went yet (T-1052): a look ahead saw one going, and
         these are the moves the AI was about to make up to the step it would go at;
@@ -1967,13 +1990,19 @@ class EpisodeRunner:
                     deeper=deeper,
                     deeper_at=sought.deeper_at if sought is not None and deeper else TOP,
                 )
-                if search.way is None:
+                # A part of the way (T-1060) is for a life that has gone: one seen
+                # coming is still to be had, and the go carries on to it.
+                part = None if search.way is not None or coming or stood else search.part
+                if search.way is None and part is None:
                     self._connection.call(lambda a: a.load_state(NOW_SLOT))
             if search.way is not None:
                 self.go_back(moment, then=search.way.moves)
                 self._way_left = len(search.way.moves)
                 if coming:
                     self._ahead_past = going_at
+            elif part is not None:
+                self.go_back(moment, then=part.moves)
+                self._way_left = len(part.moves)
         except EmulatorError:
             self._ended_by = "disconnected"
             self._signals.stop()
@@ -2010,7 +2039,7 @@ class EpisodeRunner:
                 )
             return True
         if way is None:
-            if not coming:
+            if not coming and part is None:
                 moments.forget()
             # The next search about here begins where this one stopped (T-1042).
             if sought is not None:
@@ -2054,13 +2083,19 @@ class EpisodeRunner:
                 return True
             log.info(
                 "Lost a life at step %d. Went back %s and made %d tries in %.1f s%s: "
-                "none got past.",
+                "none got past.%s",
                 at,
                 back,
                 search.tries,
                 search.seconds,
                 ", all the time a search may take" if search.out_of_time else "",
+                "" if part is None else " " + self._kept(part, len(trace), space),
             )
+            if part is not None:
+                # Neither a search for nothing nor a way found: the count that stops
+                # going back in a game is left as it is.
+                self._parts_kept += 1
+                return True
             self._missed += 1
             if self._give_up_after is not None and self._missed >= self._give_up_after:
                 self._gave_up = True
@@ -2152,6 +2187,25 @@ class EpisodeRunner:
             )
         log.info("%s%s", lead, how)
         return True
+
+    @staticmethod
+    def _kept(part: Way, did: int, space: ActionSpace) -> str:
+        """What the log says of a part of the way that is kept (T-1060)."""
+        change = part.change
+        held = f"{space[change.move].label} for {_steps(change.hold)}"
+        if part.plain is None:
+            what = f"{held}, starting {_steps(did - change.at)} before the life went"
+        else:
+            what = (
+                f"holding {space[part.plain].label} instead of what it did, with {held}, "
+                f"starting {_steps((part.lost_at or 0) - change.at)} before that would "
+                "lose the life"
+            )
+        return (
+            f"One change got further before it lost the life ({what}), so the AI keeps "
+            f"it: it plays that for {_steps(len(part.moves))} and carries on. The life "
+            "goes further on, and the search there looks for the rest of the way."
+        )
 
     def _settled(
         self,
@@ -2706,6 +2760,7 @@ class EpisodeRunner:
             self._ways_stood,
             self._ways_ahead,
             self._ways_ahead_found,
+            self._parts_kept,
         )
         self._state = None
         return result
