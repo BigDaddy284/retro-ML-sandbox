@@ -40,6 +40,7 @@ from retro_ai_lab.training.ways import HOLDS, Change, changes
 from tests.unit.training import test_going_back as going_back
 from tests.unit.training import test_trial as trial
 from tests.unit.training.test_going_back import DIED_AT, Lab, steps
+from tests.unit.training.test_looking_ahead import THING, Near, looking
 from tests.unit.training.test_search import ACROSS, ALIVE, DEAD, Script, look_for
 from tests.unit.training.test_search_at_a_loss import searching
 from tests.unit.training.test_standing_still import NEAR, hop_about, standing
@@ -326,6 +327,26 @@ def test_the_next_go_says_it_again(
         r.begin()
         steps(r, DIED_AT)
     assert caplog.text.count(SAID) == 2
+
+
+@pytest.mark.parametrize("says", [True, False])
+def test_a_life_seen_coming_is_searched_for_as_one_lost_is(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, says: bool
+) -> None:
+    made = calls(monkeypatch)
+    stood_still(monkeypatch, says)
+    r, _ = looking(lab)
+    near = Near(monkeypatch, r.watch)
+    r.begin()
+    steps(r, 5)
+    assert made == []
+    # Something of a kind that has cost a life comes near, and playing ahead the life
+    # goes: the search for a way round it is told what the ground says, as any other.
+    near.now = THING
+    assert r.step()
+    assert (r.looked_ahead, r.ways_ahead, r.ways_sought) == (1, 1, 0)
+    assert [options["still"] for options in made] == [says]
+    assert r.ways_ahead_found == 1 and r.times_back == 1
 
 
 def test_at_a_standstill_it_is_never_said(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
