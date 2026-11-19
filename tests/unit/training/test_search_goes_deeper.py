@@ -435,6 +435,14 @@ def test_out_of_tries_before_a_step_on_is_looked_at(
     assert cut == Search(None, 3) and script.outcomes == []
     # The next begins at that change, and at the top of what comes after it.
     assert cut.stopped_at == (TOP[0], spot_of(listed[2], did)) and cut.deeper_at == TOP
+    # Where the search before had stopped further down that list, that is kept.
+    script.outcomes[:] = [lost_at(16)]
+    kept = (TOP[0], (4, 2))
+    again = look_for(
+        hopper, did, no_watch, deeper=True, budget=1, begin_at=cut.stopped_at, deeper_at=kept
+    )
+    assert again == Search(None, 1) and again.stopped_at == cut.stopped_at
+    assert again.deeper_at == kept
 
 
 def test_out_of_tries_with_a_second_change_alive_and_not_looked_at(
@@ -796,12 +804,13 @@ def test_a_life_seen_coming_is_searched_deeper_as_one_lost_is(
 def test_not_where_the_screen_stands_still(
     lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    asked = Asked(monkeypatch, [nothing(True), nothing(True), nothing(True)])
+    asked = Asked(monkeypatch, [nothing(True, ((1, 6), (4, 2))), nothing(True), nothing(True)])
     r, _ = searching(lab, ways_per_go=3, give_up_after=None, max_steps=400)
     r.begin()
     steps(r, DIED_AT)
-    # The place is known for it. With the ground saying the screen stands still, a
-    # search there is for a change that keeps the life, and goes no deeper.
+    # The place is known for it, and for where in a second list a search stopped. With
+    # the ground saying the screen stands still, a search there is for a change that
+    # keeps the life, and goes no deeper.
     monkeypatch.setattr(Ground, "still", property(lambda self: True))
     with caplog.at_level(logging.INFO, logger=LOG):
         steps(r, DIED_AT)
@@ -899,6 +908,12 @@ def test_held_off_no_search_there_finds_a_way(lab: Lab, monkeypatch: pytest.Monk
     assert asked.deeper == [False] + [True] * 5
 
 
+WHY = (
+    " No single change got past here: the first loses the life later and further on, and "
+    "the second gets past from there."
+)
+
+
 def test_the_log_says_a_way_of_two_changes_to_what_it_did(
     lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -912,10 +927,54 @@ def test_the_log_says_a_way_of_two_changes_to_what_it_did(
         r.begin()
         steps(r, DIED_AT)
     (found,) = said(caplog, "found a way past")
-    assert found.startswith(f"Lost a life at step {DIED_AT}. Went back {DIED_AT} steps and ")
+    assert found == (
+        f"Lost a life at step {DIED_AT}. Went back {DIED_AT} steps and found a way past on "
+        f"try 7, after 0.0 s: right + a for 4 steps, starting {DIED_AT - 20} steps before "
+        "the life went, and 10 steps after that began a for 8 steps." + WHY
+    )
+
+
+def test_the_log_says_a_way_of_two_changes_to_the_plain_way(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    right = lab.move("right")
+    first, second = Change(9, lab.move("a", "right"), 8), Change(18, lab.move("b", "right"), 1)
+    base = (right,) * 25  # holding it lost the life at step 25, not where the go did
+    moves = second.apply(first.apply(base, 0), CARRY_ON)
+    way = Way(moves, second, tries=9, ground=2, plain=right, lost_at=25, first=first)
+    Asked(monkeypatch, [Search(way, 9)])
+    r, _ = searching(lab)
+    with caplog.at_level(logging.INFO, logger=LOG):
+        r.begin()
+        steps(r, DIED_AT)
+    (found,) = said(caplog, "found a way past")
+    assert found == (
+        f"Lost a life at step {DIED_AT}. Went back {DIED_AT} steps and found a way past on "
+        "try 9, after 0.0 s: holding right instead of what it did, with right + a for 8 "
+        "steps, starting 16 steps before that would lose the life, and 9 steps after that "
+        "began right + b for 1 step." + WHY
+    )
+
+
+def test_the_log_says_it_of_a_life_seen_coming(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    r, _ = looking(lab)
+    near = Near(monkeypatch, r.watch)
+    r.begin()
+    steps(r, 5)
+    right = lab.move("right")
+    first, second = Change(12, lab.move("a", "right"), 4), Change(17, lab.move("a", "right"), 4)
+    did = [right] * DIED_AT  # what it did, and what it was about to do
+    way = Way(second.apply(first.apply(did, 0), CARRY_ON), second, tries=4, ground=2, first=first)
+    Asked(monkeypatch, [Search(way, 4)])
+    with caplog.at_level(logging.INFO, logger=LOG):
+        near.now = THING
+        assert r.step()
+    (found,) = said(caplog, "found a way past")
+    assert found.startswith("Something of a kind that has cost a life (thing-9) came near at ")
     assert found.endswith(
-        f"found a way past on try 7, after 0.0 s: right + a for 4 steps, starting "
-        f"{DIED_AT - 20} steps before the life went, and 10 steps after that began a for 8 "
-        "steps. No single change got past here: the first loses the life later and further "
-        "on, and the second gets past from there."
+        f"found a way past on try 4, after 0.0 s: right + a for 4 steps, starting "
+        f"{DIED_AT - 12} steps before the life would go, and 5 steps after that began "
+        "right + a for 4 steps." + WHY
     )
