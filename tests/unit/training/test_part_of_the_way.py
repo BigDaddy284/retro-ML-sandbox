@@ -388,6 +388,22 @@ def test_after_a_life_lost_a_part_is_played_as_a_way_is(
     assert asked.deeper == [False]
 
 
+def test_a_part_is_played_to_its_end_though_the_go_s_steps_run_out(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    part = a_part(lab)
+    Asked(monkeypatch, [with_a_part(part)])
+    r, _ = searching(lab, ways_per_go=3, give_up_after=None, max_steps=DIED_AT + 3)
+    r.begin()
+    while r.step():
+        pass
+    # As a way just found is (T-1018): a go that ended part of the way through it
+    # would have gone back over its ground for nothing.
+    result = r.finish()
+    assert result.ended_by == "max_steps" and result.steps == DIED_AT + len(part.moves)
+    assert result.parts_kept == 1
+
+
 def test_the_log_says_a_part_of_the_plain_way(
     lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
