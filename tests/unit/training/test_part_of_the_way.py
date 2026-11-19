@@ -207,16 +207,16 @@ def test_a_search_cut_short_keeps_what_it_had_seen_and_says_where_it_stopped(
 ) -> None:
     script, did, _ = scripted(hopper, monkeypatch, [])
     listed = list(changes(did, hopper.space, upto=LIVE))
-    first = listed[0]
+    first = listed[2]  # the third in the list, a step before the first two
     tried = first.apply(did, CARRY_ON)
     stone = tried[:17]
     after = seconds(stone, first, hopper.space, upto=CUT)
-    script.outcomes[:] = [lost_at(17), lost_at(17, PAST), DEAD, DEAD]
-    cut = look_for(hopper, did, no_watch_but_once(), deeper=True, live=LIVE, budget=4)
-    assert cut == Search(None, 4) and not cut.lapped
-    assert cut.part == Way(tuple(tried[:CUT]), first, tries=4, ground=PAST)
-    assert cut.stopped_at == (TOP[0], spot_of(first, did, LIVE))
-    assert cut.deeper_at == (TOP[0], second_spot(after[2], first, stone[:CUT]))
+    script.outcomes[:] = [DEAD, DEAD, lost_at(17), lost_at(17, PAST), DEAD, DEAD]
+    cut = look_for(hopper, did, no_watch_but_once(), deeper=True, live=LIVE, budget=6)
+    assert cut == Search(None, 6) and not cut.lapped
+    assert cut.part == Way(tuple(tried[:CUT]), first, tries=6, ground=PAST)
+    assert cut.stopped_at == (TOP[0], spot_of(first, did, LIVE)) != TOP
+    assert cut.deeper_at == (TOP[0], second_spot(after[2], first, stone[:CUT])) != TOP
     # Out of tries before the look: nothing has been seen to get further.
     script.outcomes[:] = [lost_at(17)]
     sooner = look_for(hopper, did, no_watch, deeper=True, live=LIVE, budget=1)
