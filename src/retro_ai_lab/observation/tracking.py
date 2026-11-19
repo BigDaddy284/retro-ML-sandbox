@@ -38,6 +38,7 @@ the tracker without that.
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TypeVar
@@ -193,6 +194,19 @@ def _search(
     if not ranked:
         return (0, 0)
     return ranked[0][3], ranked[0][2]
+
+
+def _between(edge: NDArray[np.bool_], weight: NDArray[np.int64]) -> tuple[int, int] | None:
+    """Of the stretches between two edges (or an edge and the end), the one that holds
+    most ``weight``: where it begins, and where it ends. None when none holds any
+    (T-1061)."""
+    marks = [-1, *np.flatnonzero(edge).tolist(), len(edge)]
+    best: tuple[int, int, int] | None = None
+    for before, after in itertools.pairwise(marks):
+        held = int(weight[before + 1 : after].sum())
+        if held > 0 and (best is None or held > best[0]):
+            best = (held, before + 1, after)
+    return None if best is None else (best[1], best[2])
 
 
 def _votes(mask: object, frame: Frame, what: str) -> NDArray[np.bool_] | None:
@@ -709,11 +723,12 @@ class ObjectTracker:
         votes: NDArray[np.bool_],
         shift: tuple[int, int],
     ) -> tuple[NDArray[np.bool_], NDArray[np.bool_]] | None:
-        """The screen less its still strips under ``shift``, and the changed pixels that
-        are as the shift says. A strip is the rows above, or below, or the columns left
-        or right of everything the shift explains, if something in them stood still
-        that would not have, had it moved so. None when the shift explains nothing, or
-        no strip is left out: then the whole screen has had its say already."""
+        """The screen less its still strips under ``shift`` (the window), and the changed
+        pixels in it that are as the shift says. A strip is the rows along the top or
+        the bottom, or the columns at the left or the right, that lie beyond an edge:
+        a row or a column of which half or more stood still against the shift. None
+        when the shift explains nothing, or no strip is left out: then the whole
+        screen has had its say already."""
         dx, dy = shift
         aa, bb = _overlap(a, b, dx, dy)
         ok = _overlap(va, va, dx, dy)[0] & _overlap(vb, vb, dx, dy)[1]
@@ -725,28 +740,24 @@ class ObjectTracker:
             return None
         against = np.zeros(a.shape, np.bool_)
         against[inside] = (aa != bb) & ok & (a[inside] == b[inside])
-        # A figure that changed in a status bar may happen to be as the shift says. It
-        # is not part of what moved: in its row and in its column alike, at least as
-        # much stood still against the shift as is as the shift says.
-        row_against = against.sum(axis=1) >= as_moved.sum(axis=1)
-        column_against = against.sum(axis=0) >= as_moved.sum(axis=0)
-        core = as_moved & ~(row_against[:, None] & column_against[None, :])
-        if not core.any():
+        # A strip's edge is a row (or a column) of which half or more stood still
+        # against the shift: scenery that came out from under a bar and is compared
+        # with the bar, or the bar's own edge compared with the scenery it hid. What
+        # moved lies between two such, or between one and the screen's edge: where
+        # most is as the shift says. (A figure that changed inside a status bar may
+        # happen to be as the shift says too: it lies beyond the edge.)
+        rows = _between(2 * against.sum(axis=1) >= a.shape[1], as_moved.sum(axis=1))
+        if rows is None:
             return None
-        ys, xs = np.nonzero(core)
-        top, bottom = int(np.min(ys)), int(np.max(ys)) + 1
-        left, right = int(np.min(xs)), int(np.max(xs)) + 1
-        # Each strip is judged by what lies straight beyond what moved: the corner
-        # where a bar along the top meets the screen's side says nothing of the side.
-        window = np.ones(a.shape, np.bool_)
-        if against[:top, left:right].any():
-            window[:top] = False
-        if against[bottom:, left:right].any():
-            window[bottom:] = False
-        if against[top:bottom, :left].any():
-            window[:, :left] = False
-        if against[top:bottom, right:].any():
-            window[:, right:] = False
+        top, bottom = rows
+        columns = _between(
+            2 * against[top:bottom].sum(axis=0) >= bottom - top,
+            as_moved[top:bottom].sum(axis=0),
+        )
+        if columns is None:
+            return None
+        window = np.zeros(a.shape, np.bool_)
+        window[top:bottom, columns[0] : columns[1]] = True
         if window.all():
             return None
         return window, as_moved & window

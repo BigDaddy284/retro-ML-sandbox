@@ -70,12 +70,12 @@ def rich(size: int = 1400) -> np.ndarray:
     return a
 
 
-def bar(a: np.ndarray, where: str, count: int = 0) -> None:
+def bar(a: np.ndarray, where: str, count: int = 0, tall: int = TALL) -> None:
     """Paint a solid status bar along one edge of the screen ``a``: three lives and a
     counter that shows ``count``."""
     if where in ("top", "bottom"):
-        y = 0 if where == "top" else H - TALL
-        a[y : y + TALL] = BAR
+        y = 0 if where == "top" else H - tall
+        a[y : y + tall] = BAR
         for i in range(3):
             a[y + 4 : y + 12, 8 + 12 * i : 16 + 12 * i] = LIFE
         for i in range(4):  # four figures, each a block as tall as the figure it shows
@@ -98,6 +98,7 @@ def seen(
     where: str | None = "top",
     count: int = 0,
     things: Sequence[Thing] = (),
+    tall: int = TALL,
 ) -> Frame:
     """The screen with the camera at ``camera`` (across, down) in ``world``, the things
     drawn where they are on the screen, and the bar over it all."""
@@ -107,8 +108,38 @@ def seen(
         h, w = picture.shape[:2]
         a[ty : ty + h, tx : tx + w] = picture
     if where is not None:
-        bar(a, where, count)
+        bar(a, where, count, tall)
     return Frame(W, H, 3, a.tobytes())
+
+
+def level() -> np.ndarray:
+    """A place that stands still in these tests: one colour, and a floor of bricks, none
+    like the next, across the bottom of the screen seen from ``START``."""
+    rng = np.random.default_rng(5)
+    a = np.zeros((1400, 1400, 3), np.uint8)
+    a[:] = NIGHT
+    for x in range(0, 1400, 16):
+        a[700:740, x : x + 16] = BRICK
+        a[700:740, x] = DARK
+        a[700 + int(rng.integers(4, 30)), x : x + 10] = DARK
+    return a
+
+
+LEVEL = level()
+RICH = rich()
+
+
+def still(*things: Sequence[Thing], where: str | None = "top") -> ObjectTracker:
+    """A tracker shown the level from one spot, look after look, with other things on
+    it each time."""
+    tracker = ObjectTracker(max_shift=REACH)
+    for now in things:
+        tracker.update(seen(LEVEL, START, where=where, things=now))
+        if now is not things[0]:
+            assert tracker.scroll == (0, 0) and tracker.sighted == (0, 0)
+            assert not tracker.windowed
+    assert tracker.camera == (0, 0) and tracker.read_as == (0, 0)
+    return tracker
 
 
 def block(width: int, height: int, colour: tuple[int, int, int] = BRICK) -> np.ndarray:
@@ -148,4 +179,313 @@ def searched(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[int]]:
     yield calls
 
 
-__all__ = ["ConfigurationError", "estimate_scroll", "time"]
+# ------------------------------------------------------------ the cause
+
+
+def test_a_bar_along_the_top_outvotes_thin_scenery() -> None:
+    """The fault this task cures, on one pair of screens. The camera moved 8 rows. Laid
+    over each other as they are, the screens differ in the few marks that moved; moved
+    by the 8 rows, they differ in the 8 rows of scenery that came out from under the
+    bar, which is more. So the whole screen's vote says it stood still."""
+    before, after = seen(THIN, START), seen(THIN, (500, 508))
+    assert estimate_scroll(before, after, max_dx=REACH, max_dy=REACH) == (0, 0)
+    same = np.frombuffer(before.pixels, np.uint8) != np.frombuffer(after.pixels, np.uint8)
+    assert 0 < int(same.reshape(H, W, 3).any(axis=2).sum()) < 8 * W
+    # Without the bar the same two screens tell.
+    bare = seen(THIN, START, where=None), seen(THIN, (500, 508), where=None)
+    assert estimate_scroll(*bare, max_dx=REACH, max_dy=REACH) == (0, 8)
+
+
+# ------------------------------------------------------------ read under a bar
+
+ACROSS_THE_BAR = {  # moves that take scenery under the bar or out from under it
+    "top": [(0, -4), (0, -8), (0, 12), (0, -16), (0, 24), (0, -1), (0, 32), (-7, 5), (12, -9)],
+    "bottom": [(0, -4), (0, 8), (0, -12), (0, 16), (0, -24), (0, 2), (0, -32), (-7, 5), (12, -9)],
+    "left": [(4, 0), (-8, 0), (9, 0), (-16, 0), (20, 0), (3, 0), (32, 0), (-7, 5), (12, -9)],
+    "right": [(-4, 0), (8, 0), (-7, 0), (16, 0), (-24, 0), (-1, 0), (-32, 0), (-7, 5), (12, -9)],
+}
+ALONG_THE_BAR = {
+    "top": [(9, 0), (-7, 0), (20, 0), (3, 0), (32, 0)],
+    "bottom": [(-9, 0), (7, 0), (-20, 0), (-3, 0), (-32, 0)],
+    "left": [(0, -4), (0, -8), (0, 12), (0, 24), (0, -32)],
+    "right": [(0, 4), (0, 8), (0, -12), (0, -24), (0, 32)],
+}
+
+
+@pytest.mark.parametrize(
+    ("where", "move"), [(w, m) for w, moves in ACROSS_THE_BAR.items() for m in moves]
+)
+def test_the_move_is_read_under_a_bar(
+    where: str, move: tuple[int, int], searched: list[int]
+) -> None:
+    tracker = moved_by(move, where=where)
+    assert tracker.sighted == move and tracker.scroll == move and tracker.camera == move
+    assert tracker.windowed and tracker.read_as == (0, 1)
+    assert tracker.unexplained < 0.01  # next to nothing is left unexplained
+    # The whole screen was asked first; then what changed, twice.
+    assert len(searched) == 3 and tracker.searches == 1
+
+
+@pytest.mark.parametrize(
+    ("where", "move"), [(w, m) for w, moves in ALONG_THE_BAR.items() for m in moves]
+)
+def test_a_move_along_the_bar_is_told_by_the_whole_screen(
+    where: str, move: tuple[int, int], searched: list[int]
+) -> None:
+    """Scenery that slides along a bar does not come out from under it: the whole
+    screen tells, as it did before this task, and nothing more is looked for."""
+    tracker = moved_by(move, where=where)
+    assert tracker.sighted == move and tracker.scroll == move
+    assert not tracker.windowed and tracker.read_as == (1, 0)
+    assert len(searched) == 1
+
+
+@pytest.mark.parametrize("move", [(0, -8), (0, 24), (9, 0), (-7, 5), (12, -9), (0, 1), (32, 0)])
+def test_without_a_bar_nothing_has_changed(move: tuple[int, int], searched: list[int]) -> None:
+    tracker = moved_by(move, where=None)
+    assert tracker.sighted == move and not tracker.windowed and tracker.read_as == (1, 0)
+    assert len(searched) == 1
+
+
+@pytest.mark.parametrize("where", ["top", "bottom", "left", "right"])
+def test_a_bar_over_rich_scenery_is_told_by_the_whole_screen(
+    where: str, searched: list[int]
+) -> None:
+    tracker = ObjectTracker(max_shift=REACH)
+    for i in range(4):
+        tracker.update(seen(RICH, (500 + 5 * i, 500 + 8 * i), where=where))
+        assert not tracker.windowed
+        assert tracker.scroll == ((5, 8) if i else (0, 0))
+    assert tracker.read_as == (3, 0) and len(searched) == 3
+
+
+@pytest.mark.parametrize(
+    ("where", "move"), [("top", (0, 8)), ("left", (6, 0)), ("bottom", (3, -5))]
+)
+def test_a_counter_running_in_the_bar_does_not_stop_it(where: str, move: tuple[int, int]) -> None:
+    """Two of the counter's figures change at every look. Some of what changed in the
+    bar may happen to be as the move says; it is not taken for part of what moved."""
+    tracker = ObjectTracker(max_shift=REACH)
+    for i in range(7):
+        camera = (START[0] + move[0] * i, START[1] + move[1] * i)
+        tracker.update(seen(THIN, camera, where=where, count=17 * i))
+        assert tracker.scroll == (move if i else (0, 0))
+        assert tracker.windowed == bool(i)
+    assert tracker.camera == (6 * move[0], 6 * move[1]) and tracker.read_as == (0, 6)
+
+
+def test_the_players_box_left_out_changes_nothing() -> None:
+    """The watch hides the player (the camera holds it still on the screen, and here it
+    steers across as the road slides): hidden or not, the move is read."""
+    car = block(14, 20, MARK)
+    tracker = ObjectTracker(max_shift=REACH)
+    for i in range(6):
+        x = 120 + 6 * i
+        frame = seen(THIN, (500, 500 - 10 * i), things=[(x, 196, car)])
+        tracker.update(frame, hide=(x - 2, 194, 18, 24))
+        assert tracker.scroll == ((0, -10) if i else (0, 0))
+    assert tracker.camera == (0, -50) and tracker.read_as == (0, 5)
+    # Not hidden, the car is one thing more that moved by itself.
+    tracker = ObjectTracker(max_shift=REACH)
+    for i in range(6):
+        tracker.update(seen(THIN, (500, 500 - 10 * i), things=[(120 + 6 * i, 196, car)]))
+    assert tracker.camera == (0, -50)
+
+
+# ------------------------------------------------------------ not fooled
+
+
+def test_nothing_changing_is_no_move_and_no_search(searched: list[int]) -> None:
+    tracker = still([], [])
+    assert tracker.searches == 0 and searched == []
+
+
+def test_one_thing_moving_is_no_move(searched: list[int]) -> None:
+    thing = block(16, 16)
+    still([(100, 150, thing)], [(96, 150, thing)], [(92, 150, thing)])
+    assert searched == []  # one small thing changing needs no search at all
+
+
+def test_two_things_moving_alike_are_no_move() -> None:
+    """Two walkers in step on a bare row, over a floor that stands: what they explain
+    covers neither a quarter of the screen's rows nor a quarter of its columns."""
+    thing = block(16, 16)
+    still(
+        [(40, 184, thing), (160, 184, thing)],
+        [(36, 184, thing), (156, 184, thing)],
+        [(32, 184, thing), (152, 184, thing)],
+    )
+
+
+def test_a_row_of_things_moving_alike_is_no_move() -> None:
+    """Six in step along one row cover a quarter of the columns; but the rows they move
+    in are a strip between the bar and the floor, not the larger part of the screen."""
+    thing = block(16, 16)
+    still(*([(20 + 36 * i - 4 * n, 184, thing) for i in range(6)] for n in range(3)))
+
+
+def test_clouds_drifting_over_a_level_that_stands_still_are_no_move() -> None:
+    cloud = block(40, 14, CLOUD)
+    still(*([(10 + 60 * i - 3 * n, 30 + 9 * (i % 3), cloud) for i in range(4)] for n in range(4)))
+
+
+@pytest.mark.parametrize("there_first", [True, False])
+def test_a_wide_thing_vanishing_or_appearing_is_no_move(there_first: bool) -> None:
+    looks: list[list[Thing]] = [[(60, 100, block(120, 60))], []]
+    still(*(looks if there_first else looks[::-1]))
+
+
+def test_a_floor_that_opens_is_no_move() -> None:
+    """What an existing check caught in the first try-out: "the screen slid down" explains
+    a piece of floor turning into what is above it. All that such a move explains turned
+    one colour: nothing came as something went."""
+    hole = np.full((40, 100, 3), NIGHT, np.uint8)
+    still([], [(60, 200, hole)])
+    still([(60, 200, hole)], [])
+
+
+def test_a_cut_to_another_place_is_no_move() -> None:
+    tracker = ObjectTracker(max_shift=REACH)
+    tracker.update(seen(THIN, START))
+    tracker.update(seen(place(seed=11), START))
+    assert tracker.scroll == (0, 0) and not tracker.windowed and tracker.read_as == (0, 0)
+    assert tracker.unexplained > 0.01  # and it knows it could not tell
+
+
+@pytest.mark.parametrize(
+    ("where", "move"), [("top", (0, 60)), ("top", (0, -45)), ("left", (60, 0)), ("right", (-50, 9))]
+)
+def test_a_move_past_the_reach_is_not_read(where: str, move: tuple[int, int]) -> None:
+    tracker = moved_by(move, where=where)
+    assert tracker.scroll == (0, 0) and not tracker.windowed and tracker.read_as == (0, 0)
+
+
+def test_every_pixel_changing_is_no_move() -> None:
+    tracker = ObjectTracker(max_shift=REACH)
+    for shade in (10, 200, 90):
+        a = np.full((H, W, 3), shade, np.uint8)
+        bar(a, "top")
+        tracker.update(Frame(W, H, 3, a.tobytes()))
+        assert tracker.scroll == (0, 0) and not tracker.windowed
+
+
+def test_a_bar_that_is_most_of_the_screen_is_no_strip() -> None:
+    """A strip is a strip: the part that moved must be the larger part of the screen. A
+    window of scenery under a panel that fills more than half of it is not read."""
+    tracker = ObjectTracker(max_shift=REACH)
+    for i in range(3):
+        tracker.update(seen(THIN, (500, 500 + 8 * i), tall=130))
+        assert tracker.scroll == (0, 0) and not tracker.windowed
+    # A panel of a third of the screen is a strip still.
+    tracker = ObjectTracker(max_shift=REACH)
+    for i in range(3):
+        tracker.update(seen(THIN, (500, 500 + 8 * i), tall=80))
+    assert tracker.camera == (0, 16) and tracker.read_as == (0, 2)
+
+
+# ------------------------------------------------------------ only on a game read that way
+
+
+def test_under_a_bar_is_not_looked_where_the_whole_screen_has_told(searched: list[int]) -> None:
+    """A game whose scenery tells by itself is not one to look under a strip in: there a
+    band drifting over a still level would be the only thing such a look could find."""
+    tracker = ObjectTracker(max_shift=REACH)
+    for i in range(3):
+        tracker.update(seen(RICH, (500, 500 + 8 * i)))
+    assert tracker.read_as == (2, 0) and len(searched) == 2
+    tracker.update(seen(THIN, START))  # a cut to a place with little in it
+    for i in (1, 2):
+        tracker.update(seen(THIN, (500, 500 + 8 * i)))
+        assert tracker.scroll == (0, 0) and not tracker.windowed
+    assert tracker.read_as == (2, 0)
+    assert len(searched) == 5  # one search a look: under the bar was never looked
+
+
+def test_a_game_read_under_a_bar_stays_so() -> None:
+    """Where under the bar has told more often, a look the whole screen happens to tell
+    does not end it."""
+    tracker = ObjectTracker(max_shift=REACH)
+    for i in range(4):
+        tracker.update(seen(THIN, (500, 500 + 8 * i)))
+    assert tracker.read_as == (0, 3)
+    tracker.update(seen(RICH, START))
+    tracker.update(seen(RICH, (500, 508)))
+    assert tracker.read_as == (1, 3) and not tracker.windowed
+    tracker.update(seen(THIN, START))
+    tracker.update(seen(THIN, (500, 508)))
+    assert tracker.scroll == (0, 8) and tracker.windowed and tracker.read_as == (1, 4)
+
+
+def test_how_a_game_is_read_is_kept_over_a_go_and_handed_to_a_try() -> None:
+    told = ObjectTracker(max_shift=REACH)
+    for i in range(3):
+        told.update(seen(RICH, (500, 500 + 8 * i)))
+    told.reset()
+    assert told.read_as == (2, 0) and not told.windowed
+    # A new tracker reads under the bar; one that reads like ``told`` does not.
+    assert moved_by((0, 8)).windowed
+    like = ObjectTracker(max_shift=REACH)
+    like.read_like(told)
+    assert like.read_as == (2, 0)
+    assert not moved_by((0, 8), tracker=like).windowed and like.scroll == (0, 0)
+    under = moved_by((0, 8))
+    under.reset()
+    assert under.read_as == (0, 1) and not under.windowed  # the last move is forgotten
+    with pytest.raises(ConfigurationError, match="another tracker"):
+        like.read_like("told")  # type: ignore[arg-type]
+
+
+# ------------------------------------------------------------ after it
+
+
+def test_the_bar_becomes_glass_and_the_scenery_stands_still_in_the_level() -> None:
+    tracker = ObjectTracker(max_shift=REACH)
+    for i in range(6):
+        tracker.update(seen(THIN, (500 + 3 * i, 500 + 8 * i), count=i))
+        if i == 1:
+            assert tracker.glass == ()  # once is not enough
+    # The rows of the bar that hold the lives stood still through two moves and more.
+    assert tracker.glass == tuple(range(4, 12))
+    assert tracker.camera == (15, 40)
+    tracks = tracker.tracks()
+    lives = [t for t in tracks if t.glass]
+    assert len(lives) == 3 and all(t.y == 4 and t.missing == 0 for t in lives)
+    scenery = [t for t in tracks if not t.glass and t.missing == 0 and t.seen >= 3]
+    assert len(scenery) >= 10
+    assert all(not t.moves and t.velocity == (0.0, 0.0) for t in scenery)
+
+
+# ------------------------------------------------------------ cost and edges
+
+
+def test_a_look_under_a_bar_is_quick() -> None:
+    frames = [seen(THIN, (500, 500 + 8 * i), count=i) for i in range(11)]
+    tracker = ObjectTracker(max_shift=REACH)
+    tracker.update(frames[0])
+    began = time.perf_counter()
+    for frame in frames[1:]:
+        tracker.update(frame)
+    took = (time.perf_counter() - began) / 10
+    assert tracker.read_as == (0, 10)
+    assert took < 0.25, f"a look under a bar took {took:.3f} s"
+
+
+def test_a_small_screen_is_read_too() -> None:
+    """A screen of 64 by 48 (the practice racer's): a quarter of it is 12 rows."""
+    rng = np.random.default_rng(2)
+    world = np.zeros((200, 64, 3), np.uint8)
+    world[:] = NIGHT
+    for _ in range(60):
+        y, x = int(rng.integers(0, 190)), int(rng.integers(0, 60))
+        world[y : y + 3, x : x + 2] = MARK if rng.integers(0, 2) else POST
+
+    def small(camera: int) -> Frame:
+        a = world[camera : camera + 48].copy()
+        a[:6] = BAR
+        a[2:4, 2:5] = LIFE
+        return Frame(64, 48, 3, a.tobytes())
+
+    tracker = ObjectTracker(max_shift=REACH)
+    for i in range(5):
+        tracker.update(small(100 - 3 * i))
+    assert tracker.camera == (0, -12) and tracker.read_as == (0, 4)
