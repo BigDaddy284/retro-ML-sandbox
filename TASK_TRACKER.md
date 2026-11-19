@@ -3156,7 +3156,7 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
   - **Criterion 8:** through the real runner, the settle check on, a death of 54 steps, goes of three lives: `ThreeGaps` is got past in the second go and `FourGaps` in the third, each go before that having got beyond the first gap by a part kept, and the go that gets there finds the rest as a way. With the parts taken away from the searches (which hand back four or more over the goes) four goes never get beyond the second gap and find no way: the fault, held.
   - **Criterion 9, the existing tests:** `tests/unit/training` and `tests/unit/observation`: 1,082 tests pass, the 1,053 existing ones unchanged.
   - **Criterion 9, deliberate breaks:** 49 ways of breaking the new lines of `search.py` and `episode.py`, one at a time, from a scratch worktree. The first run noticed 48; the one missed got its test strengthened (changed while building, 4). Now 49 of 49.
-  - **Criterion 9, the whole suite:** SUITE. `ruff format`, `ruff check` and `mypy` clean. No line of an existing test changed.
+  - **Criterion 9, the whole suite:** 2,819 passed, 10 skipped (2,790 before, 29 new). `ruff format`, `ruff check` and `mypy` clean. No line of an existing test changed.
   - **Criterion 9, the practice games** (`python -m retro_ai_lab.tools.learning_bench <game> --goes 30 --seed 1 --algorithm <q_table or screen> --helpers`, main with T-1059 against this branch): the four reports are the same before and after, figure for figure: no search in them goes deeper, finds nothing and has seen a step on.
 
     | Game | Learner | Lives lost a go (goes 1 to 25, then 26 to 30) | How far | Before and after |
