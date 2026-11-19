@@ -29,6 +29,16 @@ way in 86% against 70% and sooner (median try 19 and 43 against 42 and 54);
 the two together find one in 97%. The plain way has half the tries at most,
 and what it did has the rest: it is what gets past where an earlier jump has
 to stay in, and where the plain way only walks into a wall.
+
+Some places want two changes (T-1059): a jump onto something and another off
+it, or one gap close behind another. Every single change loses the life there
+and the blind play throws it out with the rest. A search says when it has
+come to the end of its list of changes to what it did (:attr:`Search.lapped`),
+and one told that this has happened about here (``deeper``) also goes on from
+a change that got further: lost all the same, but later than waiting as long
+as the change lasts could have put it off, and, looked at once, on new ground.
+The small changes after it are tried on the moves that try made, and the
+first that gets past is the way, with both changes.
 """
 
 from __future__ import annotations

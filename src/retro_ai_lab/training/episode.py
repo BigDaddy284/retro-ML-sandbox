@@ -1868,6 +1868,11 @@ class EpisodeRunner:
         (:attr:`Ground.still`), the search takes a change that keeps the life for the
         way (``still``, T-1058): there is no new ground to reach there.
 
+        Where a search for nothing about here has come to the end of its list of
+        single changes (:attr:`Search.lapped`, remembered with the place), the
+        searches there from then on also go on from a change that loses the life
+        later and further on, with a second change after it (``deeper``, T-1059).
+
         With ``coming`` no life went yet (T-1052): a look ahead saw one going, and
         these are the moves the AI was about to make up to the step it would go at;
         ``near`` is the kind of thing that had come near. The search is the same,

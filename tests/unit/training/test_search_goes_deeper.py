@@ -186,6 +186,35 @@ def test_time_up_before_the_end_is_not_the_end(
     assert in_time.tries == 18 and not in_time.out_of_time and in_time.lapped
 
 
+def test_the_plain_ways_list_coming_round_is_not_it(
+    hopper: Hopper, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script, _, _ = ticking(hopper, monkeypatch, [lost_at(6), DEAD, DEAD])
+    back, on = hopper.move("left"), hopper.move("right")
+    theirs = list(changes((on,) * 6, hopper.space))
+    last = theirs[-2:]  # the two moves tried at the last place in its list
+    assert spot_of(last[0], (on,) * 6) == spot_of(last[1], (on,) * 6)
+
+    def clock() -> float:
+        # The play of the last change in the plain way's list takes very long.
+        return script.now + (100.0 if len(script.calls) >= 3 else 0.0)
+
+    found = look_for(
+        hopper,
+        [back] * DID,
+        no_watch,
+        plain=on,
+        seconds=50.0,
+        clock=clock,
+        begin_at=(spot_of(last[0], (on,) * 6), TOP[1]),
+    )
+    # Its list came round to its top and the time was up there: of the changes to what
+    # it did none was tried, and it is those a place is known by.
+    assert found.tries == 3 and found.out_of_time and not found.lapped
+    assert script.calls[1:] == [blind(change.apply((on,) * 6, CARRY_ON)) for change in last]
+    assert found.stopped_at == (spot_of(theirs[0], (on,) * 6), TOP[1])
+
+
 # ------------------------------------------------------------ going on from a step on
 
 
