@@ -725,7 +725,15 @@ class ObjectTracker:
             return None
         against = np.zeros(a.shape, np.bool_)
         against[inside] = (aa != bb) & ok & (a[inside] == b[inside])
-        ys, xs = np.nonzero(as_moved)
+        # A figure that changed in a status bar may happen to be as the shift says. It
+        # is not part of what moved: in its row and in its column alike, at least as
+        # much stood still against the shift as is as the shift says.
+        row_against = against.sum(axis=1) >= as_moved.sum(axis=1)
+        column_against = against.sum(axis=0) >= as_moved.sum(axis=0)
+        core = as_moved & ~(row_against[:, None] & column_against[None, :])
+        if not core.any():
+            return None
+        ys, xs = np.nonzero(core)
         top, bottom = int(np.min(ys)), int(np.max(ys)) + 1
         left, right = int(np.min(xs)), int(np.max(xs)) + 1
         # Each strip is judged by what lies straight beyond what moved: the corner
@@ -741,7 +749,7 @@ class ObjectTracker:
             window[:, right:] = False
         if window.all():
             return None
-        return window, as_moved
+        return window, as_moved & window
 
     def _told(
         self,
