@@ -185,7 +185,8 @@ to the next. `--goes`, `--steps`, `--seed` and `--algorithm` are as on the
 practice bench; `--helpers` trains as the app does, to compare. Where the
 app has moved the spot its goes start from past a life (it does that to get
 a game going), each such go counts that life as lost, and a line says how
-many goes that was.
+many goes that was. How far such a go got is counted from where it began:
+the ground it was put past is not ground it got.
 
 ### The screen network
 
