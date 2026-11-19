@@ -27,6 +27,12 @@ size. A cut to another place, or a life lost with a jump of the screen, puts
 it back where the go began. The
 runner asks :meth:`ScreenWatch.take_new_ground` after every look and the
 reward service pays it.
+
+Since T-1062 it also counts the ground the life it is on has not covered
+(:meth:`ScreenWatch.take_life_ground`), started over wherever it takes the game
+to have put the player back after a life lost. Nothing is paid for it: a try in
+a search for a way past is judged by it, since after a put-back the go has been
+beyond everything within reach.
 """
 
 from __future__ import annotations
@@ -136,6 +142,8 @@ class ScreenWatch:
         self._ground = Ground()
         self._new_ground = 0  # steps found since the last take
         self._ground_again = 0  # steps the story covered again since the last take (T-1028)
+        self._life_ground = 0  # steps new to the life it is on since the last take (T-1062)
+        self._life_said = False
         self._jolt_at: int | None = None  # the last jolt that found it somewhere else
         self._prior_box: Box | None = None  # its last sighting before this look
         self._lost_at: int | None = None  # the last look that heard of a life lost
@@ -271,6 +279,15 @@ class ScreenWatch:
         new, self._new_ground = self._new_ground, 0
         return new
 
+    def take_life_ground(self) -> int:
+        """The steps found since the last call that the life it is on had not covered
+        (T-1062): the same as :meth:`take_new_ground` until the game first puts the
+        player back, and from then on also ground the go walks again. Given once.
+        Nothing is paid for them: they tell a try that got past from one that did
+        not."""
+        fresh, self._life_ground = self._life_ground, 0
+        return fresh
+
     def take_ground_again(self) -> int:
         """The steps found since the last call that the go had been paid for before it
         was put back to a saved moment (T-1028): a go played straight would be paid
@@ -286,6 +303,7 @@ class ScreenWatch:
         self._ground.begin()
         self._new_ground = 0
         self._ground_again = 0
+        self._life_ground = 0
         self._jolt_at = None
         self._prior_box = None
         self._lost_at = None
@@ -330,6 +348,9 @@ class ScreenWatch:
         Showing it the screen is no look: nothing is counted or learnt from it. The
         game's memory is still not read across (T-1020): that look is the picture's
         alone.
+
+        A moment from before the game put the player back (T-1062) is a moment of the
+        life that went: that life is on again, as far as it had got.
         """
         if not isinstance(mark, Mark):
             raise ConfigurationError("Only a moment this watch marked can be gone back to.")
@@ -365,8 +386,10 @@ class ScreenWatch:
     def trial(self, mark: Mark) -> ScreenWatch:
         """A watch for a try from the moment ``mark`` was taken: the same player, a
         copy of the ground put back to that moment, and whether the camera can be
-        followed here. Its looks change nothing in this watch, and its
-        :meth:`take_new_ground` is what the try would be paid."""
+        followed here. Its looks change nothing in this watch, its
+        :meth:`take_new_ground` is what the try would be paid, and its
+        :meth:`take_life_ground` what tells whether it got past (T-1062): counted by
+        the life the moment was taken in, whatever this watch has seen since."""
         if not isinstance(mark, Mark):
             raise ConfigurationError("Only a moment this watch marked can be tried from.")
         other = ScreenWatch(self._player, soon=self._soon)
@@ -546,6 +569,10 @@ class ScreenWatch:
         for it. Where those are common the count would pay for moving slowly enough to
         be measured, so nothing is counted at all while :attr:`follows_camera` is
         False.
+
+        Wherever the game is taken to have put it back (a jolt or the game's own count
+        about a life lost, here; a cut after a life lost or a place undone by one,
+        T-1038), the life it is on starts over (:meth:`_new_life`, T-1062).
         """
         moved, share = self._tracker.scroll, self._tracker.unexplained
         jolt = moved == (0, 0) and share >= JOLT
@@ -563,6 +590,7 @@ class ScreenWatch:
             if came is not None and self._looks - came[0] <= BACK_LOOKS:
                 # The place it was just taken to be in was the game putting it back.
                 self._ground.go_to(came[1])
+                self._new_life()
         respawn = (
             self._jolt_at is not None
             and self._lost_at is not None
@@ -586,6 +614,7 @@ class ScreenWatch:
             self._count_said = True
         if respawn or by_count:
             self._ground.back()
+            self._new_life()
             self._jolt_at = self._lost_at = self._count_at = None
         elif cut:
             if not self._arriving:
@@ -608,6 +637,22 @@ class ScreenWatch:
         if self.follows_camera:
             self._new_ground += new  # otherwise counted and not paid, now or later
             self._ground_again += self._ground.again
+            self._life_ground += self._ground.fresh
+
+    def _new_life(self) -> None:
+        """The game put it back after a life lost (T-1062): what the life it is on has
+        reached starts over. Ground it walks again pays nothing, as before; a try
+        from here gets past something by getting where this life has not been."""
+        self._ground.new_life()
+        if self._quiet:
+            return
+        log.log(
+            logging.DEBUG if self._life_said else logging.INFO,
+            "A life was lost and the game put the AI back. Ground it walks again from "
+            "there pays nothing, and a way past something on it is one that gets "
+            "somewhere this life has not been.",
+        )
+        self._life_said = True
 
     def _count_at_the_door(self) -> bool:
         """The game's own count of its camera (T-1020) reads what it read at the door of
@@ -656,6 +701,7 @@ class ScreenWatch:
         as every cut did before.
         """
         if self._life_at is not None and self._looks - self._life_at <= RESPAWN_LOOKS:
+            self._new_life()
             return
         here = self._ground.place_number
         for number in (here, *(n for n in range(self._ground.places) if n != here)):

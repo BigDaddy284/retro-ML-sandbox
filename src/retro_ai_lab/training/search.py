@@ -44,6 +44,11 @@ Where even that finds nothing (three gaps close together), the change that
 got furthest is not thrown away (T-1060): the search hands it back as a part
 of the way (:attr:`Search.part`), to be played up to before its own loss was
 settled and searched on from where the life then goes.
+
+"Ground the go had not been on" is, since T-1062, ground the life had not been on
+(:attr:`~retro_ai_lab.training.trial.Outcome.ground`): the same ground until the
+game first puts the player back at a place's door, and after that the only kind
+there is within reach. Nothing else of a search is changed by it.
 """
 
 from __future__ import annotations

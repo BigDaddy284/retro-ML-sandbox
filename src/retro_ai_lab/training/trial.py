@@ -11,6 +11,11 @@ it reads as lives or health (one going down ends the try), and the new ground
 the watch of the screen counts (:meth:`ScreenWatch.trial`, T-1000). Alive is
 not enough, since standing still stays alive; alive and somewhere the go had
 not been is.
+
+Since T-1062 that is somewhere the life had not been
+(:meth:`ScreenWatch.take_life_ground`). Until the game first puts the player back
+the two are the same ground. After it has, the go has been beyond everything
+within reach of a place's door, and no try there could ever have got past.
 """
 
 from __future__ import annotations
@@ -25,7 +30,7 @@ from retro_ai_lab.services.connection import ConnectionService
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, ScreenWatch
 from retro_ai_lab.understanding.knowledge import Variable, decode
 
-PAST = 2  # steps of new ground, of the player's own size, that count as getting past
+PAST = 2  # steps of ground new to the life, of the player's own size: getting past
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +39,9 @@ class Outcome:
 
     steps: int  # steps played: all of them, or up to the one a value went down in
     lost: bool  # a life or health value went down
-    ground: int  # steps of new ground the watch counted (0 without a watch)
+    # Steps the watch counted that the life it is on had not covered (T-1062; the
+    # go's new ground until the game first puts the player back). 0 without a watch.
+    ground: int
     # The screen after the last move, where it was asked for and every move was played
     # (T-1018). Not part of what a try came to: two tries are compared without it.
     screen: bytes | None = field(default=None, compare=False)
@@ -44,7 +51,7 @@ class Outcome:
 
     @property
     def past(self) -> bool:
-        """Alive, and somewhere the go had not been."""
+        """Alive, and somewhere the life it is on had not been."""
         return not self.lost and self.ground >= PAST
 
 
@@ -70,12 +77,12 @@ def play(
     frames each, until they are done or one of the ``lives`` values goes down.
 
     ``watch`` (a :meth:`ScreenWatch.trial`) is shown a screenshot every
-    ``look_every`` steps, on the steps a go would look, and its count of new ground
-    is the outcome's, with the spot it last had the AI at. With ``end`` the screen
-    after the last move is the outcome's ``screen`` (T-1018): what a try without a
-    watch can be told apart by. The pad is let go at the end. The game is left where
-    the try ended: putting it back is the caller's. An emulator error comes out as
-    it is.
+    ``look_every`` steps, on the steps a go would look, and its count of ground new
+    to the life is the outcome's, with the spot it last had the AI at. With ``end``
+    the screen after the last move is the outcome's ``screen`` (T-1018): what a try
+    without a watch can be told apart by. The pad is let go at the end. The game is
+    left where the try ended: putting it back is the caller's. An emulator error
+    comes out as it is.
     """
     if not slot or not isinstance(slot, str):
         raise ConfigurationError("A try needs the name of the save to start from.")
@@ -130,7 +137,7 @@ def play(
             connection.call(lambda a: a.set_input(()))
     if watch is None:
         return Outcome(steps, lost, 0, screen)
-    return Outcome(steps, lost, watch.take_new_ground(), screen, watch.spot)
+    return Outcome(steps, lost, watch.take_life_ground(), screen, watch.spot)
 
 
 __all__ = ["PAST", "Outcome", "play"]
