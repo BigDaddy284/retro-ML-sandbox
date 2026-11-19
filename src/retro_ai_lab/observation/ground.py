@@ -39,6 +39,12 @@ when it is put back to a saved moment. A go that was put back walks ground it
 has been paid for, and is paid nothing; the same moves played straight from the
 start would be paid there. :attr:`Ground.again` says how many steps that is at
 each look, for whoever compares the go with one played straight.
+
+Whether there is new ground to be had at all is another matter (T-1058). Where
+the camera has not moved for a good while (:attr:`Ground.still`), going on gets
+nowhere new: a game of one screen once its floor is walked, a room that stands
+still in a game that scrolls. Whoever asks for new ground as proof of getting
+past something asks in vain there, and can know it from this.
 """
 
 from __future__ import annotations
@@ -49,6 +55,9 @@ from dataclasses import dataclass
 from retro_ai_lab.core import ConfigurationError
 
 MOST_A_LOOK = 4  # steps paid for one look at most: a misread jump is not a fortune
+# Looks in a row with the camera not seen to move before the screen is taken to stand
+# still (T-1058): 20 seconds of play at a look every 8 frames.
+STILL_LOOKS = 150
 SMALLEST = 4  # pixels: the step is the player's own larger side, kept within these
 LARGEST = 32
 
@@ -129,6 +138,7 @@ class Ground:
         self._most = most
         self._unit: int | None = None  # pixels in a step; kept from go to go
         self._scrolls = False  # the camera has been seen to move; kept from go to go
+        self._quiet = 0  # looks since it was last seen to move; kept from go to go (T-1058)
         self._camera = (0, 0)  # the camera's travel since the go began or it was put back
         self._first: tuple[int, int] | None = None  # where on the screen it was first seen
         self._offset = (0, 0)  # where it stands on the screen, from there
@@ -147,6 +157,14 @@ class Ground:
     def scrolls(self) -> bool:
         """The screen has been seen to scroll: only the camera's travel counts."""
         return self._scrolls
+
+    @property
+    def still(self) -> bool:
+        """The camera has not been seen to move for ``STILL_LOOKS`` looks running, this
+        go's and the goes' before it (T-1058): a game of one screen, or a room that
+        stands still in a game that scrolls. There is no new ground to be got to
+        there by going anywhere. One move of the camera ends it."""
+        return self._quiet >= STILL_LOOKS
 
     @property
     def place(self) -> tuple[int, int]:
@@ -260,7 +278,7 @@ class Ground:
     def copy(self) -> Ground:
         """Another count in the same state, for a try that must not change this one."""
         other = Ground(most=self._most)
-        other._unit, other._scrolls = self._unit, self._scrolls
+        other._unit, other._scrolls, other._quiet = self._unit, self._scrolls, self._quiet
         other._camera, other._first, other._offset = self._camera, self._first, self._offset
         other._places = [place.copy() for place in self._places]
         other._here = other._places[self.place_number]
@@ -285,6 +303,9 @@ class Ground:
         self._camera = (self._camera[0] + dx, self._camera[1] + dy)
         if dx or dy:
             self._scrolls = True
+            self._quiet = 0
+        else:
+            self._quiet += 1
         if me is not None:
             if self._first is None:
                 self._first = me
