@@ -369,6 +369,18 @@ is taken for the way, and the log says so once a go ("The screen has not
 scrolled for a good while, so there is no new ground to get to here"). One
 move of the screen and the AI asks for new ground again.
 
+Some places want two changes and not one: a jump onto something and another
+off it, or one pit close behind another. Every single change loses the life
+there, however often it is tried. Once the AI has tried every single change
+at a place and found nothing, its next search there also goes on from a
+change that got further: one that loses the life all the same, but later
+than waiting could have put it off, and on ground the go had not reached.
+From there it tries a second change, and the two together are the way. The
+log says when it starts doing this at a place ("Every single small change
+has been tried about here and none got past"), and names both changes when
+it finds such a way. It takes a few searches at the place before that
+happens: the single changes are all tried once first.
+
 Many games put you back at the start of the level when a life goes, and
 the app takes the game starting over for the end of a go. Where it can go
 back it looks for the way past first, and the go only ends there if it

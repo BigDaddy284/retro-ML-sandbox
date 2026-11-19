@@ -501,6 +501,11 @@ class _Sought:
     spot: tuple[int, int]
     at: tuple[Spot, Spot]
     times: int = 1
+    # Every single change has been tried there for nothing (T-1059): the searches
+    # from then on also go on from a change that loses the life later and further
+    # on, and this is where in a list of second changes the last one stopped.
+    deeper: bool = False
+    deeper_at: tuple[Spot, Spot] = TOP
 
 
 @dataclass(frozen=True, slots=True)
@@ -1863,6 +1868,11 @@ class EpisodeRunner:
         (:attr:`Ground.still`), the search takes a change that keeps the life for the
         way (``still``, T-1058): there is no new ground to reach there.
 
+        Where a search for nothing about here has come to the end of its list of
+        single changes (:attr:`Search.lapped`, remembered with the place), the
+        searches there from then on also go on from a change that loses the life
+        later and further on, with a second change after it (``deeper``, T-1059).
+
         With ``coming`` no life went yet (T-1052): a look ahead saw one going, and
         these are the moves the AI was about to make up to the step it would go at;
         ``near`` is the kind of thing that had come near. The search is the same,
@@ -1930,6 +1940,13 @@ class EpisodeRunner:
                         "to, instead of making the same tries again.",
                         "once before" if sought.times == 1 else f"{sought.times} times before",
                     )
+                deeper = sought is not None and sought.deeper and not still
+                if deeper:
+                    log.info(
+                        "Every single small change has been tried about here and none got "
+                        "past, so this search also goes on from a change that loses the "
+                        "life later and further on, with a second change after it."
+                    )
                 search = find_way(
                     self._connection,
                     moment.slot,
@@ -1947,6 +1964,8 @@ class EpisodeRunner:
                     live=live,
                     begin_at=TOP if sought is None else sought.at,
                     still=still,
+                    deeper=deeper,
+                    deeper_at=sought.deeper_at if sought is not None and deeper else TOP,
                 )
                 if search.way is None:
                     self._connection.call(lambda a: a.load_state(NOW_SLOT))
@@ -1998,8 +2017,10 @@ class EpisodeRunner:
                 self._sought.remove(sought)
                 sought.at = search.stopped_at
                 sought.times += 1
+                sought.deeper = sought.deeper or search.lapped
+                sought.deeper_at = search.deeper_at
             elif where is not None:
-                sought = _Sought(where[0], where[1], search.stopped_at)
+                sought = _Sought(where[0], where[1], search.stopped_at, deeper=search.lapped)
             if sought is not None:
                 self._sought.append(sought)
                 del self._sought[:-MOST_SOUGHT]
@@ -2104,6 +2125,31 @@ class EpisodeRunner:
                     f", with {held}, starting {before} step{'' if before == 1 else 's'} "
                     "before that would lose the life."
                 )
+        if way.first is not None:
+            # A way of two changes (T-1059): what is said above is the second, and its
+            # steps are counted from the first.
+            first = way.first
+            ahead = (len(trace) if way.plain is None else way.lost_at or 0) - first.at
+            on = change.at - first.at
+            how = (
+                (
+                    ""
+                    if way.plain is None
+                    else f"holding {space[way.plain].label} instead of what it did, with "
+                )
+                + f"{space[first.move].label} for {_steps(first.hold)}, starting "
+                f"{_steps(ahead)} before "
+                + (
+                    "that would lose the life"
+                    if way.plain is not None
+                    else "the life would go"
+                    if coming
+                    else "the life went"
+                )
+                + f", and {_steps(on)} after that began {held}. No single change got past "
+                "here: the first loses the life later and further on, and the second "
+                "gets past from there."
+            )
         log.info("%s%s", lead, how)
         return True
 
