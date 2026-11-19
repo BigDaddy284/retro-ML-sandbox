@@ -11,6 +11,10 @@ It reports block of goes by block, by the game's own account: the lives lost, ho
 far it got, and the goes in which no life was lost. A learner that learns shows it
 from one block to the next. ``helpers=True`` trains as the app does, to compare.
 
+How far a go got is what the go itself covered (T-1056). The app may move where
+its goes start, past a life it takes for lost whatever is pressed: such a go is
+counted from where it began, so the ground it was put past is not ground it got.
+
 Only this tool reads the game's truth. The app it measures learns everything
 itself, as it must with a real game.
 """
@@ -65,9 +69,10 @@ class Go:
     """One go, by the game's own account."""
 
     lost: int  # lives that were lost and stayed lost
-    far: int  # the furthest it got, in the game's own units
+    far: int  # the furthest it got, in the game's own units, less ``began``
     steps: int
     ended_by: str
+    began: int = 0  # how far past the game's start it began: ground it was put past (T-1056)
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,20 +292,32 @@ def _train(
     # The lives as they stood when each step's buttons went down: a go's first step
     # comes after the game was put back to its start, which no one here is told of.
     lives: list[int] = []
-    bus.subscribe(ButtonsHeld, lambda event: lives.append(game.state.lives))
+    places: list[int] = []  # and where the game stood, likewise (T-1056)
+
+    def held(event: ButtonsHeld) -> None:
+        lives.append(game.state.lives)
+        places.append(how_far(game))
+
+    bus.subscribe(ButtonsHeld, held)
     # Every life in hand: the game was just put to its own start. A go the app starts
     # from further on with a life gone (it moves where its goes start, to get a game
     # going) is a life down by the game's account, and is counted so.
     full = game.state.lives
+    # Its own start likewise. A go the app starts from further on did not get the
+    # ground it was put past: it is counted from where it began (T-1056; the racer's
+    # figures had up to 170 of moved start in every block).
+    start = how_far(game)
     training.start(Mode.INDEPENDENT)
     while training.episodes < report.goes:
         go = training.episodes
-        lost, far, looked, begun = 0, 0, 0, False
+        lost, far, looked, begun, began = 0, 0, 0, False, 0
         while training.episodes == go:
             lives.clear()
+            places.clear()
             training.step()
             if lives and not begun:
                 begun = True
+                began = max(0, places[0] - start)
                 if lives[0] < full:
                     lost += full - lives[0]
                     report.began_short += 1
@@ -308,11 +325,11 @@ def _train(
                 # A life the game was put back for within the step is there again:
                 # it was not lost.
                 lost += max(0, lives[0] - game.state.lives)
-                far = max(far, how_far(game))
+                far = max(far, how_far(game) - began)
             # No go in hand, or one that knows nothing of looking ahead, counts as none.
             looked = max(looked, getattr(training.episode, "looked_ahead", 0))
         result = training.history[-1].result
-        report.played.append(Go(lost, far, result.steps, result.ended_by))
+        report.played.append(Go(lost, far, result.steps, result.ended_by, began))
         report.ways_sought += result.ways_sought + result.ways_ahead
         report.remembered += result.remembered
         report.looked_ahead += looked
@@ -345,6 +362,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROG,
         description="Measure what the learner alone learns on a practice game.",
+        epilog=(
+            "How far a go got is counted from where the go began: where the app moved "
+            "its goes' start, the ground a go was put past is not counted as got."
+        ),
     )
     parser.add_argument("game", choices=GAMES, help="the practice game to play")
     parser.add_argument("--goes", type=_whole, default=DEFAULT_GOES, help="goes to train for")
