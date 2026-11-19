@@ -5,7 +5,8 @@ of moves made since (:mod:`retro_ai_lab.training.moments`). :func:`find_way`
 plays that list again from the save with one small change at a time
 (:mod:`retro_ai_lab.training.ways`), off the record
 (:mod:`retro_ai_lab.training.trial`), until one stays alive and reaches ground
-the go had not been on.
+the go had not been on. Where the screen has stood still for a good while there
+is no such ground to reach, and one that stays alive is the way (T-1058).
 
 A try is played blind first: no screenshot, one read of the life values a step.
 Most tries lose the life again, and that is all there is to know about them.
@@ -136,6 +137,7 @@ def find_way(
     enough: Callable[[Outcome], bool] | None = None,
     live: int | None = None,
     begin_at: tuple[Spot, Spot] = TOP,
+    still: bool = False,
 ) -> Search:
     """Look for a small change to ``trace``, played from the save in ``slot``, that
     stays alive and reaches new ground.
@@ -192,6 +194,16 @@ def find_way(
     stopped (its :attr:`Search.stopped_at`): each list is begun at the first
     change at or past its spot, comes round to its start at its end, and stops
     where it began. Not for a search at a standstill.
+
+    ``still`` says the screen has not scrolled for a good while (T-1058,
+    :attr:`~retro_ai_lab.observation.ground.Ground.still`): a game of one screen, or
+    a room that stands still. There is no new ground to reach there, so no try could
+    ever be the way. A life is not lost there for want of ground but to something
+    that came at the player, so the first play that keeps the life to its end is the
+    way: the plain way held, or the first small
+    change. It is not played again under a watch, none is asked for, and its ground
+    is 0. Not for a search at a standstill, where no life was lost and staying alive
+    tells nothing.
     """
     if not slot or not isinstance(slot, str):
         raise ConfigurationError("A search needs the name of the save to start from.")
@@ -226,6 +238,13 @@ def find_way(
             raise ConfigurationError(
                 "live is for a search after a life lost: at a standstill none was."
             )
+    if not isinstance(still, bool):
+        raise ConfigurationError("still must be true or false.")
+    if still and stood:
+        raise ConfigurationError(
+            "still is for a search after a life lost: at a standstill none was, and "
+            "staying alive tells nothing."
+        )
     if _spots(begin_at) != TOP and stood:
         raise ConfigurationError(
             "begin_at is for a search after a life lost: one at a standstill begins at the top."
@@ -315,6 +334,11 @@ def find_way(
             if blind.lost or ended_on(blind) in nowhere:
                 played.add(moves)  # lost, or where getting nowhere ended up (T-1018)
                 continue
+            if still:
+                # No new ground to reach on a screen that never scrolls: the life
+                # kept is the whole of getting past (T-1058).
+                played.add(moves)
+                return (change, moves, 0), spot(change)
             if not go_on():
                 # Alive and not looked at yet: not settled, so not marked as played.
                 return None, spot(change)
@@ -364,6 +388,9 @@ def find_way(
                 change, moves, ground = got
                 way = Way(moves, change, tries, ground, plain=plain, lost_at=first.steps)
                 return Search(way, tries, taken(), stopped_at=(plain_at, trace_at))
+        elif still:
+            way = Way(held, Change(0, plain, len(trace)), tries, 0, plain=plain)
+            return Search(way, tries, taken(), stopped_at=begin_at)
         elif tries < share and may_play():
             tries += 1
             seen = play(

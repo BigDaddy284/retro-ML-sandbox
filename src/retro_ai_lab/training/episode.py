@@ -780,6 +780,7 @@ class EpisodeRunner:
         self._ways_sought = 0
         self._ways_found = 0
         self._ways_stood = 0
+        self._still_said = False  # this go's log has said its screen stands still (T-1058)
         # Looking ahead when a thing of a kind that has cost a life comes near (T-1052),
         # where the caller asks for it and the go can search: the searches for nothing
         # a go may still make before a life is lost, those it made, the looks ahead,
@@ -1152,6 +1153,7 @@ class EpisodeRunner:
         self._ways_sought = 0
         self._ways_found = 0
         self._ways_stood = 0
+        self._still_said = False
         if self._moments is not None:
             self._moments.forget()  # a new go is a new story
         self._buttons = {b.name: b for b in self._connection.call(lambda a: a.buttons())}
@@ -1857,6 +1859,10 @@ class EpisodeRunner:
         makes the moments before it useless (every try from them would lose that
         life again first), so they are forgotten.
 
+        Where the go's watch has not seen the screen scroll for a good while
+        (:attr:`Ground.still`), the search takes a change that keeps the life for the
+        way (``still``, T-1058): there is no new ground to reach there.
+
         With ``coming`` no life went yet (T-1052): a look ahead saw one going, and
         these are the moves the AI was about to make up to the step it would go at;
         ``near`` is the kind of thing that had come near. The search is the same,
@@ -1886,6 +1892,16 @@ class EpisodeRunner:
         # there (T-1042). A standstill is no such search.
         where = None if stood else self._lost_where()
         sought = None if where is None else self._sought_about(where)
+        # Where the screen has stood still for a good while there is no new ground to
+        # get to: there the life kept is the way past (T-1058). Not at a standstill,
+        # where none was lost.
+        still = not stood and watch.ground.still
+        if still and not self._still_said:
+            self._still_said = True
+            log.info(
+                "The screen has not scrolled for a good while, so there is no new ground "
+                "to get to here: a change that keeps the life is taken for the way past."
+            )
         if coming:
             self._ways_ahead += 1
         else:
@@ -1930,6 +1946,7 @@ class EpisodeRunner:
                     enough=self._left_the_spot if stood else None,
                     live=live,
                     begin_at=TOP if sought is None else sought.at,
+                    still=still,
                 )
                 if search.way is None:
                     self._connection.call(lambda a: a.load_state(NOW_SLOT))
