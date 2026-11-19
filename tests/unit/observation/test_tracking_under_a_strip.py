@@ -185,6 +185,23 @@ def searched(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
     yield calls
 
 
+@pytest.fixture
+def asked(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[tuple[np.ndarray, np.ndarray]]]:
+    """What each search of what changed was given: the pixels that vote, and the pixels
+    of the screen before that they may be compared with."""
+    given: list[tuple[np.ndarray, np.ndarray]] = []
+    real = tracking._search_each
+
+    def kept(
+        a: np.ndarray, b: np.ndarray, votes: np.ndarray, vb: np.ndarray, *reach: int
+    ) -> tuple[int, int]:
+        given.append((votes.copy(), vb.copy()))
+        return real(a, b, votes, vb, *reach)
+
+    monkeypatch.setattr(tracking, "_search_each", kept)
+    yield given
+
+
 # ------------------------------------------------------------ the cause
 
 
@@ -277,7 +294,34 @@ def test_a_counter_running_in_the_bar_does_not_stop_it(where: str, move: tuple[i
         tracker.update(seen(THIN, camera, where=where, count=17 * i))
         assert tracker.scroll == (move if i else (0, 0))
         assert tracker.windowed == bool(i)
+        # What changed in the bar is what the move leaves unexplained: a little.
+        assert (0 < tracker.unexplained < 0.01) == bool(i)
     assert tracker.camera == (6 * move[0], 6 * move[1]) and tracker.read_as == (0, 6)
+
+
+def test_the_move_is_measured_again_inside_the_window(
+    asked: list[tuple[np.ndarray, np.ndarray]],
+) -> None:
+    """First all that changed votes, compared with all of the screen before. Then only
+    what changed in the window, compared with what was in the window: what came out from
+    under the bar has nothing there to be compared with, and a figure that changed in
+    the bar has no say in how far the road slid."""
+    tracker = moved_by((0, -8), counts=(0, 17))
+    assert tracker.scroll == (0, -8) and len(asked) == 2
+    (votes, before), (votes_again, before_again) = asked
+    assert votes[:TALL].any() and before.all()
+    # The window begins below the 8 rows that came out from under the bar.
+    assert not votes_again[: TALL + 8].any() and not before_again[: TALL + 8].any()
+    assert before_again[TALL + 8 :].all()
+    assert votes_again.any() and (votes_again[TALL + 8 :] == votes[TALL + 8 :]).all()
+
+
+def test_with_all_the_counter_changing_the_second_measure_tells() -> None:
+    tracker = ObjectTracker(max_shift=REACH)
+    for i in range(9):
+        tracker.update(seen(THIN, (500, 500 - 5 * i), count=7777 * (i % 2)))
+        assert tracker.scroll == ((0, -5) if i else (0, 0)), i
+    assert tracker.read_as == (0, 8)
 
 
 LOOK_AFTER_LOOK = {  # moves of every size and slant, twelve looks of each
@@ -342,6 +386,40 @@ def test_where_much_changed_those_that_vote_are_picked_without_a_pattern(
     assert again == (-14, 0)
 
 
+def test_those_that_vote_are_from_all_over_the_screen(monkeypatch: pytest.MonkeyPatch) -> None:
+    """All four figures of the counter change at every look: more pixels than vote, and
+    the first of what changed from the top. Were those the ones to vote, the bar alone
+    would be asked how far the road slid."""
+    monkeypatch.setattr(tracking, "FEW", 96)
+    tracker = ObjectTracker(max_shift=REACH)
+    for i in range(7):
+        frame = seen(THIN, (START[0], START[1] - 8 * i), count=7777 * (i % 2))
+        if i:
+            before = tracking._packed(seen(THIN, (500, 508 - 8 * i), count=7777 * ((i - 1) % 2)))
+            in_the_bar = int(np.count_nonzero((tracking._packed(frame) != before)[:TALL]))
+            assert in_the_bar > 96
+        tracker.update(frame)
+        assert tracker.scroll == ((0, -8) if i else (0, 0)), i
+    assert tracker.read_as == (0, 6)
+
+
+def test_between_two_edges() -> None:
+    edge = np.array([0, 0, 1, 0, 0, 0, 1, 0], np.bool_)
+    weight = np.array([1, 1, 9, 2, 0, 2, 9, 3], np.int64)
+    # What an edge itself holds is not counted, and the edge is not part of a stretch.
+    assert tracking._between(edge, weight) == (3, 6)
+    assert tracking._between(edge, np.array([3, 0, 0, 1, 0, 1, 0, 2], np.int64)) == (0, 2)
+    # Of two that hold as much, the first.
+    assert tracking._between(edge, np.array([1, 1, 0, 0, 0, 0, 0, 2], np.int64)) == (0, 2)
+    # No edge at all: the whole of it. Nothing held anywhere: none.
+    nowhere = np.zeros(8, np.bool_)
+    assert tracking._between(nowhere, weight) == (0, 8)
+    assert tracking._between(edge, np.zeros(8, np.int64)) is None
+    assert tracking._between(nowhere, np.zeros(8, np.int64)) is None
+    # Every row an edge: nothing lies between.
+    assert tracking._between(np.ones(8, np.bool_), weight) is None
+
+
 def test_what_changed_is_searched_as_the_whole_screen_is() -> None:
     night = np.zeros((12, 16), np.int32)
     a, b = night.copy(), night.copy()
@@ -395,8 +473,9 @@ def test_one_thing_moving_is_no_move(searched: list[str]) -> None:
 
 
 def test_two_things_moving_alike_are_no_move() -> None:
-    """Two walkers in step on a bare row, over a floor that stands: what they explain
-    covers neither a quarter of the screen's rows nor a quarter of its columns."""
+    """Two walkers in step on a bare row, over a floor that stands. They go along the
+    bar: no strip lies beyond what such a move explains, so the whole screen has had its
+    say on it already."""
     thing = block(16, 16)
     still(
         [(40, 184, thing), (160, 184, thing)],
@@ -406,10 +485,21 @@ def test_two_things_moving_alike_are_no_move() -> None:
 
 
 def test_a_row_of_things_moving_alike_is_no_move() -> None:
-    """Six in step along one row cover a quarter of the columns; but the rows they move
-    in are a strip between the bar and the floor, not the larger part of the screen."""
+    """Six in step along one row cover a quarter of the columns; and no strip is left
+    out here either."""
     thing = block(16, 16)
     still(*([(20 + 36 * i - 4 * n, 184, thing) for i in range(6)] for n in range(3)))
+
+
+@pytest.mark.parametrize("two_coloured", [False, True])
+def test_a_few_things_falling_together_are_no_move(two_coloured: bool) -> None:
+    """Falling, they move across the bar, and "the screen slid up" fits them with the
+    bar left out. But what that explains covers neither a quarter of the screen's rows
+    nor a quarter of its columns: a thing or two moving alike is no camera move."""
+    thing = block(12, 12)
+    if two_coloured:
+        thing[:6], thing[6:] = MARK, LAMP
+    still(*([(100 + 20 * k, 60 + 6 * n, thing) for k in range(3)] for n in range(3)))
 
 
 def test_clouds_drifting_over_a_level_that_stands_still_are_no_move() -> None:
@@ -430,6 +520,46 @@ def test_a_floor_that_opens_is_no_move() -> None:
     hole = np.full((40, 100, 3), NIGHT, np.uint8)
     still([], [(60, 200, hole)])
     still([(60, 200, hole)], [])
+
+
+def test_a_wide_thing_going_is_no_move() -> None:
+    """The lower half of a wide slab goes: "the screen slid" fits, the backdrop below
+    it having come up into its place. All that explains turned one colour."""
+    slab = np.full((20, 150, 3), MARK, np.uint8)
+    still([(50, 60, slab), (50, 80, slab)], [(50, 60, slab)])
+    # Nor with a small thing that happened to move as far: its colour is a twentieth
+    # of what the move explains, not the tenth that something coming in would be.
+    thing = block(12, 12)
+    still([(50, 60, slab), (50, 80, slab), (200, 150, thing)], [(50, 60, slab), (200, 130, thing)])
+
+
+def test_a_bar_that_changes_all_over_outweighs_a_little_scenery() -> None:
+    """As it would for the whole screen: a move must explain most of what differed, and
+    what changed in the strips is not explained by it. Such a look is not read."""
+
+    def flashing(i: int) -> Frame:
+        a = THIN[500 - 8 * i : 500 - 8 * i + H, 500 : 500 + W].copy()
+        bar(a, "top")
+        if i % 2:
+            a[:TALL][(a[:TALL] == np.array(BAR, np.uint8)).all(axis=2)] = (0, 0, 120)
+        return Frame(W, H, 3, a.tobytes())
+
+    tracker = ObjectTracker(max_shift=REACH)
+    for i in range(4):
+        tracker.update(flashing(i))
+        assert tracker.scroll == (0, 0) and not tracker.windowed
+    assert tracker.read_as == (0, 0)
+
+
+def test_a_wide_thing_that_appears_on_the_road_is_no_strips_edge() -> None:
+    """A line across more than half the screen comes into being as the road slides. It
+    is not as the move says, but it changed: only what stood still tells of a strip."""
+    line = np.full((2, 150, 3), LAMP, np.uint8)
+    tracker = ObjectTracker(max_shift=REACH)
+    tracker.update(seen(THIN, START))
+    tracker.update(seen(THIN, (500, 492), things=[(50, 120, line)]))
+    assert tracker.scroll == (0, -8) and tracker.windowed
+    assert 300 / (W * H) <= tracker.unexplained < 0.01  # the line is what is left over
 
 
 def test_a_cut_to_another_place_is_no_move() -> None:
@@ -464,11 +594,86 @@ def test_a_bar_that_is_most_of_the_screen_is_no_strip() -> None:
     for i in range(3):
         tracker.update(seen(THIN, (500, 500 + 8 * i), tall=130))
         assert tracker.scroll == (0, 0) and not tracker.windowed
-    # A panel of a third of the screen is a strip still.
+    # Nor is one of just half of it.
     tracker = ObjectTracker(max_shift=REACH)
     for i in range(3):
-        tracker.update(seen(THIN, (500, 500 + 8 * i), tall=80))
-    assert tracker.camera == (0, 16) and tracker.read_as == (0, 2)
+        tracker.update(seen(THIN, (500, 500 + 8 * i), tall=H // 2))
+        assert tracker.scroll == (0, 0) and not tracker.windowed
+    # A row less than half, and a panel of a third of the screen, are strips still.
+    for tall in (H // 2 - 1, 80):
+        tracker = ObjectTracker(max_shift=REACH)
+        for i in range(3):
+            tracker.update(seen(THIN, (500, 500 + 8 * i), tall=tall))
+        assert tracker.camera == (0, 16) and tracker.read_as == (0, 2)
+
+
+# ------------------------------------------------------------ the window by itself
+
+
+def window_of(
+    now: Frame, was: Frame, shift: tuple[int, int]
+) -> tuple[np.ndarray, np.ndarray] | None:
+    a, b = tracking._packed(now), tracking._packed(was)
+    all_of_it = np.ones(a.shape, np.bool_)
+    return ObjectTracker._moving_window(a, b, all_of_it, all_of_it, a != b, shift)
+
+
+def is_the_box(window: np.ndarray, rows: tuple[int, int], columns: tuple[int, int]) -> bool:
+    box = np.zeros(window.shape, np.bool_)
+    box[rows[0] : rows[1], columns[0] : columns[1]] = True
+    return bool((window == box).all())
+
+
+def test_the_window_is_the_screen_less_its_still_strips() -> None:
+    # The road slid down 4 rows (the camera went up): the 4 rows that came out from
+    # under the bar are compared with the bar, and are its edge.
+    found = window_of(seen(THIN, (500, 496)), seen(THIN, START), (0, -4))
+    assert found is not None and is_the_box(found[0], (TALL + 4, H), (0, W))
+    assert found[1].any() and not found[1][~found[0]].any()
+    # The other way, the bar's last 4 rows are compared with the road they hid.
+    found = window_of(seen(THIN, (500, 504)), seen(THIN, START), (0, 4))
+    assert found is not None and is_the_box(found[0], (TALL, H), (0, W))
+    # A panel at a side, and a move across it.
+    found = window_of(
+        seen(THIN, (506, 500), where="right"), seen(THIN, START, where="right"), (6, 0)
+    )
+    assert found is not None and is_the_box(found[0], (0, H), (0, W - WIDE - 6))
+
+
+def test_no_strip_no_window() -> None:
+    """With no strip left out the whole screen has had its say already; and where
+    nothing changed there is nothing for a move to explain."""
+    bare = (seen(THIN, (500, 504), where=None), seen(THIN, START, where=None))
+    assert window_of(*bare, (0, 4)) is None
+    assert window_of(seen(THIN, START), seen(THIN, START), (0, 4)) is None
+
+
+def test_a_figure_in_the_bar_that_is_as_the_move_says_is_not_part_of_what_moved() -> None:
+    """The counter's last figure goes from 3 to 7 as the road slides up 4 rows: its
+    block grows by 4 rows, which is just what a slide of 4 would have made of it."""
+    now, was = seen(THIN, (500, 504), count=7), seen(THIN, START, count=3)
+    a, b = tracking._packed(now), tracking._packed(was)
+    in_the_bar = (a != b)[: TALL - 4] & (a[: TALL - 4] == b[4:TALL])
+    assert int(np.count_nonzero(in_the_bar)) == 24
+    found = window_of(now, was, (0, 4))
+    assert found is not None and is_the_box(found[0], (TALL, H), (0, W))
+    assert found[1].any() and not found[1][:TALL].any()
+
+
+def test_a_strip_at_the_side_is_judged_by_the_rows_of_the_window() -> None:
+    """A tall bar along the top, and a box at the right that is a hundred rows of the
+    152 the window has: more than half of them, less than half of the screen's."""
+    side = np.full((100, 30, 3), LIFE, np.uint8)
+    looks = [
+        seen(THIN, (500 + 8 * i, 500 - 8 * i), tall=80, things=[(226, 80, side)]) for i in range(3)
+    ]
+    found = window_of(looks[1], looks[0], (8, -8))
+    assert found is not None and is_the_box(found[0], (88, H), (0, 218))
+    tracker = ObjectTracker(max_shift=REACH)
+    for i, look in enumerate(looks):
+        tracker.update(look)
+        assert tracker.scroll == ((8, -8) if i else (0, 0))
+    assert tracker.read_as == (0, 2)
 
 
 # ------------------------------------------------------------ only on a game read that way
