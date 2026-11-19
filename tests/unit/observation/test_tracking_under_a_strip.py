@@ -166,16 +166,22 @@ def moved_by(
 
 
 @pytest.fixture
-def searched(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[int]]:
-    """How many times the shifts were searched through: one entry a search."""
-    calls: list[int] = []
-    real = tracking._search
+def searched(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
+    """The searches through the shifts, in turn: "whole" for one in which every pixel
+    with a say votes, "changed" for one in which only those that changed do."""
+    calls: list[str] = []
+    whole, changed = tracking._search, tracking._search_each
 
-    def counted(*args: object, **kwargs: object) -> tuple[int, int]:
-        calls.append(1)
-        return real(*args, **kwargs)  # type: ignore[arg-type]
+    def counted_whole(*args: object, **kwargs: object) -> tuple[int, int]:
+        calls.append("whole")
+        return whole(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(tracking, "_search", counted)
+    def counted_changed(*args: object, **kwargs: object) -> tuple[int, int]:
+        calls.append("changed")
+        return changed(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(tracking, "_search", counted_whole)
+    monkeypatch.setattr(tracking, "_search_each", counted_changed)
     yield calls
 
 
@@ -216,47 +222,47 @@ ALONG_THE_BAR = {
     ("where", "move"), [(w, m) for w, moves in ACROSS_THE_BAR.items() for m in moves]
 )
 def test_the_move_is_read_under_a_bar(
-    where: str, move: tuple[int, int], searched: list[int]
+    where: str, move: tuple[int, int], searched: list[str]
 ) -> None:
     tracker = moved_by(move, where=where)
     assert tracker.sighted == move and tracker.scroll == move and tracker.camera == move
     assert tracker.windowed and tracker.read_as == (0, 1)
     assert tracker.unexplained < 0.01  # next to nothing is left unexplained
     # The whole screen was asked first; then what changed, twice.
-    assert len(searched) == 3 and tracker.searches == 1
+    assert searched == ["whole", "changed", "changed"] and tracker.searches == 1
 
 
 @pytest.mark.parametrize(
     ("where", "move"), [(w, m) for w, moves in ALONG_THE_BAR.items() for m in moves]
 )
 def test_a_move_along_the_bar_is_told_by_the_whole_screen(
-    where: str, move: tuple[int, int], searched: list[int]
+    where: str, move: tuple[int, int], searched: list[str]
 ) -> None:
     """Scenery that slides along a bar does not come out from under it: the whole
     screen tells, as it did before this task, and nothing more is looked for."""
     tracker = moved_by(move, where=where)
     assert tracker.sighted == move and tracker.scroll == move
     assert not tracker.windowed and tracker.read_as == (1, 0)
-    assert len(searched) == 1
+    assert searched == ["whole"]
 
 
 @pytest.mark.parametrize("move", [(0, -8), (0, 24), (9, 0), (-7, 5), (12, -9), (0, 1), (32, 0)])
-def test_without_a_bar_nothing_has_changed(move: tuple[int, int], searched: list[int]) -> None:
+def test_without_a_bar_nothing_has_changed(move: tuple[int, int], searched: list[str]) -> None:
     tracker = moved_by(move, where=None)
     assert tracker.sighted == move and not tracker.windowed and tracker.read_as == (1, 0)
-    assert len(searched) == 1
+    assert searched == ["whole"]
 
 
 @pytest.mark.parametrize("where", ["top", "bottom", "left", "right"])
 def test_a_bar_over_rich_scenery_is_told_by_the_whole_screen(
-    where: str, searched: list[int]
+    where: str, searched: list[str]
 ) -> None:
     tracker = ObjectTracker(max_shift=REACH)
     for i in range(4):
         tracker.update(seen(RICH, (500 + 5 * i, 500 + 8 * i), where=where))
         assert not tracker.windowed
         assert tracker.scroll == ((5, 8) if i else (0, 0))
-    assert tracker.read_as == (3, 0) and len(searched) == 3
+    assert tracker.read_as == (3, 0) and searched == ["whole"] * 3
 
 
 @pytest.mark.parametrize(
@@ -272,6 +278,88 @@ def test_a_counter_running_in_the_bar_does_not_stop_it(where: str, move: tuple[i
         assert tracker.scroll == (move if i else (0, 0))
         assert tracker.windowed == bool(i)
     assert tracker.camera == (6 * move[0], 6 * move[1]) and tracker.read_as == (0, 6)
+
+
+LOOK_AFTER_LOOK = {  # moves of every size and slant, twelve looks of each
+    "top": [(0, -1), (0, -5), (0, -13), (0, -31), (6, -4), (-3, -7), (9, -13)],
+    "bottom": [(0, -3), (0, -7), (0, -22), (6, -4), (9, -13)],
+    "left": [(5, 0), (-10, 0), (-14, 0), (21, 0), (6, -4), (5, 3), (2, -1), (-1, -1)],
+    "right": [(3, 0), (-10, 0), (-14, 0), (21, 0), (6, -4), (-3, -7), (2, -1), (-1, -1)],
+}
+
+
+@pytest.mark.parametrize(
+    ("where", "move"), [(w, m) for w, moves in LOOK_AFTER_LOOK.items() for m in moves]
+)
+def test_look_after_look_a_move_of_any_size_is_read(where: str, move: tuple[int, int]) -> None:
+    """Thin things tell a move only at the very shift it was: a dash two pixels wide is
+    not seen at all by a look at every fourth pixel and every fourth shift, which is how
+    the whole screen is searched. So what changed is tried at every shift."""
+    tracker = ObjectTracker(max_shift=REACH)
+    for i in range(13):
+        camera = (START[0] + move[0] * i, START[1] + move[1] * i)
+        tracker.update(seen(THIN, camera, where=where, count=i))
+        assert tracker.scroll == (move if i else (0, 0)), i
+    assert tracker.camera == (12 * move[0], 12 * move[1])
+
+
+def changed_between(
+    was: tuple[int, int], now: tuple[int, int], where: str
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Two screens packed as the tracker has them, the pixels that changed between them,
+    and a mask that lets every pixel of the one before vote."""
+    a = tracking._packed(seen(THIN, now, where=where))
+    b = tracking._packed(seen(THIN, was, where=where))
+    return a, b, a != b, np.ones(a.shape, np.bool_)
+
+
+def test_the_whole_screens_kind_of_search_misses_some(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Why what changed has a search of its own: with the whole screen's kind in its
+    place, three looks in twelve of a slide of (6, -4) under a panel are not read."""
+    monkeypatch.setattr(tracking, "_search_each", tracking._search)
+    tracker = ObjectTracker(max_shift=REACH)
+    read = []
+    for i in range(13):
+        tracker.update(seen(THIN, (START[0] + 6 * i, START[1] - 4 * i), where="left", count=i))
+        read.append(tracker.scroll)
+    assert read.count((6, -4)) == 9 and read.count((0, 0)) == 4
+
+
+@pytest.mark.parametrize("few", [128, 256, 512])
+def test_where_much_changed_those_that_vote_are_picked_without_a_pattern(
+    few: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every other pixel in turn would be one side of each dash, and a move a pixel
+    short fits one side of a dash as well as the right one does."""
+    monkeypatch.setattr(tracking, "FEW", few)
+    for i in range(4):
+        was, now = (500 - 14 * i, 500), (500 - 14 * (i + 1), 500)
+        a, b, changed, all_of_it = changed_between(was, now, "right")
+        assert int(np.count_nonzero(changed)) > 2 * few
+        assert tracking._search_each(a, b, changed, all_of_it, REACH, REACH) == (-14, 0)
+    # The same pixels are picked each time: the answer does not change from run to run.
+    again = tracking._search_each(a, b, changed, all_of_it, REACH, REACH)
+    assert again == (-14, 0)
+
+
+def test_what_changed_is_searched_as_the_whole_screen_is() -> None:
+    night = np.zeros((12, 16), np.int32)
+    a, b = night.copy(), night.copy()
+    b[2, 2], a[2, 5] = 9, 9  # one mark, three pixels to the right at the look after
+    changed, all_of_it = a != b, np.ones(a.shape, np.bool_)
+    # The pixel it left has no partner on the screen under that move, and is not counted.
+    assert tracking._search_each(a, b, changed, all_of_it, 4, 4) == (-3, 0)
+    assert tracking._search(a, b, changed, all_of_it, 4, 4) == (-3, 0)
+    # Nothing votes: no move. Nothing to vote with on the screen before: no move.
+    nothing = np.zeros(a.shape, np.bool_)
+    assert tracking._search_each(a, b, nothing, all_of_it, 4, 4) == (0, 0)
+    assert tracking._search_each(a, b, changed, nothing, 4, 4) == (0, 0)
+    # Moves that fit alike: the smallest, as everywhere.
+    assert tracking._search_each(night, night, changed, all_of_it, 4, 4) == (0, 0)
+    stripes = np.zeros((12, 16), np.int32)
+    stripes[:, ::4] = 9
+    slid = np.roll(stripes, 1, axis=1)  # one pixel on, or three back: one fits as the other
+    assert tracking._search_each(slid, stripes, slid != stripes, all_of_it, 4, 4) == (-1, 0)
 
 
 def test_the_players_box_left_out_changes_nothing() -> None:
@@ -295,12 +383,12 @@ def test_the_players_box_left_out_changes_nothing() -> None:
 # ------------------------------------------------------------ not fooled
 
 
-def test_nothing_changing_is_no_move_and_no_search(searched: list[int]) -> None:
+def test_nothing_changing_is_no_move_and_no_search(searched: list[str]) -> None:
     tracker = still([], [])
     assert tracker.searches == 0 and searched == []
 
 
-def test_one_thing_moving_is_no_move(searched: list[int]) -> None:
+def test_one_thing_moving_is_no_move(searched: list[str]) -> None:
     thing = block(16, 16)
     still([(100, 150, thing)], [(96, 150, thing)], [(92, 150, thing)])
     assert searched == []  # one small thing changing needs no search at all
@@ -386,19 +474,19 @@ def test_a_bar_that_is_most_of_the_screen_is_no_strip() -> None:
 # ------------------------------------------------------------ only on a game read that way
 
 
-def test_under_a_bar_is_not_looked_where_the_whole_screen_has_told(searched: list[int]) -> None:
+def test_under_a_bar_is_not_looked_where_the_whole_screen_has_told(searched: list[str]) -> None:
     """A game whose scenery tells by itself is not one to look under a strip in: there a
     band drifting over a still level would be the only thing such a look could find."""
     tracker = ObjectTracker(max_shift=REACH)
     for i in range(3):
         tracker.update(seen(RICH, (500, 500 + 8 * i)))
-    assert tracker.read_as == (2, 0) and len(searched) == 2
+    assert tracker.read_as == (2, 0) and searched == ["whole"] * 2
     tracker.update(seen(THIN, START))  # a cut to a place with little in it
     for i in (1, 2):
         tracker.update(seen(THIN, (500, 500 + 8 * i)))
         assert tracker.scroll == (0, 0) and not tracker.windowed
     assert tracker.read_as == (2, 0)
-    assert len(searched) == 5  # one search a look: under the bar was never looked
+    assert searched == ["whole"] * 5  # one search a look: under the bar was never looked
 
 
 def test_a_game_read_under_a_bar_stays_so() -> None:

@@ -71,6 +71,7 @@ EXPLAINS = 0.5  # a move must leave at most this share of what differed still di
 # A move brings one thing in as it takes another away: of the pixels a move under a still
 # strip explains, those of the second most common colour are at least this share (T-1061).
 CAME_AND_WENT = 0.1
+FEW = 1024  # changed pixels at most that every shift is tried on (T-1061)
 # A move the caller expects is taken where it leaves at most this share of the pixels
 # with a say differing more than the picture's own answer does (T-1020): a thing or
 # two that moved by themselves, not scenery that tells.
@@ -194,6 +195,50 @@ def _search(
     if not ranked:
         return (0, 0)
     return ranked[0][3], ranked[0][2]
+
+
+def _search_each(
+    a: NDArray[np.int32],
+    b: NDArray[np.int32],
+    votes: NDArray[np.bool_],
+    vb: NDArray[np.bool_],
+    max_dx: int,
+    max_dy: int,
+) -> tuple[int, int]:
+    """The shift that leaves least of the pixels in ``votes`` differing, with every
+    shift within reach tried on them (T-1061): they are few (what changed between two
+    looks), so each can be tried, and a coarse look at every fourth of them would miss
+    the thin things a move across little scenery is told by. Of more than ``FEW``, that
+    many vote, picked without a pattern (every other one would be one side of each thin
+    thing, and a pixel more or less would fit as well). Ranked as :func:`_rank` does;
+    (0, 0) where none votes."""
+    ys, xs = np.nonzero(votes)
+    if len(ys) == 0:
+        return (0, 0)
+    if len(ys) > FEW:
+        some = np.sort(np.random.default_rng(len(ys)).choice(len(ys), FEW, replace=False))
+        ys, xs = ys[some], xs[some]
+    colours = a[ys, xs]
+    height, width = a.shape
+    # The screen before with a rim no pixel votes from, so a partner off the screen (or
+    # left out of the vote) is simply not counted. A colour is never below nought.
+    rimmed = np.full((height + 2 * max_dy, width + 2 * max_dx), -1, np.int32)
+    rimmed[max_dy : max_dy + height, max_dx : max_dx + width] = np.where(vb, b, -1)
+    across = np.arange(-max_dx, max_dx + 1)
+    columns = xs[None, :] + max_dx + across[:, None]
+    keys: list[_Key] = []
+    for dy in range(-max_dy, max_dy + 1):
+        partners = rimmed[ys + max_dy + dy, columns]
+        counted = partners >= 0
+        voters = np.count_nonzero(counted, axis=1)
+        wrong = np.count_nonzero((partners != colours) & counted, axis=1)
+        for dx, n, bad in zip(across.tolist(), voters.tolist(), wrong.tolist(), strict=True):
+            if n:
+                keys.append((round(bad / n, 6), abs(dx) + abs(dy), dy, dx))
+    if not keys:
+        return (0, 0)
+    best = min(keys)
+    return best[3], best[2]
 
 
 def _between(edge: NDArray[np.bool_], weight: NDArray[np.int64]) -> tuple[int, int] | None:
@@ -495,10 +540,13 @@ class ObjectTracker:
         Where that vote says "no move" though more than one small thing changed, a
         strip that stood still may have outvoted the scenery (T-1061: a status bar over
         a road). Then the move that explains most of the pixels that changed is looked
-        for, the strips along the screen's edges that lie beyond all it explains and
-        hold something that stood still are left out, and the move is measured again
-        by what changed in the window that is left. It is taken if a strip was left
-        out at all and the window is the larger part of the screen; if what it explains
+        for, with every move within reach tried on them (:func:`_search_each`: they
+        are few, and thin things tell a move only at the very shift it was). The
+        strips along the screen's edges that lie beyond a row or a column of which
+        half or more stood still against that move are left out, and the move is
+        measured again by what changed in the window that is left. It is taken if a
+        strip was left out at all and the window is the larger part of the screen; if
+        what it explains
         covers a quarter of the screen's rows or of its columns and turned at least two
         colours (something came as something went: a floor that only turned into sky
         did not move); and if what still differs in the window, with what changed in
@@ -676,7 +724,7 @@ class ObjectTracker:
         votes = va & telling  # only what changed has a say in which move it was
         if not votes.any():
             return None
-        shift = _search(a, b, votes, vb, *reach)
+        shift = _search_each(a, b, votes, vb, *reach)
         if shift == (0, 0):
             return None
         found = self._moving_window(a, b, va, vb, votes, shift)
@@ -684,7 +732,7 @@ class ObjectTracker:
             return None
         # Measured again inside the window: what came out from under a strip has
         # nothing to be compared with there, as at the screen's own edge.
-        again = _search(a, b, votes & found[0], vb & found[0], *reach)
+        again = _search_each(a, b, votes & found[0], vb & found[0], *reach)
         if again == (0, 0):
             return None
         if again != shift:
