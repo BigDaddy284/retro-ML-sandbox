@@ -630,10 +630,10 @@ somewhere else on purpose, pin a spot before you press Start, or start the AI
 from scratch. Later in the same sitting a Start with no pinned spot is from
 where the game is, as before.
 
-One thing to know for now: press Start before you close the app again or
-change a setting of the AI. If you connect the game and then close the app,
-or change a setting, without having pressed Start, the way written down is
-lost. That is being put right.
+What is written down waits for that first Start. Until you press it, closing
+the app or the emulator, a link that drops, changing a setting of the AI,
+loading a saved AI or playing yourself for a while does not lose the way.
+Starting the AI from scratch does, as it is meant to.
 
 ## Before the AI loses a life
 

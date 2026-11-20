@@ -255,7 +255,7 @@ def test_the_way_is_on_disk_when_the_link_goes(
     # saves the slot again.
     lab.connect()
     assert t._kept is None and ways.exists(game_id)
-    assert t.save() is not None and not ways.exists(game_id)  # no way in memory now
+    assert t.save() is not None and ways.load(game_id)["way"] == written  # T-1067: kept
 
 
 @pytest.mark.parametrize(

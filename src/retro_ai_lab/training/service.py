@@ -897,10 +897,15 @@ class TrainingService:
     def _write_way(self, brain: Brain) -> None:
         """The brain was written: write the remembered way down beside it, where there
         is one and it starts from the spot kept; otherwise nothing on disk says there
-        is (T-1064)."""
+        is (T-1064).
+
+        Not before a Start has had its say (T-1067): from the game being connected
+        until then a way from before is on disk only, to be taken up, and nothing in
+        memory can speak for or against it."""
         ways, kept, route = self._ways, self._kept, self._route
         if ways is None or kept is None or not route.moves or route.start != kept[0]:
-            self._drop_way()
+            if not self._way_untried:
+                self._drop_way()
             return
         space = brain.agent.space
         data = {
@@ -1703,7 +1708,6 @@ class TrainingService:
             harness = self._harness
             if not harness.available():
                 return
-            untried, self._way_untried = self._way_untried, False
             held = self._pin_held
             if (
                 held is not None
@@ -1716,9 +1720,14 @@ class TrainingService:
                 # worked out from there still holds, the way the AI remembers above all.
                 harness.restore()
                 return
-            if not (opening and untried and not self._spot_pinned and self._take_up_way(harness)):
+            first = opening and self._way_untried and not self._spot_pinned
+            if not (first and self._take_up_way(harness)):
                 self._restore_spot()  # a pinned spot is where every go starts
                 self._checkpoint(harness)
+            # The Start has its spot: a way from before is taken up, or its spot is
+            # saved over and its file gone. A link that dropped on the way here leaves
+            # the file to the first Start on the next link (T-1067).
+            self._way_untried = False
             self._pin_held = (harness, harness.taken) if self._spot_pinned else None
             self._early_losses = []
             self._doomed_cleared = None
