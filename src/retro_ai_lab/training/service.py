@@ -15,14 +15,19 @@ import logging
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
 from typing import Any, NamedTuple, TypeVar
 
-from retro_ai_lab.core import ConfigurationError, EmulatorError, UnsupportedCapabilityError
+from retro_ai_lab.core import (
+    ConfigurationError,
+    EmulatorDisconnectedError,
+    EmulatorError,
+    UnsupportedCapabilityError,
+)
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.core.types import Button
 from retro_ai_lab.core.worklog import app_work
@@ -127,6 +132,28 @@ NOT_LISTENING = (
 FAST_SPEED = 64.0  # EmuHawk's client.speedmode tops out at 6400% (T-836)
 PRACTISE_SLOT = "practise"  # the save-state slot of the spot the child pinned (T-508)
 WAY_FORMAT = 1  # of the file a remembered way is written down in (T-1064)
+
+
+def _digests(regions: Mapping[str, bytes]) -> dict[str, str]:
+    """A digest of each region of a game's memory: what a saved spot is told by."""
+    return {
+        name: hashlib.blake2b(data, digest_size=16).hexdigest()
+        for name, data in sorted(regions.items())
+    }
+
+
+def _same_moves(written: object, space: ActionSpace) -> bool:
+    """Are the moves a way was written with the AI's moves now: as many, and each the
+    same buttons? The buttons of a move are a set, written in no order that lasts
+    from one run of the app to the next."""
+    if not isinstance(written, list) or len(written) != len(space):
+        return False
+    for index, buttons in enumerate(written):
+        if not isinstance(buttons, list) or any(not isinstance(b, str) for b in buttons):
+            return False
+        if frozenset(buttons) != space.buttons_for(index):
+            return False
+    return True
 
 
 def way_slot(game_id: str) -> str:
@@ -291,6 +318,9 @@ class TrainingService:
         # each region of the game's memory read just then.
         self._ways = ways
         self._kept: tuple[tuple[str, int], dict[str, str]] | None = None
+        # No Start has prepared the AI's goes since the game was connected: a way
+        # written down may be taken up at the next one (T-1065).
+        self._way_untried = False
         self._history: deque[EpisodeRecord] = deque(maxlen=history)
         self._deaths = DeathWatch(DEFAULT_WINDOW)  # what the AI saw before dying (T-968)
         self._policies: deque[tuple[int, dict[str, int]]] = deque(maxlen=DEFAULT_WINDOW + 1)
@@ -796,7 +826,7 @@ class TrainingService:
             if not isinstance(mode, Mode):
                 raise ConfigurationError("mode must be a Mode.")
             self._mode = mode
-        self._prepare_checkpoint()
+        self._prepare_checkpoint(opening=True)
         if not self._enabled:  # the link dropped while the checkpoint was being taken
             raise ConfigurationError("The game went away just as training was starting.")
         self._probe_listening = True  # the first go asks whether the game listens (T-848)
@@ -864,10 +894,7 @@ class TrainingService:
             snapshot = MemoryCapture(self._connection).capture(0)
         except (ConfigurationError, UnsupportedCapabilityError):
             return
-        spot = {
-            name: hashlib.blake2b(data, digest_size=16).hexdigest()
-            for name, data in sorted(snapshot.regions.items())
-        }
+        spot = _digests(snapshot.regions)
         slot = way_slot(game)
         self._connection.call(lambda a: a.save_state(slot))
         self._kept = ((harness.slot, harness.taken), spot)
@@ -894,6 +921,102 @@ class TrainingService:
             ways.save(data)
         except ConfigurationError as exc:
             log.warning("Couldn't write down the way the AI remembers: %s", exc)
+
+    def _take_up_way(self, harness: ExperimentHarness) -> bool:
+        """Take up the way written down for this game, if its start can be found again
+        (T-1065). True when the checkpoint is now that start and the route holds the way.
+
+        The checkpoint is saved where the game is first, to come back to. Then the
+        game's own slot is loaded and its memory read: the spot is the one the way was
+        played from where every region has the digest written down with the way.
+        Anything else puts the game back, says why, and removes the file; the caller
+        then starts from where the game is, as it always has. A link that drops goes
+        up to the caller as from a checkpoint, and the file stays for the next time.
+        """
+        ways, game, agent = self._ways, self._game_id, self._agent
+        if ways is None or self._store is None or game is None or agent is None:
+            return False
+        if not self._remember or not ways.exists(game):
+            return False
+        try:
+            spot, way = self._way_written(ways.load(game), game, agent.space)
+        except ConfigurationError as exc:
+            self._way_not_taken(f"what is written cannot be used ({exc})")
+            return False
+        harness.checkpoint()
+        slot = way_slot(game)
+        try:
+            self._connection.call(lambda a: a.load_state(slot))
+            snapshot = MemoryCapture(self._connection).capture(0)
+        except EmulatorDisconnectedError:
+            raise
+        except (ConfigurationError, EmulatorError) as exc:
+            harness.restore()
+            self._way_not_taken(f"the saved spot it starts from could not be loaded ({exc})")
+            return False
+        now = _digests(snapshot.regions)
+        differ = sorted(
+            name for name in now.keys() | spot.keys() if now.get(name) != spot.get(name)
+        )
+        if differ:
+            harness.restore()
+            self._way_not_taken(
+                "the saved spot it starts from is not as it was when the way was played: "
+                "the game's memory differs in " + ", ".join(differ)
+            )
+            return False
+        harness.checkpoint()  # the checkpoint the goes start from is the way's start
+        start = (harness.slot, harness.taken)
+        self._kept = (start, now)
+        self._route.take_up(way, start)
+        harness.restore()  # the same state: tells the observation of the jump
+        steps = len(self._route.moves)
+        log.info(
+            "Took up the way the AI remembered for this game from before: %d step%s. The "
+            "goes start from the spot that way starts from, not from where the game was.",
+            steps,
+            "" if steps == 1 else "s",
+        )
+        return True
+
+    def _way_written(
+        self, data: dict[str, Any], game: str, space: ActionSpace
+    ) -> tuple[dict[str, str], object]:
+        """The spot and the way a file holds, or a ``ConfigurationError`` that says in
+        plain words why this game's AI cannot play it."""
+        if data.get("format") != WAY_FORMAT:
+            raise ConfigurationError("it is written in another format")
+        if data.get("game_id") != game:
+            raise ConfigurationError("it is another game's")
+        if data.get("slot") != way_slot(game):
+            raise ConfigurationError("it names another save state")
+        frames = data.get("frames_per_step")
+        if frames != self._frames_per_step:
+            raise ConfigurationError(
+                f"it was played at {frames!r} frames a step and the AI now plays at "
+                f"{self._frames_per_step}"
+            )
+        if not _same_moves(data.get("actions"), space):
+            raise ConfigurationError("the AI's moves are not the ones it was played with")
+        spot = data.get("spot")
+        if (
+            not isinstance(spot, dict)
+            or not spot
+            or any(not isinstance(k, str) or not isinstance(v, str) for k, v in spot.items())
+        ):
+            raise ConfigurationError("it does not say what the game's memory held")
+        way = data.get("way")
+        if not Route.from_dict(way, ("written", 0)).moves:
+            raise ConfigurationError("it holds no moves")
+        return spot, way
+
+    def _way_not_taken(self, why: str) -> None:
+        log.info(
+            "A way is written down for this game from before, but it is not taken up: %s. "
+            "The goes start from where the game is, with no way.",
+            why,
+        )
+        self._drop_way()
 
     def _drop_way(self) -> None:
         """Remove the game's way from disk, if one is written down."""
@@ -1169,6 +1292,7 @@ class TrainingService:
         self._back_said = False
         self._route = Route()  # a way belongs to the game it was played in (T-1015)
         self._kept = None
+        self._way_untried = True
         self._watch = None  # a new game: things on its screen are looked at afresh (T-976)
         self._can_see = caps.screen_capture
         self._needs_wake = False
@@ -1569,8 +1693,12 @@ class TrainingService:
         self._checkpoint(harness)
         return True
 
-    def _prepare_checkpoint(self) -> None:
-        """Every go in an AI mode restarts from where the child left the game."""
+    def _prepare_checkpoint(self, *, opening: bool = False) -> None:
+        """Every go in an AI mode restarts from where the child left the game.
+
+        ``opening`` is a Start (not a change of mode while training runs): the first
+        one since the game was connected takes up a way written down for the game,
+        where there is one and its start can be found again (T-1065)."""
         if self._harness is None or not self._mode.ai_plays:
             return
         try:
@@ -1578,6 +1706,7 @@ class TrainingService:
             harness = self._harness
             if not harness.available():
                 return
+            untried, self._way_untried = self._way_untried, False
             held = self._pin_held
             if (
                 held is not None
@@ -1590,8 +1719,9 @@ class TrainingService:
                 # worked out from there still holds, the way the AI remembers above all.
                 harness.restore()
                 return
-            self._restore_spot()  # a pinned spot is where every go starts
-            self._checkpoint(harness)
+            if not (opening and untried and not self._spot_pinned and self._take_up_way(harness)):
+                self._restore_spot()  # a pinned spot is where every go starts
+                self._checkpoint(harness)
             self._pin_held = (harness, harness.taken) if self._spot_pinned else None
             self._early_losses = []
             self._doomed_cleared = None
