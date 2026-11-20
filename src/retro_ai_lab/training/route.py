@@ -236,9 +236,7 @@ class Route:
         other = Route.from_dict(data, start)
         self._cut_story(0)
         self._live = False
-        self._playing = 0
-        self._again, self._again_by = [], []
-        self._on_way = False
+        self._playing = 0  # and with it what the go noted of the way it began with
         self._shortened = 0
         self._start = other._start
         self._moves, self._paid, self._by = other._moves, other._paid, other._by
