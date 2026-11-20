@@ -18,13 +18,16 @@ import pytest
 from retro_ai_lab.core import EmulatorDisconnectedError
 from retro_ai_lab.core.worklog import CallStats, app_work
 from retro_ai_lab.emulator.fake import toy_hopper
+from retro_ai_lab.emulator.fake.toy_hopper import LAYOUT
 from retro_ai_lab.learning import ActionSpace
+from retro_ai_lab.services import DiscoveryUpdated
 from retro_ai_lab.training import EpisodeRunner, episode
 from retro_ai_lab.training.episode import AHEAD, DEFAULT_UNSTICK_AFTER, LATE, NOW_SLOT
 from retro_ai_lab.training.moments import Moments
 from retro_ai_lab.training.trial import Outcome
+from retro_ai_lab.understanding import VariableKind
 from tests.unit.training import test_going_back as going_back
-from tests.unit.training.test_going_back import Lab, Scripted, steps
+from tests.unit.training.test_going_back import SURE, Lab, Scripted, steps
 from tests.unit.training.test_last_chance_in_a_go import (
     GAP_ENDS,
     LONG,
@@ -178,9 +181,15 @@ def test_the_asking_runs_flat_out_and_is_timed_for_the_log(
 def test_a_pause_in_which_only_the_spot_stands_is_waited_out_too(
     lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The stuck rule off (as where what the learner sees keeps changing in the pause):
-    the go has stayed about one spot for as long as a standstill takes."""
-    r, moments = paused(lab, unstick_after=None, stand_after=30)
+    """What the learner sees keeps changing in the pause (a clock that never stops), so
+    the stuck rule has nothing to say: the go has stayed about one spot for as long as a
+    standstill takes."""
+    lab.teach()
+    clock = lab.knowledge.propose(
+        "ram", LAYOUT.timer, kind=VariableKind.POSITION, name="Clock", evidence=SURE
+    )
+    lab.bus.publish(DiscoveryUpdated((clock,), (), (), ()))
+    r, moments = paused(lab, stand_after=30)
     plays = Plays(monkeypatch)
     right, nothing = lab.move("right"), lab.move()
     r.begin()
@@ -247,8 +256,16 @@ def test_a_longer_pause_than_forty_steps_is_seen_with_none_remembered(
 
 @pytest.mark.parametrize(
     ("moves", "second"),
-    [([["right"], ["a", "right"]], ("a", "right")), ([["right"]], None)],
-    ids=["no move without the plain one's button", "one move in all"],
+    [
+        ([["right"], ["a", "right"], ["b", "up"]], ("b", "up")),
+        ([["right"], ["a", "right"]], ("a", "right")),
+        ([["right"]], None),
+    ],
+    ids=[
+        "the first move shares a button",
+        "no move without the plain one's button",
+        "one move in all",
+    ],
 )
 def test_the_second_play_is_of_whatever_other_move_there_is(
     lab: Lab,
@@ -386,7 +403,7 @@ def test_a_life_that_does_not_go_is_waited_for_no_longer(
     r, _ = paused(lab)
     r.set_unstick_buttons(("start",))
     lost = Outcome(12, True, 0)
-    plays = Plays(monkeypatch, [lost, lost])
+    plays = Plays(monkeypatch, [lost, lost, Outcome(2 * AHEAD, False, 0)])
     standing_still(lab)
     r.begin()
     with caplog.at_level(logging.INFO, logger=LOG):
@@ -402,6 +419,13 @@ def test_a_life_that_does_not_go_is_waited_for_no_longer(
     # search could follow a life lost: nothing is asked, and it is pressed again.
     steps(r, STUCK)
     assert len(plays.made) == 2 and r.unsticks == 2
+    # Once it has walked on and stands again, with moments far enough back, it asks as
+    # it did the first time: the wait that came to nothing is over and done with.
+    lab.agent.script.clear()
+    lab.agent.script.extend([lab.move("right")] * 8 + [lab.move()] * 400)
+    while r.unsticks == 2:
+        assert r.step()
+    assert len(plays.made) == 3 and plays.made[2] == (lab.move("right"),) * (2 * AHEAD)
 
 
 def test_going_back_ends_the_wait(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -493,15 +517,18 @@ def test_a_link_that_drops_while_it_asks_ends_the_go(
     steps(r, ASKED_AT)
     save, load = lab.adapter.save_state, lab.adapter.load_state
     loads: list[str] = []
+    dropped: list[int] = []  # the steps the go had played when the link went
 
     def saving(slot: str) -> None:
         if slot == NOW_SLOT and fails == "save":
+            dropped.append(r.steps)
             raise EmulatorDisconnectedError("The emulator went away.")
         save(slot)
 
     def loading(slot: str) -> None:
         loads.append(slot)
         if fails == f"load {len(loads)}":
+            dropped.append(r.steps)
             raise EmulatorDisconnectedError("The emulator went away.")
         load(slot)
 
@@ -510,6 +537,8 @@ def test_a_link_that_drops_while_it_asks_ends_the_go(
     while r.step():
         assert r.steps < LONG_DIED - 1
     assert loads == [NOW_SLOT] * (0 if fails == "save" else int(fails[-1]))
+    assert dropped == [r.steps]  # nothing was tried or played after it
     assert not r.signals.listening  # the go is over, as wherever the link drops
     result = r.finish()
     assert result.ended_by == "disconnected" and (result.setbacks, r.unsticks) == (0, 0)
+    assert (result.ways_sought, result.ways_stood) == (0, 0)  # and no search is counted
