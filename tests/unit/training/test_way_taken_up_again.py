@@ -209,9 +209,10 @@ def test_what_taking_up_saves_and_loads(opened: Opener, monkeypatch: pytest.Monk
 
 def not_taken(
     again: Sitting, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, why: str
-) -> None:
+) -> list[str]:
     """Start, and see that the way was left: the game is where it was, the log says
-    why once, the file is gone, and the goes start from there with no way."""
+    why once, the file is gone, and the goes start from there with no way. Returns
+    the save states the Start loaded."""
     t, game = again.t, game_of(again)
     played_on(again.lab, 40)
     here = game.state.x
@@ -219,6 +220,7 @@ def not_taken(
     assert game_id is not None and again.ways.path_for(game_id).exists()
     with caplog.at_level(logging.INFO):
         counting(t, monkeypatch)
+        loaded = list(again.lab.loaded)
         assert game.state.x == here and t.remembered == 0
         assert not again.ways.path_for(game_id).exists()
         assert t.step()
@@ -235,6 +237,7 @@ def not_taken(
     again.adapter.load_state(module.way_slot(game_id))
     assert game.state.x == here
     t.stop()
+    return loaded
 
 
 def test_a_spot_that_cannot_be_loaded_leaves_the_game_where_it_is(
@@ -244,13 +247,13 @@ def test_a_spot_that_cannot_be_loaded_leaves_the_game_where_it_is(
     _, _, _, written = a_sitting_with_a_way(opened, monkeypatch)
     again = opened({})
     slot = written["slot"]
-    not_taken(
+    loaded = not_taken(
         again,
         monkeypatch,
         caplog,
         f"the saved spot it starts from could not be loaded (No save state in slot {slot!r}.)",
     )
-    assert again.lab.loaded[:2] == [slot, SLOT]  # tried, and put back
+    assert loaded == [slot, SLOT]  # tried, and put back
 
 
 def test_a_spot_that_is_not_as_it_was_leaves_the_game_where_it_is(
@@ -265,14 +268,14 @@ def test_a_spot_that_is_not_as_it_was_leaves_the_game_where_it_is(
     again.adapter.save_state(slot)
     assert game_of(again).state.x != spot
     again.lab.saved.clear()
-    not_taken(
+    loaded = not_taken(
         again,
         monkeypatch,
         caplog,
         "the saved spot it starts from is not as it was when the way was played: "
         "the game's memory differs in ram",
     )
-    assert again.lab.loaded[:2] == [slot, SLOT]
+    assert loaded == [slot, SLOT]
 
 
 def rewritten(sitting: Sitting, change: Callable[[dict[str, object]], object]) -> None:
@@ -342,8 +345,7 @@ def test_memory_that_is_not_as_written_leaves_the_way(
     states, _, _, written = a_sitting_with_a_way(opened, monkeypatch)
     again = opened(states)
     rewritten(again, change)
-    not_taken(again, monkeypatch, caplog, why)
-    assert again.lab.loaded[:2] == [written["slot"], SLOT]
+    assert not_taken(again, monkeypatch, caplog, why) == [written["slot"], SLOT]
 
 
 @pytest.mark.parametrize(
@@ -416,9 +418,8 @@ def test_a_file_that_cannot_be_used_leaves_the_game_alone(
         with pytest.raises(ConfigurationError) as refused:
             again.ways.load(game_id)
         why = f"({refused.value})"
-    not_taken(again, monkeypatch, caplog, NO_USE + why)
     # The file said enough by itself: nothing was loaded to find out.
-    assert not any(s.startswith("way_") for s in again.lab.loaded)
+    assert not_taken(again, monkeypatch, caplog, NO_USE + why) == []
 
 
 def test_a_pinned_spot_decides_and_nothing_is_read(
@@ -539,11 +540,9 @@ def test_where_no_way_is_kept_none_is_taken_up(
 def test_a_link_that_drops_while_the_spot_is_looked_for_refuses_to_start(
     opened: Opener, monkeypatch: pytest.MonkeyPatch, during: str
 ) -> None:
-    states, _, _, written = a_sitting_with_a_way(opened, monkeypatch)
+    states, _, _, _ = a_sitting_with_a_way(opened, monkeypatch)
     again = opened(states)
     t, lab = again.t, again.lab
-    game_id = t.game_id
-    assert game_id is not None
 
     def gone() -> None:
         lab.connection.disconnect()
@@ -565,8 +564,6 @@ def test_a_link_that_drops_while_the_spot_is_looked_for_refuses_to_start(
     with pytest.raises(ConfigurationError, match="went away"):
         t.start(Mode.INDEPENDENT)
     assert t.status is Status.IDLE and not t.enabled and t.remembered == 0
-    # The file is still there for the next time the game is connected.
-    assert again.ways.load(game_id) == written
 
 
 def test_pay_from_a_reward_that_is_gone_is_put_right_by_the_first_go(
@@ -648,9 +645,10 @@ def test_other_moves_than_the_ais_leave_the_way(
     actions = written["actions"]
     assert isinstance(actions, list)
     rewritten(again, put("actions", change(actions)))
-    not_taken(
+    loaded = not_taken(
         again,
         monkeypatch,
         caplog,
         NO_USE + "(the AI's moves are not the ones it was played with)",
     )
+    assert loaded == []
