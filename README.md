@@ -390,6 +390,17 @@ further on, and it searches there for the rest. So a long obstacle is got
 past a piece at a time, and it can cost a life or two for each piece. The
 summary of a go counts these ("and once kept the change that got furthest").
 
+Most games put the player back when a life goes: at the start of the level,
+or at a point part of the way along. Everything near there is ground the go
+has already walked, so a try from there could never get "somewhere the go
+had not been", and every search after a put-back came to nothing. The second
+and third lives of a go went at things the AI had got past minutes earlier.
+A way past is now one that keeps the life and gets somewhere this life has
+not been. The log says so the first time it sees the game put the AI back
+("A life was lost and the game put the AI back …"). What is paid for getting
+somewhere new does not change: ground walked a second time still pays
+nothing.
+
 Many games put you back at the start of the level when a life goes, and
 the app takes the game starting over for the end of a go. Where it can go
 back it looks for the way past first, and the go only ends there if it
