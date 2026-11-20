@@ -228,6 +228,20 @@ class Route:
         route._start = start
         return route
 
+    def take_up(self, data: object, start: Hashable) -> None:
+        """Remember the way :meth:`to_dict` wrote, from ``start``, in place of whatever
+        is remembered (T-1065): for a route a runner already holds. Between goes only:
+        the story of a go, if there is one, is dropped. Where ``data`` is not a way the
+        route is left as it was."""
+        other = Route.from_dict(data, start)
+        self._cut_story(0)
+        self._live = False
+        self._playing = 0  # and with it what the go noted of the way it began with
+        self._shortened = 0
+        self._start = other._start
+        self._moves, self._paid, self._by = other._moves, other._paid, other._by
+        self._stood = other._stood
+
     def forget(self) -> None:
         """Drop the remembered way: it no longer leads anywhere. Nor do the places
         noted along it, where a loss stood."""
