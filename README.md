@@ -593,7 +593,10 @@ from memory do not count towards "Each go lasts": every go has its full
 length of its own play after them. The log says when the way grows or is
 cut and each go's line says how many steps it began with. The way is kept while training runs: pressing Start again makes
 wherever the game is the new spot the goes start from, and a way from the
-old spot is forgotten, as it is when you start the AI from scratch. It is
+old spot is forgotten, as it is when you start the AI from scratch. With a
+pinned spot ("Pin this spot") the goes start from the same spot at every
+Start, and the way from it is kept when you stop and start again; pin
+another spot, or unpin it, and the way goes with the old one. It is
 not kept when the app is closed.
 
 ## Before the AI loses a life
