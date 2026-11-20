@@ -16,7 +16,14 @@ from retro_ai_lab.services import (
     ObservationService,
     RewardService,
 )
-from retro_ai_lab.storage import BrainStore, GoalStore, KnowledgeStore, RewardStore, SavedAiStore
+from retro_ai_lab.storage import (
+    BrainStore,
+    GoalStore,
+    KnowledgeStore,
+    RewardStore,
+    SavedAiStore,
+    WayStore,
+)
 from retro_ai_lab.training import StepLog, TrainingService
 from retro_ai_lab.ui.bridge import EventBridge
 
@@ -32,6 +39,7 @@ class AppContext:
     reward_store: RewardStore = field(init=False)
     goal_store: GoalStore = field(init=False)
     brain_store: BrainStore = field(init=False)
+    way_store: WayStore = field(init=False)
     saved_ai_store: SavedAiStore = field(init=False)
     connection: ConnectionService = field(init=False)
     observation: ObservationService = field(init=False)
@@ -57,6 +65,7 @@ class AppContext:
         self.goal_store = GoalStore(self.data_dir / "goals")
         self.goals = GoalService(self.connection, self.discovery, self.bus, store=self.goal_store)
         self.brain_store = BrainStore(self.data_dir / "brains")
+        self.way_store = WayStore(self.data_dir / "ways")
         self.training = TrainingService(
             self.connection,
             self.observation,
@@ -66,6 +75,7 @@ class AppContext:
             goals=self.goals,
             rewards=self.rewards,
             look_ahead=True,  # T-1052: a life seen going is saved before it goes
+            ways=self.way_store,  # T-1064: the way it remembers is written down
         )
         self.saved_ai_store = SavedAiStore(self.data_dir / "saved_ais")
         self.saved_ais = SavedAiService(

@@ -10,6 +10,7 @@ script can call :meth:`TrainingService.train` with no GUI at all.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 import time
@@ -57,6 +58,7 @@ from retro_ai_lab.services.goals import GoalService
 from retro_ai_lab.services.observer import MemoryObserved, ObservationService
 from retro_ai_lab.services.rewards import RewardService
 from retro_ai_lab.storage.brains import BrainStore
+from retro_ai_lab.storage.ways import WayStore
 from retro_ai_lab.training.brain import Brain
 from retro_ai_lab.training.curve import DEFAULT_WINDOW, LearningCurve, describe_survival
 from retro_ai_lab.training.deaths import DeathWatch
@@ -124,6 +126,16 @@ NOT_LISTENING = (
 )
 FAST_SPEED = 64.0  # EmuHawk's client.speedmode tops out at 6400% (T-836)
 PRACTISE_SLOT = "practise"  # the save-state slot of the spot the child pinned (T-508)
+WAY_FORMAT = 1  # of the file a remembered way is written down in (T-1064)
+
+
+def way_slot(game_id: str) -> str:
+    """The save-state slot of the game's own in which the spot its goes start from is
+    kept (T-1064). The checkpoint's slot is one for every game, and the next game's
+    Start saves over it; a way written down needs its start to stay."""
+    return "way_" + hashlib.sha1(game_id.encode("utf-8")).hexdigest()[:12]
+
+
 # At a life lost the AI goes back to a moment saved a little earlier and tries small
 # changes to what it did until one gets past (T-1009). The moments of a go are kept
 # in these slots; the numbers are the prototype's.
@@ -212,6 +224,7 @@ class TrainingService:
         remember: bool = True,
         stand_after: int = STAND_AFTER,
         look_ahead: bool = False,
+        ways: WayStore | None = None,
     ) -> None:
         _check_algorithm(algorithm)
         if not isinstance(remember, bool):
@@ -272,6 +285,11 @@ class TrainingService:
         self._goals = goals
         self._rewards = rewards  # whose own rewards say what a death is (T-964)
         self._store = store
+        # Where the remembered way is written down beside the brain (T-1064), and the
+        # spot kept for it: the harness's count of saves when the game's own slot was
+        # saved, and a digest of each region of the game's memory read just then.
+        self._ways = ways
+        self._kept: tuple[int, dict[str, str]] | None = None
         self._history: deque[EpisodeRecord] = deque(maxlen=history)
         self._deaths = DeathWatch(DEFAULT_WINDOW)  # what the AI saw before dying (T-968)
         self._policies: deque[tuple[int, dict[str, int]]] = deque(maxlen=DEFAULT_WINDOW + 1)
@@ -822,7 +840,76 @@ class TrainingService:
             return None
         path = self._store.save(brain.to_dict())
         self._saves += 1
+        self._write_way()
         return path
+
+    def _checkpoint(self, harness: ExperimentHarness) -> None:
+        """Save the checkpoint the goes start from, and keep the same state where it
+        outlives the app (T-1064)."""
+        harness.checkpoint()
+        self._keep_start(harness)
+
+    def _keep_start(self, harness: ExperimentHarness) -> None:
+        """The checkpoint was saved just now: save the same state in the slot of the
+        game's own, and note what the game's memory holds there to tell the spot by.
+        Only where a way can be written down; where the memory cannot be read, the
+        spot cannot be told and nothing is kept."""
+        self._kept = None
+        game = self._game_id
+        if self._ways is None or self._store is None or game is None or not self._remember:
+            return
+        self._drop_way()  # what is written starts from another spot than this one
+        try:
+            snapshot = MemoryCapture(self._connection).capture(0)
+        except (ConfigurationError, UnsupportedCapabilityError):
+            return
+        spot = {
+            name: hashlib.blake2b(data, digest_size=16).hexdigest()
+            for name, data in sorted(snapshot.regions.items())
+        }
+        slot = way_slot(game)
+        self._connection.call(lambda a: a.save_state(slot))
+        self._kept = (harness.taken, spot)
+
+    def _write_way(self) -> None:
+        """Write the remembered way down beside the brain, where there is one and it
+        starts from the spot kept; otherwise nothing on disk says there is (T-1064)."""
+        ways, game, agent = self._ways, self._game_id, self._agent
+        if ways is None or game is None or agent is None:
+            return
+        harness, kept, route = self._harness, self._kept, self._route
+        if (
+            harness is None
+            or kept is None
+            or not route.moves
+            or route.start != (harness.slot, kept[0])
+        ):
+            self._drop_way()
+            return
+        space = agent.space
+        data = {
+            "format": WAY_FORMAT,
+            "game_id": game,
+            "slot": way_slot(game),
+            "spot": dict(kept[1]),
+            "frames_per_step": self._frames_per_step,
+            "actions": [list(space.buttons_for(i)) for i in range(len(space))],
+            "way": route.to_dict(),
+        }
+        try:
+            ways.save(data)
+        except ConfigurationError as exc:
+            log.warning("Couldn't write down the way the AI remembers: %s", exc)
+
+    def _drop_way(self) -> None:
+        """Remove the game's way from disk, if one is written down."""
+        ways, game = self._ways, self._game_id
+        if ways is None or game is None:
+            return
+        try:
+            ways.delete(game)
+        except OSError as exc:
+            log.warning("Couldn't remove the way written down for this game: %s", exc)
 
     @_locked
     def replace_brain(self, data: dict[str, Any]) -> Brain:
@@ -899,6 +986,7 @@ class TrainingService:
             self._encoder.forget_closer()
         if self._store is not None:
             self._store.delete(self._game_id)
+        self._drop_way()
         log.info("The AI forgot this game at your request: its brain and the saved copy are gone.")
         self._announce("forget")
 
@@ -973,7 +1061,7 @@ class TrainingService:
         names = [name for name, _ in entrants]
         if len(set(names)) != len(names):
             raise ConfigurationError("Each entrant needs its own name.")
-        harness.checkpoint()
+        self._checkpoint(harness)
         results: dict[str, tuple[EpisodeResult, ...]] = {}
         self._busy = True
         try:
@@ -1086,6 +1174,7 @@ class TrainingService:
         self._can_save = caps.save_states
         self._back_said = False
         self._route = Route()  # a way belongs to the game it was played in (T-1015)
+        self._kept = None
         self._watch = None  # a new game: things on its screen are looked at afresh (T-976)
         self._can_see = caps.screen_capture
         self._needs_wake = False
@@ -1355,7 +1444,7 @@ class TrainingService:
             if attempt == DEAF_TRIES:
                 break
             self._connection.call(lambda a: a.step(DEAF_WAIT))
-            self._harness.checkpoint()
+            self._checkpoint(self._harness)
             if self._listens():
                 return True
         log.warning(NOT_LISTENING)
@@ -1483,7 +1572,7 @@ class TrainingService:
             self._discovery.save()
         if self._runner is not None:
             self._runner.set_unstick_buttons((found,))
-        harness.checkpoint()
+        self._checkpoint(harness)
         return True
 
     def _prepare_checkpoint(self) -> None:
@@ -1508,7 +1597,7 @@ class TrainingService:
                 harness.restore()
                 return
             self._restore_spot()  # a pinned spot is where every go starts
-            harness.checkpoint()
+            self._checkpoint(harness)
             self._pin_held = (harness, harness.taken) if self._spot_pinned else None
             self._early_losses = []
             self._doomed_cleared = None
@@ -1746,7 +1835,7 @@ class TrainingService:
                 break
             self._connection.call(lambda a: a.step(frames * DOOMED_LISTEN_STEPS, pressed=()))
             waited += DOOMED_LISTEN_STEPS
-        harness.checkpoint()
+        self._checkpoint(harness)
         self._doomed_cleared = None  # a new start: its losses are its own to check
         self._start_moves += 1
         log.info(
@@ -1847,6 +1936,7 @@ __all__ = [
     "RESET_SUSPECT_STEPS",
     "UNTIL_OVER_MOST_FRAMES",
     "WAYS_PER_GO",
+    "WAY_FORMAT",
     "WAY_SECONDS",
     "EpisodeFinished",
     "TrainingService",
@@ -1854,4 +1944,5 @@ __all__ = [
     "TrainingStepped",
     "goes_look_identical",
     "until_over_most_steps",
+    "way_slot",
 ]
