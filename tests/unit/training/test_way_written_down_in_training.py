@@ -289,10 +289,20 @@ def test_where_the_memory_cannot_be_read_nothing_is_kept(
             raise error("save_states") if error is UnsupportedCapabilityError else error("no")
 
     monkeypatch.setattr(module, "MemoryCapture", Unreadable)
+    t.pin_spot()
     counting(t, monkeypatch)
-    assert lab.saved == [SLOT] and t._kept is None
+    assert lab.saved == [module.PRACTISE_SLOT, SLOT] and t._kept is None
     goes(t, 1)
-    assert t.remembered > 0  # the AI remembers as before; it is only not written
+    way = t.remembered
+    assert way > 0  # the AI remembers as before; it is only not written
+    t.stop()
+    assert ways.games() == ()
+    # The Start itself went on as it does: the pinned spot is held (T-1063), and the
+    # next Start leaves the checkpoint and the way as they are.
+    counting(t, monkeypatch)
+    harness = t.harness
+    assert harness is not None and harness.taken == 1 and t.remembered == way
+    assert lab.saved.count(SLOT) == 1 and t._kept is None
     t.stop()
     assert ways.games() == ()
 
