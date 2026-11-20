@@ -275,3 +275,27 @@ def test_after_the_link_went_the_spot_is_pinned_and_saved_anew(
     counting(t, monkeypatch)
     assert new.taken == 1
     t.stop()
+
+
+def test_another_harness_with_as_many_saves_does_not_hold_the_spot(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The spot is held by the harness that saved it: a new link's harness that has
+    saved as often (an experiment's checkpoint, say) is not at the pinned spot."""
+    t = lab.training()
+    lab.connect()
+    t.pin_spot()
+    a_way(t, monkeypatch)
+    old = t.harness
+    assert old is not None and old.taken == 1
+    lab.connection.disconnect()
+    game = lab.connect()
+    new = t.harness
+    assert new is not None and new is not old
+    new.checkpoint()
+    assert new.has_checkpoint and new.taken == 1
+    played_on(lab)
+    here = game.state.x
+    counting(t, monkeypatch)  # no pin: the spot the game is at, not that checkpoint
+    assert new.taken == 2 and game.state.x == here
+    t.stop()
