@@ -1495,8 +1495,13 @@ class TrainingService:
             harness = self._harness
             if not harness.available():
                 return
-            held = (harness, harness.taken)
-            if harness.has_checkpoint and self._pin_held == held:
+            held = self._pin_held
+            if (
+                held is not None
+                and held[0] is harness
+                and harness.has_checkpoint
+                and held[1] == harness.taken
+            ):
                 # The checkpoint is the pinned spot already, saved at the Start before
                 # and not since (T-1063): the goes start where they did, and what was
                 # worked out from there still holds, the way the AI remembers above all.
