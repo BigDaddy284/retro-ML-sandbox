@@ -39,11 +39,28 @@ from tests.unit.training.test_way_taken_up_again import (
 opened = taken_up.opened  # the app opened on the folders it keeps its files in (fixture)
 
 
-def written_for(sitting: Sitting) -> dict[str, object] | None:
-    """What is written down for the connected game, or None."""
+def the_file(sitting: Sitting) -> bytes | None:
+    """The file written down for the connected game as it lies on disk, or None."""
     game_id = sitting.t.game_id
     assert game_id is not None
-    return sitting.ways.load(game_id) if sitting.ways.exists(game_id) else None
+    path = sitting.ways.path_for(game_id)
+    return path.read_bytes() if sitting.ways.exists(game_id) else None
+
+
+def says(data: dict[str, object]) -> dict[str, object]:
+    """What a file says, with each move's buttons in one order. A move's buttons are
+    a set: written again from memory they may be listed in another order, and the
+    file is read with them in any (T-1065)."""
+    actions = data["actions"]
+    assert isinstance(actions, list)
+    return {**data, "actions": [sorted(buttons) for buttons in actions]}
+
+
+def written_for(sitting: Sitting) -> dict[str, object] | None:
+    """What is written down for the connected game (see ``says``), or None."""
+    game_id = sitting.t.game_id
+    assert game_id is not None
+    return says(sitting.ways.load(game_id)) if sitting.ways.exists(game_id) else None
 
 
 def the_brain_written(s: Sitting) -> None:
@@ -113,13 +130,14 @@ def test_what_is_done_before_a_start_leaves_the_way_written(
     caplog: pytest.LogCaptureFixture,
     done: Callable[[Sitting], None],
 ) -> None:
-    states, spot, way, written = a_sitting_with_a_way(opened, monkeypatch)
+    states, spot, way, _ = a_sitting_with_a_way(opened, monkeypatch)
     again = opened(states)
     t = again.t
-    saves = t._saves
+    saves, file = t._saves, the_file(again)
+    assert file is not None
     done(again)
     assert t._saves > saves or done is the_link_dropped  # the brain was written
-    assert written_for(again) == written and t.remembered == 0
+    assert the_file(again) == file and t.remembered == 0  # not a byte of it changed
     played_on(again.lab, 40)
     with caplog.at_level(logging.INFO):
         counting(t, monkeypatch)  # Start
@@ -135,12 +153,15 @@ def test_the_app_closed_with_no_start_keeps_the_way(
     opened: Opener, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Opened to look and closed again, twice: the third sitting has the way."""
-    states, spot, way, written = a_sitting_with_a_way(opened, monkeypatch)
+    states, spot, way, _ = a_sitting_with_a_way(opened, monkeypatch)
+    file = None
     for _ in range(2):
         looked = opened(states)
+        file = file or the_file(looked)
+        assert file is not None
         played_on(looked.lab, 16)
         assert looked.close() == states  # no save state of the game was made or changed
-        assert written_for(looked) == written
+        assert the_file(looked) == file  # nor a byte of the file
     again = opened(states)
     counting(again.t, monkeypatch)
     assert game_of(again).state.x == spot and again.t.remembered == way
@@ -153,8 +174,9 @@ def test_starting_from_scratch_before_a_start_still_removes_the_way(
     states, spot, _, _ = a_sitting_with_a_way(opened, monkeypatch)
     again = opened(states)
     t = again.t
+    assert the_file(again) is not None
     t.forget()
-    assert written_for(again) is None
+    assert the_file(again) is None
     played_on(again.lab, 40)
     here = game_of(again).state.x
     with caplog.at_level(logging.INFO):
@@ -196,14 +218,14 @@ def test_a_start_that_takes_its_own_spot_removes_the_way_as_before(
     states, _, _, written = a_sitting_with_a_way(opened, monkeypatch)
     again = opened(states)
     t = again.t
-    assert written_for(again) == written
+    assert the_file(again) is not None
     saves = t._saves
     start(again, monkeypatch)
-    assert written_for(again) is None and t._saves == saves and t.remembered == 0
+    assert the_file(again) is None and t._saves == saves and t.remembered == 0
     assert again.lab.saved.count(written["slot"]) == 1
     # From here on a writing of the brain with no way in memory leaves none on disk.
     again.ways.save(written)
-    assert t.save() is not None and written_for(again) is None
+    assert t.save() is not None and the_file(again) is None
     t.stop()
 
 
@@ -216,9 +238,9 @@ def test_once_a_start_has_taken_the_way_up_a_way_forgotten_is_removed(
     counting(t, monkeypatch)
     assert t.remembered == way
     t.stop()
-    assert written_for(again) == written
+    assert written_for(again) == says(written)
     t._route.forget()  # as a reward row that went, or a place that keeps costing a life
-    assert t.save() is not None and written_for(again) is None
+    assert t.save() is not None and the_file(again) is None
 
 
 @pytest.mark.parametrize("during", ["the load", "the read", "the putting back"])
@@ -228,6 +250,7 @@ def test_a_link_that_drops_at_the_start_leaves_the_way_for_the_next_one(
     states, spot, way, written = a_sitting_with_a_way(opened, monkeypatch)
     again = opened(states)
     t, lab = again.t, again.lab
+    file = the_file(again)
 
     def gone() -> None:
         lab.connection.disconnect()
@@ -252,7 +275,10 @@ def test_a_link_that_drops_at_the_start_leaves_the_way_for_the_next_one(
             m.setattr(module, "MemoryCapture", Dropping)
         with pytest.raises(ConfigurationError, match="went away"):
             t.start(Mode.INDEPENDENT)
-    assert t.status is Status.IDLE and written_for(again) == written
+    assert t.status is Status.IDLE and written_for(again) == says(written)
+    # Where the way was not yet taken up the file was not written again at all. Where
+    # it was, the link's going wrote it again from memory: it says the same.
+    assert the_file(again) == file or during == "the putting back"
     # The link comes back, and the emulator has run on: this Start is the first again.
     lab.connect()
     again.adapter._slots.update(states)
