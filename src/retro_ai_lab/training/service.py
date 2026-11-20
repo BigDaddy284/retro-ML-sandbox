@@ -933,13 +933,14 @@ class TrainingService:
         then starts from where the game is, as it always has. A link that drops goes
         up to the caller as from a checkpoint, and the file stays for the next time.
         """
-        ways, game, agent = self._ways, self._game_id, self._agent
-        if ways is None or self._store is None or game is None or agent is None:
+        ways, brain = self._ways, self.brain()
+        if ways is None or self._store is None or brain is None or not self._remember:
             return False
-        if not self._remember or not ways.exists(game):
+        game = brain.game_id
+        if not ways.exists(game):
             return False
         try:
-            spot, way = self._way_written(ways.load(game), game, agent.space)
+            spot, way = self._way_written(ways.load(game), game, brain.agent.space)
         except ConfigurationError as exc:
             self._way_not_taken(f"what is written cannot be used ({exc})")
             return False
@@ -1002,7 +1003,7 @@ class TrainingService:
         if (
             not isinstance(spot, dict)
             or not spot
-            or any(not isinstance(k, str) or not isinstance(v, str) for k, v in spot.items())
+            or any(not isinstance(digest, str) for digest in spot.values())
         ):
             raise ConfigurationError("it does not say what the game's memory held")
         way = data.get("way")

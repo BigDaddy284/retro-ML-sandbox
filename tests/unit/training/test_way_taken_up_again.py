@@ -160,6 +160,17 @@ def test_the_way_is_taken_up_when_the_app_is_opened_again(
     t.stop()
 
 
+def test_with_nothing_written_a_start_says_nothing_of_a_way(
+    opened: Opener, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    first = opened()
+    with caplog.at_level(logging.INFO):
+        counting(first.t, monkeypatch)
+    assert first.lab.saved[0] == SLOT and first.lab.loaded == []
+    assert TOOK_UP not in caplog.text and NOT_TAKEN not in caplog.text
+    first.t.stop()
+
+
 def test_the_way_is_taken_up_when_the_link_comes_back(
     opened: Opener, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
