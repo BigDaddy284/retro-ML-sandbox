@@ -234,3 +234,44 @@ def test_a_checkpoint_taken_since_is_not_the_pinned_spot(
     counting(t, monkeypatch)
     assert harness.taken == 3
     t.stop()
+
+
+def test_a_harness_that_lost_its_checkpoint_is_given_one(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    t = lab.training()
+    game = lab.connect()
+    spot = game.state.x
+    t.pin_spot()
+    a_way(t, monkeypatch)
+    harness = t.harness
+    assert harness is not None and harness.taken == 1
+    harness._has_checkpoint = False  # as a trial that lost the link leaves it
+    counting(t, monkeypatch)
+    assert harness.has_checkpoint and harness.taken == 2 and game.state.x == spot
+    t.stop()
+
+
+def test_after_the_link_went_the_spot_is_pinned_and_saved_anew(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Save states do not outlive the link: the pin is gone, a new harness is made
+    with the new link, and nothing of the old spot is taken for held."""
+    t = lab.training()
+    lab.connect()
+    t.pin_spot()
+    a_way(t, monkeypatch)
+    old = t.harness
+    assert old is not None and old.taken == 1
+    lab.connection.disconnect()
+    lab.connect()
+    assert not t.spot_pinned
+    new = t.harness
+    assert new is not None and new is not old and new.taken == 0
+    t.pin_spot()
+    counting(t, monkeypatch)
+    assert new.taken == 1
+    t.stop()
+    counting(t, monkeypatch)
+    assert new.taken == 1
+    t.stop()

@@ -1108,7 +1108,6 @@ class TrainingService:
         self._can_save = False
         self._fast_applied = False  # the script puts the speed back itself
         self._spot_pinned = False  # save states don't outlive the link
-        self._pin_held = None
         self._status = Status.IDLE
         if was_running:
             self._announce("disconnected")
@@ -1497,7 +1496,7 @@ class TrainingService:
             if not harness.available():
                 return
             held = (harness, harness.taken)
-            if self._spot_pinned and harness.has_checkpoint and self._pin_held == held:
+            if harness.has_checkpoint and self._pin_held == held:
                 # The checkpoint is the pinned spot already, saved at the Start before
                 # and not since (T-1063): the goes start where they did, and what was
                 # worked out from there still holds, the way the AI remembers above all.
