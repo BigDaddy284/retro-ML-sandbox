@@ -62,11 +62,11 @@ def test_a_start_moved_on_keeps_the_new_spot(
     lives = game.state.lives
     t.start(Mode.INDEPENDENT)
     slot = slot_of(t)
-    assert pairs(saved, slot) == 1 and t._kept is not None and t._kept[0] == 1
+    assert pairs(saved, slot) == 1 and t._kept is not None and t._kept[0] == (SLOT, 1)
     in_service._goes_lose_their_first_life_at(monkeypatch, [6, 6, 6])
     in_service._run_goes(lab, 3)
     assert t.step()  # go 4 begins a life further on
-    assert pairs(saved, slot) == 2 and t._kept is not None and t._kept[0] == 2
+    assert pairs(saved, slot) == 2 and t._kept is not None and t._kept[0] == (SLOT, 2)
     harness = t.harness
     assert harness is not None and harness.taken == 2
     lab.adapter().load_state(slot)
@@ -90,7 +90,7 @@ def test_a_game_that_was_woken_keeps_the_spot_it_woke_at(
         assert t.step()
     assert t.step()  # the next go starts by working out how to wake the game
     assert t.wake_button == "start" and pairs(saved, slot) == 2
-    assert t._kept is not None and t._kept[0] == 2
+    assert t._kept is not None and t._kept[0] == (SLOT, 2)
     in_service._drive_to_game_over(lab)
     lab.adapter().load_state(slot)
     assert not game.state.game_over
@@ -107,7 +107,7 @@ def test_waiting_for_a_game_that_does_not_listen_keeps_each_spot(
     assert not t.step() and t.status is Status.IDLE
     # The Start, and one after each wait between the searches.
     assert pairs(saved, slot_of(t)) == module.DEAF_TRIES
-    assert t._kept is not None and t._kept[0] == module.DEAF_TRIES
+    assert t._kept is not None and t._kept[0] == (SLOT, module.DEAF_TRIES)
 
 
 def test_a_race_keeps_the_spot_it_was_run_from(lab: Lab, tmp_path: Path) -> None:
@@ -118,7 +118,7 @@ def test_a_race_keeps_the_spot_it_was_run_from(lab: Lab, tmp_path: Path) -> None
     space = ActionSpace.from_buttons(lab.adapter().buttons())
     t.compete([("A", QLearningAgent(space, Settings(), seed=1))], goes=1, max_steps=5)
     slot = slot_of(t)
-    assert pairs(saved, slot) == 1 and t._kept is not None and t._kept[0] == 1
+    assert pairs(saved, slot) == 1 and t._kept is not None and t._kept[0] == (SLOT, 1)
     lab.play(["up"], 3)
     lab.adapter().load_state(slot)
     assert game.state.frame == frame

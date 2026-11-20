@@ -166,6 +166,8 @@ def having(key: str, value: object) -> dict[str, Any]:
         having("paid", [1.0, 1.75, 2.75, 3.5, float("inf")]),
         having("paid", [1.0, 1.75, 2.75, 3.5, False]),
         having("by", [[], [], [], [], "x"]),
+        having("by", [[], [], [], [], 7]),
+        having("by", [[], [], [], [], None]),
         having("by", [[], [], [], [], ["x", 1.0]]),  # a pair, not a list of pairs
         having("by", [[], [], [], [], [("x", 1.0)]]),  # as the app holds it, not as written
         having("by", [[], [], [], [], [["x"]]]),

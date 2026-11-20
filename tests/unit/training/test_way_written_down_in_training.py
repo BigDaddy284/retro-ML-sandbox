@@ -93,8 +93,10 @@ def test_a_start_keeps_the_spot_in_the_games_own_slot(
     slot = the_slot(t)
     # One save of the game's own slot after the checkpoint, and one read of memory.
     assert lab.saved == [SLOT, slot] and reads == [0]
-    assert t._kept == (1, mark)
+    assert t._kept == ((SLOT, 1), mark)
     assert ways.games() == ()  # no way yet: nothing written
+    assert t.step()  # a go has begun from the spot kept, and has no way yet either
+    assert t.save() is not None and ways.games() == ()
     goes(t, 1)
     assert lab.saved.count(slot) == 1 and reads == [0]  # a go saves and reads no more
     # The slot holds the state the goes start from.
@@ -165,7 +167,7 @@ def test_a_start_from_another_spot_takes_the_file_away(
     counting(t, monkeypatch)  # Start, with no pinned spot: from where the game is
     slot = the_slot(t)
     assert not ways.exists(game_id) and lab.saved.count(slot) == 2
-    assert t._kept == (2, new)
+    assert t._kept == ((SLOT, 2), new)
     # Until a go begins the AI still holds the old way; writing the brain does not
     # write that way down as one that starts from the new spot.
     assert t.remembered == way
@@ -214,7 +216,7 @@ def test_a_pinned_spot_held_keeps_the_spot_and_the_file(
     before = ways.load(game_id)
     assert before["spot"] == mark and lab.saved.count(slot) == 1 and reads == [0]
     counting(t, monkeypatch)  # Start again: the same spot
-    assert lab.saved.count(slot) == 1 and reads == [0] and t._kept == (1, mark)
+    assert lab.saved.count(slot) == 1 and reads == [0] and t._kept == ((SLOT, 1), mark)
     assert ways.load(game_id) == before and t.remembered == way
     goes(t, 1)
     t.stop()

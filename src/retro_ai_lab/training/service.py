@@ -286,10 +286,11 @@ class TrainingService:
         self._rewards = rewards  # whose own rewards say what a death is (T-964)
         self._store = store
         # Where the remembered way is written down beside the brain (T-1064), and the
-        # spot kept for it: the harness's count of saves when the game's own slot was
-        # saved, and a digest of each region of the game's memory read just then.
+        # spot kept for it: the start a way from it has (the checkpoint's slot and the
+        # harness's count of saves) when the game's own slot was saved, and a digest of
+        # each region of the game's memory read just then.
         self._ways = ways
-        self._kept: tuple[int, dict[str, str]] | None = None
+        self._kept: tuple[tuple[str, int], dict[str, str]] | None = None
         self._history: deque[EpisodeRecord] = deque(maxlen=history)
         self._deaths = DeathWatch(DEFAULT_WINDOW)  # what the AI saw before dying (T-968)
         self._policies: deque[tuple[int, dict[str, int]]] = deque(maxlen=DEFAULT_WINDOW + 1)
@@ -840,7 +841,7 @@ class TrainingService:
             return None
         path = self._store.save(brain.to_dict())
         self._saves += 1
-        self._write_way()
+        self._write_way(brain)
         return path
 
     def _checkpoint(self, harness: ExperimentHarness) -> None:
@@ -869,28 +870,21 @@ class TrainingService:
         }
         slot = way_slot(game)
         self._connection.call(lambda a: a.save_state(slot))
-        self._kept = (harness.taken, spot)
+        self._kept = ((harness.slot, harness.taken), spot)
 
-    def _write_way(self) -> None:
-        """Write the remembered way down beside the brain, where there is one and it
-        starts from the spot kept; otherwise nothing on disk says there is (T-1064)."""
-        ways, game, agent = self._ways, self._game_id, self._agent
-        if ways is None or game is None or agent is None:
-            return
-        harness, kept, route = self._harness, self._kept, self._route
-        if (
-            harness is None
-            or kept is None
-            or not route.moves
-            or route.start != (harness.slot, kept[0])
-        ):
+    def _write_way(self, brain: Brain) -> None:
+        """The brain was written: write the remembered way down beside it, where there
+        is one and it starts from the spot kept; otherwise nothing on disk says there
+        is (T-1064)."""
+        ways, kept, route = self._ways, self._kept, self._route
+        if ways is None or kept is None or not route.moves or route.start != kept[0]:
             self._drop_way()
             return
-        space = agent.space
+        space = brain.agent.space
         data = {
             "format": WAY_FORMAT,
-            "game_id": game,
-            "slot": way_slot(game),
+            "game_id": brain.game_id,
+            "slot": way_slot(brain.game_id),
             "spot": dict(kept[1]),
             "frames_per_step": self._frames_per_step,
             "actions": [list(space.buttons_for(i)) for i in range(len(space))],
