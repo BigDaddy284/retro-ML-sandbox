@@ -929,9 +929,9 @@ class TrainingService:
         The checkpoint is saved where the game is first, to come back to. Then the
         game's own slot is loaded and its memory read: the spot is the one the way was
         played from where every region has the digest written down with the way.
-        Anything else puts the game back, says why, and removes the file; the caller
-        then starts from where the game is, as it always has. A link that drops goes
-        up to the caller as from a checkpoint, and the file stays for the next time.
+        Anything else puts the game back and says why; the caller then starts from
+        where the game is, as it always has, and keeping that spot removes the file.
+        A link that drops goes up to the caller as from a checkpoint.
         """
         ways, brain = self._ways, self.brain()
         if ways is None or self._store is None or brain is None or not self._remember:
@@ -953,7 +953,9 @@ class TrainingService:
             raise
         except (ConfigurationError, EmulatorError) as exc:
             harness.restore()
-            self._way_not_taken(f"the saved spot it starts from could not be loaded ({exc})")
+            self._way_not_taken(
+                f"the saved spot it starts from could not be loaded and read ({exc})"
+            )
             return False
         now = _digests(snapshot.regions)
         differ = sorted(
@@ -1012,12 +1014,12 @@ class TrainingService:
         return spot, way
 
     def _way_not_taken(self, why: str) -> None:
+        """Say why. The file goes when the Start saves its own spot over the slot."""
         log.info(
             "A way is written down for this game from before, but it is not taken up: %s. "
             "The goes start from where the game is, with no way.",
             why,
         )
-        self._drop_way()
 
     def _drop_way(self) -> None:
         """Remove the game's way from disk, if one is written down."""

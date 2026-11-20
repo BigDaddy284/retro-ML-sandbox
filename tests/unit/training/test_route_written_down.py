@@ -268,6 +268,18 @@ def test_what_the_go_before_noted_of_the_old_way_does_not_remake_the_new() -> No
     assert route.moves == (3, 3, 1, 0, 2) and route.paid == 4.5 and route.shortened == 0
 
 
+def test_a_way_taken_up_has_lost_no_steps() -> None:
+    """What the way before lost when its last go ended (T-1026) is not said of this one."""
+    route = a_way()
+    route.begin(START)
+    for move in route.moves:
+        route.did(move, 0.5)
+    route.end()
+    assert route.shortened == 4 and route.moves == (3,)
+    route.take_up(another_way(), START)
+    assert route.shortened == 0 and route.moves == (1, 1, 4)
+
+
 @pytest.mark.parametrize(
     "data", [None, [], without("moves"), having("paid", [1.0]), having("stood", [-1])]
 )

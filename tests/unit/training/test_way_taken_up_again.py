@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from retro_ai_lab.core import ConfigurationError, EmulatorDisconnectedError
+from retro_ai_lab.core import ConfigurationError, EmulatorDisconnectedError, ProtocolError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter, toy_hopper
 from retro_ai_lab.emulator.fake.toy_hopper import ToyHopper
@@ -262,9 +262,64 @@ def test_a_spot_that_cannot_be_loaded_leaves_the_game_where_it_is(
         again,
         monkeypatch,
         caplog,
-        f"the saved spot it starts from could not be loaded (No save state in slot {slot!r}.)",
+        "the saved spot it starts from could not be loaded and read "
+        f"(No save state in slot {slot!r}.)",
     )
     assert loaded == [slot, SLOT]  # tried, and put back
+
+
+def test_a_spot_the_emulator_cannot_load_leaves_the_game_where_it_is(
+    opened: Opener, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Whatever the emulator says of it: a state file it can no longer read, say."""
+    states, _, _, _ = a_sitting_with_a_way(opened, monkeypatch)
+    again = opened(states)
+    load = again.adapter.load_state
+    refused: list[str] = []
+
+    def garbled(slot: str) -> None:
+        if slot.startswith("way_") and not refused:  # the first time it is asked for
+            refused.append(slot)
+            raise ProtocolError("The emulator could not read that state.")
+        load(slot)
+
+    monkeypatch.setattr(again.adapter, "load_state", garbled)
+    not_taken(
+        again,
+        monkeypatch,
+        caplog,
+        "the saved spot it starts from could not be loaded and read "
+        "(The emulator could not read that state.)",
+    )
+    assert len(refused) == 1
+
+
+def test_a_spot_whose_memory_cannot_be_read_is_left_and_the_game_put_back(
+    opened: Opener, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The spot was loaded, so the game has to be put back to where it was."""
+    states, spot, _, written = a_sitting_with_a_way(opened, monkeypatch)
+    again = opened(states)
+    game = game_of(again)
+
+    class Unreadable(MemoryCapture):
+        def capture(self, frame: int) -> MemorySnapshot:
+            assert game.state.x == spot  # the spot is loaded when the memory is asked for
+            raise ConfigurationError("No memory region can be read.")
+
+    monkeypatch.setattr(module, "MemoryCapture", Unreadable)
+    t = again.t
+    played_on(again.lab, 40)
+    here = game.state.x
+    with caplog.at_level(logging.INFO):
+        counting(t, monkeypatch)
+    assert game.state.x == here != spot and t.remembered == 0
+    assert again.lab.loaded == [written["slot"], SLOT]
+    assert (
+        f"{NOT_TAKEN}: the saved spot it starts from could not be loaded and read "
+        "(No memory region can be read.). The goes start from where the game is"
+    ) in caplog.text
+    t.stop()
 
 
 def test_a_spot_that_is_not_as_it_was_leaves_the_game_where_it_is(
