@@ -14,7 +14,14 @@ def test_looking_ahead_on_the_practice_game() -> None:
     ``test_the_ground_holds_through_going_back``, which is made without looking ahead
     and loses 9 lives to walkers, finishes 12 levels and goes back 36 times. Measured
     with it: 2 lives lost to walkers, 15 levels finished, 28 searches of the goes' own
-    and 18 more before a life went, 17 of which found a way; it looked ahead 78 times."""
+    and 18 more before a life went, 17 of which found a way; it looked ahead 78 times.
+
+    Since T-1062 a search after the game has put the player back finds a way on where
+    it made every try for nothing, and from the first of those (go 6) the run goes
+    another way: 4 lives lost to walkers, 15 levels finished, 30 searches of the goes'
+    own and 10 more before a life went, 7 of which found a way; it looked ahead 62
+    times. The least number of lives seen going is 7 for that, where it was 12 (Boss
+    agreed to this one change on 20 Nov)."""
     far = run(goes=12, seed=3, algorithm="q_table", max_steps=300, look_ahead=True)
     assert far.look_ahead
     assert far.lines()[0] == (
@@ -27,7 +34,7 @@ def test_looking_ahead_on_the_practice_game() -> None:
     assert sum(far.finished) >= 14
     # It looked ahead often, saw lives going, and found the way past for most of them
     # before they went.
-    assert far.looked_ahead >= 50 and far.ways_ahead >= 12
+    assert far.looked_ahead >= 50 and far.ways_ahead >= 7
     assert far.ways_ahead_found >= far.ways_ahead * 3 // 4
     assert far.lines()[-1].startswith(f"Looking ahead: {far.looked_ahead:,} times a thing")
     # Those are counted apart: the goes' own searches stay at most three a go.
