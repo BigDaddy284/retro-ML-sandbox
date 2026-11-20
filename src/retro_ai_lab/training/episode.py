@@ -100,6 +100,9 @@ PRESS_FOR = 16  # steps a go that was paid nothing holds its best-paid button fo
 # (T-1052): tried out, a thing first seen in reach is touched within some ten to thirty.
 AHEAD = 40
 AHEAD_EVERY = 10  # steps of the go between one look ahead and the next, at the least
+# Steps a life seen going in the game's pause over it is waited for past the step it was
+# seen to go on (T-1066): a console need not play the pause out to the very frame again.
+LATE = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -815,6 +818,10 @@ class EpisodeRunner:
         # it is alive some steps past where the life went; one that only put the loss
         # off would be found again from the same moment, go after go back, for nothing.
         self._ahead_past: int | None = None
+        # The step of the go by which a life seen going while nothing changed is counted
+        # lost (T-1066): until then that is the game's pause over it, and no standstill.
+        self._going_until: int | None = None
+        self._going_said = False
         # Paid nothing for press_after steps, a go that can still go back holds the
         # button that has paid best for press_for steps (T-1011). What each button has
         # been paid is kept over the goes; 0 never presses on.
@@ -1162,6 +1169,7 @@ class EpisodeRunner:
         self._minded.clear()
         self._looked_at = None
         self._ahead_past = None
+        self._going_until = None
         self._unpaid = 0
         self._press_next = 0
         self._pressing = False
@@ -1365,6 +1373,12 @@ class EpisodeRunner:
         # no way out. Press the wake button the service found, if it has one; with
         # none known the go ends "stuck" and the service goes looking for it (T-844).
         stuck = self._unstick_after is not None and self._same_state >= self._unstick_after
+        if stuck and not self._forced and self._life_going(self._same_state):
+            # The game's pause over a life already lost (T-1066): no dead screen and no
+            # standstill. The go carries on, and the search follows the loss.
+            stuck = False
+        if self._ended_by is not None:
+            return False
         if stuck and (self._forced or self._press_on(stuck=True)):
             # A list of moves is played to its end: the way it remembers may have stood
             # about before it got on (T-1014). Otherwise nothing changing is getting
@@ -1398,7 +1412,9 @@ class EpisodeRunner:
             if self._times_back != back:
                 assert self._state is not None
                 state = self._state  # the game was put back: this step is from there
-            if self._stands_still() and not self._seek(stood=True):
+            # Not while a life seen going is waited for: the game's pause over it is
+            # no standstill (T-1066).
+            if self._stands_still() and not self._awaited and not self._seek(stood=True):
                 return False
             self._press_on()
             if self._forced:
@@ -1458,6 +1474,7 @@ class EpisodeRunner:
             return False
         rose = self._signals.take_rises()
         if self._setbacks > lost_before:  # (what rose as the life went is not asked about)
+            self._going_until = None  # the life that was seen going has gone
             self._forced.clear()  # whatever way was being played did not get past
             self._route_left = 0
             self._pressing = False  # a press that cost a life is not one that got nothing
@@ -1655,6 +1672,94 @@ class EpisodeRunner:
         if self._watch is None or not self._watch.follows_camera:
             return False
         return self._got_somewhere and (stuck or self._stood_for >= self._stand_after)
+
+    @property
+    def _awaited(self) -> bool:
+        """A life seen going in the game's pause over it is still waited for (T-1066)."""
+        return self._going_until is not None and self._steps <= self._going_until
+
+    def _life_going(self, stayed: int) -> bool:
+        """Nothing has changed for ``stayed`` steps, as long as counts as stuck: is that
+        the game's pause over a life already lost (T-1066)? Sets how the go ended if
+        the link dropped.
+
+        A game takes its time over a lost life: the screen stands, nothing listens,
+        and only then does the count go down. To the go that looked like a dead
+        screen or a standstill: it looked for a way on from the middle of the pause,
+        where there is none, and pressed the wake button, which is a step that cannot
+        be played again and so forgot every saved moment; the life then went with
+        nothing to go back to, and got no search.
+
+        Asked only where a search could follow a life lost. The game is saved, the
+        AI's plain move is held off the record for ``AHEAD`` steps and the dying pause
+        it remembers (as many again where it remembers none), and the game is put
+        back. A life lost in that time is asked for once more with another move held:
+        lost on the same step, nothing pressed changes it, and the go waits for it to
+        be counted, with no search where it stands in the meantime. Lost on another
+        step or not at all, it is the AI's own doing and the standstill is one. A life
+        that has not gone ``LATE`` steps after the step it was seen to go on is waited
+        for no longer, and the standstill is handled.
+        """
+        if self._awaited:
+            return True
+        if self._going_until is not None:
+            self._going_until = None
+            return False
+        start = self._way_back()
+        if start is None:
+            return False
+        lives = start[2]
+        space = self._agent.space
+        plain = self._plain_move()
+        assert plain is not None  # moves were made since the moment a search would go to
+        held = space.buttons_for(plain)
+        others = [m for m in range(len(space)) if m != plain]
+        other = next((m for m in others if not held & space.buttons_for(m)), None)
+        if other is None and others:
+            other = others[0]
+        length = AHEAD + (self._dying if self._dying is not None else AHEAD)
+        try:
+            fast = self._flat_out() if self._flat_out is not None else nullcontext()
+            with fast, app_work.timed("step: pause asked"):
+                self._connection.call(lambda a: a.save_state(NOW_SLOT))
+                seen = play(
+                    self._connection,
+                    NOW_SLOT,
+                    [plain] * length,
+                    space,
+                    frames_per_step=self._frames_per_step,
+                    lives=lives,
+                )
+                going = seen.lost
+                if going and other is not None:
+                    again = play(
+                        self._connection,
+                        NOW_SLOT,
+                        [other] * seen.steps,
+                        space,
+                        frames_per_step=self._frames_per_step,
+                        lives=lives,
+                    )
+                    going = again.lost and again.steps == seen.steps
+                self._connection.call(lambda a: a.load_state(NOW_SLOT))
+        except EmulatorError:
+            self._ended_by = "disconnected"
+            self._signals.stop()
+            return False
+        if not going:
+            return False
+        self._going_until = self._steps + seen.steps - 1 + LATE
+        log.log(
+            logging.DEBUG if self._going_said else logging.INFO,
+            "Nothing has changed for %d steps. Played on off the record from here, a life "
+            "is lost %s on whatever is pressed: this is the game's pause over a life "
+            "already lost, and no standstill. The AI waits for the life to be counted and "
+            "then goes back to look for the way past.",
+            stayed,
+            _steps(seen.steps),
+        )
+        self._going_said = True
+        return True
 
     def _note_place(self, new_ground: int) -> None:
         """After a look: whether it is still about the spot it was at (T-1018)."""
@@ -2451,6 +2556,7 @@ class EpisodeRunner:
         self._stood_at = None  # wherever it stood, the game is somewhere else now (T-1018)
         self._stood_for = 0
         self._stood_spots.clear()
+        self._going_until = None
         self._forced = deque(moves)
         self._route_left = 0
         self._pressing = False
