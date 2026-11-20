@@ -204,3 +204,84 @@ def test_whole_amounts_are_read_as_amounts() -> None:
     back = Route.from_dict(data, START)
     assert back.paid == 5.0 and isinstance(back.paid, float)
     assert back.paid_by[0] == (("x", 1.0),) and isinstance(back.paid_by[0][0][1], float)
+
+
+# ------------------------------------------------------------ taking a way up (T-1065)
+
+
+def another_way() -> dict[str, Any]:
+    return {
+        "moves": [1, 1, 4],
+        "paid": [2.0, 4.0, 7.0],
+        "by": [[["x", 2.0]], [["x", 2.0]], [["goal", 3.0]]],
+        "stood": [20],
+    }
+
+
+def test_a_route_takes_up_a_way_written_down() -> None:
+    """In place: a runner that holds the route plays the way taken up."""
+    route = a_way()
+    held = route
+    route.take_up(another_way(), ("training", 2))
+    assert held.moves == (1, 1, 4) and held.paid == 7.0 and held.start == ("training", 2)
+    assert held.paid_by == ((("x", 2.0),), (("x", 2.0),), (("goal", 3.0),))
+    assert held.to_dict() == another_way()  # nothing of the way before, nor its places
+    assert held.begin(("training", 2)) == (1, 1, 4) and held.playing == 3
+    # From the start the way before had, it is another spot's way and is forgotten.
+    route.take_up(another_way(), ("training", 2))
+    assert route.begin(START) == () and route.moves == ()
+
+
+def test_a_route_with_nothing_takes_a_way_up() -> None:
+    route = Route()
+    route.take_up(a_way().to_dict(), START)
+    assert route.moves == (3, 3, 1, 0, 2) and route.start == START
+    assert route.begin(START) == (3, 3, 1, 0, 2)
+    for move in (3, 3, 1, 0, 2, 2, 2, 2):
+        route.did(move, 0.0)
+    assert route.loss_stands(3) == 6  # the place a loss stood came with it
+
+
+def test_taking_a_way_up_drops_the_go_that_was_being_played() -> None:
+    route = a_way()
+    route.begin(START)
+    route.did(3, 1.0, (("x", 1.0),))
+    route.did(0, 50.0, (("x", 49.0),))  # paid far more than either way
+    assert route.story == (3, 0) and route.playing == 5
+    route.take_up(another_way(), START)
+    assert route.story == () and route.counted == 0.0 and route.playing == 0
+    assert route.shortened == 0
+    route.did(2, 60.0)  # no go has begun: nothing is added
+    assert route.story == ()
+    assert not route.end() and route.moves == (1, 1, 4) and route.paid == 7.0
+
+
+def test_what_the_go_before_noted_of_the_old_way_does_not_remake_the_new() -> None:
+    """A go that played the old way whole and was paid less would make it again from
+    its own figures (T-1026): not the way taken up since."""
+    route = a_way()
+    route.begin(START)
+    for move in route.moves:
+        route.did(move, 0.5)  # all of the way, paid less than it was remembered for
+    route.take_up(a_way().to_dict(), START)
+    assert not route.end()
+    assert route.moves == (3, 3, 1, 0, 2) and route.paid == 4.5 and route.shortened == 0
+
+
+@pytest.mark.parametrize(
+    "data", [None, [], without("moves"), having("paid", [1.0]), having("stood", [-1])]
+)
+def test_what_is_not_a_way_leaves_the_route_as_it_was(data: object) -> None:
+    route = a_way()
+    before = route.to_dict()
+    route.begin(START)
+    route.did(3, 1.0, (("x", 1.0),))
+    with pytest.raises(ConfigurationError):
+        route.take_up(data, ("training", 2))
+    assert route.to_dict() == before and route.start == START
+    assert route.story == (3,) and route.playing == 5
+    route.did(3, 1.75)
+    assert route.story == (3, 3)  # and the go goes on
+    with pytest.raises(ConfigurationError, match="starts from a saved spot"):
+        route.take_up(another_way(), None)  # type: ignore[arg-type]
+    assert route.to_dict() == before

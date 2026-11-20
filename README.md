@@ -596,11 +596,19 @@ wherever the game is the new spot the goes start from, and a way from the
 old spot is forgotten, as it is when you start the AI from scratch. With a
 pinned spot ("Pin this spot") the goes start from the same spot at every
 Start, and the way from it is kept when you stop and start again; pin
-another spot, or unpin it, and the way goes with the old one. It is
-not kept when the app is closed yet. The app does write it down now, in a
-folder `ways` beside the brains, with the spot it starts from kept in a save
-state of the game's own; picking it up again when the app opens is the next
-step.
+another spot, or unpin it, and the way goes with the old one.
+
+The way is kept when the app is closed, too. The app writes it down in a
+folder `ways` beside the brains, and keeps the spot it starts from in a save
+state of the game's own. The first time you press Start after connecting the
+game, the game is put back to that spot and the AI begins with the way; the
+log says "Took up the way the AI remembered for this game from before".
+Where the spot cannot be found again (the emulator no longer has that save
+state, or the game's memory there is not as it was), the game is left where
+it is, the log says why, and the AI starts from there with no way. To start
+somewhere else on purpose, pin a spot before you press Start, or start the AI
+from scratch. Later in the same sitting a Start with no pinned spot is from
+where the game is, as before.
 
 ## Before the AI loses a life
 
