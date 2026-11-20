@@ -12,7 +12,6 @@ around a trial; the harness is synchronous and never touches the UI.
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -100,10 +99,6 @@ class ExperimentHarness:
         self._capture = MemoryCapture(connection)
         self._has_checkpoint = False
         self._taken = 0
-        self._spots = 0
-        # A digest of the game's memory as it was read after the last save: what the
-        # spot is told by (T-1063). None where it could not be read.
-        self._mark: bytes | None = None
         self._trials = 0
 
     # ------------------------------------------------------------ queries
@@ -121,14 +116,6 @@ class ExperimentHarness:
         """How many times the checkpoint has been saved: a count that changes whenever
         the spot it stands for does, for whatever was worked out from that spot (T-1014)."""
         return self._taken
-
-    @property
-    def spots(self) -> int:
-        """How many spots the checkpoint has stood for (T-1063): :attr:`taken`, less
-        the saves that found the game in the state it was saved in the time before. A
-        pinned spot is put back and saved again at every Start, and what was worked
-        out from it still holds: the way the AI remembers is kept by this count."""
-        return self._spots
 
     @property
     def trials(self) -> int:
@@ -166,36 +153,11 @@ class ExperimentHarness:
     # ------------------------------------------------------------ driving
 
     def checkpoint(self) -> None:
-        """Save the current game state as the starting point for trials.
-
-        The game's memory is read once after the save, to tell whether this is the
-        spot the save before stood for (:attr:`spots`, T-1063). Where the memory
-        cannot be read, the save is a new spot.
-        """
+        """Save the current game state as the starting point for trials."""
         self._require()
         self._connection.call(lambda a: a.save_state(self._slot))
         self._has_checkpoint = True
         self._taken += 1
-        mark = self._read_mark()
-        if mark is None or mark != self._mark:
-            self._spots += 1
-        self._mark = mark
-
-    def _read_mark(self) -> bytes | None:
-        """A digest of every memory region the emulator offers, as it is now; None
-        where it cannot be read (no region is offered, the emulator refuses one, the
-        link drops). The save itself has been made by then and stands: a link that
-        dropped shows at the next call, as it did before."""
-        try:
-            snapshot = self._capture.capture(0)
-        except (ConfigurationError, EmulatorError):
-            return None
-        digest = hashlib.blake2b(digest_size=16)
-        for name in sorted(snapshot.regions):
-            data = snapshot.regions[name]
-            digest.update(f"{name}:{len(data)}:".encode())
-            digest.update(data)
-        return digest.digest()
 
     def restore(self) -> None:
         """Put the game back to the checkpoint."""

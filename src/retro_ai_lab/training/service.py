@@ -295,6 +295,9 @@ class TrainingService:
         self._busy = False
         self._lock = threading.RLock()  # the worker's step and the GUI's buttons (T-903)
         self._spot_pinned = False
+        # The harness whose checkpoint is the pinned spot, and its count of saves when
+        # it was saved from there (T-1063); None when the checkpoint is not the spot.
+        self._pin_held: tuple[ExperimentHarness, int] | None = None
         self._wake_button: str | None = None
         self._needs_wake = False
         self._probe_listening = False  # ask the game directly at the next go start (T-848)
@@ -621,6 +624,7 @@ class TrainingService:
             )
         self._connection.call(lambda a: a.save_state(PRACTISE_SLOT))
         self._spot_pinned = True
+        self._pin_held = None  # another spot, for all the app knows: saved at the next Start
         self._announce("spot pinned")
 
     @_locked
@@ -629,6 +633,7 @@ class TrainingService:
         if not self._spot_pinned:
             return
         self._spot_pinned = False
+        self._pin_held = None
         self._announce("spot forgotten")
 
     def _restore_spot(self) -> None:
@@ -1103,6 +1108,7 @@ class TrainingService:
         self._can_save = False
         self._fast_applied = False  # the script puts the speed back itself
         self._spot_pinned = False  # save states don't outlive the link
+        self._pin_held = None
         self._status = Status.IDLE
         if was_running:
             self._announce("disconnected")
@@ -1487,12 +1493,22 @@ class TrainingService:
             return
         try:
             self._hold_the_game()
-            if self._harness.available():
-                self._restore_spot()  # a pinned spot is where every go starts
-                self._harness.checkpoint()
-                self._early_losses = []
-                self._doomed_cleared = None
-                self._start_moves = 0
+            harness = self._harness
+            if not harness.available():
+                return
+            held = (harness, harness.taken)
+            if self._spot_pinned and harness.has_checkpoint and self._pin_held == held:
+                # The checkpoint is the pinned spot already, saved at the Start before
+                # and not since (T-1063): the goes start where they did, and what was
+                # worked out from there still holds, the way the AI remembers above all.
+                harness.restore()
+                return
+            self._restore_spot()  # a pinned spot is where every go starts
+            harness.checkpoint()
+            self._pin_held = (harness, harness.taken) if self._spot_pinned else None
+            self._early_losses = []
+            self._doomed_cleared = None
+            self._start_moves = 0
         except EmulatorError:
             pass  # link loss is announced by the connection service
 

@@ -1334,7 +1334,7 @@ class EpisodeRunner:
         self._rows_gone()  # a row that went between goes: before the way is played
         start = None
         if self._restored and self._watch is not None and self._harness is not None:
-            start = (self._harness.slot, self._harness.spots)
+            start = (self._harness.slot, self._harness.taken)
         had = len(route.moves)
         moves = route.begin(start)
         if had and start is not None and not moves:

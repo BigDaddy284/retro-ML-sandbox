@@ -1,8 +1,10 @@
 """T-1063: a pinned spot is the same spot at every Start, and the way from it is kept.
 
-Every Start puts the game back to the pinned spot and saves the checkpoint the goes
-start from again. That save was counted as a new spot, and the way the AI remembered
-was forgotten at every Start: with a pinned spot as without one.
+Every Start put the game back to the pinned spot and saved the checkpoint the goes
+start from again. A checkpoint saved again is a new spot to everything worked out
+from the old one, so the way the AI remembered was forgotten at every Start: with a
+pinned spot as without one. Where the checkpoint already is the pinned spot, a Start
+now leaves it as it is.
 """
 
 from __future__ import annotations
@@ -12,8 +14,9 @@ import logging
 import pytest
 
 from retro_ai_lab.emulator.fake import FakeEmulatorAdapter, toy_hopper
-from retro_ai_lab.training import TrainingService
+from retro_ai_lab.training import Mode, TrainingService
 from retro_ai_lab.training import service as module
+from retro_ai_lab.training.service import PRACTISE_SLOT
 from tests.unit.training import test_going_back_in_training as in_training
 from tests.unit.training.test_going_back_in_training import GAP_ENDS, Lab
 from tests.unit.training.test_remembered_way_in_training import counting, goes
@@ -21,6 +24,7 @@ from tests.unit.training.test_remembered_way_in_training import counting, goes
 lab = in_training.lab  # the practice game behind the real services (pytest fixture)
 
 CHANGED = "The spot the goes start from has changed"
+SLOT = module.CHECKPOINT_SLOT
 
 
 def a_way(t: TrainingService, monkeypatch: pytest.MonkeyPatch) -> int:
@@ -47,15 +51,20 @@ def test_a_pinned_spot_keeps_the_way_over_stop_and_start(
 ) -> None:
     t = lab.training()
     game = lab.connect()
+    spot = game.state.x
     t.pin_spot()
     way = a_way(t, monkeypatch)
     harness = t.harness
-    assert harness is not None and (harness.taken, harness.spots) == (1, 1)
+    assert harness is not None and harness.taken == 1 and lab.saved.count(SLOT) == 1
     with caplog.at_level(logging.INFO):
-        for start in (2, 3):
-            asked = counting(t, monkeypatch)  # Start again: back to the spot, saved again
-            assert (harness.taken, harness.spots) == (start, 1)
-            assert lab.saved.count(module.CHECKPOINT_SLOT) == start
+        for _ in range(2):
+            assert game.state.x != spot  # the game is where the last go left it
+            loads = lab.loaded.count(SLOT)
+            asked = counting(t, monkeypatch)  # Start again
+            # The spot the goes start from is the one it was: not saved again, and the
+            # game put back to it.
+            assert harness.taken == 1 and lab.saved.count(SLOT) == 1
+            assert lab.loaded.count(SLOT) == loads + 1 and game.state.x == spot
             assert t.remembered == way
             # The go begins by playing the way, before the learner is asked for anything.
             assert t.step()
@@ -71,6 +80,7 @@ def test_a_pinned_spot_keeps_the_way_over_stop_and_start(
             assert t.remembered >= way
             way = t.remembered
     assert not any(CHANGED in rec.getMessage() for rec in caplog.records)
+    assert lab.saved.count(PRACTISE_SLOT) == 1
 
 
 def test_with_no_pinned_spot_a_start_takes_the_spot_the_game_is_at(
@@ -82,21 +92,20 @@ def test_with_no_pinned_spot_a_start_takes_the_spot_the_game_is_at(
     lab.connect()
     way = a_way(t, monkeypatch)
     harness = t.harness
-    assert harness is not None and (harness.taken, harness.spots) == (1, 1)
+    assert harness is not None and harness.taken == 1
     with caplog.at_level(logging.INFO):
         counting(t, monkeypatch)
-        assert (harness.taken, harness.spots) == (2, 2)
+        assert harness.taken == 2 and lab.saved.count(SLOT) == 2
         assert t.step()
         go = t.episode
         assert go is not None and go.remembered == 0 and t.remembered == 0
     said = [rec.getMessage() for rec in caplog.records if CHANGED in rec.getMessage()]
-    assert said == [
-        f"{CHANGED}, so the way the AI remembered from the old one ({way} steps) is forgotten."
-    ]
+    forgot = f"{CHANGED}, so the way the AI remembered from the old one ({way} steps) is forgotten."
+    assert said == [forgot]
     t.stop()
 
 
-def test_a_pinned_spot_that_was_moved_is_another_spot(
+def test_a_spot_pinned_again_is_another_spot(
     lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     t = lab.training()
@@ -104,10 +113,8 @@ def test_a_pinned_spot_that_was_moved_is_another_spot(
     t.pin_spot()
     way = a_way(t, monkeypatch)
     harness = t.harness
-    assert harness is not None
+    assert harness is not None and harness.taken == 1
     # The child takes the game somewhere else and pins that.
-    t.unpin_spot()
-    t.pin_spot()  # wherever the go left it
     played_on(lab)
     here = game.state.x
     t.pin_spot()
@@ -115,17 +122,39 @@ def test_a_pinned_spot_that_was_moved_is_another_spot(
     assert game.state.x != here
     with caplog.at_level(logging.INFO):
         counting(t, monkeypatch)
-        assert harness.spots == 2 and game.state.x == here
+        assert harness.taken == 2 and game.state.x == here
         assert t.step()
         go = t.episode
         assert go is not None and go.remembered == 0 and t.remembered == 0
     assert sum(CHANGED in rec.getMessage() for rec in caplog.records) == 1
     assert f"({way} steps) is forgotten" in caplog.text
     t.stop()
-    # And from the new spot on it is one spot again.
-    goes_from_here = harness.spots
+    # From the new spot on it is one spot again.
     counting(t, monkeypatch)
-    assert harness.spots == goes_from_here
+    assert harness.taken == 2 and game.state.x == here
+    t.stop()
+
+
+def test_the_same_spot_pinned_again_is_saved_again(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The app does not look at what a pin holds: a spot pinned again is taken for
+    another, wherever the game was."""
+    t = lab.training()
+    lab.connect()
+    t.pin_spot()
+    a_way(t, monkeypatch)
+    harness = t.harness
+    assert harness is not None and harness.taken == 1
+    counting(t, monkeypatch)  # back at the spot
+    t.stop()
+    assert harness.taken == 1
+    t.pin_spot()
+    counting(t, monkeypatch)
+    assert harness.taken == 2
+    assert t.step()
+    go = t.episode
+    assert go is not None and go.remembered == 0
     t.stop()
 
 
@@ -133,15 +162,75 @@ def test_unpinned_again_the_next_start_is_where_the_game_is(
     lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     t = lab.training()
-    lab.connect()
+    game = lab.connect()
+    spot = game.state.x
     t.pin_spot()
     way = a_way(t, monkeypatch)
     harness = t.harness
     assert harness is not None and t.remembered == way
     t.unpin_spot()
+    left_at = game.state.x
     counting(t, monkeypatch)  # no spot to go back to: the game is where the go left it
-    assert harness.spots == 2
+    assert harness.taken == 2 and game.state.x == left_at != spot
     assert t.step()
     go = t.episode
     assert go is not None and go.remembered == 0 and t.remembered == 0
+    t.stop()
+    # Pinned once more, there, that is the spot from then on.
+    saves = harness.taken
+    t.pin_spot()
+    counting(t, monkeypatch)
+    assert harness.taken == saves + 1
+    t.stop()
+    counting(t, monkeypatch)
+    assert harness.taken == saves + 1
+    t.stop()
+
+
+def test_handing_over_to_the_ai_while_running_keeps_the_way(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A change of mode while training runs prepares the spot as a Start does."""
+    t = lab.training()
+    game = lab.connect()
+    spot = game.state.x
+    t.pin_spot()
+    way = a_way(t, monkeypatch)
+    harness = t.harness
+    assert harness is not None
+    t.start(Mode.MANUAL)  # the child plays: no go of the AI's, and the spot stays held
+    assert harness.taken == 1
+    played_on(lab)
+    t.set_mode(Mode.INDEPENDENT)
+    assert harness.taken == 1 and game.state.x == spot and t.remembered == way
+    assert t.step()
+    go = t.episode
+    assert go is not None and go.remembered == way
+    t.stop()
+
+
+def test_a_checkpoint_taken_since_is_not_the_pinned_spot(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Whatever else saves the checkpoint (a game that had to be woken, a start that
+    was moved on) leaves it somewhere other than the pinned spot: the next Start goes
+    back to the pin and saves it, as before."""
+    t = lab.training()
+    game = lab.connect()
+    spot = game.state.x
+    t.pin_spot()
+    a_way(t, monkeypatch)
+    harness = t.harness
+    assert harness is not None and harness.taken == 1
+    played_on(lab)
+    harness.checkpoint()  # as the service does when it moves the start on
+    assert harness.taken == 2
+    counting(t, monkeypatch)
+    assert harness.taken == 3 and game.state.x == spot
+    assert t.step()
+    go = t.episode
+    assert go is not None and go.remembered == 0
+    t.stop()
+    counting(t, monkeypatch)
+    assert harness.taken == 3
     t.stop()
