@@ -109,9 +109,11 @@ def test_what_is_written_is_a_copy() -> None:
     route = a_way()
     written = route.to_dict()
     written["moves"].append(9)
+    written["paid"].append(9.0)
     written["by"][0].append(["y", 1.0])
     written["stood"].clear()
     assert route.moves == (3, 3, 1, 0, 2) and route.paid_by[0] == (("x", 1.0),)
+    assert route.paid == 4.5
     assert route.to_dict()["stood"] == [8]
     back = Route.from_dict(route.to_dict(), START)
     route.forget()
