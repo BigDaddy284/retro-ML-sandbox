@@ -544,6 +544,22 @@ These searches are among the three a go may make. The log says "Stayed about one
 Went back 64 steps and found a way on at try 3...", and the go's line says
 how many of its searches were made where it stood still.
 
+Many games stand still for a few seconds after a life is lost and only
+then count it. That is no standstill, and the AI used to take it for one:
+it looked for a way on from the middle of that pause, where there is none,
+and then pressed the button that wakes the game, after which it could no
+longer go back. The life then went with no search at all, and a fall into a
+pit, where the pause is longest, was the place it never looked for a way
+past. Now, before it treats a standstill as one, it plays on off the record
+for a few seconds, once with the button that pays best held and once with
+another. If a life goes on the same step both times, nothing it presses
+changes that: it waits for the game to count the life and then goes back
+and looks for the way past, as after any life lost. The log says "Nothing
+has changed for 25 steps. Played on off the record from here, a life is
+lost 36 steps on whatever is pressed: this is the game's pause over a life
+already lost, and no standstill." If no life goes, or only one of the two
+plays loses it, the standstill is handled as before, on the same step.
+
 A way that a search finds is always played to its end, even if the go's
 length runs out part of the way through it. Otherwise the go would end on
 ground it had already covered, nothing of the way would be remembered, and
