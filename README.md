@@ -610,6 +610,11 @@ somewhere else on purpose, pin a spot before you press Start, or start the AI
 from scratch. Later in the same sitting a Start with no pinned spot is from
 where the game is, as before.
 
+One thing to know for now: press Start before you close the app again or
+change a setting of the AI. If you connect the game and then close the app,
+or change a setting, without having pressed Start, the way written down is
+lost. That is being put right.
+
 ## Before the AI loses a life
 
 The AI's eyes learn which kinds of thing have cost it a life (see "What the
