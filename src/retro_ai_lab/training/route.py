@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Hashable, Iterable
+from typing import Any
 
 from retro_ai_lab.core import ConfigurationError
 
@@ -97,6 +98,16 @@ def _parts(value: object) -> Parts:
             raise ConfigurationError(wrong)
         out.append((part[0], _amount(part[1], "What a reward row paid")))
     return tuple(out)
+
+
+def _parts_written(value: object) -> Parts:
+    """What paid for a step, as :meth:`Route.to_dict` wrote it: pairs as lists."""
+    wrong = "What paid for a step is written as a list of [reward row, amount]."
+    if not isinstance(value, list):
+        raise ConfigurationError(wrong)
+    if any(not isinstance(part, list) for part in value):
+        raise ConfigurationError(wrong)
+    return _parts(tuple(part) for part in value)
 
 
 def _take_out(paid: list[float], by: list[Parts], rows: frozenset[str]) -> set[str]:
@@ -173,6 +184,49 @@ class Route:
         """How many steps the way lost when the last go ended, because played again
         they were paid nothing more (T-1026). 0 from the next go's beginning."""
         return self._shortened
+
+    @property
+    def start(self) -> Hashable | None:
+        """The saved spot the remembered way starts from. None before any go began
+        from one, and after :meth:`forget`."""
+        return self._start
+
+    def to_dict(self) -> dict[str, Any]:
+        """What is remembered, as plain data to write down (T-1064): the moves, what
+        the go had been paid after each, what paid for each, and the steps at which a
+        loss stood. The story of a go being played is not in it, and neither is the
+        start: a saved spot is only a count while the app runs."""
+        return {
+            "moves": list(self._moves),
+            "paid": list(self._paid),
+            "by": [[[row, amount] for row, amount in parts] for parts in self._by],
+            "stood": list(self._stood),
+        }
+
+    @classmethod
+    def from_dict(cls, data: object, start: Hashable) -> Route:
+        """A route that remembers the way :meth:`to_dict` wrote, from ``start``: the
+        saved spot the caller has made sure is the one the way was played from."""
+        if start is None:
+            raise ConfigurationError("A way written down starts from a saved spot.")
+        if not isinstance(data, dict):
+            raise ConfigurationError("A way written down is a dictionary.")
+        lists = []
+        for name in ("moves", "paid", "by", "stood"):
+            value = data.get(name)
+            if not isinstance(value, list):
+                raise ConfigurationError(f"A way written down has a list of {name!r}.")
+            lists.append(value)
+        moves, paid, by, stood = lists
+        if not len(moves) == len(paid) == len(by):
+            raise ConfigurationError("A way written down has pay for each of its moves.")
+        route = cls()
+        route._moves = [_whole(move, "A move") for move in moves]
+        route._paid = [_amount(amount, "What the go had been paid") for amount in paid]
+        route._by = [_parts_written(parts) for parts in by]
+        route._stood = [_whole(at, "The step a loss stood at") for at in stood]
+        route._start = start
+        return route
 
     def forget(self) -> None:
         """Drop the remembered way: it no longer leads anywhere. Nor do the places

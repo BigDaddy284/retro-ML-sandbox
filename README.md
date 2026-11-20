@@ -597,7 +597,10 @@ old spot is forgotten, as it is when you start the AI from scratch. With a
 pinned spot ("Pin this spot") the goes start from the same spot at every
 Start, and the way from it is kept when you stop and start again; pin
 another spot, or unpin it, and the way goes with the old one. It is
-not kept when the app is closed.
+not kept when the app is closed yet. The app does write it down now, in a
+folder `ways` beside the brains, with the spot it starts from kept in a save
+state of the game's own; picking it up again when the app opens is the next
+step.
 
 ## Before the AI loses a life
 
