@@ -550,15 +550,19 @@ it looked for a way on from the middle of that pause, where there is none,
 and then pressed the button that wakes the game, after which it could no
 longer go back. The life then went with no search at all, and a fall into a
 pit, where the pause is longest, was the place it never looked for a way
-past. Now, before it treats a standstill as one, it plays on off the record
-for a few seconds, once with the button that pays best held and once with
-another. If a life goes on the same step both times, nothing it presses
-changes that: it waits for the game to count the life and then goes back
-and looks for the way past, as after any life lost. The log says "Nothing
-has changed for 25 steps. Played on off the record from here, a life is
-lost 36 steps on whatever is pressed: this is the game's pause over a life
-already lost, and no standstill." If no life goes, or only one of the two
-plays loses it, the standstill is handled as before, on the same step.
+past. Now, when nothing has changed for as long as counts as stuck, it
+first plays on off the record for a few seconds, once with the button that
+pays best held and once with another. If a life goes on the same step both
+times, nothing it presses changes that: it waits for the game to count the
+life, without searching where it stands or pressing the wake button, and
+then goes back and looks for the way past, as after any life lost. The log
+says "Nothing has changed for 25 steps. Played on off the record from here,
+a life is lost 36 steps on whatever is pressed: this is the game's pause
+over a life already lost, and no standstill." If no life goes, or only one
+of the two plays loses it, the standstill is handled as before, on the same
+step. (A pause in which something the AI watches keeps changing, and which
+lasts longer than the 60 steps of a standstill, is still searched as one.
+That costs one of the go's searches; the life still gets its own.)
 
 A way that a search finds is always played to its end, even if the go's
 length runs out part of the way through it. Otherwise the go would end on
