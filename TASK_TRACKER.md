@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-1067 | The way written down is kept until a Start has had its say. T-1065 takes the way up at the first Start after the game is connected, but until that Start nothing in memory speaks for the way, and every writing of the brain took the file for stale and removed it: the link going, a setting changed, a saved AI loaded, the child playing first. The file is now left alone until a Start has taken the way up or saved its own spot over the one the way starts from; a link that drops while that Start looks for the spot leaves the chance to the next one. One existing test changed, with Boss's yes of 20 Nov for that test | 8 | In progress | 0/8 | see PR |
 | T-1066 | The game's pause over a lost life is not taken for a standstill. Boss's logs of 20 Nov: in every go the first life goes at the same pit, and that life gets no search. The game stands still for some 50 steps before it counts the life; the go took that for a dead screen, looked for a way on from the middle of the pause, and pressed the wake button, which forgets every saved moment. Where nothing changes and a search could follow a loss, the AI now first plays on off the record: a life that goes whatever is pressed is waited for, and the search follows it | 8 | Done | 9/10 | see PR #308 |
 | T-1065 | The way is taken up again when the app is opened. T-1064 writes the way and keeps the spot it starts from; nothing read them. At the first Start after a game is connected, with no pinned spot, the app loads the spot kept, makes sure by the game's memory that it is the one the way was played from, and the goes start there with the way. Where it cannot be sure, the game is put back, the log says why, and Start does what it always did | 8 | Done | 8/9 | see PR #307 |
 | T-1064 | The way and the spot it starts from are written down. The way the AI remembers is in the app's memory only, so closing the app loses it (Boss's logs of 20 Nov: 3,900 steps gone). First of two parts: the way is saved in a file of its own beside the brain, and the spot it starts from is kept in a save-state slot of the game's own with a mark of the game's memory to tell it by. Picking it up when the app opens is T-1065 | 8 | Done | 8/8 | see PR #306 |
@@ -3114,6 +3115,36 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; understanding + services + integration 241 passed; full suite 1358 passed, 10 skipped in 183.18s (0:03:03).
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
+
+### T-1067 – The way written down is kept until a Start has had its say
+- **Status:** In progress
+- **Phase:** 8 (the plan's Stage 3; DESIGN.md §9 "Checkpoint Training").
+- **Why now:** T-1065's first limit, which the README has had to warn about since: "press Start before you close the app again or change a setting of the AI". Boss said on 20 Nov that he will test the next build with this put right, and said yes on a card that day to changing the one existing test that pins the old behaviour.
+- **The fault:** `_write_way()` runs at every writing of the brain and removes the file where no way is in memory that starts from the spot kept. That is right once a Start has had its say: a way forgotten, or a spot saved over, must not go on being written down. Between `_on_connected` and the first Start, though, the way is on disk only, on purpose, and nothing in memory can speak for it. Whatever writes the brain in that time removes it: the link going (`_on_disconnected`, also the Disconnect button and the emulator closed first), the learning settings, the go's length, giving up, "until the game is over", another learner, a saved AI loaded, rehearsing, the end of a go the child plays. A link that drops while the first Start is looking for the spot does the same, since `_way_untried` is cleared before the looking.
+- **Try-out (20 Nov, in a scratch copy of the repository, nothing committed):** two lines changed as the objective says, and the four test files of T-1063 to T-1065 and the remembered-way tests run against them, to learn which existing tests notice. (Result under "Changed while building".)
+- **Objective:** `_write_way()` leaves the file alone while `_way_untried` holds, where it has no way of its own to write. `_prepare_checkpoint()` clears `_way_untried` only once the Start has its spot: after the way was taken up, or after the checkpoint was saved where the game is (which removes the file itself, in `_keep_start()`, as before). A link that drops before that leaves it set, so the disconnect's writing of the brain leaves the file and the first Start on the next link is the first again. Starting the AI from scratch removes the file itself, as before.
+- **Scope:** `training/service.py`, a new test file, the last assertion of one existing test, the documents. **Not in it:** Stop and Start within a sitting with no pinned spot (Boss's other card of 20 Nov, not answered); old `way_…` save states of games no longer played; a pinned first Start saving over the slot.
+- **Acceptance criteria:**
+  1. With a way written down and no Start yet since the game was connected, each of these leaves the file exactly as it was, and the first Start after it takes the way up as T-1065 has it: the brain written, the learning settings changed, the go's length, giving up, until over, another learner, a saved AI loaded, the child playing first, the link dropped and back.
+  2. The app opened and closed with no Start, twice over: the file and the emulator's save states are as they were, and the third sitting takes the way up.
+  3. A link that drops while the first Start looks for the spot (at the load of the spot, at the reading of the memory, at the putting back after the way was taken up) leaves the file, and the first Start on the next link takes the way up.
+  4. Starting the AI from scratch before a Start removes the file, and the Start after it reads nothing and says nothing of a way.
+  5. A first Start that takes its own spot (a pinned spot; the child handing over to the AI; a way written down that cannot be used) removes the file at that Start, without waiting for the brain to be written, as before, and from then on a writing of the brain with no way in memory leaves none on disk.
+  6. Once a Start has taken the way up, a way forgotten is removed at the next writing of the brain, as before.
+  7. One existing test is changed, in its last assertion only, with Boss's yes of 20 Nov for exactly that test: `test_way_written_down_in_training.py::test_the_way_is_on_disk_when_the_link_goes` now says the file is still there after the brain is written on a new link. No other existing test is changed.
+  8. The README's "One thing to know for now" is gone; `ruff format`, `ruff check`, `mypy` and the whole suite pass.
+- **Expected changes:** `src/retro_ai_lab/training/service.py`, `tests/unit/training/test_way_kept_until_a_start.py` (new), `tests/unit/training/test_way_written_down_in_training.py` (one assertion), `README.md`, `CHANGELOG.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`.
+- **Test plan (written before the code was committed; the try-out above came first):**
+  1. *Before a Start:* criteria 1, 2 and 4, on the practice hopper behind the real services, opened again on the same folders as T-1065's tests do.
+  2. *The link:* criterion 3, with the link dropped at each of the three places.
+  3. *As before:* criteria 5 and 6.
+  4. *Deliberate breaks* of the changed lines, each of which a test must notice.
+  5. *The existing tests:* one assertion changed (criterion 7); the whole suite.
+- **Changed while building:** (to come)
+- **Results:** (to come)
+- **Limits:** (to come)
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** (to come)
 
 ### T-1066 – The game's pause over a lost life is not taken for a standstill
 - **Status:** Done
