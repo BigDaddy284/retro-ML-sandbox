@@ -1412,13 +1412,10 @@ class EpisodeRunner:
             if self._times_back != back:
                 assert self._state is not None
                 state = self._state  # the game was put back: this step is from there
-            if self._stands_still():
-                # The game's pause over a life already lost is no standstill (T-1066).
-                going = self._life_going(self._stood_for, stood=True)
-                if self._ended_by is not None:
-                    return False
-                if not going and not self._seek(stood=True):
-                    return False
+            # Not while a life seen going is waited for: the game's pause over it is
+            # no standstill (T-1066).
+            if self._stands_still() and not self._awaited and not self._seek(stood=True):
+                return False
             self._press_on()
             if self._forced:
                 action = self._forced.popleft()  # a way worked out for it (T-1004)
@@ -1676,10 +1673,15 @@ class EpisodeRunner:
             return False
         return self._got_somewhere and (stuck or self._stood_for >= self._stand_after)
 
-    def _life_going(self, stayed: int, *, stood: bool = False) -> bool:
-        """Nothing changes, or the go stays about one spot (``stood``), and has for
-        ``stayed`` steps: is that the game's pause over a life already lost (T-1066)?
-        Sets how the go ended if the link dropped.
+    @property
+    def _awaited(self) -> bool:
+        """A life seen going in the game's pause over it is still waited for (T-1066)."""
+        return self._going_until is not None and self._steps <= self._going_until
+
+    def _life_going(self, stayed: int) -> bool:
+        """Nothing has changed for ``stayed`` steps, as long as counts as stuck: is that
+        the game's pause over a life already lost (T-1066)? Sets how the go ended if
+        the link dropped.
 
         A game takes its time over a lost life: the screen stands, nothing listens,
         and only then does the count go down. To the go that looked like a dead
@@ -1693,14 +1695,14 @@ class EpisodeRunner:
         it remembers (as many again where it remembers none), and the game is put
         back. A life lost in that time is asked for once more with another move held:
         lost on the same step, nothing pressed changes it, and the go waits for it to
-        be counted. Lost on another step or not at all, it is the AI's own doing and
-        the standstill is one. A life that has not gone ``LATE`` steps after the step
-        it was seen to go on is waited for no longer, and the standstill is handled.
+        be counted, with no search where it stands in the meantime. Lost on another
+        step or not at all, it is the AI's own doing and the standstill is one. A life
+        that has not gone ``LATE`` steps after the step it was seen to go on is waited
+        for no longer, and the standstill is handled.
         """
-        until = self._going_until
-        if until is not None:
-            if self._steps <= until:
-                return True
+        if self._awaited:
+            return True
+        if self._going_until is not None:
             self._going_until = None
             return False
         start = self._way_back()
@@ -1749,11 +1751,10 @@ class EpisodeRunner:
         self._going_until = self._steps + seen.steps - 1 + LATE
         log.log(
             logging.DEBUG if self._going_said else logging.INFO,
-            "%s for %d steps. Played on off the record from here, a life is lost %s on "
-            "whatever is pressed: this is the game's pause over a life already lost, and "
-            "no standstill. The AI waits for the life to be counted and then goes back to "
-            "look for the way past.",
-            "Stayed about one spot" if stood else "Nothing has changed",
+            "Nothing has changed for %d steps. Played on off the record from here, a life "
+            "is lost %s on whatever is pressed: this is the game's pause over a life "
+            "already lost, and no standstill. The AI waits for the life to be counted and "
+            "then goes back to look for the way past.",
             stayed,
             _steps(seen.steps),
         )

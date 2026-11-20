@@ -9,7 +9,6 @@ wake button, which forgets every saved moment, and the life then went with no se
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 
@@ -18,16 +17,13 @@ import pytest
 from retro_ai_lab.core import EmulatorDisconnectedError
 from retro_ai_lab.core.worklog import CallStats, app_work
 from retro_ai_lab.emulator.fake import toy_hopper
-from retro_ai_lab.emulator.fake.toy_hopper import LAYOUT
 from retro_ai_lab.learning import ActionSpace
-from retro_ai_lab.services import DiscoveryUpdated
 from retro_ai_lab.training import EpisodeRunner, episode
 from retro_ai_lab.training.episode import AHEAD, DEFAULT_UNSTICK_AFTER, LATE, NOW_SLOT
 from retro_ai_lab.training.moments import Moments
 from retro_ai_lab.training.trial import Outcome
-from retro_ai_lab.understanding import VariableKind
 from tests.unit.training import test_going_back as going_back
-from tests.unit.training.test_going_back import SURE, Lab, Scripted, steps
+from tests.unit.training.test_going_back import Lab, Scripted, steps
 from tests.unit.training.test_last_chance_in_a_go import (
     GAP_ENDS,
     LONG,
@@ -49,10 +45,10 @@ ASKED_AT = 38
 TO_GO = LONG_DIED - ASKED_AT
 DYING = 53  # steps this game takes over a lost life with that pause, as the runner measures it
 WAITS = (
-    "{lead} for {stayed} steps. Played on off the record from here, a life is lost {on} "
-    "steps on whatever is pressed: this is the game's pause over a life already lost, and "
-    "no standstill. The AI waits for the life to be counted and then goes back to look for "
-    "the way past."
+    "Nothing has changed for {stayed} steps. Played on off the record from here, a life "
+    "is lost {on} steps on whatever is pressed: this is the game's pause over a life "
+    "already lost, and no standstill. The AI waits for the life to be counted and then "
+    "goes back to look for the way past."
 )
 # A go of the AI's own making: a few steps right and then nothing. What the learner
 # sees last changes on the fifth step, so it has stood for 25 steps once 30 are played
@@ -102,7 +98,11 @@ def standing_still(lab: Lab, moves: int = 400) -> None:
 
 
 @pytest.mark.parametrize("wake", [(), ("start",)], ids=["no wake button", "a wake button"])
-@pytest.mark.parametrize("stand", [0, 60], ids=["no search at a standstill", "with one"])
+@pytest.mark.parametrize(
+    "stand",
+    [0, 30, 60],
+    ids=["no search at a standstill", "one that falls due in the pause", "the app's"],
+)
 def test_the_pause_is_waited_out_and_the_search_follows_the_loss(
     lab: Lab,
     monkeypatch: pytest.MonkeyPatch,
@@ -125,7 +125,7 @@ def test_the_pause_is_waited_out_and_the_search_follows_the_loss(
         # too, and the game was put back.
         assert lab.saved.count(NOW_SLOT) == 1 and lab.loaded == [NOW_SLOT] * 3
         assert plays.made == [(right,) * (2 * AHEAD), (nothing,) * TO_GO]
-        assert said(caplog) == [WAITS.format(lead="Nothing has changed", stayed=STUCK, on=TO_GO)]
+        assert said(caplog) == [WAITS.format(stayed=STUCK, on=TO_GO)]
         # It waits: no search where it stands, no wake press, and the go goes on.
         steps(r, LONG_DIED - 1 - r.steps)
         assert (r.ways_sought, r.unsticks, r.times_back) == (0, 0, 0)
@@ -176,42 +176,6 @@ def test_the_asking_runs_flat_out_and_is_timed_for_the_log(
     assert app_work.stats["step: pause asked"].count == timed + 1
     steps(r, 5)  # waiting costs no more of either
     assert "fast" not in order[1:] and app_work.stats["step: pause asked"].count == timed + 1
-
-
-def test_a_pause_in_which_only_the_spot_stands_is_waited_out_too(
-    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """What the learner sees keeps changing in the pause (a clock that never stops), so
-    the stuck rule has nothing to say: the go has stayed about one spot for as long as a
-    standstill takes."""
-    lab.teach()
-    clock = lab.knowledge.propose(
-        "ram", LAYOUT.timer, kind=VariableKind.POSITION, name="Clock", evidence=SURE
-    )
-    lab.bus.publish(DiscoveryUpdated((clock,), (), (), ()))
-    r, moments = paused(lab, stand_after=30)
-    plays = Plays(monkeypatch)
-    right, nothing = lab.move("right"), lab.move()
-    r.begin()
-    with caplog.at_level(logging.INFO, logger=LOG):
-        while not plays.made:
-            assert r.step()
-        at = r.steps - 1  # steps played when it asked
-        assert at < LONG_DIED - 1
-        assert plays.made == [(right,) * (2 * AHEAD), (nothing,) * (LONG_DIED - at)]
-        (line,) = said(caplog)
-        stood = re.fullmatch(
-            re.escape(
-                WAITS.format(lead="Stayed about one spot", stayed="N", on=LONG_DIED - at)
-            ).replace("N", r"(\d+)"),
-            line,
-        )
-        assert stood is not None and int(stood[1]) >= 30
-        steps(r, LONG_DIED - 1 - r.steps)
-        assert (r.ways_sought, r.ways_stood, r.times_back, len(plays.made)) == (0, 0, 0, 2)
-        assert r.step()
-    assert (r.ways_sought, r.ways_found, r.ways_stood, r.times_back) == (1, 1, 0, 1)
-    assert moments.steps == 0 and lab.game.state.lives == toy_hopper.START_LIVES
 
 
 def test_the_play_is_as_long_as_the_pause_it_remembers_and_says_so_once(
@@ -408,7 +372,7 @@ def test_a_life_that_does_not_go_is_waited_for_no_longer(
     r.begin()
     with caplog.at_level(logging.INFO, logger=LOG):
         steps(r, OWN_AT + 1)
-    assert said(caplog) == [WAITS.format(lead="Nothing has changed", stayed=STUCK, on=12)]
+    assert said(caplog) == [WAITS.format(stayed=STUCK, on=12)]
     assert len(plays.made) == 2 and r.unsticks == 0
     # It would go on the 12th step from where it asked, and is given 4 more.
     steps(r, 11 + LATE)
@@ -506,12 +470,11 @@ def test_nothing_is_asked_once_the_searches_are_used_up(
 # ------------------------------------------------------------------- the link
 
 
-@pytest.mark.parametrize("stand", [None, 30], ids=["nothing changes", "about one spot"])
 @pytest.mark.parametrize("fails", ["save", "load 1", "load 2", "load 3"])
 def test_a_link_that_drops_while_it_asks_ends_the_go(
-    lab: Lab, monkeypatch: pytest.MonkeyPatch, stand: int | None, fails: str
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, fails: str
 ) -> None:
-    r, _ = paused(lab) if stand is None else paused(lab, unstick_after=None, stand_after=stand)
+    r, _ = paused(lab, stand_after=60)
     r.set_unstick_buttons(("start",))
     r.begin()
     steps(r, ASKED_AT)
