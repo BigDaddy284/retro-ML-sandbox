@@ -169,6 +169,7 @@ Phases refer to DESIGN.md §16. Phases 1–2 are broken into small tasks now; la
 | T-876 | The Rewards panel's warning line takes its colour from the theme (the `warning` label property) instead of an inline dark orange that was unreadable on the dark look | 8 | Done | 3/3 | see PR #138 |
 | T-877 | The go's log line names every reward that paid, biggest first, instead of three and "and N more" | 8 | Done | 3/3 | see PR #139 |
 | T-878 | "Progress goes up" and "Your score jumps up" pay only when the value beats its best so far in the go, so dying and covering the same ground again earns nothing until the AI gets further; a person's own "goes up" rows are untouched | 8 | Done | 3/3 | see PR #140 |
+| T-1065 | The way is taken up again when the app is opened. T-1064 writes the way and keeps the spot it starts from; nothing read them. At the first Start after a game is connected, with no pinned spot, the app loads the spot kept, makes sure by the game's memory that it is the one the way was played from, and the goes start there with the way. Where it cannot be sure, the game is put back, the log says why, and Start does what it always did | 8 | In progress | 0/9 | see PR |
 | T-1064 | The way and the spot it starts from are written down. The way the AI remembers is in the app's memory only, so closing the app loses it (Boss's logs of 20 Nov: 3,900 steps gone). First of two parts: the way is saved in a file of its own beside the brain, and the spot it starts from is kept in a save-state slot of the game's own with a mark of the game's memory to tell it by. Picking it up when the app opens is T-1065 | 8 | Done | 8/8 | see PR #306 |
 | T-1063 | A starting spot taken again is the same spot. Boss's logs of 20 Nov show the way the AI remembered (3,900 steps, two levels) gone after the app was closed, and an hour and a half spent making 2,070 steps of it again. The way is kept by the spot the goes start from, and that spot is told by a count of how often it was saved: saving the very same spot again (a pinned spot at every Start) counts as a new one and the way is forgotten. The harness now tells a spot by what is in the game's memory when it is saved, and the count goes up only where that differs. First of two steps; the second saves the way with the brain | 8 | Done | 8/8 | see PR #305 |
 | T-1062 | After the game puts the AI back, a way past is one that gets somewhere this life has not been. Boss's logs of 19 Nov show the AI playing 3,900 steps from memory with no life lost, losing its first life at the hard spot, and then losing the other two near the place's door at things it had got past earlier in the same go: a search took a try for the way past only if it reached ground the go had not been on, and after a put-back there is none within reach. The ground now also counts what the life it is on has reached, started over when the game puts the player back, and a try is judged by that. What is paid for new ground does not change | 8 | Done | 9/9 | see PR #304 |
@@ -3112,6 +3113,43 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
 - **Results:** 2 new tests pass; understanding + services + integration 241 passed; full suite 1358 passed, 10 skipped in 183.18s (0:03:03).
 - **Commit:** see PR #185. **PR:** #185.
 - **Completion report:** The rule reads the idle trial's own before/after as what the game does by itself, so it needs no list of button names and holds for a pause, a menu or Start on a title screen alike. Sprites already carrying "changes when Start is held" in the user's knowledge keep it until the knowledge is started from scratch or the evidence is dropped; a later task may clean stale links when a button turns out to sweep.
+
+### T-1065 – The way is taken up again when the app is opened
+- **Status:** In progress
+- **Phase:** 8 (the plan's Stage 3; DESIGN.md §9 "Checkpoint Training").
+- **Why now:** Boss's logs of 20 Nov: 3,900 steps remembered at the end of one sitting, none at the beginning of the next. T-1064 put the way and its start on disk. This task reads them, which is what Boss was told is being built ("Saving it with the brain is step two").
+- **Whose decision this is:** Boss has a card of 20 Nov, not yet answered, asking where goes start when the AI already remembers a way; the recommended answer is "from where its way starts". This task builds that answer for the one case his logs are about, the first Start after a game is connected, which no existing test speaks of. The other case, Stop and Start in one sitting with no pinned spot, stays as it is (the game's place then is where somebody left it on purpose, and `test_a_start_that_moves_forgets_the_way_and_says_so` says so); it changes only if Boss picks that answer. If he picks another, the trigger here is what changes, not the reading.
+- **Objective:**
+  1. `Route.take_up(data, start)`: the route remembers the way written in `data` from `start`, in place of whatever it remembered, and is left as it was where `data` is not a way.
+  2. At `start()` in a mode in which the AI plays, the first time since the game was connected, with no pinned spot, with a way store, a brain store and remembering on, and a file for the game:
+     1. the file is read and checked: its format, its game, its slot, the frames per step, the moves' buttons, and the way itself;
+     2. the checkpoint is saved where the game is, as at any Start, so that the game can be put back;
+     3. the game's own slot is loaded and the memory read: where every region has the digest written, and the regions are the same ones, this is the spot the way was played from. The checkpoint is saved from it, the spot kept is noted (T-1064), the route takes the way up from that start, and the log says how many steps the AI remembers and that the goes start where that way starts;
+     4. anywhere it fails (the file, the load, a digest) the game is put back to where it was, the log says in plain words what was not as written (the regions that differ by name), the file is removed, and the Start goes on as it always has.
+  3. Any other Start, a change of mode while training runs, a pinned spot, no store or remembering off: nothing is read and nothing changes.
+  4. A link that drops in the middle is handled as a dropped checkpoint is.
+- **Scope:** `training/route.py`, `training/service.py`, tests, the documents. **Not in it:** Stop and Start within a sitting with no pinned spot (Boss's card); a question at Start (the card's third answer); removing old slot files; the trace file's false alarm; the first life at the end of the way getting no search.
+- **Acceptance criteria:**
+  1. On the practice hopper: a sitting leaves a way; the app is closed and opened again (new services on the same folders, the emulator's save states still there, the game somewhere else); the first Start puts the game at the way's start, the first go begins with every step of the way before the learner is asked for anything, and gets across the gap that cost the first sitting a life, with every life. The log says the way was taken up.
+  2. The same where only the link dropped and came back.
+  3. A slot that cannot be loaded, a slot that holds another state, a region more or fewer, a file of another format, game, slot, frames per step or set of moves, a way that is malformed, a file that is not JSON: each leaves the game where it was, says so once, removes the file, and the Start takes the spot the game is at with no way.
+  4. With a pinned spot the pin decides and nothing is read; at a second Start, and at a change of mode, nothing is read.
+  5. Without a way store, without a brain store or with remembering off nothing is read, loaded or saved more than before.
+  6. A way taken up is written down again as any other: after the next go the file is there with the same spot.
+  7. A reward row named in the file that is no longer there has its pay taken out of the way before it is played, as for a row that goes during a sitting.
+  8. A link that drops while the slot is loaded or the memory read refuses to start as a dropped checkpoint does, and leaves the file for the next time.
+  9. `ruff format`, `ruff check`, `mypy` and the whole suite pass, with no existing test changed.
+- **Expected changes:** `src/retro_ai_lab/training/route.py`, `src/retro_ai_lab/training/service.py`, `tests/unit/training/test_route_written_down.py`, `tests/unit/training/test_way_taken_up_again.py` (new), `README.md`, `CHANGELOG.md`, `ARCHITECTURE.md`, `TASK_TRACKER.md`.
+- **Test plan (written before the code):**
+  1. *Route* (unit): `take_up` on a route with another way, with a go's story, and with what is not a way.
+  2. *Training* (the practice hopper behind the real services; the practice console's save states carried over to the new link as an emulator that kept running, or a console that keeps them as files, would have them): criteria 1 to 8 as scripted sittings, with the saves and loads counted at the adapter.
+  3. *Deliberate breaks* of the new lines, each of which a test must notice.
+  4. *The existing tests* unchanged; the whole suite.
+- **Changed while building:** (to come)
+- **Results:** (to come)
+- **Limits:** (to come)
+- **Commit:** see PR. **PR:** pending.
+- **Completion report:** (to come)
 
 ### T-1064 – The way and the spot it starts from are written down
 - **Status:** Done
