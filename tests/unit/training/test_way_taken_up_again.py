@@ -302,9 +302,11 @@ def test_a_spot_whose_memory_cannot_be_read_is_left_and_the_game_put_back(
     again = opened(states)
     game = game_of(again)
 
+    asked_at: list[int] = []
+
     class Unreadable(MemoryCapture):
         def capture(self, frame: int) -> MemorySnapshot:
-            assert game.state.x == spot  # the spot is loaded when the memory is asked for
+            asked_at.append(game.state.x)
             raise ConfigurationError("No memory region can be read.")
 
     monkeypatch.setattr(module, "MemoryCapture", Unreadable)
@@ -315,6 +317,9 @@ def test_a_spot_whose_memory_cannot_be_read_is_left_and_the_game_put_back(
         counting(t, monkeypatch)
     assert game.state.x == here != spot and t.remembered == 0
     assert again.lab.loaded == [written["slot"], SLOT]
+    # The memory was asked for with the spot loaded, and again where the game was put
+    # back to, for the spot the Start then keeps (which cannot be told either).
+    assert asked_at == [spot, here] and t._kept is None
     assert (
         f"{NOT_TAKEN}: the saved spot it starts from could not be loaded and read "
         "(No memory region can be read.). The goes start from where the game is"
