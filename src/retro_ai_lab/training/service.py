@@ -22,12 +22,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, NamedTuple, TypeVar
 
-from retro_ai_lab.core import (
-    ConfigurationError,
-    EmulatorDisconnectedError,
-    EmulatorError,
-    UnsupportedCapabilityError,
-)
+from retro_ai_lab.core import ConfigurationError, EmulatorError, UnsupportedCapabilityError
 from retro_ai_lab.core.events import EventBus
 from retro_ai_lab.core.types import Button
 from retro_ai_lab.core.worklog import app_work
@@ -931,7 +926,8 @@ class TrainingService:
         played from where every region has the digest written down with the way.
         Anything else puts the game back and says why; the caller then starts from
         where the game is, as it always has, and keeping that spot removes the file.
-        A link that drops goes up to the caller as from a checkpoint.
+        A link that drops fails the putting back, and that goes up to the caller as
+        from a checkpoint.
         """
         ways, brain = self._ways, self.brain()
         if ways is None or self._store is None or brain is None or not self._remember:
@@ -949,10 +945,8 @@ class TrainingService:
         try:
             self._connection.call(lambda a: a.load_state(slot))
             snapshot = MemoryCapture(self._connection).capture(0)
-        except EmulatorDisconnectedError:
-            raise
         except (ConfigurationError, EmulatorError) as exc:
-            harness.restore()
+            harness.restore()  # a link that has dropped fails here, as from a checkpoint
             self._way_not_taken(
                 f"the saved spot it starts from could not be loaded and read ({exc})"
             )
