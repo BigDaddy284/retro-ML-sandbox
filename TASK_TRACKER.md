@@ -3136,7 +3136,18 @@ DESIGN.md §11 (experiments and comparison), §13 (competition and sharing), §1
   2. *Training* (the practice hopper behind the real services): criteria 4 and 5 as scripted sessions, and a pinned spot moved (unpinned, played on, pinned again) forgets the way.
   3. *Deliberate breaks* of the new lines, each of which a test must notice.
   4. *The existing tests* of the harness, the remembered way and the pinned spot unchanged; the whole suite.
-- **Changed while building:** (none yet)
+- **Changed while building:**
+  1. *The spot is not told by the game's memory, and the harness is as it was.* The plan above was built first: `checkpoint()` read the memory after the save and counted a spot only where it differed. Two existing tests say otherwise, and rightly could not be changed for it: `tests/unit/services/test_experiments.py::test_it_counts_the_checkpoints_taken` saves the checkpoint a second time with the game put back to the first and asks for a count of 2, and `tests/unit/training/test_remembered_way.py::test_nothing_is_remembered_where_it_cannot_be_played_again` does the same and asks for the way to be forgotten ("the checkpoint saved anew"). A second count beside the first (`spots`), with the way kept by that, left the first test alone and still failed the second. So the harness keeps its meaning, a checkpoint saved anew is another spot, and the service does not save anew where there is no need: at a Start whose checkpoint already is the pinned spot.
+  2. *The criteria as they stand for that* (the plan's 1 to 3 and 6 were about the digest and went with it; its 4, 5 and 7 are 1, 2 and 7 here):
+     1. With a pinned spot, Stop and Start keeps the way: the checkpoint is not saved again, the game is put back to the spot, the next go begins with the steps remembered, and the log does not say the spot has changed.
+     2. With no pinned spot, a Start takes the spot the game is at, forgets the way and says so, as before.
+     3. A spot pinned again, or unpinned, is not held: the next Start saves, and the way from the old spot is forgotten.
+     4. A checkpoint saved since by anything else, a harness that lost its checkpoint and a new link are not the pinned spot held: the next Start goes back to the pin and saves, as before.
+     5. A change of mode while training runs keeps the spot and the way as a Start does.
+     6. Nothing is read or saved that was not before, and `ExperimentHarness` is unchanged.
+     7. `ruff format`, `ruff check`, `mypy` and the whole suite pass, with no existing test changed.
+  3. *Two conditions dropped as they could not matter* (found while writing the deliberate breaks): "and a spot is pinned" in the check, since the note is only ever made with a pin and is cleared when the pin goes; and clearing the note when the link drops, since the new link's harness is another one.
+  4. *Expected changes:* `src/retro_ai_lab/training/service.py` and `tests/unit/training/test_pinned_spot_keeps_the_way.py`; not `services/experiments.py`, and no `tests/unit/services/test_experiments_same_spot.py`.
 - **Results:** (to come)
 - **Limits:** (to come)
 - **Commit:** see PR. **PR:** pending.
