@@ -550,7 +550,14 @@ something nearly always pays a little while it stands. A spot where it
 found nothing is not searched again, and after eight such searches in a row
 that find nothing it stops looking at standstills for that session (the
 same count as for the searches after a life lost, kept apart from theirs).
-These searches are among the three a go may make. The log says "Stayed about one spot for 60 steps, with no life lost.
+These searches used to be among the three a go may make, and a go that
+spent all three where it stood had none left when it then lost a life. Now
+they are counted apart: a go may search as many standstills as it may
+search lives lost (three of each), and a standstill never takes a search
+from the lives. A go that has already used up its searches for lives lost
+searches no standstill either, as before.
+
+The log says "Stayed about one spot for 60 steps, with no life lost.
 Went back 64 steps and found a way on at try 3...", and the go's line says
 how many of its searches were made where it stood still.
 
