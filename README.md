@@ -635,6 +635,14 @@ the app or the emulator, a link that drops, changing a setting of the AI,
 loading a saved AI or playing yourself for a while does not lose the way.
 Starting the AI from scratch does, as it is meant to.
 
+On BizHawk the save states the app asks for are files in a folder `states`
+beside the brains and the ways. They used to be written to Windows' temp
+folder, which Windows empties now and then, and with them went the spot a
+remembered way starts from. A new build brings a new bridge script: if
+BizHawk still has the old one open, the app says so when you connect and
+names the script to open instead. On mGBA save states live only as long as
+its script runs, so there a way is not taken up again once mGBA was closed.
+
 ## Before the AI loses a life
 
 The AI's eyes learn which kinds of thing have cost it a life (see "What the
