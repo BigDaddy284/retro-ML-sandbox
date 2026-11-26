@@ -22,6 +22,7 @@ import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any, TypeVar
 
 from retro_ai_lab.core import (
@@ -94,9 +95,14 @@ class Session:
 
 
 class ConnectionService:
-    def __init__(self, registry: AdapterRegistry, bus: EventBus) -> None:
+    def __init__(
+        self, registry: AdapterRegistry, bus: EventBus, *, states_dir: Path | None = None
+    ) -> None:
+        """``states_dir`` is where an emulator that keeps save states as files is told
+        to keep them (T-1068); None leaves that to the adapter."""
         self._registry = registry
         self._bus = bus
+        self._states_dir = states_dir
         self._state = ConnectionState.DISCONNECTED
         self._adapter: EmulatorAdapter | None = None
         self._session: Session | None = None
@@ -139,6 +145,8 @@ class ConnectionService:
                 "Already connected to an emulator. Disconnect before connecting again."
             )
         adapter = self._registry.create(adapter_name, **options)  # validates the name
+        if self._states_dir is not None:
+            adapter.keep_states_in(self._states_dir)
         self._set_state(ConnectionState.CONNECTING, adapter_name)
         try:
             adapter.connect(timeout_s)

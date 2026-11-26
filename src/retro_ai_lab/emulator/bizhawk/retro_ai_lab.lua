@@ -8,7 +8,7 @@
 -- Nothing here changes your game, saves or settings. Close the script (or
 -- EmuHawk) to stop it.
 
-local SCRIPT_VERSION = 2  -- T-887: watched steps; bumped whenever the script's answers change
+local SCRIPT_VERSION = 3  -- T-1068: save states in a folder the app names; bumped whenever the script's answers change
 local HOST = "127.0.0.1"
 local PORT = tonumber(RETRO_AI_LAB_PORT) or 43110
 
@@ -799,21 +799,39 @@ function handlers.speed(req)
   return {}
 end
 
-local function state_path(slot)
+-- Where a slot's save state is kept: in the folder the app names, which lasts from
+-- one sitting to the next (T-1068), or with none named in the temp folder, which the
+-- system may empty.
+local function state_path(slot, dir)
   if type(slot) ~= "string" or slot == "" or slot:find("[^%w_]") then
     error("'slot' must be a name of letters, digits and underscores.", 0)
   end
-  local dir = os.getenv("TEMP") or os.getenv("TMP") or os.getenv("TMPDIR") or "."
+  if dir == nil then
+    dir = os.getenv("TEMP") or os.getenv("TMP") or os.getenv("TMPDIR") or "."
+  end
   return dir .. "/retro_ai_lab_" .. slot .. ".State"
 end
 
+local function states_dir(req)
+  local dir = req.dir
+  if dir ~= nil and (type(dir) ~= "string" or dir == "") then
+    error("'dir' must be the path of a folder.", 0)
+  end
+  return dir
+end
+
 function handlers.save(req)
-  savestate.save(state_path(req.slot), true)
+  savestate.save(state_path(req.slot, states_dir(req)), true)
   return {}
 end
 
 function handlers.load(req)
-  local loaded = savestate.load(state_path(req.slot), true)
+  local dir = states_dir(req)
+  local loaded = savestate.load(state_path(req.slot, dir), true)
+  if loaded ~= true and dir ~= nil then
+    -- A state saved before the app named a folder is still where it was put.
+    loaded = savestate.load(state_path(req.slot), true)
+  end
   return { loaded = loaded == true }
 end
 

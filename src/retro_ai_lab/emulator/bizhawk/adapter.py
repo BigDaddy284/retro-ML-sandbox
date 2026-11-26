@@ -174,6 +174,7 @@ class BizHawkAdapter(EmulatorAdapter):
         self._image_path = os.path.join(
             tempfile.gettempdir(), f"retro_ai_lab_{os.getpid()}_{id(self):x}.png"
         )
+        self._states_dir: str | None = None  # where the script keeps save states (T-1068)
         self._link: Link | None = None
         self._hello: dict[str, Any] = {}
         self._description: Description | None = None
@@ -430,11 +431,34 @@ class BizHawkAdapter(EmulatorAdapter):
     def _do_set_speed(self, multiplier: float) -> None:
         self._call("speed", percent=max(1, round(multiplier * 100)))
 
+    def keep_states_in(self, folder: Path) -> None:
+        """The script writes save states to ``folder`` instead of the temp folder, which
+        the system empties: the spot a remembered way starts from has to be there at
+        the next sitting (T-1068). Only where the emulator is on this PC, as the
+        folder is; and where the folder cannot be made, the temp folder it stays."""
+        self._states_dir = None
+        if self._host.strip().lower() not in LOCAL_HOSTS:
+            return
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            log.warning(
+                "Couldn't make the folder for save states, %s (%s). They stay in the temp "
+                "folder, which the system may empty between one sitting and the next.",
+                folder,
+                exc,
+            )
+            return
+        self._states_dir = str(folder)
+
+    def _state_fields(self) -> dict[str, Any]:
+        return {} if self._states_dir is None else {"dir": self._states_dir}
+
     def _do_save_state(self, slot: str) -> None:
-        self._call("save", slot=slot)
+        self._call("save", slot=slot, **self._state_fields())
 
     def _do_load_state(self, slot: str) -> None:
-        answer = self._call("load", slot=slot)
+        answer = self._call("load", slot=slot, **self._state_fields())
         if answer.get("loaded") is not True:
             raise ConfigurationError(f"No save state in slot {slot!r}.")
 
