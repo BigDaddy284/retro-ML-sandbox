@@ -344,6 +344,16 @@ instead of several times a second, since every refresh takes time from the
 AI's steps and nobody is watching. They catch up the moment you pause, stop
 or switch back to "Watch it play".
 
+For "Practise fast" the app turns BizHawk's own speed up, and BizHawk
+remembers its speed. The bridge script puts 100% back when the app leaves.
+If BizHawk was closed first, while the AI was still practising fast, it used
+to start at that speed the next time, with the game racing and the app not
+even running. Now the script also puts 100% back when it is stopped, and
+when it starts it sees whether the speed was left turned up last time and
+puts it back, with a line in BizHawk's Lua console saying so. That needs the
+script to be running: a BizHawk started without it is as it was closed, and
+you put it right in BizHawk under Config > Speed/Skip > "Speed 100%".
+
 ## When the AI loses a life
 
 On an emulator that can save and load the game's state (BizHawk and mGBA
