@@ -789,10 +789,64 @@ function handlers.step(req)
   return body
 end
 
+-- EmuHawk keeps its speed in its settings and saves them as it closes, before it
+-- ends its scripts. Closed while the app's speed is in force, it starts at that
+-- speed the next time, with no app there to put it back (T-1069). So a note in
+-- the temp folder says the speed is the app's, for as long as it is, and the
+-- script that finds the note as it starts puts 100% back.
+local function speed_note()
+  local dir = os.getenv("TEMP") or os.getenv("TMP") or os.getenv("TMPDIR")
+  if dir == nil or dir == "" then
+    return nil
+  end
+  return dir .. "/retro_ai_lab_speed_" .. tostring(PORT) .. ".txt"
+end
+
+local function note_speed()
+  local path = speed_note()
+  local file = path and io.open(path, "w")
+  if file then
+    file:write("Retro AI Lab changed the emulator's speed and has not put it back yet.\n")
+    file:close()
+  end
+end
+
+-- Puts 100% back where the app changed the speed. The note goes only where the
+-- emulator runs on: at the script's end EmuHawk may have saved its settings
+-- already, with the app's speed in them.
+local function speed_back(runs_on)
+  if not speed_changed then
+    return
+  end
+  client.speedmode(100)
+  speed_changed = false
+  local path = runs_on and speed_note()
+  if path then
+    os.remove(path)
+  end
+end
+
+-- A note left from last time: the script ended with the app's speed in force.
+local function speed_left_over()
+  local path = speed_note()
+  local file = path and io.open(path, "r")
+  if not file then
+    return
+  end
+  file:close()
+  client.speedmode(100)
+  os.remove(path)
+  print("Retro AI Lab: the app's speed was still set when this script last ended. "
+    .. "The emulator's speed is back at 100%.")
+end
+
 function handlers.speed(req)
   local percent = req.percent
   if type(percent) ~= "number" or percent ~= percent or percent <= 0 then
     error("'percent' must be a number above zero.", 0)
+  end
+  if not speed_changed then
+    note_speed()
   end
   client.speedmode(math.max(1, math.floor(percent + 0.5)))
   speed_changed = true
@@ -862,10 +916,7 @@ local function drop_app()
   closing = false
   watching = false
   release_all()
-  if speed_changed then
-    client.speedmode(100)
-    speed_changed = false
-  end
+  speed_back(true)
   unpause()
   show_messages(true)
 end
@@ -960,8 +1011,14 @@ local function main()
   server:settimeout(0)
   local _, bound_port = server:getsockname()
   print("Retro AI Lab is waiting for the app on port " .. tostring(bound_port) .. ".")
+  local put_back, why = pcall(speed_left_over)
+  if not put_back then
+    print("Retro AI Lab: the emulator's speed could not be put back (" .. tostring(why) .. ").")
+  end
   if event and event.onexit then
     event.onexit(function()
+      -- The script is ending, with EmuHawk or without it: the speed is the app's no more.
+      pcall(speed_back, false)
       if app then
         app:close()
       end
