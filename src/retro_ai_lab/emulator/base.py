@@ -18,6 +18,7 @@ from __future__ import annotations
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
+from pathlib import Path
 from typing import ClassVar, final
 
 from retro_ai_lab.core import (
@@ -68,6 +69,15 @@ class EmulatorAdapter(ABC):
     @property
     def is_connected(self) -> bool:
         return self._connected
+
+    def keep_states_in(self, folder: Path) -> None:  # noqa: B027 (nothing to do by default)
+        """Keep save states in ``folder`` from now on (T-1068).
+
+        For an adapter whose save states are files: the folder is one that lasts,
+        so a state saved in one sitting is still there in the next. Called before
+        ``connect``. An adapter that keeps its save states some other way has
+        nothing to do, which is the default.
+        """
 
     @final
     def connect(self, timeout_s: float = DEFAULT_CONNECT_TIMEOUT_S) -> None:

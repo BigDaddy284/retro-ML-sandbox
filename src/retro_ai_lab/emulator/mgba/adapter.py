@@ -27,5 +27,9 @@ class MgbaAdapter(BizHawkAdapter):
     script_path: ClassVar[Path] = SCRIPT_PATH
     open_hint: ClassVar[str] = MGBA_HINT
 
+    def keep_states_in(self, folder: Path) -> None:
+        """mGBA's script holds save states in its own memory, not in files: there is
+        no folder to name (T-1068). They are gone when the script ends."""
+
 
 __all__ = ["MGBA_HINT", "SCRIPT_PATH", "MgbaAdapter"]

@@ -27,6 +27,10 @@ from retro_ai_lab.storage import (
 from retro_ai_lab.training import StepLog, TrainingService
 from retro_ai_lab.ui.bridge import EventBridge
 
+# Where an emulator that keeps save states as files is told to keep them, beside the
+# brains and the ways: the temp folder does not last from one sitting to the next (T-1068).
+STATES_FOLDER = "states"
+
 
 @dataclass
 class AppContext:
@@ -52,7 +56,9 @@ class AppContext:
     bridge: EventBridge = field(init=False)
 
     def __post_init__(self) -> None:
-        self.connection = ConnectionService(self.registry, self.bus)
+        self.connection = ConnectionService(
+            self.registry, self.bus, states_dir=self.data_dir / STATES_FOLDER
+        )
         self.observation = ObservationService(self.connection, self.bus)
         self.knowledge_store = KnowledgeStore(self.data_dir / "knowledge")
         self.discovery = DiscoveryService(
