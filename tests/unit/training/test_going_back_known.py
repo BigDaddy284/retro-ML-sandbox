@@ -141,11 +141,12 @@ def as_found(asked: Asked, **how: Any) -> Any:
 
 
 def test_what_is_kept_is_a_single_change_and_the_newest(
-    lab: Lab, monkeypatch: pytest.MonkeyPatch
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     asked = Asked(monkeypatch)
     r, _ = searching(lab, ways_per_go=1, give_up_after=None, max_steps=400)
     walk, jump = lab.move("right"), lab.move("a", "right")
+    caplog.set_level(logging.INFO, logger=LOG)
     to_the_gap(lab, r)
     told = asked.told_from(0)
     r.finish()
@@ -173,6 +174,12 @@ def test_what_is_kept_is_a_single_change_and_the_newest(
     to_the_gap(lab, r)
     r.finish()
     assert asked.known[4:] == [told, Known(jump, 8, 11, walk), Known(jump, 16, DIED_AT - 20)]
+    # The log says a way was the known change where it was, and not of a way found
+    # otherwise by a search that was told one.
+    ways = [(known, out) for known, out in zip(asked.known, asked.out, strict=True) if out.way]
+    found = said(caplog, "found a way past on try")
+    assert [line.endswith(AGAIN) for line in found] == [out.again for _, out in ways]
+    assert [out.again for known, out in ways if known is not None][:4] == [False] * 4
 
 
 def test_no_more_places_are_kept_than_for_searches_for_nothing(
@@ -193,6 +200,11 @@ def test_no_more_places_are_kept_than_for_searches_for_nothing(
     monkeypatch.setattr(episode, "MOST_SOUGHT", 1)
     # Room for one place: the place further on is the one kept, and the gap forgotten.
     assert goes(Asked(monkeypatch)) == [None, None, None]
+    # The one place is kept: with no way found further on, it is the gap.
+    asked = Asked(monkeypatch, [REAL, NOTHING, NOTHING])
+    r, _ = searching(lab, ways_per_go=3, give_up_after=None, max_steps=400)
+    a_go(lab, r)
+    assert asked.known == [None, None, asked.told_from(0)]
 
 
 def test_a_search_at_a_standstill_is_told_nothing_and_keeps_nothing(

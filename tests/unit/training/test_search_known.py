@@ -118,6 +118,11 @@ def test_it_is_only_for_the_plain_way_it_was_made_to(told: Told) -> None:
     without = plays(plain=told.right)
     # Made to another move held: not played.
     assert plays(plain=told.right, known=Known(told.jump, 4, 3, plain=told.left)) == without
+    # A change made to what it did is played on that, first, and not on the plain way.
+    did = Known(told.jump, 4, 3)
+    first = (Change(7, told.jump, 4).apply(told.trace, CARRY_ON), False)
+    out = told.look([DEAD, lost_at(12), *dead], live=6, plain=told.right, known=did)
+    assert told.calls == [first, *without] and out.way is None
     # No plain way in this search: not played.
     assert plays(known=Known(told.jump, 4, 3, plain=told.right)) == plays()
     # A plain way that keeps the life has no loss to count from: not played.
@@ -165,6 +170,14 @@ def test_it_is_placed_within_what_it_did(told: Told) -> None:
     # Eleven is before the save the search plays from: not played.
     told.look([DEAD] * 300, known=Known(told.jump, 4, 11))
     assert told.calls == [(moves, False) for moves in told.listed(told.trace)]
+    # It is held for as long as it was held.
+    told.look([DEAD] * 300, known=Known(told.jump, 8, 9))
+    assert told.calls[0][0] == (
+        told.trace[0],
+        *[told.jump] * 8,
+        told.trace[9],
+        *[told.right] * CARRY_ON,
+    )
     # A hold that reaches past the loss is cut there, like any change's.
     told.look([DEAD] * 300, known=Known(told.jump, 16, 2))
     assert told.calls[0][0] == (*told.trace[:8], told.jump, told.jump, *[told.right] * CARRY_ON)
