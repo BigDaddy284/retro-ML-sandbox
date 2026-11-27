@@ -103,6 +103,26 @@ class Way:
 
 
 @dataclass(frozen=True, slots=True)
+class Known:
+    """A change that got past about here in an earlier search (T-1072), told from the
+    loss it was made before: the move, the steps it was held, and how many steps
+    before the life went (or would have gone) it began.
+
+    A search places its changes by the step the loss was settled at, and that step is
+    asked of the game anew at every loss: the same place can give it a step apart
+    from one go to the next, and a list of changes two steps apart then never comes
+    to the change that got past the last time. The loss itself is where the danger
+    is, so that is what the change is told from. ``plain`` is the move that was held
+    in place of what the AI did (the plain way) where the change was made to that,
+    and the loss is then the one holding it comes to."""
+
+    move: int
+    hold: int
+    before: int
+    plain: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Search:
     """What a search came to."""
 
@@ -130,6 +150,9 @@ class Search:
     # own loss was settled. Played, the life goes further on, and a search there may
     # find the rest. None where no such change was looked at, and with a way.
     part: Way | None = field(default=None, compare=False)
+    # The way is the change that got past about here before (T-1072, ``known``), and
+    # not one from the lists. Like the time, not part of what was found.
+    again: bool = field(default=False, compare=False)
 
 
 class _Got(NamedTuple):
@@ -187,6 +210,7 @@ def find_way(
     still: bool = False,
     deeper: bool = False,
     deeper_at: tuple[Spot, Spot] = TOP,
+    known: Known | None = None,
 ) -> Search:
     """Look for a small change to ``trace``, played from the save in ``slot``, that
     stays alive and reaches new ground.
@@ -275,6 +299,17 @@ def find_way(
     rest: a place that wants three changes or more is got past a part at a time. No
     play is made for it. None without ``live``, and none where the change itself would
     not be over by then.
+
+    ``known`` is the change that got past about here in an earlier search (T-1072),
+    told from the loss it was made before. It is tried before the lists: one made to
+    what the AI did before anything else, and one made to the plain way as soon as
+    the plain way has been played and has lost the life (to the same plain move
+    only). It is placed by its loss and not by ``live``, which can lie a step apart
+    from one go to the next. Where it gets past again it is the way
+    (:attr:`Search.again`), and the lists are left where they were. Where it does
+    not, the search goes on as it would have without it: a try that lost the life
+    is not held against the lists, which may come to the same change and go on from
+    it. Not at a standstill.
     """
     if not slot or not isinstance(slot, str):
         raise ConfigurationError("A search needs the name of the save to start from.")
@@ -328,6 +363,18 @@ def find_way(
         raise ConfigurationError(
             "begin_at is for a search after a life lost: one at a standstill begins at the top."
         )
+    if known is not None:
+        if not isinstance(known, Known):
+            raise ConfigurationError("known is a change that got past before, or nothing.")
+        if stood:
+            raise ConfigurationError(
+                "known is for a search after a life lost: at a standstill none was."
+            )
+        space[known.move]
+        if known.plain is not None:
+            space[known.plain]
+        _whole(known.hold, "A known change's hold", 1)
+        _whole(known.before, "A known change's steps before the loss", 1)
     for move in trace:
         space[move]  # refuses a move the controls don't have, before anything is played
     if plain is not None:
@@ -367,6 +414,39 @@ def find_way(
     # The step on that got furthest (T-1060), cut before its own loss was settled, and
     # for one from the plain way's list the step the plain way lost the life at.
     kept: tuple[_Got, int | None] | None = None
+
+    def again(base: Sequence[int]) -> _Got | None:
+        """What got past about here before (T-1072), made to ``base``, which ends
+        with the loss: the same change as many steps before that loss, if it gets
+        past again. Two plays at most."""
+        nonlocal tries
+        assert known is not None
+        at = len(base) - known.before
+        if at < 0 or not may_play():
+            return None
+        change = Change(at, known.move, known.hold)
+        moves = change.apply(base, carry_on)
+        tries += 1
+        blind = play(connection, slot, moves, space, frames_per_step=frames_per_step, lives=lives)
+        if blind.lost:
+            return None  # the lists may come to it, and go on from it (T-1059)
+        if still:
+            return _Got(change, moves, 0)
+        if not may_play():
+            return None
+        played.add(moves)  # settled: the lists do not play it again
+        tries += 1
+        seen = play(
+            connection,
+            slot,
+            moves,
+            space,
+            frames_per_step=frames_per_step,
+            lives=lives,
+            watch=watch(),
+            look_every=look_every,
+        )
+        return _Got(change, moves, seen.ground) if got_on(seen) else None
 
     def from_spot(listed: list[Change], spot: Callable[[Change], Spot], begin: Spot) -> int:
         """The first change at or past where a list is to begin; past its end is its
@@ -530,6 +610,11 @@ def find_way(
     share = int(budget * PLAIN_SHARE)
     plain_at, trace_at = begin_at
     plain_on, trace_on = deeper_at
+    if known is not None and known.plain is None:
+        once = again(trace)
+        if once is not None:
+            way = Way(once.moves, once.change, tries, once.ground)
+            return Search(way, tries, taken(), stopped_at=begin_at, again=True)
     if plain is not None and share >= 1 and may_play():
         held = (plain,) * (len(trace) + carry_on)
         tries += 1
@@ -544,6 +629,18 @@ def find_way(
         )
         if first.lost:
             base = (plain,) * first.steps
+            if known is not None and known.plain == plain:
+                once = again(base)
+                if once is not None:
+                    way = Way(
+                        once.moves,
+                        once.change,
+                        tries,
+                        once.ground,
+                        plain=plain,
+                        lost_at=first.steps,
+                    )
+                    return Search(way, tries, taken(), stopped_at=begin_at, again=True)
             # Its loss takes as long to play out as the one at the end of the trace.
             upto = None if live is None else first.steps - (len(trace) - live)
             # Half the tries, and half the time (T-1043): on a real emulator the time
@@ -612,4 +709,14 @@ def find_way(
     return Search(None, tries, taken(), late, stopped, lapped, stopped_on, part)
 
 
-__all__ = ["BUDGET", "CARRY_ON", "PLAIN_SHARE", "TOP", "Search", "Spot", "Way", "find_way"]
+__all__ = [
+    "BUDGET",
+    "CARRY_ON",
+    "PLAIN_SHARE",
+    "TOP",
+    "Known",
+    "Search",
+    "Spot",
+    "Way",
+    "find_way",
+]

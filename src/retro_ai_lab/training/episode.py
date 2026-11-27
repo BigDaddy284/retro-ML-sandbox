@@ -17,7 +17,7 @@ from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from retro_ai_lab.core import (
     Button,
@@ -52,7 +52,7 @@ from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.training.earned import rose_anyway
 from retro_ai_lab.training.moments import LEAD, Moment, Moments
 from retro_ai_lab.training.route import Route
-from retro_ai_lab.training.search import BUDGET, TOP, Spot, Way, find_way
+from retro_ai_lab.training.search import BUDGET, TOP, Known, Spot, Way, find_way
 from retro_ai_lab.training.trial import Outcome, play
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, Mark, ScreenWatch
 from retro_ai_lab.training.ways import carry
@@ -60,6 +60,23 @@ from retro_ai_lab.understanding.events import EventKind
 from retro_ai_lab.understanding.knowledge import Knowledge, Variable, VariableKind
 
 log = logging.getLogger(__name__)
+
+_Kept = TypeVar("_Kept", "_Sought", "_Past")
+
+
+def _about(kept: Sequence[_Kept], where: tuple[int, tuple[int, int], int]) -> _Kept | None:
+    """Of the places kept, the one about ``where``: in the same place of the go and as
+    near as it says, the nearest (the one kept longer of two as near)."""
+    place, (x, y), near = where
+    found: tuple[int, _Kept] | None = None
+    for one in kept:
+        if one.place != place:
+            continue
+        far = max(abs(one.spot[0] - x), abs(one.spot[1] - y))
+        if far <= near and (found is None or far < found[0]):
+            found = far, one
+    return None if found is None else found[1]
+
 
 DEFAULT_FRAMES_PER_STEP = 4
 DEFAULT_MAX_STEPS = 600
@@ -512,6 +529,17 @@ class _Sought:
     deeper_at: tuple[Spot, Spot] = TOP
 
 
+@dataclass(slots=True)
+class _Past:
+    """A place where a search found a way past (T-1072): which place of the go and
+    where in it, as for :class:`_Sought`, and the change that got past, told from the
+    loss it was made before."""
+
+    place: int
+    spot: tuple[int, int]
+    known: Known
+
+
 @dataclass(frozen=True, slots=True)
 class EpisodeResult:
     steps: int
@@ -792,6 +820,8 @@ class EpisodeRunner:
         # lists they got (T-1042): the next search at such a place carries on there.
         # The one used last is last.
         self._sought: list[_Sought] = []
+        # Places where a search found a way past, and the change that did (T-1072).
+        self._past: list[_Past] = []
         self._flat_out = flat_out
         self._ways_left = 0
         self._ways_sought = 0
@@ -1995,15 +2025,7 @@ class EpisodeRunner:
     def _sought_about(self, where: tuple[int, tuple[int, int], int]) -> _Sought | None:
         """What is remembered of searches for nothing about ``where`` (T-1042): in
         the same place of the go and as near as it says, the nearest."""
-        place, (x, y), near = where
-        found: tuple[int, _Sought] | None = None
-        for sought in self._sought:
-            if sought.place != place:
-                continue
-            far = max(abs(sought.spot[0] - x), abs(sought.spot[1] - y))
-            if far <= near and (found is None or far < found[0]):
-                found = far, sought
-        return None if found is None else found[1]
+        return _about(self._sought, where)
 
     def _seek(self, *, stood: bool = False, coming: tuple[int, ...] = (), near: str = "") -> bool:
         """A life just went: go back and look for a way past (T-1007). False if the link dropped.
@@ -2061,6 +2083,7 @@ class EpisodeRunner:
         # there (T-1042). A standstill is no such search.
         where = None if stood else self._lost_where()
         sought = None if where is None else self._sought_about(where)
+        past = None if where is None else _about(self._past, where)
         # Where the screen has stood still for a good while there is no new ground to
         # get to: there the life kept is the way past (T-1058). Not at a standstill,
         # where none was lost.
@@ -2130,6 +2153,7 @@ class EpisodeRunner:
                     still=still,
                     deeper=deeper,
                     deeper_at=sought.deeper_at if sought is not None and deeper else TOP,
+                    known=None if past is None else past.known,
                 )
                 # A part of the way (T-1060) is for a life that has gone: one seen
                 # coming is still to be had, and the go carries on to it.
@@ -2271,6 +2295,17 @@ class EpisodeRunner:
                 self._rest_next = REST_GOES
             self._ways_found += 1
         change = way.change
+        if where is not None and way.first is None and (way.plain is None or way.lost_at):
+            # What got past here is tried first at the next search about here (T-1072),
+            # told from the loss it was made before. (The plain way alone is the first
+            # try of every search, and a way of two changes is not kept.)
+            ahead = (len(trace) if way.plain is None else way.lost_at or 0) - change.at
+            if past is not None:
+                self._past.remove(past)
+            self._past.append(
+                _Past(where[0], where[1], Known(change.move, change.hold, ahead, way.plain))
+            )
+            del self._past[:-MOST_SOUGHT]
         lead = (
             f"Stayed about one spot for {stayed} steps, with no life lost. Went back "
             f"{back} and found a way on at try {way.tries}, after {search.seconds:.1f} s: "
@@ -2326,6 +2361,8 @@ class EpisodeRunner:
                 "here: the first loses the life later and further on, and the second "
                 "gets past from there."
             )
+        if search.again:
+            how += " That is the change that got past about here before, tried first."
         log.info("%s%s", lead, how)
         return True
 
