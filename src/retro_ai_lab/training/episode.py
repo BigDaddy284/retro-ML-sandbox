@@ -853,6 +853,7 @@ class EpisodeRunner:
         # go back to before that (T-1031).
         self._last_chance = last_chance
         self._dying: int | None = None  # steps this game takes over a lost life (T-1033)
+        self._pause_said = False  # said once that the way ends that much earlier (T-1071)
         self._stood_at: tuple[int, int] | None = None
         self._stood_for = 0
         self._stood_from = 0  # the step of the story at which it came to that spot
@@ -1260,7 +1261,15 @@ class EpisodeRunner:
         same end. The next go arrives earlier, with room to do something else.
 
         Where a loss stood at about the same place in earlier goes, that room was not
-        enough: the route says how much further back to end both (T-1029)."""
+        enough: the route says how much further back to end both (T-1029).
+
+        "Before it" is before the step the loss was settled at, as far as the game has
+        shown how long it takes over a lost life (T-1071): a game that takes 54 steps
+        over one counts it long after the mistake, and thirty steps before the count
+        is then in the middle of the dying. What was remembered ended there, and the
+        next go had lost a life before it made a move of its own; and a way that
+        ended after the mistake and more than thirty steps before the count was left
+        as it was, go after go."""
         route = self._route
         if route is None:
             return
@@ -1275,6 +1284,17 @@ class EpisodeRunner:
                 lead,
                 LEAD,
             )
+        pause = self._settled_before()
+        if pause and not self._pause_said:
+            self._pause_said = True
+            log.info(
+                "This game takes about %d steps over a lost life, and nothing pressed in "
+                "that time changes it. So where a life goes for good, what the AI remembers "
+                "ends that much earlier as well: before the mistake, not only before the "
+                "step the life was counted at.",
+                pause,
+            )
+        lead += pause
         if route.failed(lead):
             log.info(
                 "A life went at step %d, close behind the end of the way the AI remembers, "
@@ -1285,6 +1305,11 @@ class EpisodeRunner:
                 had,
             )
         route.lost(lead)
+
+    def _settled_before(self) -> int:
+        """Steps before a life is counted that its loss was settled at, as far as the
+        game has shown (T-1071, :attr:`dying_steps`); 0 where it has not."""
+        return self._dying or 0
 
     def _rows_gone(self) -> None:
         """Reward rows have gone since this was last asked (the AI dropped the guess
@@ -1465,12 +1490,12 @@ class EpisodeRunner:
         settled = self._settle(state, action, self._frames_per_step, "ai")
         route = self._route
         if self._setbacks > lost_before and route is not None:
-            if from_route and route.failed(LEAD):
+            if from_route and route.failed(LEAD + self._settled_before()):
                 log.info(
                     "A life went at step %d while the AI was playing the way it remembers, "
                     "so it no longer trusts that way from %d steps before there.",
                     self._steps,
-                    LEAD,
+                    LEAD + self._settled_before(),
                 )
             if not settled:
                 self._loss_stands()  # the go ends with the loss: its story ends before it
