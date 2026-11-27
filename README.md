@@ -605,7 +605,14 @@ go, the AI backs off twice as far, and twice as far again the time after
 (30 steps, then 60, 120 and at most 240): it comes at a place that keeps
 costing a life from further back each time, plays more of the stretch
 before it itself, and so arrives there differently. The log says so when it
-does. And a way is
+does. "Before that place" means before the mistake, not before the moment
+the game takes the life: many games play a lost life out for a while (Super
+Mario Bros. for about three and a half seconds) and nothing pressed in that
+time changes anything, so once a lost life has shown the AI how long your
+game takes over one, what it remembers ends that much earlier as well. The
+log says so once: "This game takes about 54 steps over a lost life …".
+Before, what it remembered could end in the middle of the dying, and the
+next go had lost a life before it made a move of its own. And a way is
 worth what it is paid now, not what it was paid when it was found: when
 something stops paying (the AI drops a guess one of your rewards went by,
 or a goal is reached once and for all) and the way, played again, is paid
