@@ -805,6 +805,9 @@ class EpisodeRunner:
         # the step of the go it last looked ahead at.
         self._looks_ahead = look_ahead
         self._ahead_left = 0
+        # Searches the go may still make where it stands still: as many again, so
+        # that those cannot use up the ones after a life lost (T-1070).
+        self._stood_left = 0
         self._ways_ahead = 0
         self._ways_ahead_found = 0
         self._parts_kept = 0  # searches of this go that kept a part of the way (T-1060)
@@ -1160,6 +1163,7 @@ class EpisodeRunner:
                     "finding nothing. From this go on it goes back after a life lost again."
                 )
         self._ways_left = 0 if self._gave_up else self._ways_per_go
+        self._stood_left = self._ways_per_go
         looks = self._looks_ahead and not self._ahead_gave_up
         self._ahead_left = self._ways_per_go if looks else 0
         self._ways_ahead = 0
@@ -1669,6 +1673,8 @@ class EpisodeRunner:
             return False
         if self._moments is None or not self._ways_per_go or self._ways_left < 1:
             return False
+        if self._stood_left < 1:
+            return False  # as many standstills searched as a go may (T-1070)
         if self._watch is None or not self._watch.follows_camera:
             return False
         return self._got_somewhere and (stuck or self._stood_for >= self._stand_after)
@@ -2043,7 +2049,12 @@ class EpisodeRunner:
         if coming:
             self._ways_ahead += 1
         else:
-            self._ways_left -= 1
+            if stood:
+                # Not one of the go's searches after a life lost (T-1070): a go that
+                # stood about in three places had none left for the lives.
+                self._stood_left -= 1
+            else:
+                self._ways_left -= 1
             self._ways_sought += 1
         if stood:
             self._ways_stood += 1

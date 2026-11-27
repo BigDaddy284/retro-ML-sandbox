@@ -271,12 +271,17 @@ def test_lives_lost_to_a_walker_are_put_down_to_it() -> None:
     assert report.falls - 1 <= report.fell <= report.falls
     # T-1018: a go that ends in the dying pause is put back to its start with the life
     # not gone. Such a death is no life for the eyes to explain, and the bench counts
-    # it apart: one a go at most. (This run has them: a way found over a wall is
-    # played to its end, and can end in the next gap.) Of the lives that did go,
-    # every one is put down to its cause.
-    assert 1 <= report.unfinished <= 3
+    # it apart: one a go at most. Of the lives that did go, every one is put down to
+    # its cause.
+    # T-1070, with Boss's yes of 27 Nov for this test: until then the test said the run
+    # has such goes (``1 <= report.unfinished``), and it had two: a way found over a wall
+    # was played to its end and ended in the next gap, with the go's searches used up at
+    # standstills. Now the go has its searches for the lives and the run has none. The
+    # words for them in the report are held by the report made by hand above.
+    assert 0 <= report.unfinished <= 3
     assert report.blamed == report.walkers and report.fell == report.falls
-    assert f"), and {report.unfinished} more that had begun when a go ended" in report.lines()[4]
+    said = f"), and {report.unfinished} more that had begun when a go ended"
+    assert (said in report.lines()[4]) == bool(report.unfinished)
     assert report.hurts == 1 and report.kinds <= 6
     assert report.right == report.followed  # and what it follows is still the player
 
