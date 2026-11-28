@@ -609,13 +609,12 @@ best go, and nothing is remembered. If a life goes while the way is being
 played (a game does not always do the same thing twice), the way is cut
 back to before that place. The same happens when a life goes within a few
 steps of the way's end and the AI finds no way past: the next go then
-arrives a little earlier, with room to do something else. Where that room
-was not enough, and a life goes for good at about the same place in a later
-go, the AI backs off twice as far, and twice as far again the time after
-(30 steps, then 60, 120 and at most 240): it comes at a place that keeps
-costing a life from further back each time, plays more of the stretch
-before it itself, and so arrives there differently. The log says so when it
-does. "Before that place" means before the mistake, not before the moment
+arrives a little earlier, with room to do something else. Where a life
+goes for good again at about the same place in a later go, the log says so,
+and the AI backs off the same 30 steps as the first time. (It used to back
+off twice as far each time, up to 240 steps; on the practice game's hardest
+levels that threw away all it remembered of a level several times in a run,
+and it finished half as many levels as without it.) "Before that place" means before the mistake, not before the moment
 the game takes the life: many games play a lost life out for a while (Super
 Mario Bros. for about three and a half seconds) and nothing pressed in that
 time changes anything, so once a lost life has shown the AI how long your

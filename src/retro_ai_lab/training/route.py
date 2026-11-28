@@ -58,6 +58,12 @@ doubles the lead, three times at most: the AI's own play starts from further
 back each time, and arrives at the place differently. A place is told by how
 many steps in it lies, which is all the route knows of it: that holds while
 the go arrives by the way it remembers.
+
+The runner no longer ends anything further back for it (T-1074): on the
+practice game's hard levels the doubling soon reached its most at the few places
+that kept costing a life, cut the way to nothing, and the same runs finished
+half as many levels as without it. It still asks, so the places are noted (and
+written down) and the log can say that a loss stood where one stood before.
 """
 
 from __future__ import annotations

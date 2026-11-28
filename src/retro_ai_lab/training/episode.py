@@ -1290,8 +1290,11 @@ class EpisodeRunner:
         a few steps of a loss the AI finds no way past would bring every go to the
         same end. The next go arrives earlier, with room to do something else.
 
-        Where a loss stood at about the same place in earlier goes, that room was not
-        enough: the route says how much further back to end both (T-1029).
+        Where a loss stood at about the same place in earlier goes, the route notes it
+        (T-1029) and the log says so, and the lead is the same as the first time
+        (T-1074): ending further back each time (60, 120, 240 steps) cut what the AI
+        remembered of a level to nothing on the practice game's hard levels, and the
+        next go met every earlier place again.
 
         "Before it" is before the step the loss was settled at, as far as the game has
         shown how long it takes over a lost life (T-1071): a game that takes 54 steps
@@ -1304,14 +1307,14 @@ class EpisodeRunner:
         if route is None:
             return
         had = len(route.moves)
-        lead = route.loss_stands(LEAD)
-        if lead > LEAD:
+        lead = LEAD
+        if route.loss_stands(LEAD) > LEAD:  # the route notes the place (T-1029)
             log.info(
                 "A life went at step %d with no way past, about where one went for good "
-                "in an earlier go: the AI ends what it remembers of this go %d steps "
-                "before the place instead of %d, to come at it from further back.",
+                "in an earlier go. What the AI remembers of this go still ends %d steps "
+                "before the place, as the first time: backing off further threw away "
+                "more of the way than it helped.",
                 self._steps,
-                lead,
                 LEAD,
             )
         pause = self._settled_before()
