@@ -454,6 +454,11 @@ first the next time a life goes, or is seen going, about there: the same
 press, held as long, as many steps before the loss as it was the last time
 (the log line then ends "That is the change that got past about here
 before, tried first."). The AI keeps that for as long as the app is open.
+Where a search finds nothing, the next line says what its tries came to:
+how many ran into the same loss no later, how many lost the life later and
+by how much, and how many kept it but were not counted as getting anywhere
+("The 52 changes it played came to this: …"). If you send a log, that line
+tells which of those is holding your game up.
 The log says what happened each time ("Lost a
 life at step 152. Went back 49 steps and found a way past on try 19...
 holding right instead of what it did, with right + a for 4 steps..."),

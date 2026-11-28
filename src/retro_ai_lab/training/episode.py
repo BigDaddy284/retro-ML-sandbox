@@ -52,7 +52,7 @@ from retro_ai_lab.training.deaths import DeathWatch
 from retro_ai_lab.training.earned import rose_anyway
 from retro_ai_lab.training.moments import LEAD, Moment, Moments
 from retro_ai_lab.training.route import Route
-from retro_ai_lab.training.search import BUDGET, TOP, Known, Spot, Way, find_way
+from retro_ai_lab.training.search import BUDGET, TOP, Known, Spot, Way, find_way, tell
 from retro_ai_lab.training.trial import Outcome, play
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, Mark, ScreenWatch
 from retro_ai_lab.training.ways import carry
@@ -2236,6 +2236,7 @@ class EpisodeRunner:
                     else " It has now looked for nothing as often as a go may before a "
                     "life is lost, and looks ahead no more in this go.",
                 )
+                tell(search)  # what its changes came to (T-1073)
                 if done:
                     self._ahead_gave_up = True
                     self._ahead_left = 0
@@ -2256,6 +2257,7 @@ class EpisodeRunner:
                 ", all the time a search may take" if search.out_of_time else "",
                 "" if part is None else " " + self._kept(part, len(trace), space),
             )
+            tell(search)  # what its changes came to (T-1073)
             if part is not None:
                 # Neither a search for nothing nor a way found: the count that stops
                 # going back in a game is left as it is.

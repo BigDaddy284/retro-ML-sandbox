@@ -54,6 +54,7 @@ there is within reach. Nothing else of a search is changed by it.
 from __future__ import annotations
 
 import hashlib
+import logging
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -66,6 +67,8 @@ from retro_ai_lab.training.trial import PAST, Outcome, play
 from retro_ai_lab.training.vision import DEFAULT_LOOK_EVERY, ScreenWatch
 from retro_ai_lab.training.ways import HOLDS, Change, changes
 from retro_ai_lab.understanding.knowledge import Variable
+
+log = logging.getLogger(__name__)
 
 BUDGET = 120  # plays a search may make
 CARRY_ON = 20  # steps a try runs on past where the life went
@@ -123,6 +126,32 @@ class Known:
 
 
 @dataclass(frozen=True, slots=True)
+class Tally:
+    """What the changes a search played came to, where it found no way (T-1073).
+
+    Each change it played is counted once, by what became of it: it lost the life no
+    later than the life went (or would have gone) without it, or later; it kept the
+    life, was looked at and got nowhere new; or it kept the life and was not looked at,
+    the tries or the time being up. A change played again (one that got past before,
+    T-1072, which the lists come to as well) is counted each time. ``latest`` is how
+    many steps later than without it the latest loss came, and ``ground`` the most new
+    ground the watch counted on a change that kept the life (:data:`PAST` is getting
+    past). A search that gets nowhere for want of new ground tells a different story
+    from one where every change runs into the same loss."""
+
+    sooner: int = 0
+    later: int = 0
+    latest: int = 0
+    nowhere: int = 0
+    ground: int = 0
+    unseen: int = 0
+
+    @property
+    def changes(self) -> int:
+        return self.sooner + self.later + self.nowhere + self.unseen
+
+
+@dataclass(frozen=True, slots=True)
 class Search:
     """What a search came to."""
 
@@ -153,6 +182,38 @@ class Search:
     # The way is the change that got past about here before (T-1072, ``known``), and
     # not one from the lists. Like the time, not part of what was found.
     again: bool = field(default=False, compare=False)
+    # What the changes it played came to (T-1073), where it found no way. Like the
+    # time, not part of what was found.
+    tally: Tally | None = field(default=None, compare=False)
+
+
+def tell(search: Search) -> None:
+    """Say in the log what the changes of a search for nothing came to (T-1073), on
+    this module's logger: a line after the one the runner says of the search."""
+    t = search.tally
+    if search.way is not None or t is None:
+        return
+    if t.changes == 0:
+        log.info("It played no change: there was nothing of what it did to change.")
+        return
+    log.info(
+        "The %d change%s it played came to this: %d lost the life no later than it went, "
+        "%d lost it later (the latest %d step%s later), %d kept it and got nowhere new "
+        "(at most %d step%s of new ground, where %d is getting past), and %d kept it and "
+        "%s not looked at, the tries or the time being up.",
+        t.changes,
+        "" if t.changes == 1 else "s",
+        t.sooner,
+        t.later,
+        t.latest,
+        "" if t.latest == 1 else "s",
+        t.nowhere,
+        t.ground,
+        "" if t.ground == 1 else "s",
+        PAST,
+        t.unseen,
+        "was" if t.unseen == 1 else "were",
+    )
 
 
 class _Got(NamedTuple):
@@ -411,6 +472,28 @@ def find_way(
 
     deep = deeper and not still
     lapped = False
+    # What the changes played came to (T-1073): lost no later, lost later, the most
+    # steps later, kept and nowhere new, the most new ground, kept and not looked at.
+    count = [0, 0, 0, 0, 0, 0]
+
+    def lost(outcome: Outcome, end: int) -> None:
+        """A change that lost the life, against ``end``, the step its base lost it at."""
+        later = outcome.steps - end
+        if later > 0:
+            count[1] += 1
+            count[2] = max(count[2], later)
+        else:
+            count[0] += 1
+
+    def nowhere_new(seen: Outcome | None) -> None:
+        """A change that kept the life and got nowhere new (``seen``: its look)."""
+        count[3] += 1
+        if seen is not None:
+            count[4] = max(count[4], seen.ground)
+
+    def unseen() -> None:
+        count[5] += 1
+
     # The step on that got furthest (T-1060), cut before its own loss was settled, and
     # for one from the plain way's list the step the plain way lost the life at.
     kept: tuple[_Got, int | None] | None = None
@@ -429,10 +512,12 @@ def find_way(
         tries += 1
         blind = play(connection, slot, moves, space, frames_per_step=frames_per_step, lives=lives)
         if blind.lost:
+            lost(blind, len(base))
             return None  # the lists may come to it, and go on from it (T-1059)
         if still:
             return _Got(change, moves, 0)
         if not may_play():
+            unseen()
             return None
         played.add(moves)  # settled: the lists do not play it again
         tries += 1
@@ -446,7 +531,10 @@ def find_way(
             watch=watch(),
             look_every=look_every,
         )
-        return _Got(change, moves, seen.ground) if got_on(seen) else None
+        if got_on(seen):
+            return _Got(change, moves, seen.ground)
+        nowhere_new(seen)
+        return None
 
     def from_spot(listed: list[Change], spot: Callable[[Change], Spot], begin: Spot) -> int:
         """The first change at or past where a list is to begin; past its end is its
@@ -532,13 +620,16 @@ def find_way(
                     connection, slot, further, space, frames_per_step=frames_per_step, lives=lives
                 )
                 if blind.lost:
+                    lost(blind, len(stone))
                     continue
                 if not go_on():
+                    unseen()
                     return None, spot(change)
                 tries += 1
                 on = watched(further)
                 if got_on(on):
                     return _Got(change, further, on.ground, first), None
+                nowhere_new(on)
             return None, None
 
         if upto is not None and upto < 1:
@@ -577,6 +668,10 @@ def find_way(
             )
             if blind.lost or ended_on(blind) in nowhere:
                 played.add(moves)  # lost, or where getting nowhere ended up (T-1018)
+                if blind.lost:
+                    lost(blind, len(base))
+                else:
+                    nowhere_new(None)
                 # Lost, but later than waiting as long as the change lasts could have
                 # put it off: where single changes got nowhere, searched on from. (Not
                 # at a standstill, so it is here for the life lost.)
@@ -595,12 +690,14 @@ def find_way(
                 return _Got(change, moves, 0), spot(change), (0, 0), ended
             if not go_on():
                 # Alive and not looked at yet: not settled, so not marked as played.
+                unseen()
                 return None, spot(change), (0, 0), ended
             played.add(moves)
             tries += 1
             seen = watched(moves)
             if got_on(seen):
                 return _Got(change, moves, seen.ground), spot(change), (0, 0), ended
+            nowhere_new(seen)
             end = ended_on(blind)
             if end is not None:
                 nowhere.add(end)
@@ -628,6 +725,7 @@ def find_way(
             end=stood,
         )
         if first.lost:
+            lost(first, len(trace))
             base = (plain,) * first.steps
             if known is not None and known.plain == plain:
                 once = again(base)
@@ -677,6 +775,7 @@ def find_way(
             if got_on(seen):
                 way = Way(held, Change(0, plain, len(trace)), tries, seen.ground, plain=plain)
                 return Search(way, tries, taken(), stopped_at=begin_at)
+            nowhere_new(seen)
             if stood:
                 # It stood still and holding the plain move stands still too (a wall):
                 # the small changes to the plain way, a jump at some step of it. The
@@ -689,6 +788,8 @@ def find_way(
                 if got is not None:
                     way = Way(got.moves, got.change, tries, got.ground, plain=plain)
                     return Search(way, tries, taken())
+        else:
+            unseen()
     if not late:
         got, trace_at, trace_on, lapped = seek(trace, budget, live, trace_at, None, trace_on)
         if got is not None:
@@ -706,7 +807,8 @@ def find_way(
             lost_at=lost_at,
         )
     stopped, stopped_on = (plain_at, trace_at), (plain_on, trace_on)
-    return Search(None, tries, taken(), late, stopped, lapped, stopped_on, part)
+    tally = Tally(*count)
+    return Search(None, tries, taken(), late, stopped, lapped, stopped_on, part, tally=tally)
 
 
 __all__ = [
@@ -717,6 +819,8 @@ __all__ = [
     "Known",
     "Search",
     "Spot",
+    "Tally",
     "Way",
     "find_way",
+    "tell",
 ]
